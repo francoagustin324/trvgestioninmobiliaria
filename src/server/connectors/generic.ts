@@ -1,4 +1,4 @@
-import type { ImportPropertyResponse, ImportProvider } from '../../shared/import-types.js';
+import type { ImportedPropertyData, ImportPropertyResponse, ImportProvider } from '../../shared/import-types.js';
 import { fetchRenderedHtml } from '../browser.js';
 import { extractPropertyFromHtml, importLooksUseful } from '../html-extractor.js';
 import { mergeImportedData } from '../normalizer.js';
@@ -12,7 +12,7 @@ export interface GenericImportOptions {
 export async function importGeneric(url: string, options: GenericImportOptions): Promise<ImportPropertyResponse> {
   const safeUrl = await validateSafeUrl(url);
   const warnings: string[] = [];
-  let lightweightData = { photoUrls: [] };
+  let lightweightData: ImportedPropertyData = { photoUrls: [] };
   let finalUrl = safeUrl;
 
   try {
