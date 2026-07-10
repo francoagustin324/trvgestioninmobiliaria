@@ -50,7 +50,7 @@ const tsconfig = readFileSync('tsconfig.json', 'utf8');
 if (!tsconfig.includes('"strict": true')) throw new Error('TypeScript no está en modo estricto');
 
 const source = requiredFiles.filter((file) => file.endsWith('.ts')).map((file) => readFileSync(file, 'utf8')).join('\n');
-for (const text of ['Fichas TRV', 'public=', '5493515110069', 'navigator.clipboard', 'window.print', '/api/import-property', 'Importar automáticamente', 'validateSafeUrl', 'chromium']) {
+for (const text of ['Fichas TRV', 'public=', '5493515110069', 'navigator.clipboard', 'window.print', '/api/import-property', 'Crear ficha desde el link', 'Mis propiedades', 'Mejora visual suave', 'validateSafeUrl', 'chromium']) {
   if (!source.includes(text)) throw new Error(`Falta función o texto requerido: ${text}`);
 }
 
