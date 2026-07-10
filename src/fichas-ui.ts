@@ -1,6 +1,7 @@
 import { Ficha, FichaMode, Property } from './models.js';
 import { publicFichaHtml, publicLink, publicPayload, whatsappText } from './public-ficha.js';
 import { saveData, state } from './store.js';
+import type { ImportedPropertyData, ImportPropertyResponse } from './shared/import-types.js';
 import { copyText, escapeHtml, field, formValues, nextId, safePhotoUrl } from './utils.js';
 
 function propertyToFicha(property: Property): Partial<Ficha> {
@@ -13,7 +14,7 @@ function propertyToFicha(property: Property): Partial<Ficha> {
 }
 
 function normalizePhotos(value: string): string[] {
-  return value.split('\n').map((item) => item.trim()).map(safePhotoUrl).filter((url): url is string => Boolean(url));
+  return value.split('\n').map((item) => item.trim()).map(safePhotoUrl).filter((url): url is string => Boolean(url)).slice(0, 12);
 }
 
 function createFicha(values: Record<string, string>): Ficha {
@@ -44,11 +45,21 @@ function formHtml(): string {
   const options = state.crm.properties.map((property) => `<option value="${property.id}">${escapeHtml(property.title)}</option>`).join('');
   return `<form id="ficha-form" class="data-form ficha-form ${state.openForms.ficha ? '' : 'collapsed'}" data-mode="${state.fichaMode}">
     <select name="sourcePropertyId" class="property-source"><option value="">Elegir propiedad</option>${options}</select>
-    <input name="title" placeholder="Título" required><input name="propertyType" placeholder="Tipo de propiedad"><select name="operation"><option>Venta</option><option>Captación</option></select><input name="zone" placeholder="Zona"><input name="approxAddress" placeholder="Dirección aproximada">
+    <section class="importer-box external-only" aria-labelledby="importer-title">
+      <span class="importer-kicker">Importación automática</span>
+      <h3 id="importer-title">Pegá el link y evitá cargar todo a mano</h3>
+      <p>Detectamos el portal, recuperamos datos y fotos, y dejamos la ficha lista para que la revises antes de guardar.</p>
+      <div class="provider-badges"><span>MercadoLibre</span><span>Zonaprop</span><span>ficha.info</span><span>Tokko</span><span>Otros portales</span></div>
+      <div class="importer-controls"><input name="internalOriginalLink" type="url" class="import-url" placeholder="Pegá acá el enlace de la propiedad" inputmode="url"><button type="button" id="import-property">Importar automáticamente</button></div>
+      <input name="source" class="provider-result" placeholder="Portal detectado" readonly>
+      <div id="import-status" class="import-status" role="status" aria-live="polite"></div>
+      <div id="import-photos" class="import-photos"></div>
+    </section>
+    <input name="title" placeholder="Título" required><input name="propertyType" placeholder="Tipo de propiedad"><select name="operation"><option value="">Operación</option><option>Venta</option><option>Alquiler</option><option>Captación</option></select><input name="zone" placeholder="Zona"><input name="approxAddress" placeholder="Dirección aproximada">
     <input name="price" placeholder="Precio"><input name="expenses" placeholder="Expensas"><input name="bedrooms" placeholder="Dormitorios"><input name="bathrooms" placeholder="Baños"><select name="garage"><option value="">Cochera</option><option>Sí</option><option>No</option></select>
     <input name="coveredMeters" placeholder="Metros cubiertos"><input name="totalMeters" placeholder="Metros totales"><input name="age" placeholder="Antigüedad"><input name="status" placeholder="Estado"><input name="amenities" placeholder="Amenities">
     <textarea name="description" placeholder="Descripción comercial"></textarea><input name="deed" placeholder="Escritura"><input name="creditReady" placeholder="Apto crédito"><input name="paymentMethod" placeholder="Forma de pago"><textarea name="photoUrls" placeholder="URLs de fotos, una por línea"></textarea>
-    <input name="internalOriginalLink" class="external-only" placeholder="Link original interno"><input name="source" class="external-only" placeholder="Fuente: Zonaprop, Tokko, colega"><textarea name="internalNotes" placeholder="Observaciones internas"></textarea>
+    <textarea name="internalNotes" placeholder="Observaciones internas"></textarea>
     <button type="submit">Guardar ficha TRV</button>
   </form>`;
 }
@@ -63,17 +74,86 @@ export function renderFichas(container: HTMLElement): void {
   bindFichaForm();
 }
 
-function fillForm(ficha: Partial<Ficha>): void {
+function fillForm(ficha: Partial<Ficha> | ImportedPropertyData): void {
   const form = document.querySelector<HTMLFormElement>('#ficha-form');
   if (!form) return;
   Object.entries(ficha).forEach(([key, value]) => {
+    if (value === undefined || value === null || value === '') return;
     const input = form.elements.namedItem(key);
-    if (input instanceof HTMLInputElement || input instanceof HTMLTextAreaElement || input instanceof HTMLSelectElement) input.value = Array.isArray(value) ? value.join('\n') : String(value ?? '');
+    if (input instanceof HTMLInputElement || input instanceof HTMLTextAreaElement || input instanceof HTMLSelectElement) input.value = Array.isArray(value) ? value.join('\n') : String(value);
   });
 }
 
+function providerLabel(provider: ImportPropertyResponse['provider']): string {
+  return ({ mercadolibre: 'MercadoLibre', zonaprop: 'Zonaprop', 'ficha-info': 'ficha.info', tokko: 'Tokko', generic: 'Otro portal' })[provider];
+}
+
+function renderPhotoReview(form: HTMLFormElement): void {
+  const textarea = form.elements.namedItem('photoUrls');
+  const container = document.querySelector<HTMLElement>('#import-photos');
+  if (!(textarea instanceof HTMLTextAreaElement) || !container) return;
+  const photos = normalizePhotos(textarea.value);
+  container.innerHTML = photos.length ? `<div class="import-photo-heading"><strong>${photos.length} fotos encontradas</strong><span>Podés quitar las que no quieras usar.</span></div><div class="import-photo-grid">${photos.map((url, index) => `<figure><img src="${escapeHtml(url)}" alt="Foto importada ${index + 1}" loading="lazy"><button type="button" data-remove-photo="${index}" aria-label="Quitar foto ${index + 1}">×</button></figure>`).join('')}</div>` : '';
+  container.querySelectorAll<HTMLButtonElement>('[data-remove-photo]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const index = Number(button.dataset.removePhoto);
+      const current = normalizePhotos(textarea.value);
+      current.splice(index, 1);
+      textarea.value = current.join('\n');
+      renderPhotoReview(form);
+    });
+  });
+}
+
+function setImportStatus(kind: 'loading' | 'success' | 'error', message: string, warnings: string[] = []): void {
+  const status = document.querySelector<HTMLElement>('#import-status');
+  if (!status) return;
+  status.className = `import-status ${kind}`;
+  status.replaceChildren();
+  const main = document.createElement('strong');
+  main.textContent = message;
+  status.append(main);
+  if (warnings.length) {
+    const list = document.createElement('ul');
+    for (const warning of warnings) { const item = document.createElement('li'); item.textContent = warning; list.append(item); }
+    status.append(list);
+  }
+}
+
+async function importPropertyFromLink(form: HTMLFormElement): Promise<void> {
+  const urlInput = form.elements.namedItem('internalOriginalLink');
+  const sourceInput = form.elements.namedItem('source');
+  const button = document.querySelector<HTMLButtonElement>('#import-property');
+  if (!(urlInput instanceof HTMLInputElement) || !(sourceInput instanceof HTMLInputElement) || !button) return;
+  const url = urlInput.value.trim();
+  if (!url) { setImportStatus('error', 'Pegá primero el enlace de la propiedad.'); return; }
+  button.disabled = true;
+  button.textContent = 'Importando…';
+  setImportStatus('loading', 'Estamos leyendo la publicación y buscando las mejores fotos.');
+  try {
+    const response = await fetch('/api/import-property', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url }),
+    });
+    const payload = await response.json() as ImportPropertyResponse;
+    if (!response.ok || !payload.success) throw new Error(payload.error || 'No pudimos importar automáticamente esta publicación.');
+    fillForm(payload.data);
+    urlInput.value = payload.sourceUrl;
+    sourceInput.value = providerLabel(payload.provider);
+    renderPhotoReview(form);
+    setImportStatus('success', `Importación completada desde ${providerLabel(payload.provider)}. Revisá los datos antes de guardar.`, payload.warnings);
+  } catch (error) {
+    setImportStatus('error', error instanceof Error ? error.message : 'No pudimos importar automáticamente esta publicación. Podés completar los datos manualmente.');
+  } finally {
+    button.disabled = false;
+    button.textContent = 'Importar automáticamente';
+  }
+}
+
 function bindFichaForm(): void {
-  document.querySelector<HTMLFormElement>('#ficha-form')?.addEventListener('submit', (event) => {
+  const form = document.querySelector<HTMLFormElement>('#ficha-form');
+  form?.addEventListener('submit', (event) => {
     event.preventDefault();
     const ficha = createFicha(formValues(event.currentTarget as HTMLFormElement));
     const index = state.crm.fichas.findIndex((item) => item.id === ficha.id);
@@ -85,6 +165,11 @@ function bindFichaForm(): void {
     const property = state.crm.properties.find((item) => item.id === Number((event.currentTarget as HTMLSelectElement).value));
     if (property) fillForm(propertyToFicha(property));
   });
+  document.querySelector<HTMLButtonElement>('#import-property')?.addEventListener('click', () => { if (form) void importPropertyFromLink(form); });
+  if (form) {
+    const photoTextarea = form.elements.namedItem('photoUrls');
+    if (photoTextarea instanceof HTMLTextAreaElement) photoTextarea.addEventListener('change', () => renderPhotoReview(form));
+  }
 }
 
 export function handleFichaAction(action: string, id: number): void {
@@ -98,7 +183,7 @@ export function handleFichaAction(action: string, id: number): void {
   if (action === 'share') window.open(`https://wa.me/?text=${encodeURIComponent(whatsappText(ficha))}`, '_blank', 'noopener');
   if (action === 'print') state.selectedFichaId = id;
   document.dispatchEvent(new CustomEvent('trv-render'));
-  if (action === 'edit') window.setTimeout(() => fillForm(ficha), 0);
+  if (action === 'edit') window.setTimeout(() => { fillForm(ficha); const form = document.querySelector<HTMLFormElement>('#ficha-form'); if (form) renderPhotoReview(form); }, 0);
   if (action === 'print') window.setTimeout(() => window.print(), 150);
 }
 

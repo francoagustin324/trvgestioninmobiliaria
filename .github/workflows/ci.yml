@@ -1,0 +1,37 @@
+name: TRV CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    env:
+      PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Instalar dependencias
+        run: npm install --silent
+      - name: Compilar TypeScript
+        id: build
+        run: |
+          set +e
+          npm run build --silent > build.log 2>&1
+          code=$?
+          cat build.log
+          exit $code
+      - name: Guardar diagnóstico de compilación
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-diagnostics
+          path: build.log
+          retention-days: 1
+      - name: Ejecutar pruebas
+        run: npm test --silent
