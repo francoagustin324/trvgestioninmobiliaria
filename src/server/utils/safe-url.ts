@@ -20,7 +20,7 @@ function privateIpv4(ip: string): boolean {
 }
 
 function privateIpv6(ip: string): boolean {
-  const value = ip.toLowerCase().split('%')[0] ?? '';
+  const value = (ip.toLowerCase().split('%')[0] ?? '').replace(/^\[|\]$/g, '');
   if (value === '::' || value === '::1') return true;
   if (value.startsWith('fc') || value.startsWith('fd') || value.startsWith('fe8') || value.startsWith('fe9') || value.startsWith('fea') || value.startsWith('feb') || value.startsWith('ff')) return true;
   if (value.startsWith('2001:db8:')) return true;
@@ -29,9 +29,10 @@ function privateIpv6(ip: string): boolean {
 }
 
 export function isPrivateIp(ip: string): boolean {
-  const version = isIP(ip);
-  if (version === 4) return privateIpv4(ip);
-  if (version === 6) return privateIpv6(ip);
+  const normalized = ip.replace(/^\[|\]$/g, '');
+  const version = isIP(normalized);
+  if (version === 4) return privateIpv4(normalized);
+  if (version === 6) return privateIpv6(normalized);
   return true;
 }
 
@@ -50,7 +51,7 @@ export async function validateSafeUrl(input: string, cleanTracking = true): Prom
   if (!['http:', 'https:'].includes(url.protocol)) throw new Error('Solo se aceptan enlaces http o https.');
   if (url.username || url.password) throw new Error('El enlace no puede incluir credenciales.');
   if (url.port && !['80', '443'].includes(url.port)) throw new Error('El puerto del enlace no está permitido.');
-  const host = url.hostname.toLowerCase();
+  const host = url.hostname.toLowerCase().replace(/^\[|\]$/g, '');
   if (!host || host === 'localhost' || host.endsWith('.localhost')) throw new Error('No se permite localhost.');
   if (isIP(host) && isPrivateIp(host)) throw new Error('No se permiten direcciones privadas.');
   const records = await lookup(host, { all: true, verbatim: true });
@@ -70,9 +71,8 @@ export async function safeFetchText(input: URL, maxBytes = 3_000_000): Promise<S
     current = await validateSafeUrl(current.toString(), false);
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 12_000);
-    let response: Response;
     try {
-      response = await fetch(current, {
+      const response = await fetch(current, {
         redirect: 'manual',
         signal: controller.signal,
         headers: {
@@ -80,37 +80,37 @@ export async function safeFetchText(input: URL, maxBytes = 3_000_000): Promise<S
           accept: 'text/html,application/xhtml+xml,application/json;q=0.9,text/plain;q=0.8',
         },
       });
+      if ([301, 302, 303, 307, 308].includes(response.status)) {
+        const location = response.headers.get('location');
+        if (!location) throw new Error('La publicación respondió con una redirección inválida.');
+        current = await validateSafeUrl(new URL(location, current).toString(), false);
+        continue;
+      }
+      if (!response.ok) throw new Error(`El portal respondió con estado ${response.status}.`);
+      const contentType = response.headers.get('content-type') || '';
+      if (!/text\/html|application\/json|text\/plain|application\/xhtml\+xml/i.test(contentType)) throw new Error('El tipo de contenido no es compatible.');
+      const reader = response.body?.getReader();
+      if (!reader) return { finalUrl: current, text: await response.text(), contentType };
+      const chunks: Uint8Array[] = [];
+      let size = 0;
+      while (true) {
+        const result = await reader.read();
+        if (result.done) break;
+        if (!result.value) continue;
+        size += result.value.byteLength;
+        if (size > maxBytes) {
+          await reader.cancel();
+          throw new Error('La publicación es demasiado grande para importarla.');
+        }
+        chunks.push(result.value);
+      }
+      const merged = new Uint8Array(size);
+      let offset = 0;
+      for (const chunk of chunks) { merged.set(chunk, offset); offset += chunk.byteLength; }
+      return { finalUrl: current, text: new TextDecoder().decode(merged), contentType };
     } finally {
       clearTimeout(timeout);
     }
-    if ([301, 302, 303, 307, 308].includes(response.status)) {
-      const location = response.headers.get('location');
-      if (!location) throw new Error('La publicación respondió con una redirección inválida.');
-      current = await validateSafeUrl(new URL(location, current).toString(), false);
-      continue;
-    }
-    if (!response.ok) throw new Error(`El portal respondió con estado ${response.status}.`);
-    const contentType = response.headers.get('content-type') || '';
-    if (!/text\/html|application\/json|text\/plain|application\/xhtml\+xml/i.test(contentType)) throw new Error('El tipo de contenido no es compatible.');
-    const reader = response.body?.getReader();
-    if (!reader) return { finalUrl: current, text: await response.text(), contentType };
-    const chunks: Uint8Array[] = [];
-    let size = 0;
-    while (true) {
-      const result = await reader.read();
-      if (result.done) break;
-      if (!result.value) continue;
-      size += result.value.byteLength;
-      if (size > maxBytes) {
-        await reader.cancel();
-        throw new Error('La publicación es demasiado grande para importarla.');
-      }
-      chunks.push(result.value);
-    }
-    const merged = new Uint8Array(size);
-    let offset = 0;
-    for (const chunk of chunks) { merged.set(chunk, offset); offset += chunk.byteLength; }
-    return { finalUrl: current, text: new TextDecoder().decode(merged), contentType };
   }
   throw new Error('La publicación realizó demasiadas redirecciones.');
 }
