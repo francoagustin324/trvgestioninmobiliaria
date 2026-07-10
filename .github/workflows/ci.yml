@@ -16,6 +16,9 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - run: npm install
-      - run: npm run build
-      - run: npm test
+      - name: Instalar dependencias
+        run: npm install --silent
+      - name: Compilar TypeScript
+        run: npm run build --silent
+      - name: Ejecutar pruebas
+        run: npm test --silent
