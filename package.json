@@ -1,10 +1,14 @@
 {
   "name": "trv-gestion-inmobiliaria",
-  "version": "1.0.0",
-  "description": "Aplicación web estática para la gestión de una inmobiliaria.",
+  "version": "1.1.0",
+  "private": true,
+  "description": "CRM y generador de fichas TRV en TypeScript.",
   "type": "module",
   "scripts": {
-    "start": "node server.mjs",
-    "build": "node scripts/check-static-app.mjs"
+    "build": "tsc && node scripts/check-static-app.mjs",
+    "start": "node server.mjs"
+  },
+  "devDependencies": {
+    "typescript": "5.8.3"
   }
 }
