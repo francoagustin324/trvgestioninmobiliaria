@@ -96,6 +96,7 @@ export function handleFichaAction(action: string, id: number): void {
   if (action === 'copy-link') copyText(publicLink(ficha));
   if (action === 'copy-text') copyText(whatsappText(ficha));
   if (action === 'share') window.open(`https://wa.me/?text=${encodeURIComponent(whatsappText(ficha))}`, '_blank', 'noopener');
+  if (action === 'print') state.selectedFichaId = id;
   document.dispatchEvent(new CustomEvent('trv-render'));
   if (action === 'edit') window.setTimeout(() => fillForm(ficha), 0);
   if (action === 'print') window.setTimeout(() => window.print(), 150);
