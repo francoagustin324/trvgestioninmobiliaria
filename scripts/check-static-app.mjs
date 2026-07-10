@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 
-const requiredFiles = ['index.html', 'src/main.js', 'src/styles.css', 'server.mjs'];
+const requiredFiles = ['index.html', 'src/main.js', 'src/styles.css', 'server.mjs', 'src/assets/trv-logo.svg'];
 for (const file of requiredFiles) {
   const content = readFileSync(file, 'utf8');
   if (!content.trim()) throw new Error(`${file} está vacío`);
@@ -30,7 +30,7 @@ for (const text of ['0.0.0.0', 'process.env.PORT']) {
 }
 
 const js = readFileSync('src/main.js', 'utf8');
-for (const text of ['TRV CRM', 'Clientes / Leads', 'Propiedades', 'Recordatorios', 'localStorage', 'Alertas comerciales', 'Semáforo comercial', 'Cliente caliente sin contactar']) {
+for (const text of ['TRV CRM', 'CRM / Leads', 'Propiedades', 'Agenda / Seguimiento', 'localStorage', 'Alertas comerciales', 'Semáforo comercial', 'Cliente caliente sin contactar', 'Ver más', 'Fichas TRV', 'WhatsApp + IA', 'Nuevo cliente', 'trv-logo.svg', 'Plantilla visual preparada con la marca TRV']) {
   if (!js.includes(text)) throw new Error(`Falta el texto requerido: ${text}`);
 }
 
