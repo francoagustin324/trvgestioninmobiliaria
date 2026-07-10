@@ -32,7 +32,12 @@ const server = createServer((request, response) => {
   const target = existsSync(filePath) && statSync(filePath).isFile() ? filePath : join(root, 'index.html');
   const extension = extname(target);
 
-  response.writeHead(200, { 'Content-Type': contentTypes[extension] || 'application/octet-stream' });
+  response.writeHead(200, {
+    'Content-Type': contentTypes[extension] || 'application/octet-stream',
+    'Cache-Control': 'no-store, no-cache, must-revalidate, max-age=0',
+    Pragma: 'no-cache',
+    Expires: '0',
+  });
   createReadStream(target).pipe(response);
 });
 
