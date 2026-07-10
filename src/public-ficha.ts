@@ -16,6 +16,7 @@ export function decodePublicFicha(payload: string): FichaPublica | null {
     const parsed = JSON.parse(new TextDecoder().decode(bytes)) as FichaPublica;
     if (!parsed.title || !Array.isArray(parsed.photoUrls)) return null;
     parsed.photoUrls = parsed.photoUrls.map(safePhotoUrl).filter((url): url is string => Boolean(url));
+    parsed.photoEnhancement = parsed.photoEnhancement === 'soft' ? 'soft' : 'none';
     return parsed;
   } catch { return null; }
 }
@@ -27,6 +28,7 @@ export function publicPayload(ficha: Ficha): FichaPublica {
     bathrooms: ficha.bathrooms, garage: ficha.garage, coveredMeters: ficha.coveredMeters, totalMeters: ficha.totalMeters,
     age: ficha.age, status: ficha.status, amenities: ficha.amenities, description: ficha.description,
     deed: ficha.deed, creditReady: ficha.creditReady, paymentMethod: ficha.paymentMethod, photoUrls: ficha.photoUrls,
+    photoEnhancement: ficha.photoEnhancement === 'soft' ? 'soft' : 'none',
   };
 }
 
@@ -57,7 +59,8 @@ function rows(ficha: FichaPublica): string {
 export function publicFichaHtml(ficha: FichaPublica): string {
   const photos = ficha.photoUrls.map(safePhotoUrl).filter((url): url is string => Boolean(url)).slice(0, 8).map((url, index) => `<img src="${escapeHtml(url)}" alt="Foto ${index + 1} de ${escapeHtml(ficha.title)}" loading="lazy">`).join('');
   const contactText = encodeURIComponent(`Hola, consulto por ${ficha.title}. Quisiera confirmar disponibilidad y condiciones.`);
-  return `<article class="public-ficha"><header class="public-header"><img src="${LOGO_PATH}" alt="TRV Gestión Inmobiliaria"><div><span>TRV Gestión Inmobiliaria</span><h1>${escapeHtml(ficha.title)}</h1></div></header><div class="public-gallery">${photos || '<div class="gallery-placeholder">Fotos disponibles próximamente</div>'}</div><section class="public-data">${rows(ficha)}</section>${hasValue(ficha.description) ? `<p class="public-description">${escapeHtml(ficha.description)}</p>` : ''}<a class="whatsapp-public" href="https://wa.me/${WHATSAPP_NUMBER}?text=${contactText}" target="_blank" rel="noopener">Consultar por WhatsApp</a><small>${FICHA_LEGAL}</small></article>`;
+  const enhancementClass = ficha.photoEnhancement === 'soft' ? ' enhanced' : '';
+  return `<article class="public-ficha"><header class="public-header"><img src="${LOGO_PATH}" alt="TRV Gestión Inmobiliaria"><div><span>TRV Gestión Inmobiliaria</span><h1>${escapeHtml(ficha.title)}</h1></div></header><div class="public-gallery${enhancementClass}">${photos || '<div class="gallery-placeholder">Fotos disponibles próximamente</div>'}</div><section class="public-data">${rows(ficha)}</section>${hasValue(ficha.description) ? `<p class="public-description">${escapeHtml(ficha.description)}</p>` : ''}<a class="whatsapp-public" href="https://wa.me/${WHATSAPP_NUMBER}?text=${contactText}" target="_blank" rel="noopener">Consultar por WhatsApp</a><small>${FICHA_LEGAL}</small></article>`;
 }
 
 export function renderPublicMode(root: HTMLElement, ficha: FichaPublica | null): void {

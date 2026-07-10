@@ -6,6 +6,7 @@ export const LOGO_PATH = '/src/assets/trv-logo.svg';
 export type Temperature = 'Caliente' | 'Tibio' | 'Frío';
 export type ModuleId = 'inicio' | 'crm' | 'propiedades' | 'fichas' | 'whatsapp' | 'agenda' | 'reportes' | 'configuracion';
 export type FichaMode = 'manual' | 'property' | 'external';
+export type PhotoEnhancement = 'none' | 'soft';
 
 export interface Client {
   id: number; name: string; phone: string; email?: string; interest: string; status: string;
@@ -28,6 +29,7 @@ export interface FichaPublica {
   price?: string; expenses?: string; bedrooms?: string; bathrooms?: string; garage?: string;
   coveredMeters?: string; totalMeters?: string; age?: string; status?: string; amenities?: string;
   description?: string; deed?: string; creditReady?: string; paymentMethod?: string; photoUrls: string[];
+  photoEnhancement?: PhotoEnhancement;
 }
 
 export interface Ficha extends FichaPublica {

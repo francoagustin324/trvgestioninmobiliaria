@@ -15,7 +15,7 @@ function loadData(): CrmData {
 export const state = {
   crm: loadData(),
   activeModule: 'inicio' as ModuleId,
-  fichaMode: 'manual' as FichaMode,
+  fichaMode: 'property' as FichaMode,
   selectedFichaId: null as number | null,
   editingFichaId: null as number | null,
   openForms: { client: false, property: false, reminder: false, ficha: false },
