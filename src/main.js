@@ -2,8 +2,9 @@ const STORAGE_KEY = 'trv-crm-basico';
 
 const initialData = {
   clients: [
-    { id: 1, name: 'Lucía Martín', phone: '600 123 456', email: 'lucia@email.com', interest: 'Comprar piso de 2 habitaciones', status: 'Lead' },
-    { id: 2, name: 'Andrés Vega', phone: '611 222 333', email: 'andres@email.com', interest: 'Vender chalet familiar', status: 'Cliente' },
+    { id: 1, name: 'Lucía Martín', phone: '600 123 456', email: 'lucia@email.com', interest: 'Piso de 2 habitaciones en zona centro', status: 'Lead', temperature: 'Caliente', pipeline: 'Visita posible', lastContact: '2026-07-06', nextFollowUp: '2026-07-09', budget: '210000', paymentMethod: 'Hipoteca aprobada', purchaseTimeframe: '0-3 meses', purpose: 'Vivir', knowsArea: 'Sí', canMoveForward: 'Sí', objections: 'Quiere buena luz natural', notes: 'Vio dos pisos y preguntó por documentación.' },
+    { id: 2, name: 'Andrés Vega', phone: '611 222 333', email: 'andres@email.com', interest: 'Comprar casa con jardín en zona familiar', status: 'Cliente', temperature: 'Tibio', pipeline: 'Seguimiento', lastContact: '2026-06-28', nextFollowUp: '2026-07-08', budget: '330000', paymentMethod: 'Venta previa', purchaseTimeframe: '3-6 meses', purpose: 'Vivir', knowsArea: 'No', canMoveForward: 'No', objections: 'Debe vender antes de comprar', notes: 'Pedir actualización de su operación actual.' },
+    { id: 3, name: 'Grupo Norte', phone: '622 444 555', email: 'norte@email.com', interest: 'Local comercial para inversión', status: 'Lead', temperature: 'Frío', pipeline: 'Nuevo', lastContact: '2026-05-20', nextFollowUp: '2026-06-20', budget: '', paymentMethod: '', purchaseTimeframe: '', purpose: 'Invertir', knowsArea: 'No', canMoveForward: 'No', objections: 'No definió rentabilidad objetivo', notes: 'Reactivar con opciones de locales alquilados.' },
   ],
   properties: [
     { id: 1, title: 'Piso centro reformado', address: 'Calle Mayor 14', type: 'Piso', operation: 'Venta', price: 210000, owner: 'Andrés Vega', status: 'Disponible' },
@@ -15,49 +16,71 @@ const initialData = {
   ],
 };
 
-const icons = { home: '⌂', clients: '◉', properties: '▦', reminders: '◷', plus: '+', trash: '×' };
+const icons = { home: '⌂', clients: '◉', properties: '▦', reminders: '◷', alerts: '!', plus: '+', trash: '×' };
 const app = document.querySelector('#root');
+const today = new Date().toISOString().slice(0, 10);
 const loadData = () => JSON.parse(localStorage.getItem(STORAGE_KEY) || JSON.stringify(initialData));
 let crm = loadData();
 
 const saveData = () => localStorage.setItem(STORAGE_KEY, JSON.stringify(crm));
 const currency = (value, operation) => new Intl.NumberFormat('es-ES', { style: 'currency', currency: 'EUR', maximumFractionDigits: 0 }).format(Number(value || 0)) + (operation === 'Alquiler' ? '/mes' : '');
 const nextId = (items) => Math.max(0, ...items.map((item) => item.id)) + 1;
+const hasValue = (value) => Boolean(String(value || '').trim());
+const isPast = (date) => hasValue(date) && date < today;
+const daysSince = (date) => hasValue(date) ? Math.floor((new Date(today) - new Date(date)) / 86400000) : 999;
 
 app.innerHTML = `
   <main class="app-shell">
     <aside class="sidebar" aria-label="Navegación principal">
       <div class="brand"><div class="brand-mark">${icons.home}</div><div><strong>TRV CRM</strong><span>Gestión Inmobiliaria</span></div></div>
       <nav>
-        <a class="active" href="#clientes">${icons.clients} Clientes / Leads</a>
+        <a class="active" href="#alertas">${icons.alerts} Alertas comerciales</a>
+        <a href="#clientes">${icons.clients} Clientes / Leads</a>
         <a href="#propiedades">${icons.properties} Propiedades</a>
         <a href="#recordatorios">${icons.reminders} Recordatorios</a>
       </nav>
-      <div class="sidebar-card"><h3>CRM sencillo</h3><p>Cargá clientes, propiedades y recordatorios. Los datos quedan guardados en este navegador.</p></div>
+      <div class="sidebar-card"><h3>Semáforo comercial</h3><p>Priorizá oportunidades, seguimientos vencidos y clientes para reactivar sin salir del navegador.</p></div>
     </aside>
 
     <section class="content">
       <header class="hero">
         <span class="eyebrow">CRM básico para inmobiliaria</span>
-        <h1>Gestiona clientes, propiedades y recordatorios desde un único panel.</h1>
-        <p>Una app estática para organizar contactos, inmuebles y próximas acciones comerciales sin backend ni base de datos.</p>
+        <h1>Gestiona clientes, propiedades, recordatorios y alertas comerciales.</h1>
+        <p>Una app estática para priorizar contactos con semáforo comercial, sin backend ni base de datos.</p>
       </header>
 
       <section class="stats-grid" aria-label="Resumen del CRM">
-        <article class="stat-card"><span>Clientes / leads</span><strong id="client-count"></strong><p>Contactos comerciales</p></article>
-        <article class="stat-card"><span>Propiedades</span><strong id="property-count"></strong><p>Inmuebles registrados</p></article>
-        <article class="stat-card"><span>Recordatorios</span><strong id="reminder-count"></strong><p>Tareas pendientes</p></article>
+        <article class="stat-card urgent"><span>Alertas urgentes</span><strong id="urgent-count"></strong><p>Requieren intervención</p></article>
+        <article class="stat-card opportunity"><span>Posibles visitas</span><strong id="visit-count"></strong><p>Revisar y aprobar</p></article>
+        <article class="stat-card pending"><span>Seguimientos vencidos</span><strong id="overdue-count"></strong><p>Contactos atrasados</p></article>
+      </section>
+
+      <section class="panel full" id="alertas">
+        <div class="panel-heading"><div><span class="eyebrow">Alertas comerciales</span><h2>Prioridades detectadas automáticamente</h2></div></div>
+        <div class="alert-list" id="alert-list"></div>
       </section>
 
       <section class="crm-grid">
         <section class="panel" id="clientes">
           <div class="panel-heading"><div><span class="eyebrow">Clientes / Leads</span><h2>Cargar y ver contactos</h2></div></div>
-          <form class="crm-form" id="client-form">
+          <form class="crm-form client-form" id="client-form">
             <input name="name" placeholder="Nombre del cliente o lead" required>
             <input name="phone" placeholder="Teléfono" required>
             <input name="email" type="email" placeholder="Email">
-            <input name="interest" placeholder="Interés: compra, venta, alquiler..." required>
+            <input name="interest" placeholder="Qué busca / zona de interés" required>
             <select name="status"><option>Lead</option><option>Cliente</option><option>Seguimiento</option><option>Cerrado</option></select>
+            <select name="temperature"><option>Caliente</option><option>Tibio</option><option>Frío</option></select>
+            <select name="pipeline"><option>Nuevo</option><option>Calificado</option><option>Seguimiento</option><option>Visita posible</option><option>Negociación</option><option>Cerrado</option><option>Perdido</option></select>
+            <input name="lastContact" type="date" aria-label="Fecha de último contacto">
+            <input name="nextFollowUp" type="date" aria-label="Próximo seguimiento">
+            <input name="budget" placeholder="Presupuesto">
+            <input name="paymentMethod" placeholder="Forma de pago">
+            <input name="purchaseTimeframe" placeholder="Plazo de compra">
+            <select name="purpose"><option>Vivir</option><option>Invertir</option></select>
+            <select name="knowsArea"><option>Sí</option><option>No</option></select>
+            <select name="canMoveForward"><option>Sí</option><option>No</option></select>
+            <input name="objections" placeholder="Objeciones">
+            <textarea name="notes" placeholder="Observaciones"></textarea>
             <button>${icons.plus} Cargar cliente</button>
           </form>
           <div class="card-list" id="client-list"></div>
@@ -96,14 +119,60 @@ app.innerHTML = `
 function formValues(form) { return Object.fromEntries(new FormData(form).entries()); }
 function removeItem(collection, id) { crm[collection] = crm[collection].filter((item) => item.id !== Number(id)); saveData(); render(); }
 
-function render() {
-  document.querySelector('#client-count').textContent = crm.clients.length;
-  document.querySelector('#property-count').textContent = crm.properties.length;
-  document.querySelector('#reminder-count').textContent = crm.reminders.length;
+function trafficLight(client) {
+  const ready = client.temperature === 'Caliente' && hasValue(client.budget) && hasValue(client.paymentMethod) && hasValue(client.purchaseTimeframe) && client.canMoveForward === 'Sí';
+  const blocked = client.temperature === 'Frío' || !hasValue(client.budget) || !hasValue(client.purchaseTimeframe) || client.canMoveForward === 'No';
+  if (ready) return { color: 'verde', label: 'Verde', detail: 'Oportunidad clara' };
+  if (blocked) return { color: 'rojo', label: 'Rojo', detail: 'Requiere calificación' };
+  return { color: 'amarillo', label: 'Amarillo', detail: 'Pendiente de seguimiento' };
+}
 
-  document.querySelector('#client-list').innerHTML = crm.clients.map((client) => `
-    <article class="crm-card"><div><h3>${client.name}</h3><p>${client.interest}</p><small>${client.phone} · ${client.email || 'Sin email'}</small></div><span class="pill">${client.status}</span><button class="delete" data-collection="clients" data-id="${client.id}" aria-label="Eliminar cliente ${client.name}">${icons.trash}</button></article>
-  `).join('') || '<p class="empty-state">Todavía no hay clientes o leads.</p>';
+function clientSummary(client) {
+  const light = trafficLight(client);
+  const nextStep = light.color === 'verde' && client.pipeline === 'Visita posible' ? 'Este cliente parece apto para visita. Revisar y aprobar.' : light.color === 'rojo' ? 'Reactivar y completar presupuesto, plazo y capacidad de avance.' : 'Hacer seguimiento y completar datos faltantes.';
+  return { search: client.interest || 'Sin búsqueda definida', budget: client.budget || 'Sin presupuesto definido', area: client.interest || 'Sin zona/interés cargado', objections: client.objections || client.notes || 'Sin objeciones cargadas', nextStep };
+}
+
+function clientAlerts(client) {
+  const alerts = [];
+  if (client.temperature === 'Caliente' && daysSince(client.lastContact) >= 3) alerts.push({ type: 'urgent', title: 'Cliente caliente sin contactar', detail: `${client.name} lleva ${daysSince(client.lastContact)} días sin contacto.` });
+  if (isPast(client.nextFollowUp)) alerts.push({ type: 'urgent', title: 'Seguimiento vencido', detail: `${client.name} tenía seguimiento el ${client.nextFollowUp}.` });
+  if (client.status === 'Lead' && daysSince(client.lastContact) >= 5) alerts.push({ type: 'pending', title: 'Lead sin responder', detail: `${client.name} necesita una nueva respuesta comercial.` });
+  if (client.pipeline === 'Visita posible') alerts.push({ type: 'opportunity', title: 'Posible visita para revisar', detail: 'Este cliente parece apto para visita. Revisar y aprobar.' });
+  if (client.pipeline === 'Negociación' && trafficLight(client).color === 'verde') alerts.push({ type: 'opportunity', title: 'Posible reserva', detail: `${client.name} está en negociación y puede avanzar.` });
+  if (daysSince(client.lastContact) >= 30) alerts.push({ type: 'pending', title: 'Cliente viejo para reactivar', detail: `${client.name} lleva ${daysSince(client.lastContact)} días sin contacto.` });
+  return alerts.map((alert) => ({ ...alert, client }));
+}
+
+function allAlerts() { return crm.clients.flatMap(clientAlerts); }
+function alertCard(alert) { return `<article class="alert-card ${alert.type}"><span>${alert.title}</span><h3>${alert.client.name}</h3><p>${alert.detail}</p><small>${clientSummary(alert.client).nextStep}</small></article>`; }
+function detailItem(label, value) { return `<span><b>${label}:</b> ${value || 'Pendiente'}</span>`; }
+
+function render() {
+  const alerts = allAlerts();
+  document.querySelector('#urgent-count').textContent = alerts.filter((alert) => alert.type === 'urgent').length;
+  document.querySelector('#visit-count').textContent = alerts.filter((alert) => alert.title === 'Posible visita para revisar').length;
+  document.querySelector('#overdue-count').textContent = alerts.filter((alert) => alert.title === 'Seguimiento vencido').length;
+  document.querySelector('#alert-list').innerHTML = alerts.length ? alerts.map(alertCard).join('') : '<p class="empty-state">No hay alertas comerciales activas.</p>';
+
+  document.querySelector('#client-list').innerHTML = crm.clients.map((client) => {
+    const light = trafficLight(client);
+    const summary = clientSummary(client);
+    return `
+      <article class="crm-card client-card ${light.color}">
+        <div>
+          <div class="client-title"><h3>${client.name}</h3><span class="traffic ${light.color}">${light.label}</span></div>
+          <p>${client.interest}</p>
+          <small>${client.phone} · ${client.email || 'Sin email'}</small>
+          <div class="client-details">
+            ${detailItem('Temperatura', client.temperature)}${detailItem('Pipeline', client.pipeline)}${detailItem('Último contacto', client.lastContact)}${detailItem('Próximo seguimiento', client.nextFollowUp)}${detailItem('Presupuesto', summary.budget)}${detailItem('Forma de pago', client.paymentMethod)}${detailItem('Plazo', client.purchaseTimeframe)}${detailItem('Vivir / invertir', client.purpose)}${detailItem('Conoce la zona', client.knowsArea)}${detailItem('Puede avanzar', client.canMoveForward)}
+          </div>
+          <div class="client-summary"><b>Resumen automático:</b><p>Busca: ${summary.search}. Presupuesto: ${summary.budget}. Zona/interés: ${summary.area}. Objeciones: ${summary.objections}. Próximo paso recomendado: ${summary.nextStep}</p></div>
+        </div>
+        <span class="pill">${client.status}</span>
+        <button class="delete" data-collection="clients" data-id="${client.id}" aria-label="Eliminar cliente ${client.name}">${icons.trash}</button>
+      </article>`;
+  }).join('') || '<p class="empty-state">Todavía no hay clientes o leads.</p>';
 
   document.querySelector('#property-list').innerHTML = crm.properties.map((property) => `
     <article class="crm-card"><div><h3>${property.title}</h3><p>${property.address} · ${property.type}</p><small>${property.owner}</small></div><strong>${currency(property.price, property.operation)}</strong><span class="pill">${property.status}</span><button class="delete" data-collection="properties" data-id="${property.id}" aria-label="Eliminar propiedad ${property.title}">${icons.trash}</button></article>
