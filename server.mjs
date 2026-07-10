@@ -1,59 +1,41 @@
-import http from 'node:http';
-import { readFile, stat } from 'node:fs/promises';
-import { createReadStream } from 'node:fs';
-import path from 'node:path';
+import { createReadStream, existsSync, statSync } from 'node:fs';
+import { createServer } from 'node:http';
+import { extname, join, normalize } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const rootDir = __dirname;
+const root = fileURLToPath(new URL('.', import.meta.url));
 const port = Number(process.env.PORT || 4173);
 const host = '0.0.0.0';
 
-const mimeTypes = {
+const contentTypes = {
   '.html': 'text/html; charset=utf-8',
-  '.js': 'text/javascript; charset=utf-8',
   '.css': 'text/css; charset=utf-8',
+  '.js': 'text/javascript; charset=utf-8',
   '.json': 'application/json; charset=utf-8',
+  '.svg': 'image/svg+xml',
   '.png': 'image/png',
   '.jpg': 'image/jpeg',
   '.jpeg': 'image/jpeg',
-  '.svg': 'image/svg+xml',
-  '.ico': 'image/x-icon',
   '.webp': 'image/webp',
+  '.ico': 'image/x-icon',
 };
 
-function safeResolve(urlPath) {
-  const cleanPath = decodeURIComponent(urlPath.split('?')[0]);
-  const requestedPath = cleanPath === '/' ? '/index.html' : cleanPath;
-  const resolvedPath = path.resolve(rootDir, `.${requestedPath}`);
-
-  if (!resolvedPath.startsWith(rootDir)) {
-    return path.join(rootDir, 'index.html');
-  }
-
-  return resolvedPath;
+function resolveRequestPath(url) {
+  const pathname = decodeURIComponent(new URL(url, `http://${host}:${port}`).pathname);
+  const requestedPath = pathname === '/' ? 'index.html' : pathname.slice(1);
+  const filePath = normalize(join(root, requestedPath));
+  return filePath.startsWith(root) ? filePath : join(root, 'index.html');
 }
 
-const server = http.createServer(async (req, res) => {
-  try {
-    const filePath = safeResolve(req.url || '/');
-    const fileStat = await stat(filePath).catch(() => null);
-    const finalPath = fileStat?.isFile() ? filePath : path.join(rootDir, 'index.html');
-    const extension = path.extname(finalPath);
+const server = createServer((request, response) => {
+  const filePath = resolveRequestPath(request.url || '/');
+  const target = existsSync(filePath) && statSync(filePath).isFile() ? filePath : join(root, 'index.html');
+  const extension = extname(target);
 
-    res.writeHead(200, {
-      'Content-Type': mimeTypes[extension] || 'application/octet-stream',
-      'Cache-Control': 'no-store',
-    });
-
-    createReadStream(finalPath).pipe(res);
-  } catch (error) {
-    console.error(error);
-    res.writeHead(500, { 'Content-Type': 'text/plain; charset=utf-8' });
-    res.end('Error interno del servidor');
-  }
+  response.writeHead(200, { 'Content-Type': contentTypes[extension] || 'application/octet-stream' });
+  createReadStream(target).pipe(response);
 });
 
 server.listen(port, host, () => {
-  console.log(`TRV Gestión Inmobiliaria disponible en http://${host}:${port}`);
+  console.log(`TRV CRM listo en http://${host}:${port}`);
 });
