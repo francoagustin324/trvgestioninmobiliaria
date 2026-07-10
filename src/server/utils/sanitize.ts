@@ -15,8 +15,15 @@ export function decodeHtmlEntities(input = ''): string {
     .replace(/&#x([0-9a-f]+);/gi, (_match, code: string) => String.fromCodePoint(Number.parseInt(code, 16)));
 }
 
-export function cleanText(input = ''): string {
+export function cleanTechnicalText(input = ''): string {
   return decodeHtmlEntities(input)
+    .replace(/[ \t]{2,}/g, ' ')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
+export function cleanText(input = ''): string {
+  return cleanTechnicalText(input)
     .replace(EMAIL_REGEX, '')
     .replace(URL_REGEX, '')
     .replace(PHONE_REGEX, '')
