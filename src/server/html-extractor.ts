@@ -19,18 +19,19 @@ function absoluteUrl(value: string, baseUrl: string): string | null {
   try { return new URL(decodeHtmlEntities(value), baseUrl).toString(); } catch { return null; }
 }
 
-function stringsFromUnknown(value: unknown, output: string[], depth = 0): void {
-  if (depth > 8 || output.length > 80) return;
+function stringsFromUnknown(value: unknown, output: string[], depth = 0, keyHint = ''): void {
+  if (depth > 8 || output.length > 100) return;
   if (typeof value === 'string') {
-    if (/^https?:\/\//i.test(value) && /\.(?:jpe?g|png|webp)(?:[?#].*)?$/i.test(value)) output.push(value);
+    const likelyImageKey = /image|photo|picture|media|gallery/i.test(keyHint);
+    if (/^https?:\/\//i.test(value) && (likelyImageKey || /\.(?:jpe?g|png|webp)(?:[?#].*)?$/i.test(value))) output.push(value);
     return;
   }
   if (Array.isArray(value)) {
-    for (const item of value) stringsFromUnknown(item, output, depth + 1);
+    for (const item of value) stringsFromUnknown(item, output, depth + 1, keyHint);
     return;
   }
   if (value && typeof value === 'object') {
-    for (const item of Object.values(value as Record<string, unknown>)) stringsFromUnknown(item, output, depth + 1);
+    for (const [key, item] of Object.entries(value as Record<string, unknown>)) stringsFromUnknown(item, output, depth + 1, key);
   }
 }
 
@@ -58,10 +59,12 @@ function dataFromJson(value: unknown): Partial<ImportedPropertyData> {
   if (!value || typeof value !== 'object') return {};
   const images: string[] = [];
   stringsFromUnknown(value, images);
+  const price = firstStringByKeys(value, new Set(['formattedprice', 'price', 'amount']));
+  const currency = firstStringByKeys(value, new Set(['pricecurrency', 'currency', 'currencyid', 'currency_id']));
   return {
     title: firstStringByKeys(value, new Set(['title', 'name', 'postingtitle', 'publicationtitle'])),
     description: firstStringByKeys(value, new Set(['description', 'plain_text', 'body', 'content'])),
-    price: firstStringByKeys(value, new Set(['formattedprice', 'price', 'amount'])),
+    price: price && currency && !price.toUpperCase().includes(currency.toUpperCase()) ? `${currency} ${price}` : price,
     expenses: firstStringByKeys(value, new Set(['expenses', 'expensas'])),
     bedrooms: firstStringByKeys(value, new Set(['bedrooms', 'dormitorios'])),
     bathrooms: firstStringByKeys(value, new Set(['bathrooms', 'baños', 'banos'])),
@@ -123,7 +126,7 @@ function inferFromText(html: string): Partial<ImportedPropertyData> {
   const operation = /\ben alquiler\b|\balquiler\b/.test(lower) ? 'Alquiler' : /\ben venta\b|\bventa\b/.test(lower) ? 'Venta' : undefined;
   const garage = /(?:con\s+)?(?:cochera|garage|garaje)/i.test(text) ? 'Sí' : undefined;
   const deed = /(?:posee|con|cuenta con|tiene)\s+escritura/i.test(text) ? 'Sí' : undefined;
-  const creditReady = /apto\s+cr[eé]dito/i.test(text) ? 'Sí' : /no\s+apto\s+cr[eé]dito/i.test(text) ? 'No' : undefined;
+  const creditReady = /no\s+apto\s+cr[eé]dito/i.test(text) ? 'No' : /apto\s+cr[eé]dito/i.test(text) ? 'Sí' : undefined;
   return {
     propertyType,
     operation,
