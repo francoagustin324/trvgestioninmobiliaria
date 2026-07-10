@@ -30,7 +30,7 @@ for (const text of ['0.0.0.0', 'process.env.PORT']) {
 }
 
 const js = readFileSync('src/main.js', 'utf8');
-for (const text of ['TRV CRM', 'Clientes / Leads', 'Propiedades', 'Recordatorios', 'localStorage']) {
+for (const text of ['TRV CRM', 'Clientes / Leads', 'Propiedades', 'Recordatorios', 'localStorage', 'Alertas comerciales', 'Semáforo comercial', 'Cliente caliente sin contactar']) {
   if (!js.includes(text)) throw new Error(`Falta el texto requerido: ${text}`);
 }
 
