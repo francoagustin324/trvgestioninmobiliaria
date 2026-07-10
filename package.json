@@ -1,0 +1,14 @@
+{
+  "name": "trv-gestion-inmobiliaria",
+  "version": "1.0.0",
+  "description": "CRM inmobiliario TRV con frontend estático y backend TypeScript para importación de fichas.",
+  "type": "module",
+  "scripts": {
+    "build": "tsc && node scripts/copy-static.mjs && node scripts/check-static-app.mjs",
+    "start": "node dist/src/server.js",
+    "test": "npm run build && node --test dist/tests/*.test.js",
+    "import:manual": "node dist/scripts/manual-import.js"
+  },
+  "dependencies": {},
+  "devDependencies": {}
+}
