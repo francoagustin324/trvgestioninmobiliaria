@@ -4,7 +4,7 @@
   "description": "Aplicación web estática para la gestión de una inmobiliaria.",
   "type": "module",
   "scripts": {
-    "start": "python3 -m http.server ${PORT:-4173} --bind 0.0.0.0",
+    "start": "node server.mjs",
     "build": "node scripts/check-static-app.mjs"
   }
 }

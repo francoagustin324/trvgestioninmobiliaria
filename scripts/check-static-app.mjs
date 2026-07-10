@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 
-const requiredFiles = ['index.html', 'src/main.js', 'src/styles.css'];
+const requiredFiles = ['index.html', 'src/main.js', 'src/styles.css', 'server.mjs'];
 for (const file of requiredFiles) {
   const content = readFileSync(file, 'utf8');
   if (!content.trim()) throw new Error(`${file} está vacío`);
@@ -9,6 +9,16 @@ for (const file of requiredFiles) {
 const html = readFileSync('index.html', 'utf8');
 if (!html.includes('src/main.js') || !html.includes('src/styles.css')) {
   throw new Error('index.html no referencia los assets principales');
+}
+
+const packageJson = readFileSync('package.json', 'utf8');
+if (!packageJson.includes('node server.mjs')) {
+  throw new Error('package.json no contiene el start correcto para Railway');
+}
+
+const server = readFileSync('server.mjs', 'utf8');
+for (const text of ['0.0.0.0', 'process.env.PORT']) {
+  if (!server.includes(text)) throw new Error(`Falta configuración de Railway en server.mjs: ${text}`);
 }
 
 const js = readFileSync('src/main.js', 'utf8');
