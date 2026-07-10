@@ -7,6 +7,14 @@ for (const file of requiredFiles) {
 }
 
 const html = readFileSync('index.html', 'utf8');
+
+for (const file of requiredFiles) {
+  const content = readFileSync(file, 'utf8');
+  for (const marker of ['<<<<<<<', '=======', '>>>>>>>']) {
+    if (content.includes(marker)) throw new Error(`${file} contiene marcador de conflicto: ${marker}`);
+  }
+}
+
 if (!html.includes('src/main.js') || !html.includes('src/styles.css')) {
   throw new Error('index.html no referencia los assets principales');
 }
