@@ -1,14 +1,19 @@
 {
   "name": "trv-gestion-inmobiliaria",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "private": true,
-  "description": "CRM y generador de fichas TRV en TypeScript.",
+  "description": "CRM y generador de fichas TRV en TypeScript con importación automática.",
   "type": "module",
   "scripts": {
     "build": "tsc && node scripts/check-static-app.mjs",
-    "start": "node server.mjs"
+    "start": "node dist/server.js",
+    "test": "npm run build && node --test dist/tests/*.test.js"
+  },
+  "dependencies": {
+    "playwright": "1.61.0"
   },
   "devDependencies": {
+    "@types/node": "^22.15.0",
     "typescript": "5.8.3"
   }
 }
