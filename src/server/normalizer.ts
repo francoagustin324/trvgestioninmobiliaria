@@ -1,5 +1,7 @@
 import type { ImportedPropertyData } from '../shared/import-types.js';
-import { cleanText, uniquePhotos } from './utils/sanitize.js';
+import { cleanTechnicalText, cleanText, uniquePhotos } from './utils/sanitize.js';
+
+const COMMERCIAL_TEXT_FIELDS = new Set<keyof ImportedPropertyData>(['title', 'description', 'amenities']);
 
 export function emptyImportedData(): ImportedPropertyData {
   return { photoUrls: [] };
@@ -10,7 +12,7 @@ export function normalizeImportedData(data: Partial<ImportedPropertyData>): Impo
   const writable = normalized as unknown as Record<string, string | string[]>;
   for (const [key, value] of Object.entries(data)) {
     if (key === 'photoUrls' || typeof value !== 'string') continue;
-    const cleaned = cleanText(value);
+    const cleaned = COMMERCIAL_TEXT_FIELDS.has(key as keyof ImportedPropertyData) ? cleanText(value) : cleanTechnicalText(value);
     if (cleaned) writable[key] = cleaned;
   }
   return normalized;
