@@ -30,8 +30,16 @@ test('elimina fotos duplicadas y logos', () => {
   assert.equal(photos.length, 2);
 });
 
-test('normaliza los datos importados', () => {
-  const data = normalizeImportedData({ title: '  Departamento céntrico  ', description: 'Llamar al +54 9 351 555 1234', photoUrls: [] });
+test('normaliza datos y conserva precios grandes', () => {
+  const data = normalizeImportedData({
+    title: '  Departamento céntrico  ',
+    description: 'Llamar al +54 9 351 555 1234',
+    price: 'ARS 10000000',
+    totalMeters: '120 m²',
+    photoUrls: [],
+  });
   assert.equal(data.title, 'Departamento céntrico');
   assert.equal(data.description, 'Llamar al');
+  assert.equal(data.price, 'ARS 10000000');
+  assert.equal(data.totalMeters, '120 m²');
 });
