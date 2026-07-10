@@ -166,8 +166,10 @@ function bindFichaForm(): void {
     if (property) fillForm(propertyToFicha(property));
   });
   document.querySelector<HTMLButtonElement>('#import-property')?.addEventListener('click', () => { if (form) void importPropertyFromLink(form); });
-  const photoTextarea = form?.elements.namedItem('photoUrls');
-  if (photoTextarea instanceof HTMLTextAreaElement) photoTextarea.addEventListener('change', () => renderPhotoReview(form));
+  if (form) {
+    const photoTextarea = form.elements.namedItem('photoUrls');
+    if (photoTextarea instanceof HTMLTextAreaElement) photoTextarea.addEventListener('change', () => renderPhotoReview(form));
+  }
 }
 
 export function handleFichaAction(action: string, id: number): void {
