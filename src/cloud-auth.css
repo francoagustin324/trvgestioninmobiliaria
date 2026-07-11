@@ -1,0 +1,39 @@
+#cloud-account { display: flex; justify-content: flex-end; }
+.cloud-login-button { white-space: nowrap; }
+.cloud-account { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+.cloud-account span { display: grid; gap: 2px; min-width: 0; }
+.cloud-account b { color: #155e53; font-size: .82rem; }
+.cloud-account small { max-width: 220px; overflow: hidden; color: #6b7280; text-overflow: ellipsis; white-space: nowrap; }
+.cloud-account button { min-height: 36px !important; padding: 7px 10px !important; font-size: .76rem; }
+.quiet-button { color: #475569 !important; border: 1px solid #d8e2ec !important; background: #fff !important; box-shadow: none !important; }
+
+.auth-modal[hidden] { display: none; }
+.auth-modal { position: fixed; z-index: 300; inset: 0; display: grid; place-items: center; padding: 18px; background: rgba(13, 27, 42, .64); backdrop-filter: blur(8px); }
+.auth-dialog { position: relative; width: min(100%, 470px); max-height: calc(100vh - 36px); overflow-y: auto; padding: 26px; border: 1px solid rgba(212,160,23,.34); border-radius: 24px; background: #fff; box-shadow: 0 28px 80px rgba(13,27,42,.3); }
+.auth-dialog h2 { margin: 5px 0 7px; color: #0d1b2a; font-size: 2rem; }
+.auth-copy { margin-bottom: 18px; color: #6b7280; }
+.auth-close { position: absolute; top: 12px; right: 12px; width: 36px; height: 36px; min-height: 36px !important; padding: 0 !important; color: #475569 !important; border: 1px solid #d8e2ec !important; border-radius: 50% !important; background: #fff !important; box-shadow: none !important; font-size: 1.2rem; }
+.auth-tabs { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 15px; }
+.auth-tabs button { color: #1e3a5f !important; border: 1px solid #d8e2ec !important; background: #f4f7fa !important; box-shadow: none !important; }
+.auth-tabs button.active { color: #0d1b2a !important; border-color: #d4a017 !important; background: #f4d778 !important; }
+.auth-form { display: grid; gap: 12px; }
+.auth-form[hidden] { display: none; }
+.auth-form label { display: grid; gap: 6px; color: #334155; font-size: .84rem; font-weight: 800; }
+.auth-form small { color: #6b7280; }
+.auth-form button[type="submit"] { margin-top: 3px; }
+.auth-form button:disabled { opacity: .58; cursor: wait; }
+.auth-message { min-height: 24px; margin-top: 13px; color: #155e53; font-size: .88rem; font-weight: 750; }
+.auth-message.error { color: #b42318; }
+
+.cloud-settings-card { grid-column: 1 / -1; padding: 18px; border: 1px solid #dce3ea; border-radius: 18px; background: linear-gradient(135deg, #f7fafc, #fff); }
+.cloud-settings-card h3 { margin: 4px 0 6px; }
+.cloud-settings-card p { color: #6b7280; }
+.cloud-settings-card .cloud-account { justify-content: flex-start; }
+.cloud-settings-card .cloud-login-button { margin-top: 4px; }
+
+@media (max-width: 720px) {
+  #cloud-account { width: 100%; justify-content: flex-start; }
+  .cloud-account { justify-content: flex-start; }
+  .cloud-account small { max-width: 180px; }
+  .auth-dialog { padding: 22px 17px; border-radius: 20px; }
+}

@@ -8,6 +8,9 @@ import { storeExtensionImport, takeExtensionImport } from './server/extension-im
 const root = fileURLToPath(new URL('../', import.meta.url));
 const port = Number(process.env.PORT || 4173);
 const host = '0.0.0.0';
+const supabaseUrl = (process.env.SUPABASE_URL || '').trim().replace(/\/+$/g, '');
+const supabasePublishableKey = (process.env.SUPABASE_PUBLISHABLE_KEY || '').trim();
+const cloudConfigured = Boolean(supabaseUrl && supabasePublishableKey);
 const contentTypes: Record<string, string> = {
   '.html': 'text/html; charset=utf-8',
   '.css': 'text/css; charset=utf-8',
@@ -106,7 +109,14 @@ const server = createServer(async (request, response) => {
   const pathname = new URL(request.url || '/', `http://${host}:${port}`).pathname;
 
   if (request.method === 'GET' && pathname === '/health') {
-    sendJson(response, 200, { ok: true });
+    sendJson(response, 200, { ok: true, cloudConfigured });
+    return;
+  }
+
+  if (request.method === 'GET' && pathname === '/api/cloud-config') {
+    sendJson(response, 200, cloudConfigured
+      ? { configured: true, url: supabaseUrl, publishableKey: supabasePublishableKey }
+      : { configured: false });
     return;
   }
 
@@ -181,5 +191,5 @@ const server = createServer(async (request, response) => {
 });
 
 server.listen(port, host, () => {
-  console.log(`TRV CRM listo en http://${host}:${port}`);
+  console.log(`PropControl listo en http://${host}:${port} · nube ${cloudConfigured ? 'configurada' : 'pendiente'}`);
 });
