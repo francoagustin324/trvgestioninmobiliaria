@@ -1,14 +1,20 @@
+import { queueCloudSave } from './cloud-api.js';
 import { CrmData, FichaMode, ModuleId, STORAGE_KEY, initialData } from './models.js';
+
+function normalizedData(value: Partial<CrmData>): CrmData {
+  return {
+    clients: Array.isArray(value.clients) ? value.clients : [],
+    properties: Array.isArray(value.properties) ? value.properties : [],
+    reminders: Array.isArray(value.reminders) ? value.reminders : [],
+    fichas: Array.isArray(value.fichas) ? value.fichas : [],
+  };
+}
 
 function loadData(): CrmData {
   try {
-    const parsed = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}') as Partial<CrmData>;
-    return {
-      clients: Array.isArray(parsed.clients) ? parsed.clients : initialData.clients,
-      properties: Array.isArray(parsed.properties) ? parsed.properties : initialData.properties,
-      reminders: Array.isArray(parsed.reminders) ? parsed.reminders : initialData.reminders,
-      fichas: Array.isArray(parsed.fichas) ? parsed.fichas : [],
-    };
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return structuredClone(initialData);
+    return normalizedData(JSON.parse(raw) as Partial<CrmData>);
   } catch { return structuredClone(initialData); }
 }
 
@@ -21,4 +27,13 @@ export const state = {
   openForms: { client: false, property: false, reminder: false, ficha: false },
 };
 
-export function saveData(): void { localStorage.setItem(STORAGE_KEY, JSON.stringify(state.crm)); }
+export function replaceData(data: CrmData, syncCloud = false): void {
+  state.crm = normalizedData(data);
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(state.crm));
+  if (syncCloud) queueCloudSave(state.crm);
+}
+
+export function saveData(): void {
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(state.crm));
+  queueCloudSave(state.crm);
+}
