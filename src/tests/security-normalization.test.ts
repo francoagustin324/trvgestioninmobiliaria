@@ -65,5 +65,5 @@ test('extrae datos y fotos desde respuestas JSON de portales', () => {
   assert.equal(data.price, 'USD 125000');
   assert.equal(data.bedrooms, '2');
   assert.equal(data.zone, 'Nueva Córdoba');
-  assert.equal(data.photoUrls.length, 2);
+  assert.equal((data.photoUrls ?? []).length, 2);
 });
