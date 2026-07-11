@@ -1,4 +1,5 @@
 import { FICHA_LEGAL, Ficha, FichaPublica, LOGO_PATH, WHATSAPP_NUMBER } from './models.js';
+import { AGENCY_BRAND } from './branding.js';
 import { escapeHtml, hasValue, safePhotoUrl } from './utils.js';
 
 export function encodePublicFicha(ficha: FichaPublica): string {
@@ -38,7 +39,7 @@ export function publicLink(ficha: Ficha): string {
 
 export function whatsappText(ficha: Ficha): string {
   const features = [ficha.propertyType, ficha.bedrooms && `${ficha.bedrooms} dorm.`, ficha.bathrooms && `${ficha.bathrooms} baños`, ficha.coveredMeters && `${ficha.coveredMeters} m² cubiertos`, ficha.totalMeters && `${ficha.totalMeters} m² totales`].filter(Boolean).join(' · ');
-  return ['Te comparto una propiedad de TRV Gestión Inmobiliaria:', ficha.title, ficha.zone && `Zona: ${ficha.zone}`, ficha.operation && `Operación: ${ficha.operation}`, ficha.price && `Precio: ${ficha.price}`, features && `Características: ${features}`, `Ver ficha: ${publicLink(ficha)}`, 'Decime si querés que revisemos disponibilidad y condiciones.'].filter(Boolean).join('\n');
+  return [`Te comparto una propiedad de ${AGENCY_BRAND.name}:`, ficha.title, ficha.zone && `Zona: ${ficha.zone}`, ficha.operation && `Operación: ${ficha.operation}`, ficha.price && `Precio: ${ficha.price}`, features && `Características: ${features}`, `Ver ficha: ${publicLink(ficha)}`, 'Decime si querés que revisemos disponibilidad y condiciones.'].filter(Boolean).join('\n');
 }
 
 function rows(ficha: FichaPublica): string {
@@ -60,7 +61,7 @@ export function publicFichaHtml(ficha: FichaPublica): string {
   const photos = ficha.photoUrls.map(safePhotoUrl).filter((url): url is string => Boolean(url)).slice(0, 8).map((url, index) => `<img src="${escapeHtml(url)}" alt="Foto ${index + 1} de ${escapeHtml(ficha.title)}" loading="lazy">`).join('');
   const contactText = encodeURIComponent(`Hola, consulto por ${ficha.title}. Quisiera confirmar disponibilidad y condiciones.`);
   const enhancementClass = ficha.photoEnhancement === 'soft' ? ' enhanced' : '';
-  return `<article class="public-ficha"><header class="public-header"><img src="${LOGO_PATH}" alt="TRV Gestión Inmobiliaria"><div><span>TRV Gestión Inmobiliaria</span><h1>${escapeHtml(ficha.title)}</h1></div></header><div class="public-gallery${enhancementClass}">${photos || '<div class="gallery-placeholder">Fotos disponibles próximamente</div>'}</div><section class="public-data">${rows(ficha)}</section>${hasValue(ficha.description) ? `<p class="public-description">${escapeHtml(ficha.description)}</p>` : ''}<a class="whatsapp-public" href="https://wa.me/${WHATSAPP_NUMBER}?text=${contactText}" target="_blank" rel="noopener">Consultar por WhatsApp</a><small>${FICHA_LEGAL}</small></article>`;
+  return `<article class="public-ficha"><header class="public-header"><img src="${LOGO_PATH}" alt="${AGENCY_BRAND.name}"><div><span>${AGENCY_BRAND.name}</span><h1>${escapeHtml(ficha.title)}</h1></div></header><div class="public-gallery${enhancementClass}">${photos || '<div class="gallery-placeholder">Fotos disponibles próximamente</div>'}</div><section class="public-data">${rows(ficha)}</section>${hasValue(ficha.description) ? `<p class="public-description">${escapeHtml(ficha.description)}</p>` : ''}<a class="whatsapp-public" href="https://wa.me/${WHATSAPP_NUMBER}?text=${contactText}" target="_blank" rel="noopener">Consultar por WhatsApp</a><small>${FICHA_LEGAL}</small></article>`;
 }
 
 export function renderPublicMode(root: HTMLElement, ficha: FichaPublica | null): void {
