@@ -132,7 +132,9 @@ export class WebhookDeduplicator {
 
     const normalized = unique(keys.filter(Boolean));
     const duplicate = normalized.length > 0 && normalized.every((key) => (this.seen.get(key) || 0) > now);
-    for (const key of normalized) this.seen.set(key, now + this.ttlMs);
+    for (const key of normalized) {
+      if ((this.seen.get(key) || 0) <= now) this.seen.set(key, now + this.ttlMs);
+    }
 
     while (this.seen.size > this.maxEntries) {
       const oldest = this.seen.keys().next().value as string | undefined;
