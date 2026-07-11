@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TRV Fichas</title>
+    <link rel="stylesheet" href="popup.css">
+  </head>
+  <body>
+    <main>
+      <header>
+        <div class="brand-mark">TRV</div>
+        <div>
+          <strong>Fichas TRV</strong>
+          <span>Importador inmobiliario</span>
+        </div>
+      </header>
+
+      <section class="primary-card">
+        <span class="kicker">Opción recomendada</span>
+        <h1>Usar la publicación abierta</h1>
+        <p>Abrí el aviso completo, esperá a que carguen las fotos y tocá el botón.</p>
+        <button id="import-current" type="button">Crear ficha con esta página</button>
+      </section>
+
+      <div class="separator"><span>o pegá el link</span></div>
+
+      <section class="link-card">
+        <label for="property-url">Enlace de Zonaprop, MercadoLibre, Tokko u otro portal</label>
+        <input id="property-url" type="url" placeholder="https://..." autocomplete="off">
+        <button id="open-import" type="button" class="secondary">Abrir link y crear ficha</button>
+        <small>Chrome puede pedir autorización una sola vez para leer ese portal.</small>
+      </section>
+
+      <div id="status" role="status" aria-live="polite"></div>
+    </main>
+    <script src="popup.js"></script>
+  </body>
+</html>
