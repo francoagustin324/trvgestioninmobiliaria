@@ -18,11 +18,13 @@ const requiredFiles = [
   'src/shared/import-types.ts',
   'src/server/import-service.ts',
   'src/server/extension-import-store.ts',
+  'src/server/whatsapp-webhook.ts',
   'src/server/provider.ts',
   'src/server/browser.ts',
   'src/server/html-extractor.ts',
   'src/server/utils/safe-url.ts',
   'src/server/utils/sanitize.ts',
+  'src/tests/whatsapp-webhook.test.ts',
   'src/styles.css',
   'src/importer.css',
   'src/propcontrol-theme.css',
@@ -99,16 +101,24 @@ for (const text of ['/auth/v1/signup', '/auth/v1/token?grant_type=password', 'or
 if (cloudApi.includes('SUPABASE_SECRET_KEY')) throw new Error('La clave secreta no debe incluirse en el código del navegador');
 
 const server = readFileSync('src/server.ts', 'utf8');
-for (const text of ['SUPABASE_URL', 'SUPABASE_PUBLISHABLE_KEY', '/api/cloud-config']) {
+for (const text of ['SUPABASE_URL', 'SUPABASE_PUBLISHABLE_KEY', '/api/cloud-config', 'WHATSAPP_WEBHOOK_VERIFY_TOKEN', 'META_APP_SECRET']) {
   if (!server.includes(text)) throw new Error(`Falta configuración de servidor: ${text}`);
 }
 if (server.includes("process.env.SUPABASE_SECRET_KEY") && server.includes('publishableKey: process.env.SUPABASE_SECRET_KEY')) {
   throw new Error('El servidor intenta exponer la clave secreta');
 }
 
+const whatsappWebhook = readFileSync('src/server/whatsapp-webhook.ts', 'utf8');
+for (const text of ['/api/whatsapp/webhook', 'x-hub-signature-256', 'timingSafeEqual', 'hub.verify_token', 'WebhookDeduplicator']) {
+  if (!whatsappWebhook.includes(text)) throw new Error(`Falta protección del webhook: ${text}`);
+}
+if (whatsappWebhook.includes('console.log(payload)') || whatsappWebhook.includes('console.info(payload)')) {
+  throw new Error('El webhook no debe registrar payloads completos con datos personales');
+}
+
 const source = requiredFiles.filter((file) => file.endsWith('.ts') || file.endsWith('.js')).map((file) => readFileSync(file, 'utf8')).join('\n');
-for (const text of ['Fichas TRV', 'public=', '5493515110069', 'navigator.clipboard', 'window.print', '/api/import-property', '/api/extension-import', 'Crear ficha desde el link', 'Mis propiedades', 'Mejora visual suave', 'TRV_IMPORT_CURRENT', 'validateSafeUrl', 'chromium', 'PropControl', 'Ingresar / crear cuenta']) {
+for (const text of ['Fichas TRV', 'public=', '5493515110069', 'navigator.clipboard', 'window.print', '/api/import-property', '/api/extension-import', 'Crear ficha desde el link', 'Mis propiedades', 'Mejora visual suave', 'TRV_IMPORT_CURRENT', 'validateSafeUrl', 'chromium', 'PropControl', 'Ingresar / crear cuenta', '/api/whatsapp/webhook']) {
   if (!source.includes(text)) throw new Error(`Falta función o texto requerido: ${text}`);
 }
 
-console.log('PropControl: TypeScript, branding, extensión, autenticación y Supabase aprobados');
+console.log('PropControl: TypeScript, branding, extensión, autenticación, Supabase y webhook de WhatsApp aprobados');
