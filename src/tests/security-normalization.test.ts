@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { extractPropertyFromJson } from '../server/json-extractor.js';
 import { normalizeImportedData } from '../server/normalizer.js';
 import { isPrivateIp, validateSafeUrl } from '../server/utils/safe-url.js';
 import { cleanText, uniquePhotos } from '../server/utils/sanitize.js';
@@ -42,4 +43,27 @@ test('normaliza datos y conserva precios grandes', () => {
   assert.equal(data.description, 'Llamar al');
   assert.equal(data.price, 'ARS 10000000');
   assert.equal(data.totalMeters, '120 m²');
+});
+
+test('extrae datos y fotos desde respuestas JSON de portales', () => {
+  const data = extractPropertyFromJson({
+    posting: {
+      postingTitle: 'Departamento reciclado en Nueva Córdoba',
+      price: 125000,
+      currency: 'USD',
+      bedrooms: 2,
+      bathrooms: 1,
+      totalArea: 78,
+      location: { neighborhood: 'Nueva Córdoba' },
+      pictures: [
+        { imageUrl: 'https://img.example.com/depto-1.webp' },
+        { imageUrl: 'https://img.example.com/depto-2.webp' },
+      ],
+    },
+  });
+  assert.equal(data.title, 'Departamento reciclado en Nueva Córdoba');
+  assert.equal(data.price, 'USD 125000');
+  assert.equal(data.bedrooms, '2');
+  assert.equal(data.zone, 'Nueva Córdoba');
+  assert.equal((data.photoUrls ?? []).length, 2);
 });

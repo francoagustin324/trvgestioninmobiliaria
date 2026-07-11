@@ -1,6 +1,7 @@
 import type { ImportedPropertyData, ImportPropertyResponse, ImportProvider } from '../../shared/import-types.js';
 import { fetchRenderedHtml } from '../browser.js';
 import { extractPropertyFromHtml, importLooksUseful } from '../html-extractor.js';
+import { extractPropertyFromJson } from '../json-extractor.js';
 import { mergeImportedData } from '../normalizer.js';
 import { safeFetchText, validateSafeUrl } from '../utils/safe-url.js';
 
@@ -23,19 +24,25 @@ export async function importGeneric(url: string, options: GenericImportOptions):
     warnings.push(error instanceof Error ? `Lectura directa: ${error.message}` : 'No se pudo leer el HTML inicial.');
   }
 
-  if (!options.forceBrowserWhenWeak || importLooksUseful(lightweightData)) {
+  if (!options.forceBrowserWhenWeak && importLooksUseful(lightweightData)) {
     return { success: true, provider: options.provider, sourceUrl: finalUrl.toString(), data: lightweightData, warnings };
   }
 
   try {
     const rendered = await fetchRenderedHtml(safeUrl);
     const renderedData = extractPropertyFromHtml(rendered.html, rendered.finalUrl.toString());
-    const data = mergeImportedData(renderedData, lightweightData);
-    if (!importLooksUseful(data)) warnings.push('El portal no expuso todos los datos; revisá los campos antes de guardar.');
+    const networkData = rendered.jsonPayloads.map((payload) => extractPropertyFromJson(payload));
+    const data = mergeImportedData(...networkData, renderedData, lightweightData);
+    if (!importLooksUseful(data)) {
+      throw new Error('El portal no entregó datos suficientes de la propiedad.');
+    }
+    if (!data.photoUrls.length) warnings.push('No se pudieron recuperar las fotografías de la publicación.');
     return { success: true, provider: options.provider, sourceUrl: rendered.finalUrl.toString(), data, warnings };
   } catch (error) {
     warnings.push(error instanceof Error ? `Navegador: ${error.message}` : 'El navegador no pudo procesar la publicación.');
-    if (importLooksUseful(lightweightData)) return { success: true, provider: options.provider, sourceUrl: finalUrl.toString(), data: lightweightData, warnings };
+    if (importLooksUseful(lightweightData)) {
+      return { success: true, provider: options.provider, sourceUrl: finalUrl.toString(), data: lightweightData, warnings };
+    }
     throw new Error('No pudimos importar automáticamente esta publicación.');
   }
 }
