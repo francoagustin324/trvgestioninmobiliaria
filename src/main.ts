@@ -3,6 +3,7 @@ import { renderHome, renderClients, renderProperties } from './crm-ui.js';
 import { handleFichaAction, renderFichas, setFichaMode } from './fichas-ui.js';
 import { decodePublicFicha, renderPublicMode } from './public-ficha.js';
 import { consumeExtensionImport } from './extension-import-ui.js';
+import { renderExtensionInstallHelp } from './extension-install-ui.js';
 import { saveData, state } from './store.js';
 import { escapeHtml, field, formValues, nextId, qs } from './utils.js';
 
@@ -31,7 +32,7 @@ function renderSimple(): void {
 }
 
 function render(): void {
-  renderHome(qs<HTMLElement>('#inicio')); renderClients(qs<HTMLElement>('#crm')); renderProperties(qs<HTMLElement>('#propiedades')); renderFichas(qs<HTMLElement>('#fichas')); renderSimple();
+  renderHome(qs<HTMLElement>('#inicio')); renderClients(qs<HTMLElement>('#crm')); renderProperties(qs<HTMLElement>('#propiedades')); renderFichas(qs<HTMLElement>('#fichas')); renderExtensionInstallHelp(); renderSimple();
   modules.forEach(([id, label]) => {
     qs<HTMLElement>(`#${id}`).classList.toggle('active', id === state.activeModule);
     document.querySelector<HTMLButtonElement>(`[data-module="${id}"]`)?.classList.toggle('active', id === state.activeModule);
@@ -73,6 +74,7 @@ if (location.hash.startsWith('#public=')) {
   renderPublicMode(root, decodePublicFicha(location.hash.slice('#public='.length)));
 } else {
   const extensionToken = location.hash.startsWith('#extension-import=') ? location.hash.slice('#extension-import='.length) : '';
+  const extensionError = location.hash.startsWith('#extension-error=') ? location.hash.slice('#extension-error='.length) : '';
   renderShell();
   bindShellEvents();
   if (extensionToken) {
@@ -81,6 +83,12 @@ if (location.hash.startsWith('#public=')) {
     state.openForms.ficha = true;
   }
   render();
+  if (extensionError) {
+    let message = 'La extensión no pudo leer esta publicación.';
+    try { message = decodeURIComponent(extensionError); } catch { /* mantener mensaje seguro */ }
+    history.replaceState(null, '', `${location.pathname}${location.search}`);
+    showNotice(message);
+  }
   if (extensionToken) void consumeExtensionImport(extensionToken).catch((error) => {
     history.replaceState(null, '', `${location.pathname}${location.search}`);
     showNotice(error instanceof Error ? error.message : 'No se pudo recibir la propiedad desde la extensión.');
