@@ -49,7 +49,10 @@ async function extractFromTab(tabId) {
 async function sendToTrv(extracted) {
   const response = await fetch(`${APP_URL}/api/extension-import`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      'X-TRV-Extension': '1',
+    },
     body: JSON.stringify(extracted),
   });
   const payload = await response.json();
