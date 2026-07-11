@@ -3,6 +3,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from 'node:ht
 import { extname, join, normalize } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { importProperty } from './server/import-service.js';
+import { storeExtensionImport, takeExtensionImport } from './server/extension-import-store.js';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const port = Number(process.env.PORT || 4173);
@@ -18,6 +19,7 @@ const contentTypes: Record<string, string> = {
   '.jpeg': 'image/jpeg',
   '.webp': 'image/webp',
   '.ico': 'image/x-icon',
+  '.zip': 'application/zip',
 };
 
 const requestWindows = new Map<string, { count: number; resetAt: number }>();
@@ -31,19 +33,20 @@ function rateLimit(request: IncomingMessage): boolean {
     return false;
   }
   current.count += 1;
-  return current.count > 12;
+  return current.count > 30;
 }
 
-function sendJson(response: ServerResponse, status: number, payload: unknown): void {
+function sendJson(response: ServerResponse, status: number, payload: unknown, extraHeaders: Record<string, string> = {}): void {
   response.writeHead(status, {
     'Content-Type': 'application/json; charset=utf-8',
     'Cache-Control': 'no-store',
     'X-Content-Type-Options': 'nosniff',
+    ...extraHeaders,
   });
   response.end(JSON.stringify(payload));
 }
 
-async function readJson(request: IncomingMessage): Promise<Record<string, unknown>> {
+async function readJson(request: IncomingMessage, maxBytes = 10_000): Promise<Record<string, unknown>> {
   const contentType = request.headers['content-type'] || '';
   if (!contentType.toLowerCase().startsWith('application/json')) throw new Error('La solicitud debe enviarse como JSON.');
   const chunks: Buffer[] = [];
@@ -51,13 +54,25 @@ async function readJson(request: IncomingMessage): Promise<Record<string, unknow
   for await (const chunk of request) {
     const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
     size += buffer.byteLength;
-    if (size > 10_000) throw new Error('La solicitud es demasiado grande.');
+    if (size > maxBytes) throw new Error('La solicitud es demasiado grande.');
     chunks.push(buffer);
   }
   const raw = Buffer.concat(chunks).toString('utf8');
   const parsed: unknown = JSON.parse(raw || '{}');
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('El contenido JSON no es válido.');
   return parsed as Record<string, unknown>;
+}
+
+function extensionCorsHeaders(request: IncomingMessage): Record<string, string> | null {
+  const origin = request.headers.origin;
+  if (typeof origin !== 'string' || !/^chrome-extension:\/\/[a-p]{32}$/.test(origin)) return null;
+  return {
+    'Access-Control-Allow-Origin': origin,
+    'Access-Control-Allow-Methods': 'POST, OPTIONS',
+    'Access-Control-Allow-Headers': 'Content-Type',
+    'Access-Control-Max-Age': '600',
+    Vary: 'Origin',
+  };
 }
 
 function resolveRequestPath(requestUrl: string): string {
@@ -83,10 +98,56 @@ function serveStatic(request: IncomingMessage, response: ServerResponse): void {
 
 const server = createServer(async (request, response) => {
   const pathname = new URL(request.url || '/', `http://${host}:${port}`).pathname;
+
   if (request.method === 'GET' && pathname === '/health') {
     sendJson(response, 200, { ok: true });
     return;
   }
+
+  if (pathname === '/api/extension-import' && request.method === 'OPTIONS') {
+    const cors = extensionCorsHeaders(request);
+    if (!cors) {
+      sendJson(response, 403, { success: false, error: 'Origen no autorizado.' });
+      return;
+    }
+    response.writeHead(204, cors);
+    response.end();
+    return;
+  }
+
+  if (pathname === '/api/extension-import' && request.method === 'POST') {
+    const cors = extensionCorsHeaders(request);
+    if (!cors) {
+      sendJson(response, 403, { success: false, error: 'Origen no autorizado.' });
+      return;
+    }
+    if (rateLimit(request)) {
+      sendJson(response, 429, { success: false, error: 'Demasiados intentos. Esperá unos minutos y volvé a probar.' }, cors);
+      return;
+    }
+    try {
+      const body = await readJson(request, 600_000);
+      if (typeof body.sourceUrl !== 'string' || !body.sourceUrl.trim()) throw new Error('Falta el enlace original de la publicación.');
+      if (!body.data || typeof body.data !== 'object' || Array.isArray(body.data)) throw new Error('La extensión no envió datos válidos.');
+      const token = storeExtensionImport(body.sourceUrl, body.data);
+      sendJson(response, 201, { success: true, token }, cors);
+    } catch (error) {
+      sendJson(response, 400, { success: false, error: error instanceof Error ? error.message : 'No se pudo recibir la publicación.' }, cors);
+    }
+    return;
+  }
+
+  const extensionTokenMatch = pathname.match(/^\/api\/extension-import\/([0-9a-f-]{36})$/i);
+  if (request.method === 'GET' && extensionTokenMatch?.[1]) {
+    const payload = takeExtensionImport(extensionTokenMatch[1]);
+    if (!payload) {
+      sendJson(response, 404, { success: false, error: 'La importación venció o ya fue utilizada. Volvé a usar la extensión.' });
+      return;
+    }
+    sendJson(response, 200, payload);
+    return;
+  }
+
   if (request.method === 'POST' && pathname === '/api/import-property') {
     if (rateLimit(request)) {
       sendJson(response, 429, { success: false, error: 'Demasiados intentos. Esperá unos minutos y volvé a probar.' });
@@ -105,6 +166,7 @@ const server = createServer(async (request, response) => {
     }
     return;
   }
+
   if (request.method !== 'GET' && request.method !== 'HEAD') {
     sendJson(response, 405, { error: 'Método no permitido.' });
     return;
