@@ -31,3 +31,9 @@ export interface ImportPropertyResponse {
   warnings: string[];
   error?: string;
 }
+
+export interface ExtensionImportCreateResponse {
+  success: boolean;
+  token?: string;
+  error?: string;
+}
