@@ -66,7 +66,7 @@ test('extrae datos y fotos desde respuestas JSON de portales', () => {
   assert.equal(data.price, 'USD 125000');
   assert.equal(data.bedrooms, '2');
   assert.equal(data.zone, 'Nueva Córdoba');
-  assert.equal(data.photoUrls.length, 2);
+  assert.equal(data.photoUrls?.length ?? 0, 2);
 });
 
 test('guarda y consume una importación enviada por la extensión', () => {
