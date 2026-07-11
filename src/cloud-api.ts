@@ -72,12 +72,13 @@ async function getConfig(): Promise<Required<Pick<CloudConfig, 'url' | 'publisha
   return configPromise;
 }
 
-function authHeaders(config: Required<Pick<CloudConfig, 'url' | 'publishableKey'>>, accessToken?: string): HeadersInit {
-  return {
+function authHeaders(config: Required<Pick<CloudConfig, 'url' | 'publishableKey'>>, accessToken?: string): Record<string, string> {
+  const headers: Record<string, string> = {
     apikey: config.publishableKey,
-    Authorization: `Bearer ${accessToken || config.publishableKey}`,
     'Content-Type': 'application/json',
   };
+  if (accessToken) headers.Authorization = `Bearer ${accessToken}`;
+  return headers;
 }
 
 function toSession(payload: AuthResponse): CloudSession | null {
