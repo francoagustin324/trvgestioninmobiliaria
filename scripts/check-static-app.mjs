@@ -29,6 +29,7 @@ const requiredFiles = [
   'src/importer.css',
   'src/propcontrol-theme.css',
   'src/cloud-auth.css',
+  'src/mobile-premium.css',
   'dist/main.js',
   'dist/server.js',
   'src/assets/propcontrol-mark.svg',
@@ -62,9 +63,10 @@ const zip = readFileSync(zipPath);
 if (zip.readUInt32LE(0) !== 0x04034b50) throw new Error('El ZIP de la extensión no es válido');
 
 const html = readFileSync('index.html', 'utf8');
-for (const asset of ['/dist/main.js', '/src/styles.css', '/src/importer.css', '/src/propcontrol-theme.css', '/src/cloud-auth.css', '/src/assets/propcontrol-mark.svg']) {
+for (const asset of ['/dist/main.js', '/src/styles.css', '/src/importer.css', '/src/propcontrol-theme.css', '/src/cloud-auth.css', '/src/mobile-premium.css', '/src/assets/propcontrol-mark.svg']) {
   if (!html.includes(asset)) throw new Error(`index.html no referencia ${asset}`);
 }
+if (!html.includes('viewport-fit=cover')) throw new Error('Falta soporte de safe area para móviles');
 if (!html.includes('PropControl')) throw new Error('El título interno no usa PropControl');
 
 const packageJson = JSON.parse(readFileSync('package.json', 'utf8'));
@@ -116,9 +118,19 @@ if (whatsappWebhook.includes('console.log(payload)') || whatsappWebhook.includes
   throw new Error('El webhook no debe registrar payloads completos con datos personales');
 }
 
+const responsiveCss = readFileSync('src/mobile-premium.css', 'utf8');
+for (const text of ['overflow-x: clip', '.mobile-nav-trigger', '.sidebar-backdrop', 'body.mobile-nav-open', '@media (max-width: 720px)', 'env(safe-area-inset-bottom)']) {
+  if (!responsiveCss.includes(text)) throw new Error(`Falta protección responsive: ${text}`);
+}
+
+const main = readFileSync('src/main.ts', 'utf8');
+for (const text of ['data-mobile-nav-toggle', 'data-mobile-nav-close', 'setMobileNavigation', 'aria-expanded']) {
+  if (!main.includes(text)) throw new Error(`Falta navegación móvil accesible: ${text}`);
+}
+
 const source = requiredFiles.filter((file) => file.endsWith('.ts') || file.endsWith('.js')).map((file) => readFileSync(file, 'utf8')).join('\n');
 for (const text of ['Fichas TRV', 'public=', '5493515110069', 'navigator.clipboard', 'window.print', '/api/import-property', '/api/extension-import', 'Crear ficha desde el link', 'Mis propiedades', 'Mejora visual suave', 'TRV_IMPORT_CURRENT', 'validateSafeUrl', 'chromium', 'PropControl', 'Ingresar / crear cuenta', '/api/whatsapp/webhook']) {
   if (!source.includes(text)) throw new Error(`Falta función o texto requerido: ${text}`);
 }
 
-console.log('PropControl: TypeScript, branding, extensión, autenticación, Supabase y webhook de WhatsApp aprobados');
+console.log('PropControl: TypeScript, branding, responsive mobile-first, autenticación, Supabase y webhook de WhatsApp aprobados');

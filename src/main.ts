@@ -12,8 +12,43 @@ import { escapeHtml, field, formValues, nextId, qs } from './utils.js';
 const root = qs<HTMLElement>('#root');
 
 function renderShell(): void {
-  root.innerHTML = `<main class="premium-shell"><aside class="premium-sidebar"><div class="brand"><img class="product-brand-mark" src="${PRODUCT_BRAND.logo}" alt="${PRODUCT_BRAND.name}"><div><strong>${PRODUCT_BRAND.name}</strong><span>${PRODUCT_BRAND.tagline}</span></div></div><nav>${modules.map(([id, label]) => `<button class="nav-button" data-module="${id}">${label}</button>`).join('')}</nav><div class="sidebar-card"><b>${PRODUCT_BRAND.phrase}</b><p>Organizá leads, propiedades, fichas y seguimientos desde un solo lugar.</p></div></aside><section class="premium-content"><header class="topbar"><div class="topbar-brand"><img class="topbar-product-mark" src="${PRODUCT_BRAND.logo}" alt=""><div><span class="eyebrow">${PRODUCT_BRAND.name}</span><h1 id="module-title">Inicio</h1><span class="product-tagline">${PRODUCT_BRAND.tagline}</span></div></div><div id="cloud-account"></div></header><div id="notice" class="notice" hidden></div><section class="module-panel" id="inicio"></section><section class="module-panel" id="crm"></section><section class="module-panel" id="propiedades"></section><section class="module-panel" id="fichas"></section><section class="module-panel" id="whatsapp"></section><section class="module-panel" id="agenda"></section><section class="module-panel" id="reportes"></section><section class="module-panel" id="configuracion"></section></section></main>${authShellHtml()}`;
+  root.innerHTML = `<main class="premium-shell">
+    <div class="sidebar-backdrop" data-mobile-nav-close hidden></div>
+    <aside class="premium-sidebar" id="app-sidebar" aria-label="Navegación principal">
+      <div class="sidebar-mobile-head"><span>Menú principal</span><button type="button" class="sidebar-close" data-mobile-nav-close aria-label="Cerrar menú">×</button></div>
+      <div class="brand"><img class="product-brand-mark" src="${PRODUCT_BRAND.logo}" alt="${PRODUCT_BRAND.name}"><div><strong>${PRODUCT_BRAND.name}</strong><span>${PRODUCT_BRAND.tagline}</span></div></div>
+      <nav>${modules.map(([id, label]) => `<button type="button" class="nav-button" data-module="${id}">${label}</button>`).join('')}</nav>
+      <div class="sidebar-card"><b>${PRODUCT_BRAND.phrase}</b><p>Organizá leads, propiedades, fichas y seguimientos desde un solo lugar.</p></div>
+    </aside>
+    <section class="premium-content">
+      <header class="topbar">
+        <button type="button" class="mobile-nav-trigger" data-mobile-nav-toggle aria-controls="app-sidebar" aria-expanded="false" aria-label="Abrir menú">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+          <span class="mobile-nav-label">Menú</span>
+        </button>
+        <div class="topbar-brand"><img class="topbar-product-mark" src="${PRODUCT_BRAND.logo}" alt=""><div><span class="eyebrow">${PRODUCT_BRAND.name}</span><h1 id="module-title">Inicio</h1><span class="product-tagline">${PRODUCT_BRAND.tagline}</span></div></div>
+        <div id="cloud-account"></div>
+      </header>
+      <div id="notice" class="notice" hidden></div>
+      <section class="module-panel" id="inicio"></section>
+      <section class="module-panel" id="crm"></section>
+      <section class="module-panel" id="propiedades"></section>
+      <section class="module-panel" id="fichas"></section>
+      <section class="module-panel" id="whatsapp"></section>
+      <section class="module-panel" id="agenda"></section>
+      <section class="module-panel" id="reportes"></section>
+      <section class="module-panel" id="configuracion"></section>
+    </section>
+  </main>${authShellHtml()}`;
   renderCloudAccount();
+}
+
+function setMobileNavigation(open: boolean): void {
+  document.body.classList.toggle('mobile-nav-open', open);
+  const trigger = document.querySelector<HTMLButtonElement>('[data-mobile-nav-toggle]');
+  const backdrop = document.querySelector<HTMLElement>('.sidebar-backdrop');
+  trigger?.setAttribute('aria-expanded', String(open));
+  if (backdrop) backdrop.hidden = !open;
 }
 
 function showNotice(message: string): void {
@@ -42,8 +77,14 @@ function render(): void {
   renderHome(qs<HTMLElement>('#inicio')); renderClients(qs<HTMLElement>('#crm')); renderProperties(qs<HTMLElement>('#propiedades')); renderFichas(qs<HTMLElement>('#fichas')); renderExtensionInstallHelp(); renderSimple();
   modules.forEach(([id, label]) => {
     qs<HTMLElement>(`#${id}`).classList.toggle('active', id === state.activeModule);
-    document.querySelector<HTMLButtonElement>(`[data-module="${id}"]`)?.classList.toggle('active', id === state.activeModule);
-    if (id === state.activeModule) qs<HTMLElement>('#module-title').textContent = label;
+    const button = document.querySelector<HTMLButtonElement>(`[data-module="${id}"]`);
+    button?.classList.toggle('active', id === state.activeModule);
+    if (id === state.activeModule) {
+      qs<HTMLElement>('#module-title').textContent = label;
+      button?.setAttribute('aria-current', 'page');
+    } else {
+      button?.removeAttribute('aria-current');
+    }
   });
 }
 
@@ -59,21 +100,55 @@ function bindShellEvents(): void {
   document.addEventListener('trv-render', render);
   document.addEventListener('click', (event) => {
     const target = event.target as HTMLElement;
-    const module = target.dataset.module as ModuleId | undefined;
-    if (module) { state.activeModule = module; render(); return; }
-    const toggle = target.dataset.toggle;
+
+    if (target.closest('[data-mobile-nav-toggle]')) {
+      setMobileNavigation(!document.body.classList.contains('mobile-nav-open'));
+      return;
+    }
+    if (target.closest('[data-mobile-nav-close]')) {
+      setMobileNavigation(false);
+      return;
+    }
+
+    const moduleButton = target.closest<HTMLButtonElement>('[data-module]');
+    const module = moduleButton?.dataset.module as ModuleId | undefined;
+    if (module) {
+      state.activeModule = module;
+      render();
+      setMobileNavigation(false);
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+      return;
+    }
+
+    const toggleButton = target.closest<HTMLElement>('[data-toggle]');
+    const toggle = toggleButton?.dataset.toggle;
     if (toggle === 'client-form') state.openForms.client = !state.openForms.client;
     if (toggle === 'property-form') state.openForms.property = !state.openForms.property;
     if (toggle === 'reminder-form') state.openForms.reminder = !state.openForms.reminder;
     if (toggle === 'ficha-form') state.openForms.ficha = !state.openForms.ficha;
     if (toggle) { render(); return; }
-    const mode = target.dataset.mode as FichaMode | undefined;
+
+    const modeButton = target.closest<HTMLElement>('[data-mode]');
+    const mode = modeButton?.dataset.mode as FichaMode | undefined;
     if (mode) { setFichaMode(mode); return; }
-    const collection = target.dataset.delete;
-    const id = Number(target.dataset.id);
+
+    const deleteButton = target.closest<HTMLElement>('[data-delete]');
+    const collection = deleteButton?.dataset.delete;
+    const id = Number(deleteButton?.dataset.id);
     if (collection && id) { removeItem(collection, id); return; }
-    const action = target.dataset.fichaAction;
-    if (action && id) handleFichaAction(action, id);
+
+    const actionButton = target.closest<HTMLElement>('[data-ficha-action]');
+    const action = actionButton?.dataset.fichaAction;
+    const actionId = Number(actionButton?.dataset.id);
+    if (action && actionId) handleFichaAction(action, actionId);
+  });
+
+  document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape') setMobileNavigation(false);
+  });
+
+  window.addEventListener('resize', () => {
+    if (window.innerWidth > 980) setMobileNavigation(false);
   });
 }
 
