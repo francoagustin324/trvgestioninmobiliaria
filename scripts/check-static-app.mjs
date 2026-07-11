@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, statSync } from 'node:fs';
 
 const requiredFiles = [
   'index.html',
@@ -9,6 +9,7 @@ const requiredFiles = [
   'src/public-ficha.ts',
   'src/fichas-ui.ts',
   'src/extension-import-ui.ts',
+  'src/extension-install-ui.ts',
   'src/crm-ui.ts',
   'src/server.ts',
   'src/shared/import-types.ts',
@@ -31,6 +32,7 @@ const requiredFiles = [
   'extension/trv-fichas-chrome/popup.css',
   'extension/trv-fichas-chrome/popup.js',
   'extension/trv-fichas-chrome/INSTALAR.txt',
+  'scripts/build-extension-zip.mjs',
   'tsconfig.json',
   'Dockerfile',
 ];
@@ -45,6 +47,11 @@ for (const file of requiredFiles) {
   if (file.endsWith('.ts') && content.includes('@ts-nocheck')) throw new Error(`${file} desactiva el control de TypeScript`);
 }
 
+const zipPath = 'extension/trv-fichas-chrome.zip';
+if (!existsSync(zipPath) || statSync(zipPath).size < 1000) throw new Error('No se generó el ZIP instalable de la extensión');
+const zip = readFileSync(zipPath);
+if (zip.readUInt32LE(0) !== 0x04034b50) throw new Error('El ZIP de la extensión no es válido');
+
 const html = readFileSync('index.html', 'utf8');
 if (!html.includes('/dist/main.js') || !html.includes('/src/styles.css') || !html.includes('/src/importer.css')) {
   throw new Error('index.html no referencia los archivos de la aplicación');
@@ -53,6 +60,7 @@ if (!html.includes('/dist/main.js') || !html.includes('/src/styles.css') || !htm
 const packageJson = JSON.parse(readFileSync('package.json', 'utf8'));
 if (packageJson.scripts?.start !== 'node dist/server.js') throw new Error('Start de Railway incorrecto');
 if (!String(packageJson.scripts?.build).includes('tsc')) throw new Error('El build no compila TypeScript');
+if (!String(packageJson.scripts?.build).includes('build-extension-zip')) throw new Error('El build no genera la extensión instalable');
 if (!packageJson.dependencies?.playwright) throw new Error('Falta Playwright para portales dinámicos');
 
 const tsconfig = readFileSync('tsconfig.json', 'utf8');
