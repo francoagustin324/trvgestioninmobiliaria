@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "TRV Fichas Inmobiliarias",
-  "version": "1.0.0",
-  "description": "Copia datos y fotos de una publicación abierta en Chrome y crea una ficha comercial TRV.",
+  "name": "PropControl Fichas Inmobiliarias",
+  "version": "1.1.0",
+  "description": "Copia datos y fotos de una publicación abierta en Chrome y los envía al generador de fichas de PropControl.",
   "permissions": ["activeTab", "scripting", "tabs"],
   "optional_host_permissions": ["http://*/*", "https://*/*"],
   "host_permissions": ["https://trvgestioninmobiliaria-production.up.railway.app/*"],
@@ -10,7 +10,7 @@
     "service_worker": "background.js"
   },
   "action": {
-    "default_title": "Crear ficha TRV",
+    "default_title": "Crear ficha con PropControl",
     "default_popup": "popup.html"
   }
 }
