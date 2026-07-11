@@ -4,6 +4,7 @@ import { extname, join, normalize } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { importProperty } from './server/import-service.js';
 import { storeExtensionImport, takeExtensionImport } from './server/extension-import-store.js';
+import { handleWhatsAppWebhook, WebhookDeduplicator } from './server/whatsapp-webhook.js';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const port = Number(process.env.PORT || 4173);
@@ -11,6 +12,9 @@ const host = '0.0.0.0';
 const supabaseUrl = (process.env.SUPABASE_URL || '').trim().replace(/\/+$/g, '');
 const supabasePublishableKey = (process.env.SUPABASE_PUBLISHABLE_KEY || '').trim();
 const cloudConfigured = Boolean(supabaseUrl && supabasePublishableKey);
+const whatsappWebhookVerifyToken = (process.env.WHATSAPP_WEBHOOK_VERIFY_TOKEN || '').trim();
+const metaAppSecret = (process.env.META_APP_SECRET || '').trim();
+const whatsappWebhookDeduplicator = new WebhookDeduplicator();
 const contentTypes: Record<string, string> = {
   '.html': 'text/html; charset=utf-8',
   '.css': 'text/css; charset=utf-8',
@@ -108,6 +112,21 @@ function serveStatic(request: IncomingMessage, response: ServerResponse): void {
 const server = createServer(async (request, response) => {
   const pathname = new URL(request.url || '/', `http://${host}:${port}`).pathname;
 
+  const whatsappHandled = await handleWhatsAppWebhook(request, response, {
+    verifyToken: whatsappWebhookVerifyToken,
+    appSecret: metaAppSecret,
+    deduplicator: whatsappWebhookDeduplicator,
+    onEvent: ({ duplicate, summary }) => {
+      console.info('WhatsApp webhook recibido', JSON.stringify({
+        duplicate,
+        messages: summary.messageIds.length,
+        statuses: summary.statusKeys.length,
+        phoneNumbers: summary.phoneNumberIds.length,
+      }));
+    },
+  });
+  if (whatsappHandled) return;
+
   if (request.method === 'GET' && pathname === '/health') {
     sendJson(response, 200, { ok: true, cloudConfigured });
     return;
@@ -187,6 +206,7 @@ const server = createServer(async (request, response) => {
     sendJson(response, 405, { error: 'Método no permitido.' });
     return;
   }
+
   serveStatic(request, response);
 });
 
