@@ -65,14 +65,20 @@ async function readJson(request: IncomingMessage, maxBytes = 10_000): Promise<Re
 
 function extensionCorsHeaders(request: IncomingMessage): Record<string, string> | null {
   const origin = request.headers.origin;
-  if (typeof origin !== 'string' || !/^chrome-extension:\/\/[a-p]{32}$/.test(origin)) return null;
-  return {
-    'Access-Control-Allow-Origin': origin,
+  const marker = request.headers['x-trv-extension'];
+  const chromeOrigin = typeof origin === 'string' && /^chrome-extension:\/\/[a-p]{32}$/.test(origin);
+  const serviceWorkerWithoutOrigin = origin === undefined && marker === '1';
+  if (!chromeOrigin && !serviceWorkerWithoutOrigin) return null;
+  const headers: Record<string, string> = {
     'Access-Control-Allow-Methods': 'POST, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type',
+    'Access-Control-Allow-Headers': 'Content-Type, X-TRV-Extension',
     'Access-Control-Max-Age': '600',
-    Vary: 'Origin',
   };
+  if (chromeOrigin) {
+    headers['Access-Control-Allow-Origin'] = origin;
+    headers.Vary = 'Origin';
+  }
+  return headers;
 }
 
 function resolveRequestPath(requestUrl: string): string {
