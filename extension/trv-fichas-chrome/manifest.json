@@ -1,0 +1,16 @@
+{
+  "manifest_version": 3,
+  "name": "TRV Fichas Inmobiliarias",
+  "version": "1.0.0",
+  "description": "Copia datos y fotos de una publicación abierta en Chrome y crea una ficha comercial TRV.",
+  "permissions": ["activeTab", "scripting", "tabs"],
+  "optional_host_permissions": ["http://*/*", "https://*/*"],
+  "host_permissions": ["https://trvgestioninmobiliaria-production.up.railway.app/*"],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_title": "Crear ficha TRV",
+    "default_popup": "popup.html"
+  }
+}

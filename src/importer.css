@@ -76,6 +76,31 @@
   background: rgba(127, 29, 29, .88);
 }
 
+.extension-install-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  margin-top: 16px;
+  padding: 14px;
+  border: 1px solid rgba(242, 207, 122, .38);
+  border-radius: 15px;
+  background: rgba(255,255,255,.09);
+}
+.extension-install-card strong { display: block; margin-bottom: 4px; color: #fff4d4; }
+.importer-box .extension-install-card p { margin: 0; color: #d7e5eb; font-size: .82rem; }
+.extension-install-card a {
+  flex: 0 0 auto;
+  padding: 11px 14px;
+  border-radius: 11px;
+  color: #07364a;
+  background: #f2cf7a;
+  font-size: .82rem;
+  font-weight: 900;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
 .photo-enhancement-toggle {
   grid-column: 1 / -1;
   display: flex;
@@ -106,4 +131,6 @@
   .importer-controls button { width: 100%; }
   .import-photo-heading { align-items: flex-start; flex-direction: column; }
   .import-photo-grid { grid-template-columns: 1fr 1fr; }
+  .extension-install-card { align-items: stretch; flex-direction: column; }
+  .extension-install-card a { text-align: center; }
 }

@@ -2,6 +2,8 @@ import { FichaMode, LOGO_PATH, ModuleId, modules } from './models.js';
 import { renderHome, renderClients, renderProperties } from './crm-ui.js';
 import { handleFichaAction, renderFichas, setFichaMode } from './fichas-ui.js';
 import { decodePublicFicha, renderPublicMode } from './public-ficha.js';
+import { consumeExtensionImport } from './extension-import-ui.js';
+import { renderExtensionInstallHelp } from './extension-install-ui.js';
 import { saveData, state } from './store.js';
 import { escapeHtml, field, formValues, nextId, qs } from './utils.js';
 
@@ -9,6 +11,12 @@ const root = qs<HTMLElement>('#root');
 
 function renderShell(): void {
   root.innerHTML = `<main class="premium-shell"><aside class="premium-sidebar"><div class="brand"><img src="${LOGO_PATH}" alt="TRV"><div><strong>TRV CRM</strong><span>Gestión inmobiliaria</span></div></div><nav>${modules.map(([id, label]) => `<button class="nav-button" data-module="${id}">${label}</button>`).join('')}</nav><div class="sidebar-card"><b>Semáforo comercial</b><p>Priorizá clientes y seguimientos con criterio comercial.</p></div></aside><section class="premium-content"><header class="topbar"><div><span class="eyebrow">TRV Gestión Inmobiliaria</span><h1 id="module-title">Inicio</h1></div><span class="status-badge">TypeScript · Railway</span></header><div id="notice" class="notice" hidden></div><section class="module-panel" id="inicio"></section><section class="module-panel" id="crm"></section><section class="module-panel" id="propiedades"></section><section class="module-panel" id="fichas"></section><section class="module-panel" id="whatsapp"></section><section class="module-panel" id="agenda"></section><section class="module-panel" id="reportes"></section><section class="module-panel" id="configuracion"></section></section></main>`;
+}
+
+function showNotice(message: string): void {
+  const notice = qs<HTMLElement>('#notice');
+  notice.hidden = false;
+  notice.textContent = message;
 }
 
 function renderSimple(): void {
@@ -24,7 +32,7 @@ function renderSimple(): void {
 }
 
 function render(): void {
-  renderHome(qs<HTMLElement>('#inicio')); renderClients(qs<HTMLElement>('#crm')); renderProperties(qs<HTMLElement>('#propiedades')); renderFichas(qs<HTMLElement>('#fichas')); renderSimple();
+  renderHome(qs<HTMLElement>('#inicio')); renderClients(qs<HTMLElement>('#crm')); renderProperties(qs<HTMLElement>('#propiedades')); renderFichas(qs<HTMLElement>('#fichas')); renderExtensionInstallHelp(); renderSimple();
   modules.forEach(([id, label]) => {
     qs<HTMLElement>(`#${id}`).classList.toggle('active', id === state.activeModule);
     document.querySelector<HTMLButtonElement>(`[data-module="${id}"]`)?.classList.toggle('active', id === state.activeModule);
@@ -40,10 +48,7 @@ function removeItem(collection: string, id: number): void {
   saveData(); render();
 }
 
-if (location.hash.startsWith('#public=')) {
-  renderPublicMode(root, decodePublicFicha(location.hash.slice('#public='.length)));
-} else {
-  renderShell(); render();
+function bindShellEvents(): void {
   document.addEventListener('trv-render', render);
   document.addEventListener('click', (event) => {
     const target = event.target as HTMLElement;
@@ -62,5 +67,30 @@ if (location.hash.startsWith('#public=')) {
     if (collection && id) { removeItem(collection, id); return; }
     const action = target.dataset.fichaAction;
     if (action && id) handleFichaAction(action, id);
+  });
+}
+
+if (location.hash.startsWith('#public=')) {
+  renderPublicMode(root, decodePublicFicha(location.hash.slice('#public='.length)));
+} else {
+  const extensionToken = location.hash.startsWith('#extension-import=') ? location.hash.slice('#extension-import='.length) : '';
+  const extensionError = location.hash.startsWith('#extension-error=') ? location.hash.slice('#extension-error='.length) : '';
+  renderShell();
+  bindShellEvents();
+  if (extensionToken) {
+    state.activeModule = 'fichas';
+    state.fichaMode = 'external';
+    state.openForms.ficha = true;
+  }
+  render();
+  if (extensionError) {
+    let message = 'La extensión no pudo leer esta publicación.';
+    try { message = decodeURIComponent(extensionError); } catch { /* mantener mensaje seguro */ }
+    history.replaceState(null, '', `${location.pathname}${location.search}`);
+    showNotice(message);
+  }
+  if (extensionToken) void consumeExtensionImport(extensionToken).catch((error) => {
+    history.replaceState(null, '', `${location.pathname}${location.search}`);
+    showNotice(error instanceof Error ? error.message : 'No se pudo recibir la propiedad desde la extensión.');
   });
 }

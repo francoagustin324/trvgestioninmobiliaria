@@ -1,0 +1,22 @@
+EXTENSIÓN TRV FICHAS INMOBILIARIAS
+
+INSTALACIÓN EN GOOGLE CHROME
+
+1. Descomprimí el archivo trv-fichas-chrome.zip.
+2. Abrí Chrome y escribí en la barra: chrome://extensions
+3. Activá “Modo de desarrollador” arriba a la derecha.
+4. Tocá “Cargar descomprimida”.
+5. Elegí la carpeta trv-fichas-chrome.
+6. Fijá el ícono de TRV desde el botón de extensiones de Chrome.
+
+USO RECOMENDADO
+
+1. Abrí el link de Zonaprop, MercadoLibre, Tokko, ficha.info u otro portal.
+2. Esperá a que se vean los datos y las fotos.
+3. Tocá la extensión TRV.
+4. Tocá “Crear ficha con esta página”.
+5. Se abrirá Fichas TRV con los datos y las fotos cargados para revisar.
+
+También podés pegar un link directamente dentro de la extensión y tocar “Abrir link y crear ficha”.
+
+La extensión solo lee la pestaña cuando vos la activás. No revisa otras páginas ni funciona en segundo plano sin tu acción.
