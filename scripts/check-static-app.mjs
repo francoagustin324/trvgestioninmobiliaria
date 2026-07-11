@@ -3,6 +3,7 @@ import { existsSync, readFileSync, statSync } from 'node:fs';
 const requiredFiles = [
   'index.html',
   'src/main.ts',
+  'src/branding.ts',
   'src/models.ts',
   'src/utils.ts',
   'src/store.ts',
@@ -22,8 +23,11 @@ const requiredFiles = [
   'src/server/utils/sanitize.ts',
   'src/styles.css',
   'src/importer.css',
+  'src/propcontrol-theme.css',
   'dist/main.js',
   'dist/server.js',
+  'src/assets/propcontrol-mark.svg',
+  'src/assets/propcontrol-logo.svg',
   'src/assets/trv-logo.svg',
   'extension/trv-fichas-chrome/manifest.json',
   'extension/trv-fichas-chrome/background.js',
@@ -53,9 +57,10 @@ const zip = readFileSync(zipPath);
 if (zip.readUInt32LE(0) !== 0x04034b50) throw new Error('El ZIP de la extensión no es válido');
 
 const html = readFileSync('index.html', 'utf8');
-if (!html.includes('/dist/main.js') || !html.includes('/src/styles.css') || !html.includes('/src/importer.css')) {
-  throw new Error('index.html no referencia los archivos de la aplicación');
+for (const asset of ['/dist/main.js', '/src/styles.css', '/src/importer.css', '/src/propcontrol-theme.css', '/src/assets/propcontrol-mark.svg']) {
+  if (!html.includes(asset)) throw new Error(`index.html no referencia ${asset}`);
 }
+if (!html.includes('PropControl')) throw new Error('El título interno no usa PropControl');
 
 const packageJson = JSON.parse(readFileSync('package.json', 'utf8'));
 if (packageJson.scripts?.start !== 'node dist/server.js') throw new Error('Start de Railway incorrecto');
@@ -68,14 +73,25 @@ if (!tsconfig.includes('"strict": true')) throw new Error('TypeScript no está e
 
 const manifest = JSON.parse(readFileSync('extension/trv-fichas-chrome/manifest.json', 'utf8'));
 if (manifest.manifest_version !== 3) throw new Error('La extensión debe usar Manifest V3');
+if (!String(manifest.name).includes('PropControl')) throw new Error('La extensión no usa la marca PropControl');
 for (const permission of ['activeTab', 'scripting', 'tabs']) {
   if (!manifest.permissions?.includes(permission)) throw new Error(`Falta permiso de extensión: ${permission}`);
 }
 if (!manifest.background?.service_worker || !manifest.action?.default_popup) throw new Error('La extensión no tiene service worker o popup');
 
+const branding = readFileSync('src/branding.ts', 'utf8');
+for (const text of ['PRODUCT_BRAND', 'AGENCY_BRAND', 'PropControl', 'TRV Gestión Inmobiliaria', '5493515110069']) {
+  if (!branding.includes(text)) throw new Error(`Falta configuración de marca: ${text}`);
+}
+
+const publicFicha = readFileSync('src/public-ficha.ts', 'utf8');
+if (!publicFicha.includes('AGENCY_BRAND.name') || !publicFicha.includes('AGENCY_BRAND')) {
+  throw new Error('Las fichas públicas no conservan la marca de la inmobiliaria');
+}
+
 const source = requiredFiles.filter((file) => file.endsWith('.ts') || file.endsWith('.js')).map((file) => readFileSync(file, 'utf8')).join('\n');
-for (const text of ['Fichas TRV', 'public=', '5493515110069', 'navigator.clipboard', 'window.print', '/api/import-property', '/api/extension-import', 'Crear ficha desde el link', 'Mis propiedades', 'Mejora visual suave', 'TRV_IMPORT_CURRENT', 'validateSafeUrl', 'chromium']) {
+for (const text of ['Fichas TRV', 'public=', '5493515110069', 'navigator.clipboard', 'window.print', '/api/import-property', '/api/extension-import', 'Crear ficha desde el link', 'Mis propiedades', 'Mejora visual suave', 'TRV_IMPORT_CURRENT', 'validateSafeUrl', 'chromium', 'PropControl']) {
   if (!source.includes(text)) throw new Error(`Falta función o texto requerido: ${text}`);
 }
 
-console.log('TRV TypeScript importer and Chrome extension validation passed');
+console.log('PropControl y fichas TRV: validación TypeScript, extensión y branding aprobada');
