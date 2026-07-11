@@ -8,10 +8,12 @@ const requiredFiles = [
   'src/store.ts',
   'src/public-ficha.ts',
   'src/fichas-ui.ts',
+  'src/extension-import-ui.ts',
   'src/crm-ui.ts',
   'src/server.ts',
   'src/shared/import-types.ts',
   'src/server/import-service.ts',
+  'src/server/extension-import-store.ts',
   'src/server/provider.ts',
   'src/server/browser.ts',
   'src/server/html-extractor.ts',
@@ -22,6 +24,13 @@ const requiredFiles = [
   'dist/main.js',
   'dist/server.js',
   'src/assets/trv-logo.svg',
+  'extension/trv-fichas-chrome/manifest.json',
+  'extension/trv-fichas-chrome/background.js',
+  'extension/trv-fichas-chrome/extractor.js',
+  'extension/trv-fichas-chrome/popup.html',
+  'extension/trv-fichas-chrome/popup.css',
+  'extension/trv-fichas-chrome/popup.js',
+  'extension/trv-fichas-chrome/INSTALAR.txt',
   'tsconfig.json',
   'Dockerfile',
 ];
@@ -49,9 +58,16 @@ if (!packageJson.dependencies?.playwright) throw new Error('Falta Playwright par
 const tsconfig = readFileSync('tsconfig.json', 'utf8');
 if (!tsconfig.includes('"strict": true')) throw new Error('TypeScript no está en modo estricto');
 
-const source = requiredFiles.filter((file) => file.endsWith('.ts')).map((file) => readFileSync(file, 'utf8')).join('\n');
-for (const text of ['Fichas TRV', 'public=', '5493515110069', 'navigator.clipboard', 'window.print', '/api/import-property', 'Crear ficha desde el link', 'Mis propiedades', 'Mejora visual suave', 'validateSafeUrl', 'chromium']) {
+const manifest = JSON.parse(readFileSync('extension/trv-fichas-chrome/manifest.json', 'utf8'));
+if (manifest.manifest_version !== 3) throw new Error('La extensión debe usar Manifest V3');
+for (const permission of ['activeTab', 'scripting', 'tabs']) {
+  if (!manifest.permissions?.includes(permission)) throw new Error(`Falta permiso de extensión: ${permission}`);
+}
+if (!manifest.background?.service_worker || !manifest.action?.default_popup) throw new Error('La extensión no tiene service worker o popup');
+
+const source = requiredFiles.filter((file) => file.endsWith('.ts') || file.endsWith('.js')).map((file) => readFileSync(file, 'utf8')).join('\n');
+for (const text of ['Fichas TRV', 'public=', '5493515110069', 'navigator.clipboard', 'window.print', '/api/import-property', '/api/extension-import', 'Crear ficha desde el link', 'Mis propiedades', 'Mejora visual suave', 'TRV_IMPORT_CURRENT', 'validateSafeUrl', 'chromium']) {
   if (!source.includes(text)) throw new Error(`Falta función o texto requerido: ${text}`);
 }
 
-console.log('TRV TypeScript importer validation passed');
+console.log('TRV TypeScript importer and Chrome extension validation passed');
