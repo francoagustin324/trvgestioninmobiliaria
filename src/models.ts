@@ -1,7 +1,9 @@
+import { AGENCY_BRAND } from './branding.js';
+
 export const STORAGE_KEY = 'trv-crm-basico';
-export const WHATSAPP_NUMBER = '5493515110069';
-export const FICHA_LEGAL = 'Propiedad sujeta a disponibilidad y confirmación de condiciones al momento de la consulta.';
-export const LOGO_PATH = '/src/assets/trv-logo.svg';
+export const WHATSAPP_NUMBER = AGENCY_BRAND.whatsapp;
+export const FICHA_LEGAL = AGENCY_BRAND.publicLegal;
+export const LOGO_PATH = AGENCY_BRAND.logo;
 
 export type Temperature = 'Caliente' | 'Tibio' | 'Frío';
 export type ModuleId = 'inicio' | 'crm' | 'propiedades' | 'fichas' | 'whatsapp' | 'agenda' | 'reportes' | 'configuracion';

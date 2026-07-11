@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 190" role="img" aria-labelledby="title desc">
+  <title id="title">PropControl</title>
+  <desc id="desc">Logo de PropControl sobre fondo blanco.</desc>
+  <rect width="760" height="190" rx="30" fill="#FFFFFF"/>
+  <g transform="translate(20 15) scale(.95)">
+    <path d="M34 128V58L80 28l46 30v70" fill="none" stroke="#0D1B2A" stroke-width="10" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M48 124V86h17v38M73 124V61h18v63M99 124V78h17v46" fill="#1E3A5F"/>
+    <path d="M28 128h104" stroke="#0D1B2A" stroke-width="9" stroke-linecap="round"/>
+    <circle cx="125" cy="119" r="25" fill="#D4A017" stroke="#FFFFFF" stroke-width="6"/>
+    <path d="m114 119 8 8 15-18" fill="none" stroke="#FFFFFF" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+  <text x="182" y="102" fill="#0D1B2A" font-family="Inter, Manrope, Arial, sans-serif" font-size="64" font-weight="800" letter-spacing="-2">Prop</text>
+  <text x="322" y="102" fill="#1E3A5F" font-family="Inter, Manrope, Arial, sans-serif" font-size="64" font-weight="500" letter-spacing="-2">Control</text>
+  <text x="187" y="139" fill="#6B7280" font-family="Inter, Manrope, Arial, sans-serif" font-size="23" font-weight="600">Control comercial para inmobiliarias</text>
+  <text x="187" y="168" fill="#D4A017" font-family="Inter, Manrope, Arial, sans-serif" font-size="19" font-weight="800">Ordená. Seguí. Cerrá.</text>
+</svg>
