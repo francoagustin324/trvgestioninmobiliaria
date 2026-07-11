@@ -3,6 +3,8 @@ import { existsSync, readFileSync, statSync } from 'node:fs';
 const requiredFiles = [
   'index.html',
   'src/main.ts',
+  'src/auth-ui.ts',
+  'src/cloud-api.ts',
   'src/branding.ts',
   'src/models.ts',
   'src/utils.ts',
@@ -24,6 +26,7 @@ const requiredFiles = [
   'src/styles.css',
   'src/importer.css',
   'src/propcontrol-theme.css',
+  'src/cloud-auth.css',
   'dist/main.js',
   'dist/server.js',
   'src/assets/propcontrol-mark.svg',
@@ -57,7 +60,7 @@ const zip = readFileSync(zipPath);
 if (zip.readUInt32LE(0) !== 0x04034b50) throw new Error('El ZIP de la extensión no es válido');
 
 const html = readFileSync('index.html', 'utf8');
-for (const asset of ['/dist/main.js', '/src/styles.css', '/src/importer.css', '/src/propcontrol-theme.css', '/src/assets/propcontrol-mark.svg']) {
+for (const asset of ['/dist/main.js', '/src/styles.css', '/src/importer.css', '/src/propcontrol-theme.css', '/src/cloud-auth.css', '/src/assets/propcontrol-mark.svg']) {
   if (!html.includes(asset)) throw new Error(`index.html no referencia ${asset}`);
 }
 if (!html.includes('PropControl')) throw new Error('El título interno no usa PropControl');
@@ -89,9 +92,23 @@ if (!publicFicha.includes('AGENCY_BRAND.name') || !publicFicha.includes('AGENCY_
   throw new Error('Las fichas públicas no conservan la marca de la inmobiliaria');
 }
 
+const cloudApi = readFileSync('src/cloud-api.ts', 'utf8');
+for (const text of ['/auth/v1/signup', '/auth/v1/token?grant_type=password', 'organization_members', 'propcontrol_system_snapshot', 'queueCloudSave']) {
+  if (!cloudApi.includes(text)) throw new Error(`Falta función de nube: ${text}`);
+}
+if (cloudApi.includes('SUPABASE_SECRET_KEY')) throw new Error('La clave secreta no debe incluirse en el código del navegador');
+
+const server = readFileSync('src/server.ts', 'utf8');
+for (const text of ['SUPABASE_URL', 'SUPABASE_PUBLISHABLE_KEY', '/api/cloud-config']) {
+  if (!server.includes(text)) throw new Error(`Falta configuración de servidor: ${text}`);
+}
+if (server.includes("process.env.SUPABASE_SECRET_KEY") && server.includes('publishableKey: process.env.SUPABASE_SECRET_KEY')) {
+  throw new Error('El servidor intenta exponer la clave secreta');
+}
+
 const source = requiredFiles.filter((file) => file.endsWith('.ts') || file.endsWith('.js')).map((file) => readFileSync(file, 'utf8')).join('\n');
-for (const text of ['Fichas TRV', 'public=', '5493515110069', 'navigator.clipboard', 'window.print', '/api/import-property', '/api/extension-import', 'Crear ficha desde el link', 'Mis propiedades', 'Mejora visual suave', 'TRV_IMPORT_CURRENT', 'validateSafeUrl', 'chromium', 'PropControl']) {
+for (const text of ['Fichas TRV', 'public=', '5493515110069', 'navigator.clipboard', 'window.print', '/api/import-property', '/api/extension-import', 'Crear ficha desde el link', 'Mis propiedades', 'Mejora visual suave', 'TRV_IMPORT_CURRENT', 'validateSafeUrl', 'chromium', 'PropControl', 'Ingresar / crear cuenta']) {
   if (!source.includes(text)) throw new Error(`Falta función o texto requerido: ${text}`);
 }
 
-console.log('PropControl y fichas TRV: validación TypeScript, extensión y branding aprobada');
+console.log('PropControl: TypeScript, branding, extensión, autenticación y Supabase aprobados');
