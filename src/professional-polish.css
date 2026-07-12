@@ -1,0 +1,215 @@
+/* Capa de acabado visual segura para PropControl.
+   No modifica lógica, datos ni la identidad pública de TRV Gestión Inmobiliaria. */
+
+:root {
+  --pc-radius-sm: 12px;
+  --pc-radius-md: 18px;
+  --pc-radius-lg: 24px;
+  --pc-shadow-soft: 0 10px 30px rgba(13, 27, 42, .07);
+  --pc-shadow-lift: 0 18px 48px rgba(13, 27, 42, .11);
+  --pc-transition: 180ms ease;
+}
+
+body:not(.public-mode) {
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+body:not(.public-mode) .premium-content {
+  min-width: 0;
+}
+
+body:not(.public-mode) .topbar {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  margin-bottom: 22px;
+}
+
+body:not(.public-mode) .topbar h1 {
+  margin: 1px 0 0;
+  font-size: clamp(1.3rem, 2vw, 1.85rem);
+  line-height: 1.08;
+  letter-spacing: -.035em;
+}
+
+body:not(.public-mode) .eyebrow {
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  font-size: .68rem;
+  font-weight: 900;
+}
+
+body:not(.public-mode) .module-panel.active {
+  animation: pc-panel-enter 220ms ease-out both;
+}
+
+body:not(.public-mode) .panel-heading {
+  align-items: flex-start;
+  gap: 16px;
+  margin-bottom: 18px;
+}
+
+body:not(.public-mode) .panel-heading h2,
+body:not(.public-mode) .empty-module h2 {
+  margin-top: 4px;
+  letter-spacing: -.025em;
+}
+
+body:not(.public-mode) .panel-card,
+body:not(.public-mode) .empty-module,
+body:not(.public-mode) .metric-grid article,
+body:not(.public-mode) .crm-card,
+body:not(.public-mode) .ficha-list-card,
+body:not(.public-mode) .cloud-settings-card {
+  border-radius: var(--pc-radius-md);
+  box-shadow: var(--pc-shadow-soft);
+  transition: transform var(--pc-transition), box-shadow var(--pc-transition), border-color var(--pc-transition);
+}
+
+body:not(.public-mode) .crm-card:hover,
+body:not(.public-mode) .ficha-list-card:hover,
+body:not(.public-mode) .metric-grid article:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--pc-shadow-lift);
+}
+
+body:not(.public-mode) .metric-grid article {
+  position: relative;
+  overflow: hidden;
+}
+
+body:not(.public-mode) .metric-grid article::after {
+  content: '';
+  position: absolute;
+  inset: auto 0 0;
+  height: 3px;
+  background: linear-gradient(90deg, var(--pc-gold), var(--pc-corporate-blue));
+  opacity: .8;
+}
+
+body:not(.public-mode) .metric-grid strong {
+  display: block;
+  margin-top: 4px;
+  font-size: clamp(1.7rem, 4vw, 2.45rem);
+  line-height: 1;
+  letter-spacing: -.045em;
+}
+
+body:not(.public-mode) input,
+body:not(.public-mode) select,
+body:not(.public-mode) textarea {
+  min-height: 44px;
+  border-radius: var(--pc-radius-sm);
+  transition: border-color var(--pc-transition), box-shadow var(--pc-transition), background var(--pc-transition);
+}
+
+body:not(.public-mode) textarea {
+  min-height: 112px;
+}
+
+body:not(.public-mode) button:not(.delete):not(.nav-button):not(.sidebar-close):not(.mobile-nav-trigger) {
+  min-height: 42px;
+  border-radius: var(--pc-radius-sm);
+  font-weight: 900;
+  letter-spacing: -.01em;
+}
+
+body:not(.public-mode) button:focus-visible,
+body:not(.public-mode) a:focus-visible,
+body:not(.public-mode) input:focus-visible,
+body:not(.public-mode) select:focus-visible,
+body:not(.public-mode) textarea:focus-visible {
+  outline: 3px solid rgba(212, 160, 23, .34);
+  outline-offset: 2px;
+}
+
+body:not(.public-mode) .notice {
+  position: sticky;
+  top: 90px;
+  z-index: 19;
+  border-radius: var(--pc-radius-sm);
+  box-shadow: var(--pc-shadow-soft);
+}
+
+body:not(.public-mode) .settings-grid label {
+  border: 1px solid var(--pc-border);
+  border-radius: var(--pc-radius-md);
+  background: rgba(255,255,255,.9);
+  box-shadow: var(--pc-shadow-soft);
+}
+
+body:not(.public-mode) .settings-brand-card {
+  overflow: hidden;
+  box-shadow: var(--pc-shadow-lift);
+}
+
+body:not(.public-mode) .settings-brand-card img {
+  padding: 14px;
+  border: 1px solid #e7ebef;
+}
+
+body:not(.public-mode) .agency-chip {
+  max-width: 100%;
+  white-space: normal;
+}
+
+@media (min-width: 1200px) {
+  body:not(.public-mode) .premium-content {
+    padding-left: clamp(24px, 3vw, 46px);
+    padding-right: clamp(24px, 3vw, 46px);
+  }
+
+  body:not(.public-mode) .module-panel {
+    max-width: 1480px;
+    margin-inline: auto;
+  }
+}
+
+@media (max-width: 720px) {
+  body:not(.public-mode) .topbar {
+    top: 0;
+    margin-bottom: 14px;
+  }
+
+  body:not(.public-mode) .topbar h1 {
+    font-size: 1.25rem;
+  }
+
+  body:not(.public-mode) .product-tagline {
+    font-size: .74rem;
+  }
+
+  body:not(.public-mode) .panel-heading {
+    margin-bottom: 14px;
+  }
+
+  body:not(.public-mode) .metric-grid article,
+  body:not(.public-mode) .crm-card,
+  body:not(.public-mode) .panel-card,
+  body:not(.public-mode) .empty-module {
+    border-radius: 16px;
+  }
+
+  body:not(.public-mode) .crm-card:hover,
+  body:not(.public-mode) .ficha-list-card:hover,
+  body:not(.public-mode) .metric-grid article:hover {
+    transform: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  body:not(.public-mode) *,
+  body:not(.public-mode) *::before,
+  body:not(.public-mode) *::after {
+    scroll-behavior: auto !important;
+    animation-duration: .01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: .01ms !important;
+  }
+}
+
+@keyframes pc-panel-enter {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
