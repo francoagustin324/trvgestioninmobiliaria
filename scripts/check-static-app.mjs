@@ -15,6 +15,8 @@ const requiredFiles = [
   'src/client-duplicates.ts',
   'src/property-matching.ts',
   'src/property-matching-ui.ts',
+  'src/whatsapp-assistant.ts',
+  'src/whatsapp-ui.ts',
   'src/agenda.ts',
   'src/agenda-ui.ts',
   'src/public-ficha.ts',
@@ -33,6 +35,7 @@ const requiredFiles = [
   'src/server/utils/safe-url.ts',
   'src/server/utils/sanitize.ts',
   'src/tests/whatsapp-webhook.test.ts',
+  'src/tests/whatsapp-assistant.test.ts',
   'src/tests/client-editor.test.ts',
   'src/tests/phone-normalizer.test.ts',
   'src/tests/client-list.test.ts',
@@ -44,6 +47,7 @@ const requiredFiles = [
   'src/client-filters.css',
   'src/client-duplicates.css',
   'src/property-matching.css',
+  'src/whatsapp-ai.css',
   'src/agenda.css',
   'src/importer.css',
   'src/propcontrol-theme.css',
@@ -83,7 +87,7 @@ const zip = readFileSync(zipPath);
 if (zip.readUInt32LE(0) !== 0x04034b50) throw new Error('El ZIP de la extensión no es válido');
 
 const html = readFileSync('index.html', 'utf8');
-for (const asset of ['/dist/main.js', '/src/styles.css', '/src/crm-safety.css', '/src/client-filters.css', '/src/client-duplicates.css', '/src/property-matching.css', '/src/agenda.css', '/src/importer.css', '/src/propcontrol-theme.css', '/src/cloud-auth.css', '/src/mobile-premium.css', '/src/professional-polish.css', '/src/assets/propcontrol-mark.svg']) {
+for (const asset of ['/dist/main.js', '/src/styles.css', '/src/crm-safety.css', '/src/client-filters.css', '/src/client-duplicates.css', '/src/property-matching.css', '/src/whatsapp-ai.css', '/src/agenda.css', '/src/importer.css', '/src/propcontrol-theme.css', '/src/cloud-auth.css', '/src/mobile-premium.css', '/src/professional-polish.css', '/src/assets/propcontrol-mark.svg']) {
   if (!html.includes(asset)) throw new Error(`index.html no referencia ${asset}`);
 }
 if (!html.includes('viewport-fit=cover')) throw new Error('Falta soporte de safe area para móviles');
@@ -144,7 +148,7 @@ for (const text of ['overflow-x: clip', '.mobile-nav-trigger', '.sidebar-backdro
 }
 
 const main = readFileSync('src/main.ts', 'utf8');
-for (const text of ['data-mobile-nav-toggle', 'data-mobile-nav-close', 'setMobileNavigation', 'aria-expanded', 'data-edit-client', 'data-cancel-client-edit', 'window.confirm', 'renderAgenda']) {
+for (const text of ['data-mobile-nav-toggle', 'data-mobile-nav-close', 'setMobileNavigation', 'aria-expanded', 'data-edit-client', 'data-cancel-client-edit', 'window.confirm', 'renderAgenda', 'renderWhatsApp']) {
   if (!main.includes(text)) throw new Error(`Falta interacción principal: ${text}`);
 }
 
@@ -178,6 +182,16 @@ for (const text of ['Propiedades sugeridas', 'Compradores compatibles', 'revisi�
   if (!propertyMatchingUi.includes(text)) throw new Error(`Falta interfaz de matching comercial: ${text}`);
 }
 
+const whatsappAssistant = readFileSync('src/whatsapp-assistant.ts', 'utf8');
+for (const text of ['qualificationState', 'suggestAssistantReply', 'requiresHumanHandoff', 'applyQualificationFromMessage', 'addFollowUpPlan', 'antes de coordinar', 'Franco revisa la disponibilidad']) {
+  if (!whatsappAssistant.includes(text)) throw new Error(`Falta lógica de IA supervisada: ${text}`);
+}
+
+const whatsappUi = readFileSync('src/whatsapp-ui.ts', 'utf8');
+for (const text of ['Bandeja supervisada', 'Coexistencia pendiente', 'Simular mensaje entrante', 'Registrar respuesta aprobada', 'Crear plan 24 h / 72 h / 7 días', 'Nada se envía a WhatsApp']) {
+  if (!whatsappUi.includes(text)) throw new Error(`Falta interfaz de WhatsApp supervisado: ${text}`);
+}
+
 const agenda = readFileSync('src/agenda.ts', 'utf8');
 for (const text of ['buildAgendaItems', 'groupAgendaItems', 'todayIsoDate', 'terminalClient']) {
   if (!agenda.includes(text)) throw new Error(`Falta lógica de agenda: ${text}`);
@@ -193,4 +207,4 @@ for (const text of ['Fichas TRV', 'public=', '5493515110069', 'navigator.clipboa
   if (!source.includes(text)) throw new Error(`Falta función o texto requerido: ${text}`);
 }
 
-console.log('PropControl: matching comercial explicable, fusión segura de duplicados, búsqueda y filtros del CRM, agenda, autenticación, Supabase y webhook de WhatsApp aprobados');
+console.log('PropControl: bandeja WhatsApp supervisada, calificación, seguimiento, matching, duplicados, agenda, Supabase y webhook aprobados');
