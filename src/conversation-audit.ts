@@ -16,38 +16,66 @@ interface IntentSignal {
   reason: string;
 }
 
-const commercialPatterns: Array<[RegExp, string]> = [
-  [/\b(soy|somos) (corredor|corredora|martillero|martillera|asesor inmobiliario|asesora inmobiliaria|inmobiliaria|constructor|constructora|desarrollista|vendedor|vendedora)\b/, 'La persona se identificó como profesional o empresa del sector.'],
-  [/\b(trabajo|represento) (en|para|a) (una )?(inmobiliaria|constructora|desarrollista)\b/, 'Indicó que trabaja para una inmobiliaria, constructora o desarrollista.'],
-  [/\b(trabajo en ventas|soy del equipo comercial)\b/, 'Indicó que pertenece a un equipo de ventas.'],
-  [/\b(te|les) (comparto|paso|envio) (una )?(propiedad|producto|unidad|departamento|casa|disponibilidad)\b/, 'El mensaje comparte producto inmobiliario en lugar de expresar una búsqueda.'],
-  [/\b(comparto|compartimos) comision\b/, 'Mencionó colaboración o comisión entre colegas.'],
-  [/\bsoy propietario\b/, 'Se identificó como propietario.'],
-  [/\b(quiero|necesito) vender (mi|una) (casa|departamento|depto|propiedad|terreno)\b/, 'La intención principal detectada es vender una propiedad.'],
+type PatternRule = [RegExp, string];
+
+const commercialPatterns: PatternRule[] = [
+  [/(soy|somos) (corredor|corredora|martillero|martillera|asesor inmobiliario|asesora inmobiliaria|agente inmobiliario|agente inmobiliaria|broker inmobiliario|broker inmobiliaria|inmobiliaria|constructor|constructora|desarrollista)/, 'La persona se identificó como profesional o empresa del sector.'],
+  [/(soy|somos) (vendedor|vendedora) (inmobiliario|inmobiliaria|de (una )?(inmobiliaria|constructora|desarrollista)|de propiedades|de desarrollos)/, 'La persona se identificó como vendedor del sector inmobiliario.'],
+  [/soy de (una )?(inmobiliaria|constructora|desarrollista)/, 'Indicó que pertenece a una empresa del sector.'],
+  [/(trabajo|represento) (en|para|a) (una )?(inmobiliaria|constructora|desarrollista)/, 'Indicó que trabaja para una inmobiliaria, constructora o desarrollista.'],
+  [/trabajo como (corredor|corredora|martillero|martillera|vendedor inmobiliario|vendedora inmobiliaria)/, 'Indicó un rol profesional inmobiliario.'],
+  [/(trabajo en ventas inmobiliarias|soy del equipo comercial)/, 'Indicó que pertenece a un equipo comercial inmobiliario.'],
+  [/(te|les) (comparto|paso|envio|mando) (una )?(propiedad|producto|unidad|departamento|depto|casa|disponibilidad)/, 'El mensaje comparte producto inmobiliario en lugar de expresar una búsqueda.'],
+  [/(comparto|compartimos) comision/, 'Mencionó colaboración o comisión entre colegas.'],
+  [/soy (el )?(propietario|dueno)/, 'Se identificó como propietario.'],
+  [/(quiero|necesito) vender (mi|una|un) (casa|departamento|depto|propiedad|terreno)/, 'La intención principal detectada es vender una propiedad.'],
+  [/tengo (unidades|propiedades|departamentos|deptos|casas) para ofrecer/, 'Indicó que tiene inventario inmobiliario para ofrecer.'],
+  [/(vendo|estoy vendiendo) (departamentos|deptos|casas|unidades|propiedades)( de pozo| disponibles| en)?/, 'Indicó que comercializa productos inmobiliarios.'],
 ];
 
-const stoppedPatterns: Array<[RegExp, string]> = [
-  [/\b(no busco mas|ya no busco|no estoy buscando|ya no estoy buscando|ya no seguimos buscando|deje de buscar|dejamos de buscar)\b/, 'Indicó explícitamente que dejó de buscar.'],
-  [/\b(no quiero comprar|no queremos comprar|desistimos de comprar)\b/, 'Indicó explícitamente que no continuará con la compra.'],
-  [/\b(no me escribas|no me escriban|no me contacten|no quiero recibir mensajes|sacame de la lista|borrenme)\b/, 'Pidió no recibir más mensajes.'],
-  [/\b(por ahora no busco|suspendi la busqueda|pausamos la busqueda)\b/, 'Indicó que la búsqueda está suspendida.'],
+const stoppedPatterns: PatternRule[] = [
+  [/(no busco mas|ya no busco|no estoy buscando|ya no estoy buscando|ya no seguimos buscando|no buscamos mas|deje de buscar|dejamos de buscar|no sigo buscando|no seguimos buscando)/, 'Indicó explícitamente que dejó de buscar.'],
+  [/(no quiero comprar|no queremos comprar|desistimos de comprar|no voy a comprar|no vamos a comprar|no compro|decidi no comprar)/, 'Indicó explícitamente que no continuará con la compra.'],
+  [/(no me escribas|no me escriban|no me contacten|no quiero recibir mensajes|sacame de la lista|borrenme|no hace falta que me mandes mas)/, 'Pidió no recibir más mensajes.'],
+  [/(por ahora no busco|suspendi la busqueda|pausamos la busqueda|cancele la busqueda|cancelamos la compra|dimos de baja la busqueda|frene la busqueda)/, 'Indicó que la búsqueda fue pausada o cancelada.'],
+  [/(no sigas buscando para mi|no necesitamos mas opciones|no quiero seguir viendo propiedades|prefiero no continuar con la busqueda|abandonamos la idea de comprar|gracias pero no buscamos mas|ya no necesito una propiedad|no tengo intencion de comprar)/, 'Indicó que no necesita continuar recibiendo opciones.'],
 ];
 
-const boughtPatterns: Array<[RegExp, string]> = [
-  [/\b(ya compre|ya compramos|compramos una|ya conseguimos|ya consegui|ya encontramos|ya encontre)\b/, 'Confirmó que ya compró o encontró una propiedad.'],
-  [/\b(ya resolvi|ya lo resolvimos|cerre con otra inmobiliaria|cerramos con otra inmobiliaria)\b/, 'Confirmó que la necesidad ya fue resuelta por otra vía.'],
+const boughtPatterns: PatternRule[] = [
+  [/(ya|finalmente) (compre|compramos|consegui|conseguimos|encontre|encontramos|cerre|cerramos|sene|senamos|reserve|reservamos|adquiri|adquirimos|elegi|elegimos)/, 'Confirmó que la compra o elección ya fue resuelta.'],
+  [/compramos (una|un) (casa|departamento|depto|propiedad|terreno)/, 'Confirmó que compró una propiedad.'],
+  [/(compre|compramos) (por otro lado|con otra inmobiliaria)/, 'Confirmó que compró por otra vía.'],
+  [/(ya resolvi|ya lo resolvimos|ya solucione|ya esta resuelta la compra|cerre con otra inmobiliaria|cerramos con otra inmobiliaria)/, 'Confirmó que la necesidad ya fue resuelta.'],
+  [/(ya tengo|ya tenemos) (casa|departamento|depto|propiedad|donde mudarnos)/, 'Confirmó que ya tiene una propiedad o solución habitacional.'],
+  [/(encontre|consegui) (una opcion|algo)( por mi cuenta| en otra zona)?/, 'Confirmó que encontró una alternativa.'],
+  [/(concretamos la compra|firme por otro (departamento|depto|casa)|ya elegimos y compramos)/, 'Confirmó que la operación ya fue concretada.'],
 ];
 
-const waitingSalePatterns: Array<[RegExp, string]> = [
-  [/\b(todavia no vendi|todavia no vendimos|aun no vendi|aun no vendimos|no pude vender|no pudimos vender|todavia no pude vender)\b/, 'Todavía necesita vender antes de avanzar.'],
-  [/\b(dependo de vender|dependemos de vender|primero tengo que vender|primero tenemos que vender|antes tengo que vender|hasta que no venda|cuando venda)\b/, 'La compra depende de una venta previa.'],
-  [/\b(estoy esperando vender|seguimos esperando vender)\b/, 'Está esperando concretar una venta antes de retomar.'],
+const waitingSalePatterns: PatternRule[] = [
+  [/(todavia no vendi|todavia no vendimos|aun no vendi|aun no vendimos|no pude vender|no pudimos vender|todavia no pude vender|no logre vender|no logramos vender)/, 'Todavía necesita vender antes de avanzar.'],
+  [/(mi|el|la) (casa|departamento|depto|propiedad) no se vendio|no se vendio todavia/, 'La propiedad previa todavía no se vendió.'],
+  [/(dependo de vender|dependemos de vender|dependo de la venta|dependemos de la venta)/, 'La compra depende de una venta previa.'],
+  [/(primero|antes) (tengo que|tenemos que|debo|debemos|necesito|necesitamos) vender/, 'Necesita vender antes de comprar.'],
+  [/(hasta que no venda|hasta que no vendamos|hasta vender no puedo|hasta vender no podemos)/, 'No puede avanzar hasta vender.'],
+  [/(cuando venda|cuando vendamos|si vendo|si vendemos)/, 'El avance depende de concretar una venta.'],
+  [/(estoy esperando vender|seguimos esperando vender)/, 'Está esperando concretar una venta antes de retomar.'],
+  [/(estoy|estamos) vendiendo (mi|nuestra|la|el) (casa|departamento|depto|propiedad)/, 'Está vendiendo una propiedad antes de avanzar.'],
+  [/la compra depende de vender|(necesito|necesitamos|tenemos que) vender antes de (comprar|avanzar)/, 'La compra depende de vender primero.'],
+  [/mi propiedad sigue publicada|todavia tengo (la|el|mi) (casa|departamento|depto|propiedad) a la venta/, 'La propiedad previa sigue publicada.'],
 ];
 
-const activeSearchPatterns: Array<[RegExp, string]> = [
-  [/\b(sigo buscando|seguimos buscando|sigo en la busqueda|seguimos en la busqueda|todavia busco|todavia estamos buscando|continuo buscando|continuamos buscando)\b/, 'Confirmó explícitamente que continúa buscando.'],
-  [/\b(mandame opciones|mandame mas opciones|enviame opciones|avisame si aparece|quiero seguir viendo)\b/, 'Pidió recibir nuevas opciones.'],
-  [/\b(estoy buscando|estamos buscando|quiero comprar|queremos comprar|me interesa ver opciones)\b/, 'Expresó una intención activa de compra.'],
+const activeSearchPatterns: PatternRule[] = [
+  [/(sigo|seguimos) (buscando|en la busqueda|con la busqueda)/, 'Confirmó explícitamente que continúa buscando.'],
+  [/(todavia|aun) (busco|estoy buscando|estamos buscando|sigo buscando|necesito encontrar)/, 'Confirmó que la búsqueda continúa.'],
+  [/(continuo|continuamos) (buscando|con la busqueda)/, 'Confirmó que continúa con la búsqueda.'],
+  [/(mandame|pasame|enviame|compartime|mostrame) (mas )?(opciones|alternativas|propiedades|departamentos|deptos|casas)/, 'Pidió recibir nuevas opciones.'],
+  [/(avisame|avisenme) (si|cuando) (aparece|aparezca|sale|salga|tengas|tengan|haya)( algo)?/, 'Pidió ser avisado cuando aparezca una opción.'],
+  [/(quiero|queremos) seguir viendo/, 'Pidió continuar viendo propiedades.'],
+  [/(?<!no )(estoy|estamos) buscando/, 'Expresó una búsqueda activa.'],
+  [/(?<!no )(quiero|queremos|necesito|necesitamos) comprar/, 'Expresó intención activa de compra.'],
+  [/me interesa ver opciones/, 'Pidió evaluar opciones.'],
+  [/(busco|buscamos) (un|una|algo|casa|departamento|depto|propiedad|terreno|duplex)/, 'Describió una búsqueda inmobiliaria activa.'],
+  [/estoy en busqueda activa/, 'Indicó expresamente que la búsqueda está activa.'],
 ];
 
 export function normalizeAuditText(value: unknown): string {
@@ -60,7 +88,7 @@ export function normalizeAuditText(value: unknown): string {
     .trim();
 }
 
-function matchingSignals(normalized: string, patterns: Array<[RegExp, string]>, status: ConversationStatus, confidence: number): IntentSignal[] {
+function matchingSignals(normalized: string, patterns: PatternRule[], status: ConversationStatus, confidence: number): IntentSignal[] {
   return patterns
     .filter(([pattern]) => pattern.test(normalized))
     .map(([, reason]) => ({ status, confidence, reason }));
@@ -70,24 +98,21 @@ function signalFromText(text: string): IntentSignal | null {
   const normalized = normalizeAuditText(text);
   if (!normalized) return null;
 
-  const stopped = matchingSignals(normalized, stoppedPatterns, 'No busca más', 99);
-  if (stopped.length) return stopped[0]!;
-
-  const bought = matchingSignals(normalized, boughtPatterns, 'Ya compró', 98);
-  if (bought.length) return bought[0]!;
-
-  const waiting = matchingSignals(normalized, waitingSalePatterns, 'Esperando vender', 96);
-  const active = matchingSignals(normalized, activeSearchPatterns, 'Sigue buscando', 93);
-  if (waiting.length && active.length) {
+  const groups: IntentSignal[][] = [
+    matchingSignals(normalized, stoppedPatterns, 'No busca más', 99),
+    matchingSignals(normalized, boughtPatterns, 'Ya compró', 98),
+    matchingSignals(normalized, waitingSalePatterns, 'Esperando vender', 96),
+    matchingSignals(normalized, activeSearchPatterns, 'Sigue buscando', 93),
+  ];
+  const matchedGroups = groups.filter((group) => group.length > 0);
+  if (matchedGroups.length > 1) {
     return {
       status: 'Revisar manualmente',
-      confidence: 45,
-      reason: 'El mismo mensaje indica que sigue buscando, pero también que depende de una venta previa.',
+      confidence: 40,
+      reason: 'El mismo mensaje contiene señales comerciales contradictorias; no debe generar una acción automática.',
     };
   }
-  if (waiting.length) return waiting[0]!;
-  if (active.length) return active[0]!;
-  return null;
+  return matchedGroups[0]?.[0] ?? null;
 }
 
 function commercialSignal(messages: WhatsAppConversation['messages']): IntentSignal | null {
