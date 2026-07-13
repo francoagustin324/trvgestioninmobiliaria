@@ -48,6 +48,14 @@ function searchableText(client: Client): string {
   ].join(' '));
 }
 
+function matchesQuery(client: Client, rawQuery: string): boolean {
+  const query = normalizedText(rawQuery);
+  if (!query) return true;
+  if (searchableText(client).includes(query)) return true;
+  const queryPhone = phoneIdentity(rawQuery);
+  return queryPhone.length >= 8 && phoneIdentity(client.phone).includes(queryPhone);
+}
+
 function matchesFollowUp(client: Client, filter: FollowUpFilter, today: string): boolean {
   if (filter === 'Todos') return true;
   const date = client.nextFollowUp?.trim() ?? '';
@@ -77,9 +85,8 @@ function compareOptionalDate(left: string | undefined, right: string | undefined
 }
 
 export function filterAndSortClients(clients: Client[], filters: ClientListFilters, today: string): Client[] {
-  const query = normalizedText(filters.query);
   return clients
-    .filter((client) => !query || searchableText(client).includes(query))
+    .filter((client) => matchesQuery(client, filters.query))
     .filter((client) => filters.temperature === 'Todas' || client.temperature === filters.temperature)
     .filter((client) => filters.pipeline === 'Todas' || client.pipeline === filters.pipeline)
     .filter((client) => matchesFollowUp(client, filters.followUp, today))
