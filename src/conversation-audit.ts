@@ -235,11 +235,10 @@ function commercialSignalFromText(normalized: string): IntentSignal | null {
   return null;
 }
 
-function activeSignal(normalized: string): IntentSignal | null {
+function activeRuleSignal(normalized: string): IntentSignal | null {
   const cleaned = negativeActiveFragments.reduce((text, phrase) => removePhrase(text, phrase), normalized);
   const grouped = findGroupSignal(cleaned, activeGroups, 'Sigue buscando', 93);
   if (grouped) return grouped;
-
   if (includesPhrase(cleaned, 'estoy buscando') || includesPhrase(cleaned, 'estamos buscando')) {
     return { status: 'Sigue buscando', confidence: 93, reason: 'Expresó una búsqueda activa.', engine: 'Reglas de seguridad' };
   }
@@ -249,7 +248,11 @@ function activeSignal(normalized: string): IntentSignal | null {
   if (/(^| )(busco|buscamos) (un|una|algo|casa|departamento|depto|propiedad|terreno|duplex)( |$)/.test(cleaned)) {
     return { status: 'Sigue buscando', confidence: 93, reason: 'Describió una búsqueda inmobiliaria activa.', engine: 'Reglas de seguridad' };
   }
+  return null;
+}
 
+function activeConceptSignal(normalized: string): IntentSignal | null {
+  const cleaned = negativeActiveFragments.reduce((text, phrase) => removePhrase(text, phrase), normalized);
   const continuity = includesStem(cleaned, ['segu', 'continu', 'retom', 'and']) || includesAny(cleaned, ['todavia', 'aun']);
   const searchAction = includesStem(cleaned, ['busc', 'encontr', 'ver', 'visit']) || includesAny(cleaned, ['en la busqueda', 'con la busqueda']);
   const requestAction = includesStem(cleaned, ['manda', 'pasa', 'envia', 'mostra', 'comparti', 'avisa'])
@@ -275,8 +278,8 @@ function activeSignal(normalized: string): IntentSignal | null {
 }
 
 function stoppedConceptSignal(normalized: string): IntentSignal | null {
-  const stopAction = includesStem(normalized, ['abandon', 'cancel', 'paus', 'fren', 'desist', 'dej'])
-    || includesAny(normalized, ['dar de baja', 'dimos de baja', 'cerrar la busqueda', 'cerramos la busqueda']);
+  const stopAction = includesStem(normalized, ['abandon', 'cancel', 'paus', 'fren', 'desist', 'dej', 'cerr'])
+    || includesAny(normalized, ['dar de baja', 'dimos de baja']);
   const searchContext = includesStem(normalized, ['busc', 'compr', 'continu', 'avanz'])
     || includesAny(normalized, [...optionTerms, 'mensajes', 'contactos']);
   const noContact = includesAny(normalized, ['no me mandes', 'no me envies', 'no me contacten', 'no me escribas', 'prefiero que no']);
@@ -328,44 +331,40 @@ function waitingSaleConceptSignal(normalized: string): IntentSignal | null {
   return null;
 }
 
+function uniqueSignal(signals: Array<IntentSignal | null>, engine: IntentSignal['engine']): IntentSignal | null {
+  const present = signals.filter((signal): signal is IntentSignal => Boolean(signal));
+  const statuses = new Set(present.map((signal) => signal.status));
+  if (statuses.size > 1) {
+    return {
+      status: 'Revisar manualmente',
+      confidence: engine === 'Reglas de seguridad' ? 40 : 45,
+      reason: engine === 'Reglas de seguridad'
+        ? 'El mismo mensaje contiene señales explícitas contradictorias; no debe generar una acción automática.'
+        : 'La comprensión por conceptos encontró intenciones incompatibles; requiere revisión humana.',
+      engine,
+    };
+  }
+  return present[0] ?? null;
+}
+
 function signalFromText(text: string): IntentSignal | null {
   const normalized = normalizeAuditText(text);
   if (!normalized) return null;
 
-  const exactSignals = [
+  const ruleSignal = uniqueSignal([
     findGroupSignal(normalized, stoppedGroups, 'No busca más', 99),
     findGroupSignal(normalized, boughtGroups, 'Ya compró', 98),
     findGroupSignal(normalized, waitingSaleGroups, 'Esperando vender', 96),
-    activeSignal(normalized),
-  ].filter((signal): signal is IntentSignal => Boolean(signal));
+    activeRuleSignal(normalized),
+  ], 'Reglas de seguridad');
+  if (ruleSignal) return ruleSignal;
 
-  const exactStatuses = new Set(exactSignals.map((signal) => signal.status));
-  if (exactStatuses.size > 1) {
-    return {
-      status: 'Revisar manualmente',
-      confidence: 40,
-      reason: 'El mismo mensaje contiene señales contradictorias; no debe generar una acción automática.',
-      engine: 'Reglas de seguridad',
-    };
-  }
-  if (exactSignals.length) return exactSignals[0]!;
-
-  const conceptSignals = [
+  return uniqueSignal([
     stoppedConceptSignal(normalized),
     boughtConceptSignal(normalized),
     waitingSaleConceptSignal(normalized),
-    activeSignal(normalized),
-  ].filter((signal): signal is IntentSignal => Boolean(signal));
-  const conceptStatuses = new Set(conceptSignals.map((signal) => signal.status));
-  if (conceptStatuses.size > 1) {
-    return {
-      status: 'Revisar manualmente',
-      confidence: 45,
-      reason: 'La comprensión por conceptos encontró intenciones incompatibles; requiere revisión humana.',
-      engine: 'Comprensión por conceptos',
-    };
-  }
-  return conceptSignals[0] ?? null;
+    activeConceptSignal(normalized),
+  ], 'Comprensión por conceptos');
 }
 
 export function auditableMessageText(message: ConversationMessage): string {
