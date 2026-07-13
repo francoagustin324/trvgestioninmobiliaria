@@ -181,7 +181,7 @@ function commercialSignalFromText(normalized: string): IntentSignal | null {
   const grouped = findGroupSignal(normalized, commercialGroups, 'Contacto comercial', 98);
   if (grouped) return grouped;
 
-  const sharesProduct = /(^| )(te|les) (comparto|paso|envio|mando) (una )?(propiedad|producto|unidad|departamento|depto|casa|disponibilidad)( |$)/.test(normalized);
+  const sharesProduct = /(^| )(te|les) (comparto|paso|envio|mando) (una |un )?(propiedad|producto|unidad|departamento|depto|casa|disponibilidad)( |$)/.test(normalized);
   const wantsToSell = /(^| )(quiero|necesito) vender (mi|una|un) (casa|departamento|depto|propiedad|terreno)( |$)/.test(normalized);
   if (sharesProduct) return { status: 'Contacto comercial', confidence: 98, reason: 'Compartió producto o disponibilidad inmobiliaria.' };
   if (wantsToSell) return { status: 'Contacto comercial', confidence: 98, reason: 'La intención principal detectada es vender una propiedad.' };
