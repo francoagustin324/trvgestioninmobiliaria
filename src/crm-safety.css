@@ -1,0 +1,21 @@
+.form-error {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  border: 1px solid #fecaca;
+  border-radius: 13px;
+  color: #991b1b;
+  background: #fff1f2;
+  font-weight: 800;
+}
+
+.form-error[hidden] { display: none; }
+.form-error .secondary { flex: 0 0 auto; }
+
+@media (max-width: 720px) {
+  .form-error { align-items: stretch; flex-direction: column; }
+  .form-error .secondary { width: 100%; }
+}
