@@ -19,7 +19,8 @@ export interface Client {
 
 export interface Property {
   id: number; title: string; address: string; type: string; operation: string;
-  price: number; owner: string; status: string;
+  price: number; owner: string; status: string; bedrooms?: number; bathrooms?: number;
+  paymentMethod?: string; features?: string; notes?: string;
 }
 
 export interface Reminder {
@@ -54,7 +55,11 @@ export const initialData: CrmData = {
     paymentMethod: 'Contado', purchaseTimeframe: '0-3 meses', purpose: 'Vivir', knowsArea: 'Sí',
     canMoveForward: 'Sí', objections: 'Busca balcón y buena luz natural', notes: 'Revisar opciones antes de coordinar visita.',
   }],
-  properties: [{ id: 1, title: 'Departamento en General Paz', address: 'General Paz, Córdoba', type: 'Departamento', operation: 'Venta', price: 85000, owner: 'Propietario', status: 'Activa' }],
+  properties: [{
+    id: 1, title: 'Departamento en General Paz', address: 'General Paz, Córdoba', type: 'Departamento',
+    operation: 'Venta', price: 85000, owner: 'Propietario', status: 'Activa', bedrooms: 2, bathrooms: 1,
+    paymentMethod: 'Contado', features: 'Balcón, buena luz natural', notes: '',
+  }],
   reminders: [{ id: 1, date: '2026-07-13', title: 'Llamar a Lucía', related: 'Búsqueda Nueva Córdoba', priority: 'Alta' }],
   fichas: [],
 };
