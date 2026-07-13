@@ -213,7 +213,7 @@ function commercialSignalFromText(normalized: string): IntentSignal | null {
   if (wantsToSell) return { status: 'Contacto comercial', confidence: 98, reason: 'La intención principal detectada es vender una propiedad.', engine: 'Reglas de seguridad' };
 
   const firstPersonRole = includesAny(normalized, ['soy', 'somos', 'trabajo', 'represento', 'me dedico', 'manejo']);
-  const sectorRole = includesStem(normalized, ['corredor', 'corredora', 'martiller', 'inmobiliar', 'constructor', 'constructor', 'desarroll', 'broker', 'asesor', 'agente']);
+  const sectorRole = includesStem(normalized, ['corredor', 'corredora', 'martiller', 'inmobiliar', 'constructor', 'desarroll', 'broker', 'asesor', 'agente']);
   const sellerWithContext = includesStem(normalized, ['vendedor', 'vendedora', 'comercializ']) && includesAny(normalized, realEstateTerms);
   const inventoryContext = includesStem(normalized, ['ofrec', 'compart', 'comercializ', 'public']) && includesAny(normalized, realEstateTerms);
   const ownerContext = includesAny(normalized, ['soy titular', 'soy el titular', 'la propiedad es mia', 'es de mi propiedad']);
@@ -246,7 +246,8 @@ function activeSignal(normalized: string): IntentSignal | null {
   const continuity = includesStem(cleaned, ['segu', 'continu', 'retom', 'and']) || includesAny(cleaned, ['todavia', 'aun']);
   const searchAction = includesStem(cleaned, ['busc', 'encontr', 'ver', 'visit']) || includesAny(cleaned, ['en la busqueda', 'con la busqueda']);
   const requestAction = includesStem(cleaned, ['manda', 'pasa', 'envia', 'mostra', 'comparti', 'avisa']) && includesAny(cleaned, [...propertyTerms, ...optionTerms]);
-  const purchaseIntent = includesStem(cleaned, ['compr', 'invert', 'mudar']) && includesAny(cleaned, [...propertyTerms, ...optionTerms, 'para vivir', 'para invertir']);
+  const saleDependencyContext = includesStem(cleaned, ['vend', 'venta']) && includesAny(cleaned, ['antes', 'primero', 'hasta', 'dependo', 'dependemos', 'depende', 'esperando', 'a la espera', 'cuando venda', 'cuando vendamos', 'si vendo', 'si vendemos', 'atada a la venta', 'sujeta a la venta']);
+  const purchaseIntent = !saleDependencyContext && includesStem(cleaned, ['compr', 'invert', 'mudar']) && includesAny(cleaned, [...propertyTerms, ...optionTerms, 'para vivir', 'para invertir']);
   if ((continuity && searchAction) || requestAction || purchaseIntent) {
     return {
       status: 'Sigue buscando',
