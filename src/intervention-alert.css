@@ -1,0 +1,9 @@
+.intervention-alert { display: flex; align-items: center; gap: 7px; margin-left: auto; padding: 5px 7px; border: 1px solid #dbe6ee; border-radius: 999px; background: #fff; box-shadow: 0 4px 14px rgb(15 35 50 / 5%); }
+.intervention-count { display: grid; width: 24px; height: 24px; place-items: center; border-radius: 50%; color: #fff; background: #ba6b2f; font-size: .72rem; font-weight: 900; }
+.intervention-count:empty { display: none; }
+.intervention-toggle, .intervention-test { min-height: 30px; padding: 5px 9px; border-radius: 999px; font-size: .72rem; }
+.intervention-toggle { display: flex; align-items: center; gap: 5px; color: #31566a; background: #f4f8fa; }
+.intervention-toggle[aria-pressed="true"] { color: #116749; background: #eaf8f1; }
+.intervention-toggle span:first-child { font-size: .95rem; }
+.intervention-test { color: #657786; background: transparent; }
+@media (max-width: 760px) { .intervention-alert { order: 3; width: 100%; justify-content: center; margin-left: 0; } .intervention-toggle { flex: 1; justify-content: center; } }
