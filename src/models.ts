@@ -11,10 +11,13 @@ export type FichaMode = 'manual' | 'property' | 'external';
 export type PhotoEnhancement = 'none' | 'soft';
 export type ConversationMode = 'IA supervisada' | 'Humano' | 'Pausada';
 export type MessageSender = 'Cliente' | 'IA' | 'Humano';
+export type MessageKind = 'text' | 'audio';
+export type TranscriptionStatus = 'No requerida' | 'Pendiente' | 'Transcripto' | 'Error';
 export type CommercialContactType = 'Colega / Inmobiliaria' | 'Constructor / Desarrollista' | 'Propietario';
 export type ConversationStatus = 'Sigue buscando' | 'Esperando vender' | 'Ya compró' | 'No busca más' | 'Contacto comercial' | 'Revisar manualmente';
 export type FollowUpDecision = 'Seguimiento supervisado' | 'Pausar' | 'No contactar' | 'Revisión manual';
 export type AuditSource = 'Automático' | 'Manual';
+export type AuditEngine = 'Reglas de seguridad' | 'Comprensión por conceptos' | 'Manual';
 
 export interface Client {
   id: number; name: string; phone: string; email?: string; interest: string; status: string;
@@ -55,6 +58,12 @@ export interface ConversationMessage {
   text: string;
   createdAt: string;
   detectedData?: string[];
+  kind?: MessageKind;
+  mediaId?: string;
+  mimeType?: string;
+  durationSeconds?: number;
+  transcript?: string;
+  transcriptionStatus?: TranscriptionStatus;
 }
 
 export interface ConversationAudit {
@@ -64,6 +73,7 @@ export interface ConversationAudit {
   reasons: string[];
   auditedAt: string;
   source: AuditSource;
+  engine?: AuditEngine;
 }
 
 export interface WhatsAppConversation {
@@ -147,6 +157,8 @@ export const initialData: CrmData = {
       sender: 'Cliente',
       text: 'Hola, ¿se puede ver el departamento?',
       createdAt: '2026-07-13T12:15:00.000Z',
+      kind: 'text',
+      transcriptionStatus: 'No requerida',
     }],
   }],
 };
