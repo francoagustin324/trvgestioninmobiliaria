@@ -2,6 +2,7 @@ import type {
   Client,
   CommercialContact,
   ConversationAudit,
+  ConversationMessage,
   ConversationMode,
   ConversationStatus,
   FollowUpDecision,
@@ -14,6 +15,7 @@ interface IntentSignal {
   status: ConversationStatus;
   confidence: number;
   reason: string;
+  engine: 'Reglas de seguridad' | 'Comprensión por conceptos';
 }
 
 interface PhraseGroup {
@@ -156,6 +158,14 @@ const negativeActiveFragments = [
   'no quiero comprar', 'no queremos comprar', 'no necesito comprar', 'no necesitamos comprar',
 ] as const;
 
+const propertyTerms = [
+  'propiedad', 'propiedades', 'casa', 'casas', 'departamento', 'departamentos',
+  'depto', 'deptos', 'duplex', 'terreno', 'unidad', 'unidades', 'vivienda',
+] as const;
+const optionTerms = ['opcion', 'opciones', 'alternativa', 'alternativas', 'algo', 'oportunidad', 'oportunidades'] as const;
+const realEstateTerms = [...propertyTerms, 'inmobiliaria', 'inmobiliarias', 'constructora', 'constructor', 'desarrollista', 'desarrollo', 'pozo', 'comision'] as const;
+const searchStems = ['busc', 'busq'] as const;
+
 export function normalizeAuditText(value: unknown): string {
   return String(value ?? '')
     .normalize('NFD')
@@ -174,6 +184,15 @@ function removePhrase(normalized: string, phrase: string): string {
   return ` ${normalized} `.replaceAll(` ${phrase} `, ' ').replace(/\s+/g, ' ').trim();
 }
 
+function includesAny(normalized: string, terms: readonly string[]): boolean {
+  return terms.some((term) => includesPhrase(normalized, term));
+}
+
+function includesStem(normalized: string, stems: readonly string[]): boolean {
+  const words = normalized.split(' ');
+  return words.some((word) => stems.some((stem) => word.startsWith(stem)));
+}
+
 function findGroupSignal(
   normalized: string,
   groups: PhraseGroup[],
@@ -182,7 +201,7 @@ function findGroupSignal(
 ): IntentSignal | null {
   for (const group of groups) {
     if (group.phrases.some((phrase) => includesPhrase(normalized, phrase))) {
-      return { status, confidence, reason: group.reason };
+      return { status, confidence, reason: group.reason, engine: 'Reglas de seguridad' };
     }
   }
   return null;
@@ -192,57 +211,172 @@ function commercialSignalFromText(normalized: string): IntentSignal | null {
   const grouped = findGroupSignal(normalized, commercialGroups, 'Contacto comercial', 98);
   if (grouped) return grouped;
 
-  const sharesProduct = /(^| )(te|les) (comparto|paso|envio|mando) (una |un )?(propiedad|producto|unidad|departamento|depto|casa|disponibilidad)( |$)/.test(normalized);
+  const sharesProduct = /(^| )(te|les) (comparto|paso|envio|mando|acerco) (una |un )?(propiedad|producto|unidad|departamento|depto|casa|disponibilidad)( |$)/.test(normalized);
   const wantsToSell = /(^| )(quiero|necesito) vender (mi|una|un) (casa|departamento|depto|propiedad|terreno)( |$)/.test(normalized);
-  if (sharesProduct) return { status: 'Contacto comercial', confidence: 98, reason: 'Compartió producto o disponibilidad inmobiliaria.' };
-  if (wantsToSell) return { status: 'Contacto comercial', confidence: 98, reason: 'La intención principal detectada es vender una propiedad.' };
+  if (sharesProduct) {
+    return { status: 'Contacto comercial', confidence: 98, reason: 'Compartió producto o disponibilidad inmobiliaria.', engine: 'Reglas de seguridad' };
+  }
+  if (wantsToSell) {
+    return { status: 'Contacto comercial', confidence: 98, reason: 'La intención principal detectada es vender una propiedad.', engine: 'Reglas de seguridad' };
+  }
+
+  const firstPersonRole = includesAny(normalized, ['soy', 'somos', 'trabajo', 'represento', 'me dedico', 'manejo']);
+  const sectorRole = includesStem(normalized, ['corredor', 'corredora', 'martiller', 'inmobiliar', 'constructor', 'desarroll', 'broker', 'asesor', 'agente']);
+  const sellerWithContext = includesStem(normalized, ['vendedor', 'vendedora', 'comercializ']) && includesAny(normalized, realEstateTerms);
+  const inventoryContext = includesStem(normalized, ['ofrec', 'compart', 'comercializ']) && includesAny(normalized, realEstateTerms);
+  const ownerContext = includesAny(normalized, ['soy titular', 'soy el titular', 'la propiedad es mia', 'es de mi propiedad']);
+  if ((firstPersonRole && (sectorRole || sellerWithContext)) || inventoryContext || ownerContext) {
+    return {
+      status: 'Contacto comercial',
+      confidence: 95,
+      reason: 'La combinación de rol, actividad e inventario indica una relación comercial inmobiliaria.',
+      engine: 'Comprensión por conceptos',
+    };
+  }
   return null;
 }
 
-function activeSignal(normalized: string): IntentSignal | null {
+function activeRuleSignal(normalized: string): IntentSignal | null {
   const cleaned = negativeActiveFragments.reduce((text, phrase) => removePhrase(text, phrase), normalized);
   const grouped = findGroupSignal(cleaned, activeGroups, 'Sigue buscando', 93);
   if (grouped) return grouped;
-
   if (includesPhrase(cleaned, 'estoy buscando') || includesPhrase(cleaned, 'estamos buscando')) {
-    return { status: 'Sigue buscando', confidence: 93, reason: 'Expresó una búsqueda activa.' };
+    return { status: 'Sigue buscando', confidence: 93, reason: 'Expresó una búsqueda activa.', engine: 'Reglas de seguridad' };
   }
-
   if (['quiero comprar', 'queremos comprar', 'necesito comprar', 'necesitamos comprar'].some((phrase) => includesPhrase(cleaned, phrase))) {
-    return { status: 'Sigue buscando', confidence: 93, reason: 'Expresó intención activa de compra.' };
+    return { status: 'Sigue buscando', confidence: 93, reason: 'Expresó intención activa de compra.', engine: 'Reglas de seguridad' };
   }
-
   if (/(^| )(busco|buscamos) (un|una|algo|casa|departamento|depto|propiedad|terreno|duplex)( |$)/.test(cleaned)) {
-    return { status: 'Sigue buscando', confidence: 93, reason: 'Describió una búsqueda inmobiliaria activa.' };
+    return { status: 'Sigue buscando', confidence: 93, reason: 'Describió una búsqueda inmobiliaria activa.', engine: 'Reglas de seguridad' };
   }
   return null;
+}
+
+function activeConceptSignal(normalized: string): IntentSignal | null {
+  const cleaned = negativeActiveFragments.reduce((text, phrase) => removePhrase(text, phrase), normalized);
+  const continuity = includesStem(cleaned, ['segu', 'continu', 'retom', 'and']) || includesAny(cleaned, ['todavia', 'aun']);
+  const searchAction = includesStem(cleaned, [...searchStems, 'encontr', 'ver', 'visit']) || includesAny(cleaned, ['en la busqueda', 'con la busqueda']);
+  const requestAction = includesStem(cleaned, ['manda', 'pasa', 'envia', 'mostra', 'comparti', 'avisa'])
+    && includesAny(cleaned, [...propertyTerms, ...optionTerms]);
+  const saleDependencyContext = includesStem(cleaned, ['vend', 'venta'])
+    && includesAny(cleaned, [
+      'antes', 'primero', 'hasta', 'dependo', 'dependemos', 'depende', 'esperando',
+      'a la espera', 'cuando venda', 'cuando vendamos', 'si vendo', 'si vendemos',
+      'atada a la venta', 'sujeta a la venta',
+    ]);
+  const purchaseIntent = !saleDependencyContext
+    && includesStem(cleaned, ['compr', 'invert', 'mudar'])
+    && includesAny(cleaned, [...propertyTerms, ...optionTerms, 'para vivir', 'para invertir']);
+  if ((continuity && searchAction) || requestAction || purchaseIntent) {
+    return {
+      status: 'Sigue buscando',
+      confidence: 91,
+      reason: 'La combinación de continuidad, búsqueda y pedido de opciones indica interés activo.',
+      engine: 'Comprensión por conceptos',
+    };
+  }
+  return null;
+}
+
+function stoppedConceptSignal(normalized: string): IntentSignal | null {
+  const stopAction = includesStem(normalized, ['abandon', 'cancel', 'paus', 'fren', 'desist', 'dej', 'cerr'])
+    || includesAny(normalized, ['dar de baja', 'dimos de baja']);
+  const searchContext = includesStem(normalized, [...searchStems, 'compr', 'continu', 'avanz'])
+    || includesAny(normalized, [...optionTerms, 'mensajes', 'contactos']);
+  const noContact = includesAny(normalized, ['no me mandes', 'no me envies', 'no me contacten', 'no me escribas', 'prefiero que no']);
+  if ((stopAction && searchContext) || noContact) {
+    return {
+      status: 'No busca más',
+      confidence: 96,
+      reason: 'La intención combina una acción de cierre o pausa con la búsqueda o el contacto comercial.',
+      engine: 'Comprensión por conceptos',
+    };
+  }
+  return null;
+}
+
+function boughtConceptSignal(normalized: string): IntentSignal | null {
+  const resolutionMarker = includesAny(normalized, [
+    'ya', 'finalmente', 'por otro lado', 'por nuestra cuenta', 'otra inmobiliaria',
+    'otra propiedad', 'otra unidad', 'tema resuelto', 'necesidad resuelta',
+  ]);
+  const resolvedAction = includesStem(normalized, ['compr', 'consegu', 'encontr', 'reserv', 'sen', 'firm', 'cerr', 'adquir', 'resolv', 'solucion', 'eleg']);
+  const propertyContext = includesAny(normalized, [...propertyTerms, ...optionTerms, 'donde vivir', 'donde mudarnos', 'operacion', 'compra']);
+  if (resolutionMarker && resolvedAction && propertyContext) {
+    return {
+      status: 'Ya compró',
+      confidence: 96,
+      reason: 'La conversación combina una resolución reciente con una compra, reserva o elección inmobiliaria.',
+      engine: 'Comprensión por conceptos',
+    };
+  }
+  return null;
+}
+
+function waitingSaleConceptSignal(normalized: string): IntentSignal | null {
+  const saleContext = includesStem(normalized, ['vend', 'venta', 'publicad']);
+  const dependency = includesAny(normalized, [
+    'antes', 'primero', 'hasta', 'dependo', 'dependemos', 'a la espera', 'esperando',
+    'cuando venda', 'si vendo', 'atada a la venta', 'sujeta a la venta', 'todavia no', 'aun no',
+  ]);
+  const purchaseContext = includesStem(normalized, ['compr', 'avanz', 'retom', 'mudar'])
+    || includesAny(normalized, ['la busqueda', 'la operacion']);
+  if (saleContext && dependency && purchaseContext) {
+    return {
+      status: 'Esperando vender',
+      confidence: 94,
+      reason: 'La intención de compra o avance está condicionada a concretar una venta previa.',
+      engine: 'Comprensión por conceptos',
+    };
+  }
+  return null;
+}
+
+function uniqueSignal(signals: Array<IntentSignal | null>, engine: IntentSignal['engine']): IntentSignal | null {
+  const present = signals.filter((signal): signal is IntentSignal => Boolean(signal));
+  const statuses = new Set(present.map((signal) => signal.status));
+  if (statuses.size > 1) {
+    return {
+      status: 'Revisar manualmente',
+      confidence: engine === 'Reglas de seguridad' ? 40 : 45,
+      reason: engine === 'Reglas de seguridad'
+        ? 'El mismo mensaje contiene señales explícitas contradictorias; no debe generar una acción automática.'
+        : 'La comprensión por conceptos encontró intenciones incompatibles; requiere revisión humana.',
+      engine,
+    };
+  }
+  return present[0] ?? null;
 }
 
 function signalFromText(text: string): IntentSignal | null {
   const normalized = normalizeAuditText(text);
   if (!normalized) return null;
 
-  const signals = [
+  const ruleSignal = uniqueSignal([
     findGroupSignal(normalized, stoppedGroups, 'No busca más', 99),
     findGroupSignal(normalized, boughtGroups, 'Ya compró', 98),
     findGroupSignal(normalized, waitingSaleGroups, 'Esperando vender', 96),
-    activeSignal(normalized),
-  ].filter((signal): signal is IntentSignal => Boolean(signal));
+    activeRuleSignal(normalized),
+  ], 'Reglas de seguridad');
+  if (ruleSignal) return ruleSignal;
 
-  const statuses = new Set(signals.map((signal) => signal.status));
-  if (statuses.size > 1) {
-    return {
-      status: 'Revisar manualmente',
-      confidence: 40,
-      reason: 'El mismo mensaje contiene señales contradictorias; no debe generar una acción automática.',
-    };
-  }
-  return signals[0] ?? null;
+  return uniqueSignal([
+    stoppedConceptSignal(normalized),
+    boughtConceptSignal(normalized),
+    waitingSaleConceptSignal(normalized),
+    activeConceptSignal(normalized),
+  ], 'Comprensión por conceptos');
+}
+
+export function auditableMessageText(message: ConversationMessage): string {
+  const transcript = String(message.transcript ?? '').trim();
+  if (message.kind === 'audio' && transcript) return transcript;
+  return String(message.text ?? '').trim();
 }
 
 function commercialSignal(messages: WhatsAppConversation['messages']): IntentSignal | null {
   for (const message of messages.filter((item) => item.direction === 'inbound')) {
-    const signal = commercialSignalFromText(normalizeAuditText(message.text));
+    const signal = commercialSignalFromText(normalizeAuditText(auditableMessageText(message)));
     if (signal) return signal;
   }
   return null;
@@ -276,6 +410,7 @@ export function auditConversation(
       reasons: [`El teléfono pertenece a ${knownContact.type}: ${knownContact.name}.`],
       auditedAt,
       source: 'Automático',
+      engine: 'Reglas de seguridad',
     };
   }
 
@@ -288,14 +423,22 @@ export function auditConversation(
       reasons: [commercial.reason],
       auditedAt,
       source: 'Automático',
+      engine: commercial.engine,
     };
   }
 
   const inbound = conversation.messages.filter((message) => message.direction === 'inbound');
   for (const message of [...inbound].reverse()) {
-    const signal = signalFromText(message.text);
+    const signal = signalFromText(auditableMessageText(message));
     if (!signal) continue;
-    const reasons = [signal.reason, 'Se tomó el último estado explícito del cliente dentro del historial disponible.'];
+    const mediaReason = message.kind === 'audio'
+      ? 'El estado fue interpretado desde la transcripción del audio.'
+      : null;
+    const reasons = [
+      signal.reason,
+      mediaReason,
+      'Se tomó el último estado explícito del cliente dentro del historial disponible.',
+    ].filter((reason): reason is string => Boolean(reason));
     if (signal.status === 'Sigue buscando' && client?.canMoveForward === 'No') {
       return {
         status: 'Revisar manualmente',
@@ -304,6 +447,7 @@ export function auditConversation(
         reasons: [...reasons, 'El CRM indica que todavía no puede avanzar; se mantiene pausado hasta revisión.'],
         auditedAt,
         source: 'Automático',
+        engine: signal.engine,
       };
     }
     return {
@@ -313,33 +457,51 @@ export function auditConversation(
       reasons,
       auditedAt,
       source: 'Automático',
+      engine: signal.engine,
     };
   }
 
   const crmHints = normalizeAuditText([client?.notes, client?.objections, client?.purchaseTimeframe].join(' '));
-  const waitingHint = findGroupSignal(crmHints, waitingSaleGroups, 'Esperando vender', 82);
+  const waitingHint = findGroupSignal(crmHints, waitingSaleGroups, 'Esperando vender', 82)
+    ?? waitingSaleConceptSignal(crmHints);
   if (waitingHint || client?.canMoveForward === 'No') {
     return {
       status: 'Esperando vender',
       decision: 'Pausar',
-      confidence: waitingHint ? 82 : 65,
-      reasons: [waitingHint?.reason ?? 'El CRM indica que todavía no puede avanzar.', 'No se habilita contacto automático con información incompleta.'],
+      confidence: waitingHint ? Math.min(waitingHint.confidence, 82) : 65,
+      reasons: [
+        waitingHint?.reason ?? 'El CRM indica que todavía no puede avanzar.',
+        'No se habilita contacto automático con información incompleta.',
+      ],
       auditedAt,
       source: 'Automático',
+      engine: waitingHint?.engine ?? 'Reglas de seguridad',
     };
   }
 
+  const pendingAudio = inbound.some((message) => message.kind === 'audio' && message.transcriptionStatus !== 'Transcripto');
   return {
     status: 'Revisar manualmente',
     decision: 'Revisión manual',
-    confidence: inbound.length ? 35 : 15,
-    reasons: [inbound.length ? 'El historial no contiene una confirmación clara del estado actual.' : 'No hay mensajes entrantes para analizar.', 'Ante la duda, la conversación queda pausada.'],
+    confidence: pendingAudio ? 10 : inbound.length ? 35 : 15,
+    reasons: [
+      pendingAudio
+        ? 'Existe un audio pendiente de transcripción; no se puede decidir con seguridad.'
+        : inbound.length
+          ? 'El historial no contiene una confirmación clara del estado actual.'
+          : 'No hay mensajes entrantes para analizar.',
+      'Ante la duda, la conversación queda pausada.',
+    ],
     auditedAt,
     source: 'Automático',
+    engine: 'Reglas de seguridad',
   };
 }
 
-export function manualConversationAudit(status: ConversationStatus, auditedAt = new Date().toISOString()): ConversationAudit {
+export function manualConversationAudit(
+  status: ConversationStatus,
+  auditedAt = new Date().toISOString(),
+): ConversationAudit {
   return {
     status,
     decision: decisionForConversationStatus(status),
@@ -347,12 +509,15 @@ export function manualConversationAudit(status: ConversationStatus, auditedAt = 
     reasons: ['Estado confirmado manualmente por un usuario de la inmobiliaria.'],
     auditedAt,
     source: 'Manual',
+    engine: 'Manual',
   };
 }
 
 export function safeConversationMode(audit: ConversationAudit, current: ConversationMode): ConversationMode {
   if (current === 'Humano') return 'Humano';
-  return audit.status === 'Sigue buscando' && audit.decision === 'Seguimiento supervisado' && audit.confidence >= 90
+  return audit.status === 'Sigue buscando'
+    && audit.decision === 'Seguimiento supervisado'
+    && audit.confidence >= 90
     ? 'IA supervisada'
     : 'Pausada';
 }
@@ -384,7 +549,9 @@ export function auditAllConversations(
   ));
 }
 
-export function conversationAuditSummary(conversations: WhatsAppConversation[]): Record<ConversationStatus, number> {
+export function conversationAuditSummary(
+  conversations: WhatsAppConversation[],
+): Record<ConversationStatus, number> {
   const summary: Record<ConversationStatus, number> = {
     'Sigue buscando': 0,
     'Esperando vender': 0,
@@ -405,14 +572,22 @@ function addDays(isoDate: string, days: number): string {
   return date.toISOString().slice(0, 10);
 }
 
-export function addWaitingSaleReminder(existing: Reminder[], client: Client, baseDate: string): { reminders: Reminder[]; added: number } {
+export function addWaitingSaleReminder(
+  existing: Reminder[],
+  client: Client,
+  baseDate: string,
+): { reminders: Reminder[]; added: number } {
   const candidate = {
     date: addDays(baseDate, 30),
     title: 'Revisar si pudo vender',
     related: `${client.name} · WhatsApp · ${client.interest}`,
     priority: 'Media',
   };
-  const duplicate = existing.some((reminder) => reminder.date === candidate.date && reminder.title === candidate.title && reminder.related === candidate.related);
+  const duplicate = existing.some((reminder) =>
+    reminder.date === candidate.date
+    && reminder.title === candidate.title
+    && reminder.related === candidate.related,
+  );
   if (duplicate) return { reminders: existing, added: 0 };
   const nextId = Math.max(0, ...existing.map((reminder) => reminder.id)) + 1;
   return { reminders: [...existing, { ...candidate, id: nextId }], added: 1 };
