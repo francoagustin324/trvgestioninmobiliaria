@@ -164,6 +164,7 @@ const propertyTerms = [
 ] as const;
 const optionTerms = ['opcion', 'opciones', 'alternativa', 'alternativas', 'algo', 'oportunidad', 'oportunidades'] as const;
 const realEstateTerms = [...propertyTerms, 'inmobiliaria', 'inmobiliarias', 'constructora', 'constructor', 'desarrollista', 'desarrollo', 'pozo', 'comision'] as const;
+const searchStems = ['busc', 'busq'] as const;
 
 export function normalizeAuditText(value: unknown): string {
   return String(value ?? '')
@@ -254,7 +255,7 @@ function activeRuleSignal(normalized: string): IntentSignal | null {
 function activeConceptSignal(normalized: string): IntentSignal | null {
   const cleaned = negativeActiveFragments.reduce((text, phrase) => removePhrase(text, phrase), normalized);
   const continuity = includesStem(cleaned, ['segu', 'continu', 'retom', 'and']) || includesAny(cleaned, ['todavia', 'aun']);
-  const searchAction = includesStem(cleaned, ['busc', 'encontr', 'ver', 'visit']) || includesAny(cleaned, ['en la busqueda', 'con la busqueda']);
+  const searchAction = includesStem(cleaned, [...searchStems, 'encontr', 'ver', 'visit']) || includesAny(cleaned, ['en la busqueda', 'con la busqueda']);
   const requestAction = includesStem(cleaned, ['manda', 'pasa', 'envia', 'mostra', 'comparti', 'avisa'])
     && includesAny(cleaned, [...propertyTerms, ...optionTerms]);
   const saleDependencyContext = includesStem(cleaned, ['vend', 'venta'])
@@ -280,7 +281,7 @@ function activeConceptSignal(normalized: string): IntentSignal | null {
 function stoppedConceptSignal(normalized: string): IntentSignal | null {
   const stopAction = includesStem(normalized, ['abandon', 'cancel', 'paus', 'fren', 'desist', 'dej', 'cerr'])
     || includesAny(normalized, ['dar de baja', 'dimos de baja']);
-  const searchContext = includesStem(normalized, ['busc', 'compr', 'continu', 'avanz'])
+  const searchContext = includesStem(normalized, [...searchStems, 'compr', 'continu', 'avanz'])
     || includesAny(normalized, [...optionTerms, 'mensajes', 'contactos']);
   const noContact = includesAny(normalized, ['no me mandes', 'no me envies', 'no me contacten', 'no me escribas', 'prefiero que no']);
   if ((stopAction && searchContext) || noContact) {
