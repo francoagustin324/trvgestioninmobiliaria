@@ -7,6 +7,7 @@ function normalizedData(value: Partial<CrmData>): CrmData {
     properties: Array.isArray(value.properties) ? value.properties : [],
     reminders: Array.isArray(value.reminders) ? value.reminders : [],
     fichas: Array.isArray(value.fichas) ? value.fichas : [],
+    conversations: Array.isArray(value.conversations) ? value.conversations : [],
   };
 }
 
@@ -25,12 +26,14 @@ export const state = {
   selectedFichaId: null as number | null,
   editingFichaId: null as number | null,
   editingClientId: null as number | null,
+  selectedConversationId: null as number | null,
   openForms: { client: false, property: false, reminder: false, ficha: false },
 };
 
 export function replaceData(data: CrmData, syncCloud = false): void {
   state.crm = normalizedData(data);
   state.editingClientId = null;
+  state.selectedConversationId = null;
   localStorage.setItem(STORAGE_KEY, JSON.stringify(state.crm));
   if (syncCloud) queueCloudSave(state.crm);
 }
