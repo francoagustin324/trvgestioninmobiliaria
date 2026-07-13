@@ -7,6 +7,7 @@ import {
 } from './commercial-network.js';
 import type { CommercialContact, CommercialContactType } from './models.js';
 import { formatPhone, isPlausiblePhone, normalizePhone } from './phone-normalizer.js';
+import { enhancePropertyNetwork } from './property-network-ui.js';
 import { saveData, state } from './store.js';
 import { escapeHtml, field, formValues, nextId } from './utils.js';
 
@@ -103,6 +104,7 @@ function showFormError(form: HTMLFormElement, message: string): void {
 }
 
 export function renderCommercialNetwork(container: HTMLElement): void {
+  enhancePropertyNetwork(document.querySelector<HTMLElement>('#propiedades'));
   const editing = state.crm.contacts.find((contact) => contact.id === state.editingContactId) ?? null;
   if (state.editingContactId !== null && !editing) state.editingContactId = null;
   const visibleContacts = filterCommercialContacts(state.crm.contacts, state.crm.properties, networkFilters);
