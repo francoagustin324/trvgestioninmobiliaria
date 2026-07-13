@@ -16,7 +16,7 @@ const availableStatuses = new Set(['activa', 'disponible']);
 
 const typeAliases: Record<string, string[]> = {
   Departamento: ['departamento', 'depto', 'dpto'],
-  Casa: ['casa', 'duplex', 'duplex', 'chalet'],
+  Casa: ['casa', 'duplex', 'chalet'],
   Terreno: ['terreno', 'lote'],
   Comercial: ['comercial', 'local', 'oficina'],
 };
@@ -58,7 +58,8 @@ export function parseUsdBudget(value: string | undefined): number | null {
   const raw = String(value ?? '').toLowerCase();
   if (!raw.trim()) return null;
   const matches = [...raw.matchAll(/(\d{1,3}(?:[.\s]\d{3})+|\d+(?:[.,]\d+)?)\s*(k|mil)?/g)];
-  const currencyContext = /usd|u\$s|us\$|dolar/.test(normalizeText(raw));
+  const normalized = normalizeText(raw);
+  const currencyContext = /\b(?:usd|us|u s|dolar|dolares)\b/.test(normalized);
   const amounts = matches
     .map((match) => {
       const number = parseNumericToken(match[1] ?? '');
