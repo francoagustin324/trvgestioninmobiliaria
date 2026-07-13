@@ -9,6 +9,8 @@ export type Temperature = 'Caliente' | 'Tibio' | 'Frío';
 export type ModuleId = 'inicio' | 'crm' | 'propiedades' | 'fichas' | 'whatsapp' | 'agenda' | 'reportes' | 'configuracion';
 export type FichaMode = 'manual' | 'property' | 'external';
 export type PhotoEnhancement = 'none' | 'soft';
+export type ConversationMode = 'IA supervisada' | 'Humano' | 'Pausada';
+export type MessageSender = 'Cliente' | 'IA' | 'Humano';
 
 export interface Client {
   id: number; name: string; phone: string; email?: string; interest: string; status: string;
@@ -27,6 +29,25 @@ export interface Reminder {
   id: number; date: string; title: string; related: string; priority: string;
 }
 
+export interface ConversationMessage {
+  id: number;
+  direction: 'inbound' | 'outbound';
+  sender: MessageSender;
+  text: string;
+  createdAt: string;
+  detectedData?: string[];
+}
+
+export interface WhatsAppConversation {
+  id: number;
+  clientId: number;
+  phone: string;
+  mode: ConversationMode;
+  unread: number;
+  lastActivity: string;
+  messages: ConversationMessage[];
+}
+
 export interface FichaPublica {
   title: string; propertyType?: string; operation?: string; zone?: string; approxAddress?: string;
   price?: string; expenses?: string; bedrooms?: string; bathrooms?: string; garage?: string;
@@ -40,7 +61,13 @@ export interface Ficha extends FichaPublica {
   source?: string; internalNotes?: string; createdAt: string;
 }
 
-export interface CrmData { clients: Client[]; properties: Property[]; reminders: Reminder[]; fichas: Ficha[]; }
+export interface CrmData {
+  clients: Client[];
+  properties: Property[];
+  reminders: Reminder[];
+  fichas: Ficha[];
+  conversations: WhatsAppConversation[];
+}
 
 export const modules: Array<[ModuleId, string]> = [
   ['inicio', 'Inicio'], ['crm', 'CRM / Leads'], ['propiedades', 'Propiedades'], ['fichas', 'Fichas TRV'],
@@ -62,4 +89,19 @@ export const initialData: CrmData = {
   }],
   reminders: [{ id: 1, date: '2026-07-13', title: 'Llamar a Lucía', related: 'Búsqueda Nueva Córdoba', priority: 'Alta' }],
   fichas: [],
+  conversations: [{
+    id: 1,
+    clientId: 1,
+    phone: '351 555-0101',
+    mode: 'IA supervisada',
+    unread: 1,
+    lastActivity: '2026-07-13T12:15:00.000Z',
+    messages: [{
+      id: 1,
+      direction: 'inbound',
+      sender: 'Cliente',
+      text: 'Hola, ¿se puede ver el departamento?',
+      createdAt: '2026-07-13T12:15:00.000Z',
+    }],
+  }],
 };
