@@ -16,67 +16,138 @@ interface IntentSignal {
   reason: string;
 }
 
-type PatternRule = [RegExp, string];
+interface PhraseGroup {
+  phrases: readonly string[];
+  reason: string;
+}
 
-const commercialPatterns: PatternRule[] = [
-  [/(soy|somos) (corredor|corredora|martillero|martillera|asesor inmobiliario|asesora inmobiliaria|agente inmobiliario|agente inmobiliaria|broker inmobiliario|broker inmobiliaria|inmobiliaria|constructor|constructora|desarrollista)/, 'La persona se identificó como profesional o empresa del sector.'],
-  [/(soy|somos) (vendedor|vendedora) (inmobiliario|inmobiliaria|de (una )?(inmobiliaria|constructora|desarrollista)|de propiedades|de desarrollos)/, 'La persona se identificó como vendedor del sector inmobiliario.'],
-  [/soy de (una )?(inmobiliaria|constructora|desarrollista)/, 'Indicó que pertenece a una empresa del sector.'],
-  [/(trabajo|represento) (en|para|a) (una )?(inmobiliaria|constructora|desarrollista)/, 'Indicó que trabaja para una inmobiliaria, constructora o desarrollista.'],
-  [/trabajo como (corredor|corredora|martillero|martillera|vendedor inmobiliario|vendedora inmobiliaria)/, 'Indicó un rol profesional inmobiliario.'],
-  [/(trabajo en ventas inmobiliarias|soy del equipo comercial)/, 'Indicó que pertenece a un equipo comercial inmobiliario.'],
-  [/(te|les) (comparto|paso|envio|mando) (una )?(propiedad|producto|unidad|departamento|depto|casa|disponibilidad)/, 'El mensaje comparte producto inmobiliario en lugar de expresar una búsqueda.'],
-  [/(comparto|compartimos) comision/, 'Mencionó colaboración o comisión entre colegas.'],
-  [/soy (el )?(propietario|dueno)/, 'Se identificó como propietario.'],
-  [/(quiero|necesito) vender (mi|una|un) (casa|departamento|depto|propiedad|terreno)/, 'La intención principal detectada es vender una propiedad.'],
-  [/tengo (unidades|propiedades|departamentos|deptos|casas) para ofrecer/, 'Indicó que tiene inventario inmobiliario para ofrecer.'],
-  [/(vendo|estoy vendiendo) (departamentos|deptos|casas|unidades|propiedades)( de pozo| disponibles| en)?/, 'Indicó que comercializa productos inmobiliarios.'],
+const commercialGroups: PhraseGroup[] = [
+  {
+    phrases: [
+      'soy corredor', 'soy corredora', 'soy martillero', 'soy martillera',
+      'soy asesor inmobiliario', 'soy asesora inmobiliaria', 'soy agente inmobiliario',
+      'soy agente inmobiliaria', 'soy broker inmobiliario', 'soy broker inmobiliaria',
+      'soy constructor', 'soy constructora', 'soy desarrollista',
+    ],
+    reason: 'La persona se identificó como profesional del sector inmobiliario.',
+  },
+  {
+    phrases: [
+      'soy vendedor inmobiliario', 'soy vendedora inmobiliaria',
+      'soy vendedor de una constructora', 'soy vendedora de una constructora',
+      'soy vendedor de la constructora', 'soy vendedora de la constructora',
+      'soy vendedor de una inmobiliaria', 'soy vendedora de una inmobiliaria',
+      'trabajo como vendedor inmobiliario', 'trabajo como vendedora inmobiliaria',
+      'trabajo en ventas inmobiliarias', 'soy del equipo comercial',
+    ],
+    reason: 'La persona se identificó como vendedor del sector inmobiliario.',
+  },
+  {
+    phrases: [
+      'soy de una inmobiliaria', 'soy de una constructora', 'soy de una desarrollista',
+      'trabajo en una inmobiliaria', 'trabajo para una inmobiliaria',
+      'trabajo en una constructora', 'trabajo para una constructora',
+      'trabajo en una desarrollista', 'trabajo para una desarrollista',
+      'represento a una inmobiliaria', 'represento a una constructora', 'represento a una desarrollista',
+      'trabajo como corredor', 'trabajo como corredora', 'trabajo como martillero', 'trabajo como martillera',
+    ],
+    reason: 'Indicó que trabaja para una empresa inmobiliaria.',
+  },
+  {
+    phrases: ['comparto comision', 'compartimos comision'],
+    reason: 'Mencionó colaboración o comisión entre colegas.',
+  },
+  {
+    phrases: ['soy propietario', 'soy el propietario', 'soy dueno', 'soy el dueno'],
+    reason: 'Se identificó como propietario.',
+  },
+  {
+    phrases: [
+      'tengo unidades para ofrecer', 'tengo propiedades para ofrecer',
+      'tengo departamentos para ofrecer', 'tengo deptos para ofrecer',
+      'vendo departamentos de pozo', 'vendo deptos de pozo',
+      'vendo unidades', 'vendo propiedades', 'estoy vendiendo departamentos',
+    ],
+    reason: 'Indicó que comercializa productos inmobiliarios.',
+  },
 ];
 
-const stoppedPatterns: PatternRule[] = [
-  [/(no busco mas|ya no busco|no estoy buscando|ya no estoy buscando|ya no seguimos buscando|no buscamos mas|deje de buscar|dejamos de buscar|no sigo buscando|no seguimos buscando)/, 'Indicó explícitamente que dejó de buscar.'],
-  [/(no quiero comprar|no queremos comprar|desistimos de comprar|no voy a comprar|no vamos a comprar|no compro|decidi no comprar)/, 'Indicó explícitamente que no continuará con la compra.'],
-  [/(no me escribas|no me escriban|no me contacten|no quiero recibir mensajes|sacame de la lista|borrenme|no hace falta que me mandes mas)/, 'Pidió no recibir más mensajes.'],
-  [/(por ahora no busco|suspendi la busqueda|pausamos la busqueda|cancele la busqueda|cancelamos la compra|dimos de baja la busqueda|frene la busqueda)/, 'Indicó que la búsqueda fue pausada o cancelada.'],
-  [/(no sigas buscando para mi|no necesitamos mas opciones|no quiero seguir viendo propiedades|prefiero no continuar con la busqueda|abandonamos la idea de comprar|gracias pero no buscamos mas|ya no necesito una propiedad|no tengo intencion de comprar)/, 'Indicó que no necesita continuar recibiendo opciones.'],
-];
+const stoppedGroups: PhraseGroup[] = [{
+  phrases: [
+    'no busco mas', 'ya no busco', 'no estoy buscando', 'ya no estoy buscando',
+    'ya no seguimos buscando', 'no buscamos mas', 'deje de buscar', 'dejamos de buscar',
+    'no sigo buscando', 'no seguimos buscando', 'no quiero comprar', 'no queremos comprar',
+    'desistimos de comprar', 'no voy a comprar', 'no vamos a comprar', 'no compro',
+    'decidi no comprar', 'no me escribas', 'no me escriban', 'no me contacten',
+    'no quiero recibir mensajes', 'sacame de la lista', 'borrenme',
+    'no hace falta que me mandes mas', 'por ahora no busco', 'suspendi la busqueda',
+    'pausamos la busqueda', 'cancele la busqueda', 'cancelamos la compra',
+    'dimos de baja la busqueda', 'frene la busqueda', 'no sigas buscando para mi',
+    'no necesitamos mas opciones', 'no quiero seguir viendo propiedades',
+    'prefiero no continuar con la busqueda', 'abandonamos la idea de comprar',
+    'gracias pero no buscamos mas', 'ya no necesito una propiedad',
+    'no tengo intencion de comprar',
+  ],
+  reason: 'Indicó explícitamente que dejó de buscar o pidió no recibir más contactos.',
+}];
 
-const boughtPatterns: PatternRule[] = [
-  [/(ya|finalmente) (compre|compramos|consegui|conseguimos|encontre|encontramos|cerre|cerramos|sene|senamos|reserve|reservamos|adquiri|adquirimos|elegi|elegimos)/, 'Confirmó que la compra o elección ya fue resuelta.'],
-  [/compramos (una|un) (casa|departamento|depto|propiedad|terreno)/, 'Confirmó que compró una propiedad.'],
-  [/(compre|compramos) (por otro lado|con otra inmobiliaria)/, 'Confirmó que compró por otra vía.'],
-  [/(ya resolvi|ya lo resolvimos|ya solucione|ya esta resuelta la compra|cerre con otra inmobiliaria|cerramos con otra inmobiliaria)/, 'Confirmó que la necesidad ya fue resuelta.'],
-  [/(ya tengo|ya tenemos) (casa|departamento|depto|propiedad|donde mudarnos)/, 'Confirmó que ya tiene una propiedad o solución habitacional.'],
-  [/(encontre|consegui) (una opcion|algo)( por mi cuenta| en otra zona)?/, 'Confirmó que encontró una alternativa.'],
-  [/(concretamos la compra|firme por otro (departamento|depto|casa)|ya elegimos y compramos)/, 'Confirmó que la operación ya fue concretada.'],
-];
+const boughtGroups: PhraseGroup[] = [{
+  phrases: [
+    'ya compre', 'ya compramos', 'compramos una', 'compramos un',
+    'ya consegui', 'ya conseguimos', 'ya encontre', 'ya encontramos',
+    'ya resolvi', 'ya lo resolvimos', 'cerre con otra inmobiliaria',
+    'cerramos con otra inmobiliaria', 'compre por otro lado', 'compramos por otro lado',
+    'compre con otra inmobiliaria', 'compramos con otra inmobiliaria',
+    'ya cerre', 'ya cerramos', 'ya sene', 'ya senamos', 'ya reserve', 'ya reservamos',
+    'ya tengo casa', 'ya tengo departamento', 'ya tengo depto', 'ya tengo propiedad',
+    'ya tenemos casa', 'ya tenemos departamento', 'ya tenemos depto', 'ya tenemos propiedad',
+    'finalmente compre', 'finalmente compramos', 'finalmente encontre', 'finalmente encontramos',
+    'ya solucione', 'ya esta resuelta la compra', 'encontre una opcion',
+    'consegui una opcion', 'consegui algo', 'ya adquiri', 'concretamos la compra',
+    'firme por otro departamento', 'firme por otro depto', 'firme por otra casa',
+    'ya tenemos donde mudarnos', 'ya elegimos y compramos',
+  ],
+  reason: 'Confirmó que la compra o necesidad ya fue resuelta.',
+}];
 
-const waitingSalePatterns: PatternRule[] = [
-  [/(todavia no vendi|todavia no vendimos|aun no vendi|aun no vendimos|no pude vender|no pudimos vender|todavia no pude vender|no logre vender|no logramos vender)/, 'Todavía necesita vender antes de avanzar.'],
-  [/(mi|el|la) (casa|departamento|depto|propiedad) no se vendio|no se vendio todavia/, 'La propiedad previa todavía no se vendió.'],
-  [/(dependo de vender|dependemos de vender|dependo de la venta|dependemos de la venta)/, 'La compra depende de una venta previa.'],
-  [/(primero|antes) (tengo que|tenemos que|debo|debemos|necesito|necesitamos) vender/, 'Necesita vender antes de comprar.'],
-  [/(hasta que no venda|hasta que no vendamos|hasta vender no puedo|hasta vender no podemos)/, 'No puede avanzar hasta vender.'],
-  [/(cuando venda|cuando vendamos|si vendo|si vendemos)/, 'El avance depende de concretar una venta.'],
-  [/(estoy esperando vender|seguimos esperando vender)/, 'Está esperando concretar una venta antes de retomar.'],
-  [/(estoy|estamos) vendiendo (mi|nuestra|la|el) (casa|departamento|depto|propiedad)/, 'Está vendiendo una propiedad antes de avanzar.'],
-  [/la compra depende de vender|(necesito|necesitamos|tenemos que) vender antes de (comprar|avanzar)/, 'La compra depende de vender primero.'],
-  [/mi propiedad sigue publicada|todavia tengo (la|el|mi) (casa|departamento|depto|propiedad) a la venta/, 'La propiedad previa sigue publicada.'],
-];
+const waitingSaleGroups: PhraseGroup[] = [{
+  phrases: [
+    'todavia no vendi', 'todavia no vendimos', 'aun no vendi', 'aun no vendimos',
+    'no pude vender', 'no pudimos vender', 'todavia no pude vender',
+    'no logre vender', 'no logramos vender', 'mi casa no se vendio',
+    'el departamento no se vendio', 'el depto no se vendio', 'la propiedad no se vendio',
+    'no se vendio todavia', 'dependo de vender', 'dependemos de vender',
+    'dependo de la venta', 'dependemos de la venta', 'primero tengo que vender',
+    'primero tenemos que vender', 'primero debo vender', 'primero debemos vender',
+    'antes tengo que vender', 'antes tenemos que vender', 'antes debo vender',
+    'antes debemos vender', 'hasta que no venda', 'hasta que no vendamos',
+    'hasta vender no puedo', 'hasta vender no podemos', 'cuando venda', 'cuando vendamos',
+    'si vendo', 'si vendemos', 'estoy esperando vender', 'seguimos esperando vender',
+    'estoy vendiendo mi casa', 'estoy vendiendo mi departamento',
+    'estamos vendiendo nuestra casa', 'estamos vendiendo antes de comprar',
+    'la compra depende de vender', 'necesito vender antes de comprar',
+    'necesitamos vender antes de comprar', 'tenemos que vender antes de avanzar',
+    'mi propiedad sigue publicada', 'todavia tengo la casa a la venta',
+    'todavia tengo el departamento a la venta',
+  ],
+  reason: 'La compra depende de vender una propiedad previa.',
+}];
 
-const activeSearchPatterns: PatternRule[] = [
-  [/(sigo|seguimos) (buscando|en la busqueda|con la busqueda)/, 'Confirmó explícitamente que continúa buscando.'],
-  [/(todavia|aun) (busco|estoy buscando|estamos buscando|sigo buscando|necesito encontrar)/, 'Confirmó que la búsqueda continúa.'],
-  [/(continuo|continuamos) (buscando|con la busqueda)/, 'Confirmó que continúa con la búsqueda.'],
-  [/(mandame|pasame|enviame|compartime|mostrame) (mas )?(opciones|alternativas|propiedades|departamentos|deptos|casas)/, 'Pidió recibir nuevas opciones.'],
-  [/(avisame|avisenme) (si|cuando) (aparece|aparezca|sale|salga|tengas|tengan|haya)( algo)?/, 'Pidió ser avisado cuando aparezca una opción.'],
-  [/(quiero|queremos) seguir viendo/, 'Pidió continuar viendo propiedades.'],
-  [/(?<!no )(estoy|estamos) buscando/, 'Expresó una búsqueda activa.'],
-  [/(?<!no )(quiero|queremos|necesito|necesitamos) comprar/, 'Expresó intención activa de compra.'],
-  [/me interesa ver opciones/, 'Pidió evaluar opciones.'],
-  [/(busco|buscamos) (un|una|algo|casa|departamento|depto|propiedad|terreno|duplex)/, 'Describió una búsqueda inmobiliaria activa.'],
-  [/estoy en busqueda activa/, 'Indicó expresamente que la búsqueda está activa.'],
-];
+const activeGroups: PhraseGroup[] = [{
+  phrases: [
+    'sigo buscando', 'seguimos buscando', 'sigo en la busqueda', 'seguimos en la busqueda',
+    'sigo con la busqueda', 'seguimos con la busqueda', 'todavia busco',
+    'todavia estamos buscando', 'aun sigo buscando', 'continuo buscando',
+    'continuamos buscando', 'continuo con la busqueda', 'continuamos con la busqueda',
+    'mandame opciones', 'mandame mas opciones', 'mandame propiedades',
+    'pasame opciones', 'pasame departamentos', 'pasame propiedades',
+    'enviame opciones', 'compartime opciones', 'mostrame alternativas',
+    'avisame si aparece', 'avisame cuando tengas', 'avisenme si sale',
+    'quiero seguir viendo', 'queremos seguir viendo', 'me interesa ver opciones',
+    'estoy en busqueda activa', 'todavia necesito encontrar',
+  ],
+  reason: 'Confirmó explícitamente que continúa buscando.',
+}];
 
 export function normalizeAuditText(value: unknown): string {
   return String(value ?? '')
@@ -88,38 +159,81 @@ export function normalizeAuditText(value: unknown): string {
     .trim();
 }
 
-function matchingSignals(normalized: string, patterns: PatternRule[], status: ConversationStatus, confidence: number): IntentSignal[] {
-  return patterns
-    .filter(([pattern]) => pattern.test(normalized))
-    .map(([, reason]) => ({ status, confidence, reason }));
+function includesPhrase(normalized: string, phrase: string): boolean {
+  return ` ${normalized} `.includes(` ${phrase} `);
+}
+
+function findGroupSignal(
+  normalized: string,
+  groups: PhraseGroup[],
+  status: ConversationStatus,
+  confidence: number,
+): IntentSignal | null {
+  for (const group of groups) {
+    if (group.phrases.some((phrase) => includesPhrase(normalized, phrase))) {
+      return { status, confidence, reason: group.reason };
+    }
+  }
+  return null;
+}
+
+function commercialSignalFromText(normalized: string): IntentSignal | null {
+  const grouped = findGroupSignal(normalized, commercialGroups, 'Contacto comercial', 98);
+  if (grouped) return grouped;
+
+  const sharesProduct = /(^| )(te|les) (comparto|paso|envio|mando) (una )?(propiedad|producto|unidad|departamento|depto|casa|disponibilidad)( |$)/.test(normalized);
+  const wantsToSell = /(^| )(quiero|necesito) vender (mi|una|un) (casa|departamento|depto|propiedad|terreno)( |$)/.test(normalized);
+  if (sharesProduct) return { status: 'Contacto comercial', confidence: 98, reason: 'Compartió producto o disponibilidad inmobiliaria.' };
+  if (wantsToSell) return { status: 'Contacto comercial', confidence: 98, reason: 'La intención principal detectada es vender una propiedad.' };
+  return null;
+}
+
+function activeSignal(normalized: string): IntentSignal | null {
+  const grouped = findGroupSignal(normalized, activeGroups, 'Sigue buscando', 93);
+  if (grouped) return grouped;
+
+  const negativeSearch = ['no estoy buscando', 'ya no estoy buscando', 'no estamos buscando'].some((phrase) => includesPhrase(normalized, phrase));
+  if (!negativeSearch && (includesPhrase(normalized, 'estoy buscando') || includesPhrase(normalized, 'estamos buscando'))) {
+    return { status: 'Sigue buscando', confidence: 93, reason: 'Expresó una búsqueda activa.' };
+  }
+
+  const negativePurchase = ['no quiero comprar', 'no queremos comprar', 'no necesito comprar', 'no necesitamos comprar'].some((phrase) => includesPhrase(normalized, phrase));
+  if (!negativePurchase && ['quiero comprar', 'queremos comprar', 'necesito comprar', 'necesitamos comprar'].some((phrase) => includesPhrase(normalized, phrase))) {
+    return { status: 'Sigue buscando', confidence: 93, reason: 'Expresó intención activa de compra.' };
+  }
+
+  if (/(^| )(busco|buscamos) (un|una|algo|casa|departamento|depto|propiedad|terreno|duplex)( |$)/.test(normalized)) {
+    return { status: 'Sigue buscando', confidence: 93, reason: 'Describió una búsqueda inmobiliaria activa.' };
+  }
+  return null;
 }
 
 function signalFromText(text: string): IntentSignal | null {
   const normalized = normalizeAuditText(text);
   if (!normalized) return null;
 
-  const groups: IntentSignal[][] = [
-    matchingSignals(normalized, stoppedPatterns, 'No busca más', 99),
-    matchingSignals(normalized, boughtPatterns, 'Ya compró', 98),
-    matchingSignals(normalized, waitingSalePatterns, 'Esperando vender', 96),
-    matchingSignals(normalized, activeSearchPatterns, 'Sigue buscando', 93),
-  ];
-  const matchedGroups = groups.filter((group) => group.length > 0);
-  if (matchedGroups.length > 1) {
+  const signals = [
+    findGroupSignal(normalized, stoppedGroups, 'No busca más', 99),
+    findGroupSignal(normalized, boughtGroups, 'Ya compró', 98),
+    findGroupSignal(normalized, waitingSaleGroups, 'Esperando vender', 96),
+    activeSignal(normalized),
+  ].filter((signal): signal is IntentSignal => Boolean(signal));
+
+  const statuses = new Set(signals.map((signal) => signal.status));
+  if (statuses.size > 1) {
     return {
       status: 'Revisar manualmente',
       confidence: 40,
-      reason: 'El mismo mensaje contiene señales comerciales contradictorias; no debe generar una acción automática.',
+      reason: 'El mismo mensaje contiene señales contradictorias; no debe generar una acción automática.',
     };
   }
-  return matchedGroups[0]?.[0] ?? null;
+  return signals[0] ?? null;
 }
 
 function commercialSignal(messages: WhatsAppConversation['messages']): IntentSignal | null {
   for (const message of messages.filter((item) => item.direction === 'inbound')) {
-    const normalized = normalizeAuditText(message.text);
-    const match = commercialPatterns.find(([pattern]) => pattern.test(normalized));
-    if (match) return { status: 'Contacto comercial', confidence: 98, reason: match[1] };
+    const signal = commercialSignalFromText(normalizeAuditText(message.text));
+    if (signal) return signal;
   }
   return null;
 }
@@ -193,13 +307,13 @@ export function auditConversation(
   }
 
   const crmHints = normalizeAuditText([client?.notes, client?.objections, client?.purchaseTimeframe].join(' '));
-  const waitingHint = waitingSalePatterns.find(([pattern]) => pattern.test(crmHints));
+  const waitingHint = findGroupSignal(crmHints, waitingSaleGroups, 'Esperando vender', 82);
   if (waitingHint || client?.canMoveForward === 'No') {
     return {
       status: 'Esperando vender',
       decision: 'Pausar',
       confidence: waitingHint ? 82 : 65,
-      reasons: [waitingHint?.[1] ?? 'El CRM indica que todavía no puede avanzar.', 'No se habilita contacto automático con información incompleta.'],
+      reasons: [waitingHint?.reason ?? 'El CRM indica que todavía no puede avanzar.', 'No se habilita contacto automático con información incompleta.'],
       auditedAt,
       source: 'Automático',
     };
