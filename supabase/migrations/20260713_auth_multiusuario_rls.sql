@@ -1,6 +1,7 @@
 begin;
 
 create schema if not exists private;
+grant usage on schema private to authenticated, service_role;
 
 alter table if exists public.organizations
   add column if not exists seat_limit integer,
@@ -16,22 +17,36 @@ alter table if exists public.organization_members
 
 create sequence if not exists public.organization_members_member_id_seq;
 alter sequence public.organization_members_member_id_seq owned by public.organization_members.member_id;
-alter table public.organization_members alter column member_id set default nextval('public.organization_members_member_id_seq');
+alter table public.organization_members
+  alter column member_id set default nextval('public.organization_members_member_id_seq');
+
 update public.organization_members
 set member_id = nextval('public.organization_members_member_id_seq')
 where member_id is null;
+
+select setval(
+  'public.organization_members_member_id_seq',
+  greatest(coalesce((select max(member_id) from public.organization_members), 1), 1),
+  true
+);
+
 alter table public.organization_members alter column member_id set not null;
 
 update public.organization_members om
 set email = coalesce(nullif(om.email, ''), u.email),
     display_name = coalesce(nullif(om.display_name, ''), split_part(coalesce(u.email, 'Usuario'), '@', 1)),
-    status = case when lower(coalesce(om.status, 'active')) in ('active','invited','suspended') then lower(om.status) else 'active' end
+    status = case
+      when lower(coalesce(om.status, 'active')) in ('active','invited','suspended') then lower(om.status)
+      else 'active'
+    end
 from auth.users u
 where u.id = om.user_id;
 
 create unique index if not exists organization_members_org_member_id_uq
   on public.organization_members (organization_id, member_id);
-create unique index if not exists organization_members_org_email_uq
+create unique index if not exists organization_members_org_user_uq
+  on public.organization_members (organization_id, user_id);
+create index if not exists organization_members_org_email_idx
   on public.organization_members (organization_id, lower(email))
   where email is not null and email <> '';
 create index if not exists organization_members_user_org_idx
@@ -99,6 +114,7 @@ revoke all on function private.normalized_org_role(text) from public;
 revoke all on function private.org_member_role(uuid, uuid) from public;
 revoke all on function private.org_member_number(uuid, uuid) from public;
 revoke all on function private.is_active_org_member(uuid, uuid) from public;
+grant execute on function private.normalized_org_role(text) to authenticated, service_role;
 grant execute on function private.org_member_role(uuid, uuid) to authenticated, service_role;
 grant execute on function private.org_member_number(uuid, uuid) to authenticated, service_role;
 grant execute on function private.is_active_org_member(uuid, uuid) to authenticated, service_role;
@@ -147,7 +163,7 @@ for each row execute function public.protect_propcontrol_record_identity();
 alter table public.propcontrol_records enable row level security;
 grant select, insert, update, delete on public.propcontrol_records to authenticated;
 
- drop policy if exists propcontrol_records_select on public.propcontrol_records;
+drop policy if exists propcontrol_records_select on public.propcontrol_records;
 create policy propcontrol_records_select
 on public.propcontrol_records
 for select
@@ -161,7 +177,7 @@ using (
   )
 );
 
- drop policy if exists propcontrol_records_insert on public.propcontrol_records;
+drop policy if exists propcontrol_records_insert on public.propcontrol_records;
 create policy propcontrol_records_insert
 on public.propcontrol_records
 for insert
@@ -175,7 +191,7 @@ with check (
   )
 );
 
- drop policy if exists propcontrol_records_update on public.propcontrol_records;
+drop policy if exists propcontrol_records_update on public.propcontrol_records;
 create policy propcontrol_records_update
 on public.propcontrol_records
 for update
@@ -195,7 +211,7 @@ with check (
   )
 );
 
- drop policy if exists propcontrol_records_delete on public.propcontrol_records;
+drop policy if exists propcontrol_records_delete on public.propcontrol_records;
 create policy propcontrol_records_delete
 on public.propcontrol_records
 for delete
@@ -211,7 +227,7 @@ using (
 alter table public.organization_members enable row level security;
 grant select on public.organization_members to authenticated;
 
- drop policy if exists organization_members_directory_select on public.organization_members;
+drop policy if exists organization_members_directory_select on public.organization_members;
 create policy organization_members_directory_select
 on public.organization_members
 for select
@@ -221,7 +237,19 @@ using (
   or private.is_active_org_member(organization_id)
 );
 
- drop policy if exists organization_members_owner_admin_insert on public.organization_members;
+-- Esta política restrictiva evita que una política antigua más amplia exponga otra organización.
+drop policy if exists organization_members_org_scope_restrictive on public.organization_members;
+create policy organization_members_org_scope_restrictive
+on public.organization_members
+as restrictive
+for select
+to authenticated
+using (
+  user_id = auth.uid()
+  or private.is_active_org_member(organization_id)
+);
+
+drop policy if exists organization_members_owner_admin_insert on public.organization_members;
 create policy organization_members_owner_admin_insert
 on public.organization_members
 as restrictive
@@ -229,7 +257,7 @@ for insert
 to authenticated
 with check (private.org_member_role(organization_id) in ('owner','admin'));
 
- drop policy if exists organization_members_owner_admin_update on public.organization_members;
+drop policy if exists organization_members_owner_admin_update on public.organization_members;
 create policy organization_members_owner_admin_update
 on public.organization_members
 as restrictive
@@ -238,7 +266,7 @@ to authenticated
 using (private.org_member_role(organization_id) in ('owner','admin'))
 with check (private.org_member_role(organization_id) in ('owner','admin'));
 
- drop policy if exists organization_members_owner_admin_delete on public.organization_members;
+drop policy if exists organization_members_owner_admin_delete on public.organization_members;
 create policy organization_members_owner_admin_delete
 on public.organization_members
 as restrictive
@@ -247,7 +275,7 @@ to authenticated
 using (
   private.org_member_role(organization_id) in ('owner','admin')
   and user_id <> auth.uid()
-  and private.normalized_org_role(role) <> 'owner'
+  and lower(coalesce(role, '')) not in ('owner','dueño','dueno')
 );
 
 create or replace function public.activate_my_organization_memberships()
@@ -267,7 +295,7 @@ revoke all on function public.activate_my_organization_memberships() from public
 grant execute on function public.activate_my_organization_memberships() to authenticated;
 
 -- El snapshot antiguo queda disponible solamente para dueño/administrador.
--- Esta política restrictiva se combina con las políticas existentes de fichas.
+-- Estas políticas restrictivas se combinan con las políticas existentes de fichas.
 do $$
 begin
   if to_regclass('public.fichas') is not null then
