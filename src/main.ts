@@ -2,6 +2,8 @@ import { FichaMode, ModuleId, modules } from './models.js';
 import { AGENCY_BRAND, PRODUCT_BRAND } from './branding.js';
 import { authShellHtml, bindAuthUi, initializeCloudSession, renderCloudAccount } from './auth-ui.js';
 import { renderHome, renderClients, renderProperties } from './crm-ui.js';
+import { renderCommercialNetwork } from './commercial-network-ui.js';
+import { unlinkCommercialContact } from './commercial-network.js';
 import { renderAgenda } from './agenda-ui.js';
 import { handleFichaAction, renderFichas, setFichaMode } from './fichas-ui.js';
 import { decodePublicFicha, renderPublicMode } from './public-ficha.js';
@@ -35,6 +37,7 @@ function renderShell(): void {
       <section class="module-panel" id="inicio"></section>
       <section class="module-panel" id="crm"></section>
       <section class="module-panel" id="propiedades"></section>
+      <section class="module-panel" id="red"></section>
       <section class="module-panel" id="fichas"></section>
       <section class="module-panel" id="whatsapp"></section>
       <section class="module-panel" id="agenda"></section>
@@ -61,7 +64,7 @@ function showNotice(message: string): void {
 }
 
 function renderSimple(): void {
-  qs<HTMLElement>('#reportes').innerHTML = `<div class="metric-grid"><article><span>Leads</span><strong>${state.crm.clients.length}</strong></article><article><span>Calientes</span><strong>${state.crm.clients.filter((item) => item.temperature === 'Caliente').length}</strong></article><article><span>Fichas</span><strong>${state.crm.fichas.length}</strong></article><article><span>Propiedades</span><strong>${state.crm.properties.length}</strong></article></div>`;
+  qs<HTMLElement>('#reportes').innerHTML = `<div class="metric-grid"><article><span>Leads</span><strong>${state.crm.clients.length}</strong></article><article><span>Calientes</span><strong>${state.crm.clients.filter((item) => item.temperature === 'Caliente').length}</strong></article><article><span>Propiedades</span><strong>${state.crm.properties.length}</strong></article><article><span>Red comercial</span><strong>${state.crm.contacts.length}</strong></article><article><span>Fichas</span><strong>${state.crm.fichas.length}</strong></article></div>`;
   qs<HTMLElement>('#configuracion').innerHTML = `<div class="settings-grid"><section class="settings-brand-card"><img src="${PRODUCT_BRAND.wordmark}" alt="${PRODUCT_BRAND.name}"><div><span class="eyebrow">Marca del software</span><h3>${PRODUCT_BRAND.name}</h3><p>${PRODUCT_BRAND.tagline}</p><strong>${PRODUCT_BRAND.phrase}</strong><span class="agency-chip">Inmobiliaria configurada: ${AGENCY_BRAND.name}</span></div></section><section class="cloud-settings-card"><span class="eyebrow">Datos protegidos</span><h3>Cuenta y respaldo online</h3><p>Ingresá para usar los mismos clientes, propiedades, agenda y fichas desde distintos dispositivos.</p><div id="cloud-settings-account"></div></section><label>Software<input value="${PRODUCT_BRAND.name}" readonly></label><label>Inmobiliaria<input value="${AGENCY_BRAND.name}" readonly></label><label>WhatsApp público<input value="${AGENCY_BRAND.displayWhatsapp}" readonly></label><label>Marca de las fichas<img src="${AGENCY_BRAND.logo}" alt="${AGENCY_BRAND.name}"></label></div>`;
   const cloudSettings = document.querySelector<HTMLElement>('#cloud-settings-account');
   const topAccount = document.querySelector<HTMLElement>('#cloud-account');
@@ -72,6 +75,7 @@ function render(): void {
   renderHome(qs<HTMLElement>('#inicio'));
   renderClients(qs<HTMLElement>('#crm'));
   renderProperties(qs<HTMLElement>('#propiedades'));
+  renderCommercialNetwork(qs<HTMLElement>('#red'));
   renderFichas(qs<HTMLElement>('#fichas'));
   renderExtensionInstallHelp();
   renderWhatsApp(qs<HTMLElement>('#whatsapp'));
@@ -100,6 +104,15 @@ function removeItem(collection: string, id: number): void {
     }
   }
   if (collection === 'properties') state.crm.properties = state.crm.properties.filter((item) => item.id !== id);
+  if (collection === 'contacts') {
+    state.crm.contacts = state.crm.contacts.filter((item) => item.id !== id);
+    state.crm.properties = unlinkCommercialContact(state.crm.properties, id);
+    if (state.selectedContactId === id) state.selectedContactId = null;
+    if (state.editingContactId === id) {
+      state.editingContactId = null;
+      state.openForms.contact = false;
+    }
+  }
   if (collection === 'reminders') state.crm.reminders = state.crm.reminders.filter((item) => item.id !== id);
   if (collection === 'fichas') { state.crm.fichas = state.crm.fichas.filter((item) => item.id !== id); if (state.selectedFichaId === id) state.selectedFichaId = state.crm.fichas[0]?.id ?? null; }
   saveData(); render();
@@ -108,6 +121,7 @@ function removeItem(collection: string, id: number): void {
 function deletionMessage(collection: string): string {
   if (collection === 'clients') return '¿Eliminar este cliente? También se eliminará su conversación de prueba. Esta acción no se puede deshacer.';
   if (collection === 'properties') return '¿Eliminar esta propiedad? Esta acción no se puede deshacer.';
+  if (collection === 'contacts') return '¿Eliminar este contacto? Las propiedades se conservarán, pero quedarán sin contacto vinculado.';
   if (collection === 'reminders') return '¿Eliminar este recordatorio? Esta acción no se puede deshacer.';
   return '¿Eliminar este registro? Esta acción no se puede deshacer.';
 }
@@ -147,9 +161,38 @@ function bindShellEvents(): void {
       return;
     }
 
+    const openContactButton = target.closest<HTMLElement>('[data-open-contact]');
+    const openContactId = Number(openContactButton?.dataset.openContact);
+    if (openContactId) {
+      state.activeModule = 'red';
+      state.selectedContactId = openContactId;
+      render();
+      window.requestAnimationFrame(() => document.querySelector('.network-detail')?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
+      return;
+    }
+
+    const editContactButton = target.closest<HTMLElement>('[data-edit-contact]');
+    const editContactId = Number(editContactButton?.dataset.editContact);
+    if (editContactId) {
+      state.activeModule = 'red';
+      state.selectedContactId = editContactId;
+      state.editingContactId = editContactId;
+      state.openForms.contact = true;
+      render();
+      window.requestAnimationFrame(() => document.querySelector('#contact-form')?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
+      return;
+    }
+
     if (target.closest('[data-cancel-client-edit]')) {
       state.editingClientId = null;
       state.openForms.client = false;
+      render();
+      return;
+    }
+
+    if (target.closest('[data-cancel-contact-edit]')) {
+      state.editingContactId = null;
+      state.openForms.contact = false;
       render();
       return;
     }
@@ -162,6 +205,14 @@ function bindShellEvents(): void {
         state.openForms.client = true;
       } else {
         state.openForms.client = !state.openForms.client;
+      }
+    }
+    if (toggle === 'contact-form') {
+      if (state.editingContactId !== null) {
+        state.editingContactId = null;
+        state.openForms.contact = true;
+      } else {
+        state.openForms.contact = !state.openForms.contact;
       }
     }
     if (toggle === 'property-form') state.openForms.property = !state.openForms.property;
@@ -193,6 +244,11 @@ function bindShellEvents(): void {
       if (state.editingClientId !== null) {
         state.editingClientId = null;
         state.openForms.client = false;
+        render();
+      }
+      if (state.editingContactId !== null) {
+        state.editingContactId = null;
+        state.openForms.contact = false;
         render();
       }
     }
