@@ -165,7 +165,9 @@ export function setActiveMemberId(memberId: number): void {
   state.activeMemberId = member.id;
   localStorage.setItem(TEAM_VIEW_KEY, String(member.id));
   state.editingClientId = null;
-  state.selectedConversationId = null;
+  state.selectedConversationId = member.role === 'Corredor'
+    ? state.crm.conversations.find((conversation) => conversation.assignedToId === member.id)?.id ?? null
+    : null;
 }
 
 export function replaceData(data: CrmData, syncCloud = false): void {
