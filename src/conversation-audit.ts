@@ -18,7 +18,7 @@ interface IntentSignal {
 
 const commercialPatterns: Array<[RegExp, string]> = [
   [/\b(soy|somos) (corredor|corredora|martillero|martillera|asesor inmobiliario|asesora inmobiliaria|inmobiliaria|constructor|constructora|desarrollista|vendedor|vendedora)\b/, 'La persona se identificó como profesional o empresa del sector.'],
-  [/\b(trabajo|represento) (en|para) (una )?(inmobiliaria|constructora|desarrollista)\b/, 'Indicó que trabaja para una inmobiliaria, constructora o desarrollista.'],
+  [/\b(trabajo|represento) (en|para|a) (una )?(inmobiliaria|constructora|desarrollista)\b/, 'Indicó que trabaja para una inmobiliaria, constructora o desarrollista.'],
   [/\b(trabajo en ventas|soy del equipo comercial)\b/, 'Indicó que pertenece a un equipo de ventas.'],
   [/\b(te|les) (comparto|paso|envio) (una )?(propiedad|producto|unidad|departamento|casa|disponibilidad)\b/, 'El mensaje comparte producto inmobiliario en lugar de expresar una búsqueda.'],
   [/\b(comparto|compartimos) comision\b/, 'Mencionó colaboración o comisión entre colegas.'],
