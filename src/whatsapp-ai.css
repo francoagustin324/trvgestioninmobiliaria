@@ -1,0 +1,47 @@
+.wa-status { padding: 7px 10px; border-radius: 999px; font-size: .78rem; font-weight: 900; }
+.wa-status.pending { color: #8a4b08; background: #fff0d8; }
+.wa-preflight { margin-bottom: 14px; padding: 13px 15px; border: 1px solid #d9e5ef; border-radius: 16px; background: #f8fbfd; }
+.wa-preflight b { color: #0d3449; }
+.wa-preflight p { margin: 5px 0 0; color: #5f7180; }
+.wa-layout { display: grid; grid-template-columns: 260px minmax(0, 1fr) 320px; gap: 14px; min-height: 620px; }
+.wa-sidebar, .wa-chat, .wa-assistant { min-width: 0; border: 1px solid #dce6ee; border-radius: 18px; background: #fff; }
+.wa-sidebar { padding: 10px; }
+.wa-sidebar-head { display: flex; justify-content: space-between; padding: 7px 6px 11px; color: #0d3449; }
+.wa-thread { position: relative; width: 100%; margin-bottom: 8px; padding: 11px 34px 11px 11px; text-align: left; border: 1px solid transparent; border-radius: 13px; color: #213547; background: #f7fafc; }
+.wa-thread.active { border-color: #78b7a1; background: #edf9f3; }
+.wa-thread span { display: flex; justify-content: space-between; gap: 8px; }
+.wa-thread small { color: #72808c; font-size: .68rem; }
+.wa-thread p { margin: 5px 0 0; overflow: hidden; color: #64748b; font-size: .8rem; text-overflow: ellipsis; white-space: nowrap; }
+.wa-thread > strong { position: absolute; top: 12px; right: 9px; display: grid; width: 21px; height: 21px; place-items: center; border-radius: 50%; color: #fff; background: #0f8a5f; font-size: .7rem; }
+.wa-new-conversation { display: grid; gap: 7px; margin-top: 12px; }
+.wa-new-conversation select, .wa-new-conversation button { width: 100%; }
+.wa-chat { display: grid; grid-template-rows: auto 1fr auto; overflow: hidden; }
+.wa-chat > header { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px; border-bottom: 1px solid #e5edf3; }
+.wa-chat h3 { margin: 0; color: #0d3449; }
+.wa-chat header span { color: #667787; font-size: .8rem; }
+.wa-messages { display: flex; flex-direction: column; gap: 9px; overflow: auto; padding: 15px; background: #f4f7f8; }
+.wa-message { max-width: 78%; padding: 10px 12px; border-radius: 14px; box-shadow: 0 4px 12px rgb(15 35 50 / 6%); }
+.wa-message.inbound { align-self: flex-start; background: #fff; }
+.wa-message.outbound { align-self: flex-end; background: #dcf8e9; }
+.wa-message span, .wa-message small { color: #71808c; font-size: .68rem; }
+.wa-message p { margin: 5px 0; color: #1f3342; line-height: 1.45; }
+.wa-incoming-form { display: grid; grid-template-columns: 1fr auto; gap: 9px; padding: 12px; border-top: 1px solid #e5edf3; }
+.wa-incoming-form textarea { min-height: 64px; }
+.wa-assistant { display: grid; align-content: start; gap: 12px; padding: 12px; background: #fbfcfd; }
+.wa-qualification, .wa-suggestion, .wa-controls { padding: 13px; border: 1px solid #e0e8ef; border-radius: 15px; background: #fff; }
+.wa-qualification > div:first-child, .wa-suggestion > div:first-child { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.wa-qualification progress { width: 100%; margin: 9px 0 5px; }
+.wa-qualification p, .wa-suggestion p { color: #64748b; font-size: .82rem; line-height: 1.45; }
+.wa-missing { display: flex; flex-wrap: wrap; gap: 6px; }
+.wa-missing span { padding: 5px 7px; border-radius: 999px; color: #8a4b08; background: #fff0d8; font-size: .7rem; font-weight: 800; }
+.wa-missing strong { color: #18704f; }
+.wa-suggestion.needs-human { border-color: #f0c68d; background: #fffaf2; }
+.wa-suggestion > div strong { color: #8a4b08; font-size: .75rem; }
+.wa-suggestion textarea { width: 100%; min-height: 126px; margin-top: 9px; }
+.wa-actions { display: grid; grid-template-columns: 1fr auto; gap: 8px; }
+.wa-controls { display: grid; gap: 10px; }
+.wa-controls label { display: grid; gap: 6px; color: #425466; font-size: .8rem; font-weight: 800; }
+.wa-controls small { color: #64748b; line-height: 1.4; }
+.wa-empty { padding: 14px; color: #64748b; }
+@media (max-width: 1180px) { .wa-layout { grid-template-columns: 220px minmax(0, 1fr); } .wa-assistant { grid-column: 1 / -1; grid-template-columns: repeat(3, 1fr); } }
+@media (max-width: 760px) { .wa-layout { grid-template-columns: 1fr; } .wa-assistant { grid-column: auto; grid-template-columns: 1fr; } .wa-sidebar { max-height: 280px; overflow: auto; } .wa-chat { min-height: 560px; } .wa-chat > header, .wa-incoming-form { grid-template-columns: 1fr; align-items: stretch; } .wa-chat > header { flex-direction: column; align-items: flex-start; } .wa-chat > header button { width: 100%; } .wa-message { max-width: 92%; } .wa-actions { grid-template-columns: 1fr; } }
