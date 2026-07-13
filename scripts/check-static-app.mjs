@@ -9,6 +9,7 @@ const requiredFiles = [
   'src/models.ts',
   'src/utils.ts',
   'src/store.ts',
+  'src/client-editor.ts',
   'src/public-ficha.ts',
   'src/fichas-ui.ts',
   'src/extension-import-ui.ts',
@@ -25,11 +26,13 @@ const requiredFiles = [
   'src/server/utils/safe-url.ts',
   'src/server/utils/sanitize.ts',
   'src/tests/whatsapp-webhook.test.ts',
+  'src/tests/client-editor.test.ts',
   'src/styles.css',
   'src/importer.css',
   'src/propcontrol-theme.css',
   'src/cloud-auth.css',
   'src/mobile-premium.css',
+  'src/professional-polish.css',
   'dist/main.js',
   'dist/server.js',
   'src/assets/propcontrol-mark.svg',
@@ -63,7 +66,7 @@ const zip = readFileSync(zipPath);
 if (zip.readUInt32LE(0) !== 0x04034b50) throw new Error('El ZIP de la extensión no es válido');
 
 const html = readFileSync('index.html', 'utf8');
-for (const asset of ['/dist/main.js', '/src/styles.css', '/src/importer.css', '/src/propcontrol-theme.css', '/src/cloud-auth.css', '/src/mobile-premium.css', '/src/assets/propcontrol-mark.svg']) {
+for (const asset of ['/dist/main.js', '/src/styles.css', '/src/importer.css', '/src/propcontrol-theme.css', '/src/cloud-auth.css', '/src/mobile-premium.css', '/src/professional-polish.css', '/src/assets/propcontrol-mark.svg']) {
   if (!html.includes(asset)) throw new Error(`index.html no referencia ${asset}`);
 }
 if (!html.includes('viewport-fit=cover')) throw new Error('Falta soporte de safe area para móviles');
@@ -124,8 +127,13 @@ for (const text of ['overflow-x: clip', '.mobile-nav-trigger', '.sidebar-backdro
 }
 
 const main = readFileSync('src/main.ts', 'utf8');
-for (const text of ['data-mobile-nav-toggle', 'data-mobile-nav-close', 'setMobileNavigation', 'aria-expanded']) {
-  if (!main.includes(text)) throw new Error(`Falta navegación móvil accesible: ${text}`);
+for (const text of ['data-mobile-nav-toggle', 'data-mobile-nav-close', 'setMobileNavigation', 'aria-expanded', 'data-edit-client', 'data-cancel-client-edit', 'window.confirm']) {
+  if (!main.includes(text)) throw new Error(`Falta interacción principal: ${text}`);
+}
+
+const crmUi = readFileSync('src/crm-ui.ts', 'utf8');
+for (const text of ['Guardar cambios', 'Editar', 'upsertClient', 'clientFromFormValues', 'record-actions']) {
+  if (!crmUi.includes(text)) throw new Error(`Falta edición de clientes: ${text}`);
 }
 
 const source = requiredFiles.filter((file) => file.endsWith('.ts') || file.endsWith('.js')).map((file) => readFileSync(file, 'utf8')).join('\n');
@@ -133,4 +141,4 @@ for (const text of ['Fichas TRV', 'public=', '5493515110069', 'navigator.clipboa
   if (!source.includes(text)) throw new Error(`Falta función o texto requerido: ${text}`);
 }
 
-console.log('PropControl: TypeScript, branding, responsive mobile-first, autenticación, Supabase y webhook de WhatsApp aprobados');
+console.log('PropControl: TypeScript, edición de clientes, responsive mobile-first, autenticación, Supabase y webhook de WhatsApp aprobados');
