@@ -2,6 +2,8 @@ import { state } from './store.js';
 import { activeMember, canAccessModule, visibleConversations } from './team-access.js';
 import { renderTeam, renderTeamAccount } from './team-ui.js';
 
+let initialized = false;
+
 function ensureTeamDom(): void {
   const nav = document.querySelector<HTMLElement>('.premium-sidebar nav');
   if (nav && !nav.querySelector('[data-module="equipo"]')) {
@@ -81,6 +83,8 @@ function syncTeamUi(): void {
 }
 
 function initializeTeamModule(): void {
+  if (initialized) return;
+  initialized = true;
   ensureTeamDom();
   syncTeamUi();
   document.addEventListener('trv-render', () => window.requestAnimationFrame(syncTeamUi));
