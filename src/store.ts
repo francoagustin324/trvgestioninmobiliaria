@@ -24,11 +24,13 @@ export const state = {
   fichaMode: 'property' as FichaMode,
   selectedFichaId: null as number | null,
   editingFichaId: null as number | null,
+  editingClientId: null as number | null,
   openForms: { client: false, property: false, reminder: false, ficha: false },
 };
 
 export function replaceData(data: CrmData, syncCloud = false): void {
   state.crm = normalizedData(data);
+  state.editingClientId = null;
   localStorage.setItem(STORAGE_KEY, JSON.stringify(state.crm));
   if (syncCloud) queueCloudSave(state.crm);
 }
