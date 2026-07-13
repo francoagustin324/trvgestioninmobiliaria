@@ -12,6 +12,7 @@ const requiredFiles = [
   'src/client-editor.ts',
   'src/phone-normalizer.ts',
   'src/client-list.ts',
+  'src/client-duplicates.ts',
   'src/agenda.ts',
   'src/agenda-ui.ts',
   'src/public-ficha.ts',
@@ -33,10 +34,12 @@ const requiredFiles = [
   'src/tests/client-editor.test.ts',
   'src/tests/phone-normalizer.test.ts',
   'src/tests/client-list.test.ts',
+  'src/tests/client-duplicates.test.ts',
   'src/tests/agenda.test.ts',
   'src/styles.css',
   'src/crm-safety.css',
   'src/client-filters.css',
+  'src/client-duplicates.css',
   'src/agenda.css',
   'src/importer.css',
   'src/propcontrol-theme.css',
@@ -76,7 +79,7 @@ const zip = readFileSync(zipPath);
 if (zip.readUInt32LE(0) !== 0x04034b50) throw new Error('El ZIP de la extensión no es válido');
 
 const html = readFileSync('index.html', 'utf8');
-for (const asset of ['/dist/main.js', '/src/styles.css', '/src/crm-safety.css', '/src/client-filters.css', '/src/agenda.css', '/src/importer.css', '/src/propcontrol-theme.css', '/src/cloud-auth.css', '/src/mobile-premium.css', '/src/professional-polish.css', '/src/assets/propcontrol-mark.svg']) {
+for (const asset of ['/dist/main.js', '/src/styles.css', '/src/crm-safety.css', '/src/client-filters.css', '/src/client-duplicates.css', '/src/agenda.css', '/src/importer.css', '/src/propcontrol-theme.css', '/src/cloud-auth.css', '/src/mobile-premium.css', '/src/professional-polish.css', '/src/assets/propcontrol-mark.svg']) {
   if (!html.includes(asset)) throw new Error(`index.html no referencia ${asset}`);
 }
 if (!html.includes('viewport-fit=cover')) throw new Error('Falta soporte de safe area para móviles');
@@ -142,7 +145,7 @@ for (const text of ['data-mobile-nav-toggle', 'data-mobile-nav-close', 'setMobil
 }
 
 const crmUi = readFileSync('src/crm-ui.ts', 'utf8');
-for (const text of ['Guardar cambios', 'Editar', 'upsertClient', 'clientFromFormValues', 'record-actions', 'findDuplicateClient', 'client-form-error', 'Abrir cliente existente', 'client-filters', 'client-result-count', 'data-clear-client-filters']) {
+for (const text of ['Guardar cambios', 'Editar', 'upsertClient', 'clientFromFormValues', 'record-actions', 'findDuplicateClient', 'client-form-error', 'Abrir cliente existente', 'client-filters', 'client-result-count', 'data-clear-client-filters', 'duplicate-audit', 'data-merge-client-primary', 'data-undo-client-merge']) {
   if (!crmUi.includes(text)) throw new Error(`Falta función del CRM: ${text}`);
 }
 
@@ -154,6 +157,11 @@ for (const text of ['normalizePhone', 'phoneIdentity', 'findDuplicateClient', 'i
 const clientList = readFileSync('src/client-list.ts', 'utf8');
 for (const text of ['filterAndSortClients', 'defaultClientListFilters', 'Seguimiento urgente', 'matchesFollowUp', 'matchesQuery']) {
   if (!clientList.includes(text)) throw new Error(`Falta búsqueda o filtros de clientes: ${text}`);
+}
+
+const clientDuplicates = readFileSync('src/client-duplicates.ts', 'utf8');
+for (const text of ['findHistoricalDuplicateGroups', 'recommendedPrimaryClient', 'mergeDuplicateClients', 'saveClientMergeBackup', 'restoreClientMergeBackup', 'Registro fusionado']) {
+  if (!clientDuplicates.includes(text)) throw new Error(`Falta fusión segura de duplicados: ${text}`);
 }
 
 const agenda = readFileSync('src/agenda.ts', 'utf8');
@@ -171,4 +179,4 @@ for (const text of ['Fichas TRV', 'public=', '5493515110069', 'navigator.clipboa
   if (!source.includes(text)) throw new Error(`Falta función o texto requerido: ${text}`);
 }
 
-console.log('PropControl: búsqueda y filtros del CRM, teléfonos normalizados, duplicados bloqueados, agenda comercial, autenticación, Supabase y webhook de WhatsApp aprobados');
+console.log('PropControl: fusión segura de duplicados, búsqueda y filtros del CRM, agenda comercial, autenticación, Supabase y webhook de WhatsApp aprobados');
