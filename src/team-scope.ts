@@ -2,6 +2,7 @@ import { saveData, state } from './store.js';
 import { activeMember, addActivity, canViewAll, visibleClients, visibleConversations, visibleProperties, visibleReminders } from './team-access.js';
 
 let applying = false;
+let initialized = false;
 
 function claimUnassignedRecords(): boolean {
   const member = activeMember();
@@ -118,6 +119,8 @@ function applyScope(): void {
 const observer = new MutationObserver(() => window.requestAnimationFrame(applyScope));
 
 function initialize(): void {
+  if (initialized) return;
+  initialized = true;
   applyScope();
   const root = document.querySelector('#root');
   if (root) observer.observe(root, { childList: true, subtree: true });
