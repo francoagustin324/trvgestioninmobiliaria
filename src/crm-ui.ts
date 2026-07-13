@@ -1,5 +1,6 @@
 import { clientFromFormValues, upsertClient } from './client-editor.js';
 import { Client, Temperature } from './models.js';
+import { findDuplicateClient, formatPhone, isPlausiblePhone } from './phone-normalizer.js';
 import { saveData, state } from './store.js';
 import { escapeHtml, field, formValues, nextId } from './utils.js';
 
@@ -16,6 +17,15 @@ function selectedOption(value: string, current: string | undefined): string {
 
 function clientValue(client: Client | null, key: keyof Client): string {
   return escapeHtml(client?.[key] ?? '');
+}
+
+function showClientFormError(form: HTMLFormElement, message: string, duplicateId: number | null = null): void {
+  const error = form.querySelector<HTMLElement>('#client-form-error');
+  if (!error) return;
+  error.hidden = false;
+  error.innerHTML = duplicateId === null
+    ? `<span>${escapeHtml(message)}</span>`
+    : `<span>${escapeHtml(message)}</span><button type="button" class="secondary" data-edit-client="${duplicateId}">Abrir cliente existente</button>`;
 }
 
 export function renderHome(container: HTMLElement): void {
@@ -40,9 +50,9 @@ export function renderClients(container: HTMLElement): void {
 
   container.innerHTML = `<div class="panel-heading"><div><span class="eyebrow">CRM / Leads</span><h2>Pipeline comercial</h2></div><button type="button" data-toggle="client-form">Nuevo cliente</button></div>
   <form id="client-form" class="data-form ${state.openForms.client ? '' : 'collapsed'}">
-    <div class="form-heading"><div><span class="eyebrow">${editingClient ? 'Edición' : 'Alta'}</span><h3>${formTitle}</h3></div>${editingClient ? '<span>Modificá los datos y guardá. La actualización se respaldará online.</span>' : ''}</div>
+    <div class="form-heading"><div><span class="eyebrow">${editingClient ? 'Edición' : 'Alta'}</span><h3>${formTitle}</h3></div>${editingClient ? '<span>Modificá los datos y guardá. La actualización se respaldará online.</span>' : '<span>El teléfono se normaliza automáticamente y no se permiten duplicados.</span>'}</div>
     <input name="name" aria-label="Nombre" placeholder="Nombre" value="${clientValue(editingClient, 'name')}" required>
-    <input name="phone" aria-label="Teléfono" placeholder="Teléfono" value="${clientValue(editingClient, 'phone')}" required>
+    <input name="phone" aria-label="Teléfono" inputmode="tel" autocomplete="tel" placeholder="Teléfono" value="${clientValue(editingClient, 'phone')}" required>
     <input name="email" aria-label="Email" type="email" placeholder="Email" value="${clientValue(editingClient, 'email')}">
     <input name="interest" aria-label="Qué busca o zona" placeholder="Qué busca / zona" value="${clientValue(editingClient, 'interest')}" required>
     <select name="status" aria-label="Estado">${statuses.map((value) => selectedOption(value, editingClient?.status ?? 'Lead')).join('')}</select>
@@ -58,15 +68,31 @@ export function renderClients(container: HTMLElement): void {
     <select name="canMoveForward" aria-label="Puede avanzar">${['Sí', 'No'].map((value) => selectedOption(value, editingClient?.canMoveForward ?? 'No')).join('')}</select>
     <input name="objections" aria-label="Objeciones" placeholder="Objeciones" value="${clientValue(editingClient, 'objections')}">
     <textarea name="notes" aria-label="Observaciones" placeholder="Observaciones">${clientValue(editingClient, 'notes')}</textarea>
+    <div id="client-form-error" class="form-error" role="alert" hidden></div>
     <div class="form-actions"><button type="submit">${submitLabel}</button>${editingClient ? '<button type="button" class="secondary" data-cancel-client-edit>Cancelar</button>' : ''}</div>
   </form>
-  <div class="card-list">${state.crm.clients.map((client) => { const status = trafficLight(client); return `<article class="crm-card ${status.color}"><div><div class="card-title"><h3>${escapeHtml(client.name)}</h3><span class="traffic ${status.color}">${escapeHtml(status.label)}</span></div><p>${escapeHtml(client.interest)}</p><small>${escapeHtml(client.phone)} · ${escapeHtml(client.budget || 'Sin presupuesto')}</small><strong class="next-step">${escapeHtml(status.next)}</strong></div><div class="record-actions"><button type="button" class="secondary edit-button" data-edit-client="${client.id}" aria-label="Editar ${escapeHtml(client.name)}">Editar</button><button type="button" class="delete" data-delete="clients" data-id="${client.id}" aria-label="Eliminar ${escapeHtml(client.name)}">×</button></div></article>`; }).join('') || '<p class="empty-state">No hay clientes.</p>'}</div>`;
+  <div class="card-list">${state.crm.clients.map((client) => { const status = trafficLight(client); return `<article class="crm-card ${status.color}"><div><div class="card-title"><h3>${escapeHtml(client.name)}</h3><span class="traffic ${status.color}">${escapeHtml(status.label)}</span></div><p>${escapeHtml(client.interest)}</p><small>${escapeHtml(formatPhone(client.phone))} · ${escapeHtml(client.budget || 'Sin presupuesto')}</small><strong class="next-step">${escapeHtml(status.next)}</strong></div><div class="record-actions"><button type="button" class="secondary edit-button" data-edit-client="${client.id}" aria-label="Editar ${escapeHtml(client.name)}">Editar</button><button type="button" class="delete" data-delete="clients" data-id="${client.id}" aria-label="Eliminar ${escapeHtml(client.name)}">×</button></div></article>`; }).join('') || '<p class="empty-state">No hay clientes.</p>'}</div>`;
 
   document.querySelector<HTMLFormElement>('#client-form')?.addEventListener('submit', (event) => {
     event.preventDefault();
-    const values = formValues(event.currentTarget as HTMLFormElement);
+    const form = event.currentTarget as HTMLFormElement;
+    const values = formValues(form);
     const id = editingClient?.id ?? nextId(state.crm.clients);
-    state.crm.clients = upsertClient(state.crm.clients, clientFromFormValues(id, values));
+    const client = clientFromFormValues(id, values);
+
+    if (!isPlausiblePhone(client.phone)) {
+      showClientFormError(form, 'Ingresá un teléfono válido de entre 8 y 15 dígitos.');
+      form.querySelector<HTMLInputElement>('[name="phone"]')?.focus();
+      return;
+    }
+
+    const duplicate = findDuplicateClient(state.crm.clients, client.phone, editingClient?.id ?? null);
+    if (duplicate) {
+      showClientFormError(form, `Ese teléfono ya pertenece a ${duplicate.name}.`, duplicate.id);
+      return;
+    }
+
+    state.crm.clients = upsertClient(state.crm.clients, client);
     state.editingClientId = null;
     state.openForms.client = false;
     saveData();
