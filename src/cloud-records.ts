@@ -105,22 +105,33 @@ function row(
   };
 }
 
+function visibleToCurrentMember<T extends { assignedToId?: number }>(
+  items: T[],
+  context: Pick<CloudMembershipContext, 'currentMemberId' | 'currentRole'>,
+): T[] {
+  if (context.currentRole !== 'Corredor') return items;
+  return items.filter((item) => item.assignedToId === context.currentMemberId);
+}
+
 export function crmToCloudRecords(
   crm: CrmData,
-  context: Pick<CloudMembershipContext, 'organizationId' | 'currentMemberId'>,
+  context: Pick<CloudMembershipContext, 'organizationId' | 'currentMemberId' | 'currentRole'>,
   userId: string,
 ): CloudRecordRow[] {
   const org = context.organizationId;
   const member = context.currentMemberId;
+  const elevated = context.currentRole !== 'Corredor';
   return [
-    row(org, 'organization', 'settings', null, { ...crm.organization, id: org }, userId),
-    ...crm.clients.map((item) => row(org, 'client', item.id, assignedId(item, member), item, userId)),
-    ...crm.properties.map((item) => row(org, 'property', item.id, assignedId(item, member), item, userId)),
-    ...crm.contacts.map((item) => row(org, 'commercial_contact', item.id, assignedId(item, member), item, userId)),
-    ...crm.reminders.map((item) => row(org, 'reminder', item.id, assignedId(item, member), item, userId)),
-    ...crm.fichas.map((item) => row(org, 'ficha', item.id, assignedId(item, member), item, userId)),
-    ...crm.conversations.map((item) => row(org, 'conversation', item.id, assignedId(item, member), item, userId)),
-    ...crm.activityLog.map((item) => row(org, 'activity', item.id, Number(item.actorId || member), item, userId)),
+    ...(elevated ? [row(org, 'organization', 'settings', null, { ...crm.organization, id: org }, userId)] : []),
+    ...visibleToCurrentMember(crm.clients, context).map((item) => row(org, 'client', item.id, assignedId(item, member), item, userId)),
+    ...visibleToCurrentMember(crm.properties, context).map((item) => row(org, 'property', item.id, assignedId(item, member), item, userId)),
+    ...visibleToCurrentMember(crm.contacts, context).map((item) => row(org, 'commercial_contact', item.id, assignedId(item, member), item, userId)),
+    ...visibleToCurrentMember(crm.reminders, context).map((item) => row(org, 'reminder', item.id, assignedId(item, member), item, userId)),
+    ...visibleToCurrentMember(crm.fichas, context).map((item) => row(org, 'ficha', item.id, assignedId(item, member), item, userId)),
+    ...visibleToCurrentMember(crm.conversations, context).map((item) => row(org, 'conversation', item.id, assignedId(item, member), item, userId)),
+    ...crm.activityLog
+      .filter((item) => elevated || item.actorId === member)
+      .map((item) => row(org, 'activity', item.id, Number(item.actorId || member), item, userId)),
   ];
 }
 
