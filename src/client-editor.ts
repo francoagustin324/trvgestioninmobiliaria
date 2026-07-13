@@ -1,4 +1,5 @@
 import { Client, Temperature } from './models.js';
+import { normalizePhone } from './phone-normalizer.js';
 
 const temperatures: Temperature[] = ['Caliente', 'Tibio', 'Frío'];
 
@@ -14,7 +15,7 @@ export function clientFromFormValues(id: number, values: Record<string, string>)
   return {
     id,
     name: clean(values, 'name'),
-    phone: clean(values, 'phone'),
+    phone: normalizePhone(clean(values, 'phone')),
     email: clean(values, 'email'),
     interest: clean(values, 'interest'),
     status: clean(values, 'status'),
