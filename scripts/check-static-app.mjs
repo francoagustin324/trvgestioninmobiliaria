@@ -10,6 +10,8 @@ const requiredFiles = [
   'src/utils.ts',
   'src/store.ts',
   'src/client-editor.ts',
+  'src/agenda.ts',
+  'src/agenda-ui.ts',
   'src/public-ficha.ts',
   'src/fichas-ui.ts',
   'src/extension-import-ui.ts',
@@ -27,7 +29,9 @@ const requiredFiles = [
   'src/server/utils/sanitize.ts',
   'src/tests/whatsapp-webhook.test.ts',
   'src/tests/client-editor.test.ts',
+  'src/tests/agenda.test.ts',
   'src/styles.css',
+  'src/agenda.css',
   'src/importer.css',
   'src/propcontrol-theme.css',
   'src/cloud-auth.css',
@@ -66,7 +70,7 @@ const zip = readFileSync(zipPath);
 if (zip.readUInt32LE(0) !== 0x04034b50) throw new Error('El ZIP de la extensión no es válido');
 
 const html = readFileSync('index.html', 'utf8');
-for (const asset of ['/dist/main.js', '/src/styles.css', '/src/importer.css', '/src/propcontrol-theme.css', '/src/cloud-auth.css', '/src/mobile-premium.css', '/src/professional-polish.css', '/src/assets/propcontrol-mark.svg']) {
+for (const asset of ['/dist/main.js', '/src/styles.css', '/src/agenda.css', '/src/importer.css', '/src/propcontrol-theme.css', '/src/cloud-auth.css', '/src/mobile-premium.css', '/src/professional-polish.css', '/src/assets/propcontrol-mark.svg']) {
   if (!html.includes(asset)) throw new Error(`index.html no referencia ${asset}`);
 }
 if (!html.includes('viewport-fit=cover')) throw new Error('Falta soporte de safe area para móviles');
@@ -127,7 +131,7 @@ for (const text of ['overflow-x: clip', '.mobile-nav-trigger', '.sidebar-backdro
 }
 
 const main = readFileSync('src/main.ts', 'utf8');
-for (const text of ['data-mobile-nav-toggle', 'data-mobile-nav-close', 'setMobileNavigation', 'aria-expanded', 'data-edit-client', 'data-cancel-client-edit', 'window.confirm']) {
+for (const text of ['data-mobile-nav-toggle', 'data-mobile-nav-close', 'setMobileNavigation', 'aria-expanded', 'data-edit-client', 'data-cancel-client-edit', 'window.confirm', 'renderAgenda']) {
   if (!main.includes(text)) throw new Error(`Falta interacción principal: ${text}`);
 }
 
@@ -136,9 +140,19 @@ for (const text of ['Guardar cambios', 'Editar', 'upsertClient', 'clientFromForm
   if (!crmUi.includes(text)) throw new Error(`Falta edición de clientes: ${text}`);
 }
 
+const agenda = readFileSync('src/agenda.ts', 'utf8');
+for (const text of ['buildAgendaItems', 'groupAgendaItems', 'todayIsoDate', 'terminalClient']) {
+  if (!agenda.includes(text)) throw new Error(`Falta lógica de agenda: ${text}`);
+}
+
+const agendaUi = readFileSync('src/agenda-ui.ts', 'utf8');
+for (const text of ['Seguimientos priorizados', 'Abrir cliente', 'data-edit-client', 'data-delete="reminders"']) {
+  if (!agendaUi.includes(text)) throw new Error(`Falta interfaz de agenda: ${text}`);
+}
+
 const source = requiredFiles.filter((file) => file.endsWith('.ts') || file.endsWith('.js')).map((file) => readFileSync(file, 'utf8')).join('\n');
 for (const text of ['Fichas TRV', 'public=', '5493515110069', 'navigator.clipboard', 'window.print', '/api/import-property', '/api/extension-import', 'Crear ficha desde el link', 'Mis propiedades', 'Mejora visual suave', 'TRV_IMPORT_CURRENT', 'validateSafeUrl', 'chromium', 'PropControl', 'Ingresar / crear cuenta', '/api/whatsapp/webhook']) {
   if (!source.includes(text)) throw new Error(`Falta función o texto requerido: ${text}`);
 }
 
-console.log('PropControl: TypeScript, edición de clientes, responsive mobile-first, autenticación, Supabase y webhook de WhatsApp aprobados');
+console.log('PropControl: TypeScript, agenda comercial, edición de clientes, responsive mobile-first, autenticación, Supabase y webhook de WhatsApp aprobados');
