@@ -31,6 +31,7 @@ export interface OrganizationSettings {
 
 export interface TeamMember {
   id: number;
+  userId?: string;
   name: string;
   email: string;
   phone?: string;
@@ -70,6 +71,8 @@ export interface CommercialContact {
   notes?: string;
   lastContact?: string;
   createdAt: string;
+  assignedToId?: number;
+  createdById?: number;
 }
 
 export interface Property {
@@ -134,6 +137,7 @@ export interface FichaPublica {
 export interface Ficha extends FichaPublica {
   id: number; mode: FichaMode; sourcePropertyId?: number; internalOriginalLink?: string;
   source?: string; internalNotes?: string; createdAt: string;
+  assignedToId?: number; createdById?: number;
 }
 
 export interface CrmData {
@@ -191,6 +195,8 @@ export const initialData: CrmData = {
     notes: 'Contacto de ejemplo para organizar productos compartidos.',
     lastContact: '2026-07-11',
     createdAt: '2026-07-11T15:00:00.000Z',
+    assignedToId: 1,
+    createdById: 1,
   }],
   properties: [{
     id: 1, title: 'Departamento en General Paz', address: 'General Paz, Córdoba', type: 'Departamento',
