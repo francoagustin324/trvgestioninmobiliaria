@@ -10,6 +10,7 @@ const requiredFiles = [
   'src/utils.ts',
   'src/store.ts',
   'src/client-editor.ts',
+  'src/phone-normalizer.ts',
   'src/agenda.ts',
   'src/agenda-ui.ts',
   'src/public-ficha.ts',
@@ -29,8 +30,10 @@ const requiredFiles = [
   'src/server/utils/sanitize.ts',
   'src/tests/whatsapp-webhook.test.ts',
   'src/tests/client-editor.test.ts',
+  'src/tests/phone-normalizer.test.ts',
   'src/tests/agenda.test.ts',
   'src/styles.css',
+  'src/crm-safety.css',
   'src/agenda.css',
   'src/importer.css',
   'src/propcontrol-theme.css',
@@ -70,7 +73,7 @@ const zip = readFileSync(zipPath);
 if (zip.readUInt32LE(0) !== 0x04034b50) throw new Error('El ZIP de la extensión no es válido');
 
 const html = readFileSync('index.html', 'utf8');
-for (const asset of ['/dist/main.js', '/src/styles.css', '/src/agenda.css', '/src/importer.css', '/src/propcontrol-theme.css', '/src/cloud-auth.css', '/src/mobile-premium.css', '/src/professional-polish.css', '/src/assets/propcontrol-mark.svg']) {
+for (const asset of ['/dist/main.js', '/src/styles.css', '/src/crm-safety.css', '/src/agenda.css', '/src/importer.css', '/src/propcontrol-theme.css', '/src/cloud-auth.css', '/src/mobile-premium.css', '/src/professional-polish.css', '/src/assets/propcontrol-mark.svg']) {
   if (!html.includes(asset)) throw new Error(`index.html no referencia ${asset}`);
 }
 if (!html.includes('viewport-fit=cover')) throw new Error('Falta soporte de safe area para móviles');
@@ -136,8 +139,13 @@ for (const text of ['data-mobile-nav-toggle', 'data-mobile-nav-close', 'setMobil
 }
 
 const crmUi = readFileSync('src/crm-ui.ts', 'utf8');
-for (const text of ['Guardar cambios', 'Editar', 'upsertClient', 'clientFromFormValues', 'record-actions']) {
-  if (!crmUi.includes(text)) throw new Error(`Falta edición de clientes: ${text}`);
+for (const text of ['Guardar cambios', 'Editar', 'upsertClient', 'clientFromFormValues', 'record-actions', 'findDuplicateClient', 'client-form-error', 'Abrir cliente existente']) {
+  if (!crmUi.includes(text)) throw new Error(`Falta protección del CRM: ${text}`);
+}
+
+const phoneNormalizer = readFileSync('src/phone-normalizer.ts', 'utf8');
+for (const text of ['normalizePhone', 'phoneIdentity', 'findDuplicateClient', 'isPlausiblePhone', 'argentinaNationalNumber']) {
+  if (!phoneNormalizer.includes(text)) throw new Error(`Falta normalización telefónica: ${text}`);
 }
 
 const agenda = readFileSync('src/agenda.ts', 'utf8');
@@ -155,4 +163,4 @@ for (const text of ['Fichas TRV', 'public=', '5493515110069', 'navigator.clipboa
   if (!source.includes(text)) throw new Error(`Falta función o texto requerido: ${text}`);
 }
 
-console.log('PropControl: TypeScript, agenda comercial, edición de clientes, responsive mobile-first, autenticación, Supabase y webhook de WhatsApp aprobados');
+console.log('PropControl: TypeScript, teléfonos normalizados, duplicados bloqueados, agenda comercial, autenticación, Supabase y webhook de WhatsApp aprobados');
