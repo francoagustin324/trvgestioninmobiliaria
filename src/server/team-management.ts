@@ -77,12 +77,17 @@ async function responsePayload(response: Response): Promise<Record<string, unkno
   return payload && typeof payload === 'object' ? payload as Record<string, unknown> | unknown[] : {};
 }
 
-function serviceHeaders(options: TeamManagementOptions): Record<string, string> {
-  return {
-    apikey: options.secretKey,
-    Authorization: `Bearer ${options.secretKey}`,
+export function supabaseServerHeaders(secretKey: string): Record<string, string> {
+  const headers: Record<string, string> = {
+    apikey: secretKey,
     'Content-Type': 'application/json',
   };
+  if (!secretKey.startsWith('sb_secret_')) headers.Authorization = `Bearer ${secretKey}`;
+  return headers;
+}
+
+function serviceHeaders(options: TeamManagementOptions): Record<string, string> {
+  return supabaseServerHeaders(options.secretKey);
 }
 
 function bearerToken(request: IncomingMessage): string {
