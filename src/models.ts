@@ -6,11 +6,12 @@ export const FICHA_LEGAL = AGENCY_BRAND.publicLegal;
 export const LOGO_PATH = AGENCY_BRAND.logo;
 
 export type Temperature = 'Caliente' | 'Tibio' | 'Frío';
-export type ModuleId = 'inicio' | 'crm' | 'propiedades' | 'fichas' | 'whatsapp' | 'agenda' | 'reportes' | 'configuracion';
+export type ModuleId = 'inicio' | 'crm' | 'propiedades' | 'red' | 'fichas' | 'whatsapp' | 'agenda' | 'reportes' | 'configuracion';
 export type FichaMode = 'manual' | 'property' | 'external';
 export type PhotoEnhancement = 'none' | 'soft';
 export type ConversationMode = 'IA supervisada' | 'Humano' | 'Pausada';
 export type MessageSender = 'Cliente' | 'IA' | 'Humano';
+export type CommercialContactType = 'Colega / Inmobiliaria' | 'Constructor / Desarrollista' | 'Propietario';
 
 export interface Client {
   id: number; name: string; phone: string; email?: string; interest: string; status: string;
@@ -19,10 +20,25 @@ export interface Client {
   knowsArea?: string; canMoveForward?: string; objections?: string; notes?: string;
 }
 
+export interface CommercialContact {
+  id: number;
+  type: CommercialContactType;
+  name: string;
+  company?: string;
+  phone: string;
+  email?: string;
+  zones?: string;
+  tags?: string;
+  notes?: string;
+  lastContact?: string;
+  createdAt: string;
+}
+
 export interface Property {
   id: number; title: string; address: string; type: string; operation: string;
   price: number; owner: string; status: string; bedrooms?: number; bathrooms?: number;
   paymentMethod?: string; features?: string; notes?: string;
+  sourceContactId?: number; sharedAt?: string; sourceLink?: string;
 }
 
 export interface Reminder {
@@ -64,14 +80,16 @@ export interface Ficha extends FichaPublica {
 export interface CrmData {
   clients: Client[];
   properties: Property[];
+  contacts: CommercialContact[];
   reminders: Reminder[];
   fichas: Ficha[];
   conversations: WhatsAppConversation[];
 }
 
 export const modules: Array<[ModuleId, string]> = [
-  ['inicio', 'Inicio'], ['crm', 'CRM / Leads'], ['propiedades', 'Propiedades'], ['fichas', 'Fichas TRV'],
-  ['whatsapp', 'WhatsApp + IA'], ['agenda', 'Agenda / Seguimiento'], ['reportes', 'Reportes'], ['configuracion', 'Configuración'],
+  ['inicio', 'Inicio'], ['crm', 'CRM / Leads'], ['propiedades', 'Propiedades'], ['red', 'Red comercial'],
+  ['fichas', 'Fichas TRV'], ['whatsapp', 'WhatsApp + IA'], ['agenda', 'Agenda / Seguimiento'],
+  ['reportes', 'Reportes'], ['configuracion', 'Configuración'],
 ];
 
 export const initialData: CrmData = {
@@ -82,10 +100,24 @@ export const initialData: CrmData = {
     paymentMethod: 'Contado', purchaseTimeframe: '0-3 meses', purpose: 'Vivir', knowsArea: 'Sí',
     canMoveForward: 'Sí', objections: 'Busca balcón y buena luz natural', notes: 'Revisar opciones antes de coordinar visita.',
   }],
+  contacts: [{
+    id: 1,
+    type: 'Colega / Inmobiliaria',
+    name: 'Martín Suárez',
+    company: 'Inmobiliaria Centro',
+    phone: '5493515550198',
+    email: '',
+    zones: 'General Paz, Cofico',
+    tags: 'Departamentos, comparte comisión',
+    notes: 'Contacto de ejemplo para organizar productos compartidos.',
+    lastContact: '2026-07-11',
+    createdAt: '2026-07-11T15:00:00.000Z',
+  }],
   properties: [{
     id: 1, title: 'Departamento en General Paz', address: 'General Paz, Córdoba', type: 'Departamento',
     operation: 'Venta', price: 85000, owner: 'Propietario', status: 'Activa', bedrooms: 2, bathrooms: 1,
     paymentMethod: 'Contado', features: 'Balcón, buena luz natural', notes: '',
+    sourceContactId: 1, sharedAt: '2026-07-11', sourceLink: '',
   }],
   reminders: [{ id: 1, date: '2026-07-13', title: 'Llamar a Lucía', related: 'Búsqueda Nueva Córdoba', priority: 'Alta' }],
   fichas: [],

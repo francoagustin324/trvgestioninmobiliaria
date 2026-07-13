@@ -15,6 +15,9 @@ const requiredFiles = [
   'src/client-duplicates.ts',
   'src/property-matching.ts',
   'src/property-matching-ui.ts',
+  'src/commercial-network.ts',
+  'src/commercial-network-ui.ts',
+  'src/property-network-ui.ts',
   'src/whatsapp-assistant.ts',
   'src/whatsapp-ui.ts',
   'src/agenda.ts',
@@ -41,6 +44,7 @@ const requiredFiles = [
   'src/tests/client-list.test.ts',
   'src/tests/client-duplicates.test.ts',
   'src/tests/property-matching.test.ts',
+  'src/tests/commercial-network.test.ts',
   'src/tests/agenda.test.ts',
   'src/styles.css',
   'src/crm-safety.css',
@@ -48,6 +52,7 @@ const requiredFiles = [
   'src/client-duplicates.css',
   'src/property-matching.css',
   'src/whatsapp-ai.css',
+  'src/commercial-network.css',
   'src/agenda.css',
   'src/importer.css',
   'src/propcontrol-theme.css',
@@ -87,7 +92,7 @@ const zip = readFileSync(zipPath);
 if (zip.readUInt32LE(0) !== 0x04034b50) throw new Error('El ZIP de la extensión no es válido');
 
 const html = readFileSync('index.html', 'utf8');
-for (const asset of ['/dist/main.js', '/src/styles.css', '/src/crm-safety.css', '/src/client-filters.css', '/src/client-duplicates.css', '/src/property-matching.css', '/src/whatsapp-ai.css', '/src/agenda.css', '/src/importer.css', '/src/propcontrol-theme.css', '/src/cloud-auth.css', '/src/mobile-premium.css', '/src/professional-polish.css', '/src/assets/propcontrol-mark.svg']) {
+for (const asset of ['/dist/main.js', '/src/styles.css', '/src/crm-safety.css', '/src/client-filters.css', '/src/client-duplicates.css', '/src/property-matching.css', '/src/whatsapp-ai.css', '/src/commercial-network.css', '/src/agenda.css', '/src/importer.css', '/src/propcontrol-theme.css', '/src/cloud-auth.css', '/src/mobile-premium.css', '/src/professional-polish.css', '/src/assets/propcontrol-mark.svg']) {
   if (!html.includes(asset)) throw new Error(`index.html no referencia ${asset}`);
 }
 if (!html.includes('viewport-fit=cover')) throw new Error('Falta soporte de safe area para móviles');
@@ -148,8 +153,13 @@ for (const text of ['overflow-x: clip', '.mobile-nav-trigger', '.sidebar-backdro
 }
 
 const main = readFileSync('src/main.ts', 'utf8');
-for (const text of ['data-mobile-nav-toggle', 'data-mobile-nav-close', 'setMobileNavigation', 'aria-expanded', 'data-edit-client', 'data-cancel-client-edit', 'window.confirm', 'renderAgenda', 'renderWhatsApp']) {
+for (const text of ['data-mobile-nav-toggle', 'data-mobile-nav-close', 'setMobileNavigation', 'aria-expanded', 'data-edit-client', 'data-cancel-client-edit', 'window.confirm', 'renderAgenda', 'renderWhatsApp', 'renderCommercialNetwork', 'data-open-contact', 'unlinkCommercialContact']) {
   if (!main.includes(text)) throw new Error(`Falta interacción principal: ${text}`);
+}
+
+const models = readFileSync('src/models.ts', 'utf8');
+for (const text of ['CommercialContactType', 'CommercialContact', 'contacts: CommercialContact[]', "['red', 'Red comercial']", 'sourceContactId']) {
+  if (!models.includes(text)) throw new Error(`Falta modelo de red comercial: ${text}`);
 }
 
 const crmUi = readFileSync('src/crm-ui.ts', 'utf8');
@@ -182,6 +192,21 @@ for (const text of ['Propiedades sugeridas', 'Compradores compatibles', 'revisi�
   if (!propertyMatchingUi.includes(text)) throw new Error(`Falta interfaz de matching comercial: ${text}`);
 }
 
+const commercialNetwork = readFileSync('src/commercial-network.ts', 'utf8');
+for (const text of ['filterCommercialContacts', 'linkedPropertiesForContact', 'findDuplicateCommercialContact', 'unlinkCommercialContact', 'sourceContactId']) {
+  if (!commercialNetwork.includes(text)) throw new Error(`Falta lógica de red comercial: ${text}`);
+}
+
+const commercialNetworkUi = readFileSync('src/commercial-network-ui.ts', 'utf8');
+for (const text of ['Red comercial', 'Abrir WhatsApp', 'Propiedades compartidas', 'data-open-contact', 'data-edit-contact', 'También busca dentro de las propiedades vinculadas']) {
+  if (!commercialNetworkUi.includes(text)) throw new Error(`Falta interfaz de red comercial: ${text}`);
+}
+
+const propertyNetworkUi = readFileSync('src/property-network-ui.ts', 'utf8');
+for (const text of ['Quién compartió el producto', 'data-save-property-source', 'sourceContactId', 'Guardar origen', 'Abrir fuente']) {
+  if (!propertyNetworkUi.includes(text)) throw new Error(`Falta vínculo entre propiedad y contacto: ${text}`);
+}
+
 const whatsappAssistant = readFileSync('src/whatsapp-assistant.ts', 'utf8');
 for (const text of ['qualificationState', 'suggestAssistantReply', 'requiresHumanHandoff', 'applyQualificationFromMessage', 'addFollowUpPlan', 'antes de coordinar', 'Franco revisa la disponibilidad']) {
   if (!whatsappAssistant.includes(text)) throw new Error(`Falta lógica de IA supervisada: ${text}`);
@@ -203,8 +228,8 @@ for (const text of ['Seguimientos priorizados', 'Abrir cliente', 'data-edit-clie
 }
 
 const source = requiredFiles.filter((file) => file.endsWith('.ts') || file.endsWith('.js')).map((file) => readFileSync(file, 'utf8')).join('\n');
-for (const text of ['Fichas TRV', 'public=', '5493515110069', 'navigator.clipboard', 'window.print', '/api/import-property', '/api/extension-import', 'Crear ficha desde el link', 'Mis propiedades', 'Mejora visual suave', 'TRV_IMPORT_CURRENT', 'validateSafeUrl', 'chromium', 'PropControl', 'Ingresar / crear cuenta', '/api/whatsapp/webhook']) {
+for (const text of ['Fichas TRV', 'public=', '5493515110069', 'navigator.clipboard', 'window.print', '/api/import-property', '/api/extension-import', 'Crear ficha desde el link', 'Mis propiedades', 'Mejora visual suave', 'TRV_IMPORT_CURRENT', 'validateSafeUrl', 'chromium', 'PropControl', 'Ingresar / crear cuenta', '/api/whatsapp/webhook', 'Red comercial']) {
   if (!source.includes(text)) throw new Error(`Falta función o texto requerido: ${text}`);
 }
 
-console.log('PropControl: bandeja WhatsApp supervisada, calificación, seguimiento, matching, duplicados, agenda, Supabase y webhook aprobados');
+console.log('PropControl: red comercial y origen de propiedades, bandeja WhatsApp, matching, duplicados, agenda, Supabase y webhook aprobados');
