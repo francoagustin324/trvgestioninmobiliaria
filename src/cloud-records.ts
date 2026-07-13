@@ -83,6 +83,49 @@ export function membershipContext(rows: CloudMembershipRow[], userId: string): C
   };
 }
 
+function normalizedEmail(value: string | undefined): string {
+  return String(value ?? '').trim().toLowerCase();
+}
+
+export function reconcileCrmAssignments(crm: CrmData, context: CloudMembershipContext): CrmData {
+  const validMemberIds = new Set(context.members.map((member) => member.id));
+  const legacyToCloud = new Map<number, number>();
+
+  crm.teamMembers.forEach((legacyMember) => {
+    const email = normalizedEmail(legacyMember.email);
+    const match = context.members.find((member) => (
+      Boolean(legacyMember.userId && member.userId === legacyMember.userId)
+      || Boolean(email && normalizedEmail(member.email) === email)
+    ));
+    if (match) legacyToCloud.set(legacyMember.id, match.id);
+    else if (legacyMember.role === context.currentRole) legacyToCloud.set(legacyMember.id, context.currentMemberId);
+  });
+
+  const memberId = (value: number | undefined): number => {
+    if (value !== undefined && validMemberIds.has(value)) return value;
+    if (value !== undefined && legacyToCloud.has(value)) return legacyToCloud.get(value)!;
+    return context.currentMemberId;
+  };
+  const assigned = <T extends { assignedToId?: number; createdById?: number }>(item: T): T => ({
+    ...item,
+    assignedToId: memberId(item.assignedToId),
+    createdById: memberId(item.createdById),
+  });
+
+  return {
+    ...crm,
+    organization: { ...crm.organization, id: context.organizationId },
+    teamMembers: context.members,
+    clients: crm.clients.map(assigned),
+    properties: crm.properties.map(assigned),
+    contacts: crm.contacts.map(assigned),
+    reminders: crm.reminders.map(assigned),
+    fichas: crm.fichas.map(assigned),
+    conversations: crm.conversations.map(assigned),
+    activityLog: crm.activityLog.map((item) => ({ ...item, actorId: memberId(item.actorId) })),
+  };
+}
+
 function assignedId(value: { assignedToId?: number; createdById?: number }, fallback: number): number {
   return Number(value.assignedToId ?? value.createdById ?? fallback);
 }
@@ -119,21 +162,22 @@ function visibleToCurrentMember<T extends { assignedToId?: number }>(
 
 export function crmToCloudRecords(
   crm: CrmData,
-  context: Pick<CloudMembershipContext, 'organizationId' | 'currentMemberId' | 'currentRole'>,
+  context: CloudMembershipContext,
   userId: string,
 ): CloudRecordRow[] {
+  const reconciled = reconcileCrmAssignments(crm, context);
   const org = context.organizationId;
   const member = context.currentMemberId;
   const elevated = context.currentRole !== 'Corredor';
   return [
-    ...(elevated ? [row(org, 'organization', 'settings', null, { ...crm.organization, id: org }, userId)] : []),
-    ...visibleToCurrentMember(crm.clients, context).map((item) => row(org, 'client', item.id, assignedId(item, member), item, userId)),
-    ...visibleToCurrentMember(crm.properties, context).map((item) => row(org, 'property', item.id, assignedId(item, member), item, userId)),
-    ...visibleToCurrentMember(crm.contacts, context).map((item) => row(org, 'commercial_contact', item.id, assignedId(item, member), item, userId)),
-    ...visibleToCurrentMember(crm.reminders, context).map((item) => row(org, 'reminder', item.id, assignedId(item, member), item, userId)),
-    ...visibleToCurrentMember(crm.fichas, context).map((item) => row(org, 'ficha', item.id, assignedId(item, member), item, userId)),
-    ...visibleToCurrentMember(crm.conversations, context).map((item) => row(org, 'conversation', item.id, assignedId(item, member), item, userId)),
-    ...crm.activityLog
+    ...(elevated ? [row(org, 'organization', 'settings', null, reconciled.organization, userId)] : []),
+    ...visibleToCurrentMember(reconciled.clients, context).map((item) => row(org, 'client', item.id, assignedId(item, member), item, userId)),
+    ...visibleToCurrentMember(reconciled.properties, context).map((item) => row(org, 'property', item.id, assignedId(item, member), item, userId)),
+    ...visibleToCurrentMember(reconciled.contacts, context).map((item) => row(org, 'commercial_contact', item.id, assignedId(item, member), item, userId)),
+    ...visibleToCurrentMember(reconciled.reminders, context).map((item) => row(org, 'reminder', item.id, assignedId(item, member), item, userId)),
+    ...visibleToCurrentMember(reconciled.fichas, context).map((item) => row(org, 'ficha', item.id, assignedId(item, member), item, userId)),
+    ...visibleToCurrentMember(reconciled.conversations, context).map((item) => row(org, 'conversation', item.id, assignedId(item, member), item, userId)),
+    ...reconciled.activityLog
       .filter((item) => elevated || item.actorId === member)
       .map((item) => row(org, 'activity', item.id, Number(item.actorId || member), item, userId)),
   ];
@@ -164,13 +208,7 @@ export function cloudRecordsToCrm(
   fallback: CrmData,
 ): CrmData {
   const canUseFallback = context.currentRole !== 'Corredor' && rows.length === 0;
-  if (canUseFallback) {
-    return {
-      ...fallback,
-      organization: { ...fallback.organization, id: context.organizationId },
-      teamMembers: context.members,
-    };
-  }
+  if (canUseFallback) return reconcileCrmAssignments(fallback, context);
   return {
     organization: organizationFromRows(rows, fallback.organization, context.organizationId),
     teamMembers: context.members,
