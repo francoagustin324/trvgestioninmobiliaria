@@ -149,6 +149,13 @@ const activeGroups: PhraseGroup[] = [{
   reason: 'Confirmó explícitamente que continúa buscando.',
 }];
 
+const negativeActiveFragments = [
+  'ya no seguimos buscando', 'no seguimos buscando', 'no sigo buscando',
+  'no estoy buscando', 'ya no estoy buscando', 'no estamos buscando',
+  'no quiero seguir viendo', 'no queremos seguir viendo',
+  'no quiero comprar', 'no queremos comprar', 'no necesito comprar', 'no necesitamos comprar',
+] as const;
+
 export function normalizeAuditText(value: unknown): string {
   return String(value ?? '')
     .normalize('NFD')
@@ -161,6 +168,10 @@ export function normalizeAuditText(value: unknown): string {
 
 function includesPhrase(normalized: string, phrase: string): boolean {
   return ` ${normalized} `.includes(` ${phrase} `);
+}
+
+function removePhrase(normalized: string, phrase: string): string {
+  return ` ${normalized} `.replaceAll(` ${phrase} `, ' ').replace(/\s+/g, ' ').trim();
 }
 
 function findGroupSignal(
@@ -189,20 +200,19 @@ function commercialSignalFromText(normalized: string): IntentSignal | null {
 }
 
 function activeSignal(normalized: string): IntentSignal | null {
-  const grouped = findGroupSignal(normalized, activeGroups, 'Sigue buscando', 93);
+  const cleaned = negativeActiveFragments.reduce((text, phrase) => removePhrase(text, phrase), normalized);
+  const grouped = findGroupSignal(cleaned, activeGroups, 'Sigue buscando', 93);
   if (grouped) return grouped;
 
-  const negativeSearch = ['no estoy buscando', 'ya no estoy buscando', 'no estamos buscando'].some((phrase) => includesPhrase(normalized, phrase));
-  if (!negativeSearch && (includesPhrase(normalized, 'estoy buscando') || includesPhrase(normalized, 'estamos buscando'))) {
+  if (includesPhrase(cleaned, 'estoy buscando') || includesPhrase(cleaned, 'estamos buscando')) {
     return { status: 'Sigue buscando', confidence: 93, reason: 'Expresó una búsqueda activa.' };
   }
 
-  const negativePurchase = ['no quiero comprar', 'no queremos comprar', 'no necesito comprar', 'no necesitamos comprar'].some((phrase) => includesPhrase(normalized, phrase));
-  if (!negativePurchase && ['quiero comprar', 'queremos comprar', 'necesito comprar', 'necesitamos comprar'].some((phrase) => includesPhrase(normalized, phrase))) {
+  if (['quiero comprar', 'queremos comprar', 'necesito comprar', 'necesitamos comprar'].some((phrase) => includesPhrase(cleaned, phrase))) {
     return { status: 'Sigue buscando', confidence: 93, reason: 'Expresó intención activa de compra.' };
   }
 
-  if (/(^| )(busco|buscamos) (un|una|algo|casa|departamento|depto|propiedad|terreno|duplex)( |$)/.test(normalized)) {
+  if (/(^| )(busco|buscamos) (un|una|algo|casa|departamento|depto|propiedad|terreno|duplex)( |$)/.test(cleaned)) {
     return { status: 'Sigue buscando', confidence: 93, reason: 'Describió una búsqueda inmobiliaria activa.' };
   }
   return null;
