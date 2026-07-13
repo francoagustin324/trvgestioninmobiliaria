@@ -1,5 +1,5 @@
 import { saveData, state } from './store.js';
-import { escapeHtml, field, formValues, nextId } from './utils.js';
+import { escapeHtml, field, formValues, nextId, safePhotoUrl } from './utils.js';
 
 function contactOptions(selectedId: number | undefined): string {
   const options = state.crm.contacts
@@ -48,7 +48,8 @@ function appendSourceFields(form: HTMLFormElement): void {
     const expectedId = nextId(state.crm.properties);
     const sourceContactId = Number(field(values, 'sourceContactId')) || undefined;
     const sharedAt = field(values, 'sharedAt') || undefined;
-    const sourceLink = field(values, 'sourceLink') || undefined;
+    const rawSourceLink = field(values, 'sourceLink');
+    const sourceLink = rawSourceLink ? safePhotoUrl(rawSourceLink) ?? undefined : undefined;
     queueMicrotask(() => {
       const property = state.crm.properties.find((item) => item.id === expectedId);
       if (!property) return;
@@ -81,7 +82,8 @@ function bindSourceActions(container: HTMLElement): void {
       if (!property || !editor) return;
       property.sourceContactId = Number(editor.querySelector<HTMLSelectElement>('[data-property-source-contact]')?.value) || undefined;
       property.sharedAt = editor.querySelector<HTMLInputElement>('[data-property-source-date]')?.value || undefined;
-      property.sourceLink = editor.querySelector<HTMLInputElement>('[data-property-source-link]')?.value.trim() || undefined;
+      const rawSourceLink = editor.querySelector<HTMLInputElement>('[data-property-source-link]')?.value.trim() || '';
+      property.sourceLink = rawSourceLink ? safePhotoUrl(rawSourceLink) ?? undefined : undefined;
       saveData();
       document.dispatchEvent(new CustomEvent('trv-render'));
     });
