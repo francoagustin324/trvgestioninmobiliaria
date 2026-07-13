@@ -1,5 +1,10 @@
 import type { AssignmentEntity, TeamMember, TeamRole } from './models.js';
-import { saveData, setActiveMemberId, state } from './store.js';
+import {
+  getCloudSession,
+  inviteTeamMember,
+  updateTeamMemberAccess,
+} from './cloud-api.js';
+import { saveData, state } from './store.js';
 import {
   activeMember,
   activeSeatCount,
@@ -9,23 +14,27 @@ import {
   memberName,
   workload,
 } from './team-access.js';
-import { escapeHtml, field, formValues, nextId } from './utils.js';
+import { escapeHtml, field, formValues } from './utils.js';
 
 const roles: TeamRole[] = ['Dueño', 'Administrador', 'Corredor'];
 
 function roleDescription(role: TeamRole): string {
-  if (role === 'Dueño') return 'Control total, métricas, configuración, equipo y toda la operación.';
-  if (role === 'Administrador') return 'Organiza usuarios, asignaciones y operación, sin reemplazar al dueño.';
-  return 'Trabaja únicamente los clientes, propiedades, conversaciones y tareas que tenga asignados.';
+  if (role === 'Dueño') return 'Control total, configuración, equipo y toda la operación.';
+  if (role === 'Administrador') return 'Organiza usuarios y asignaciones. No puede modificar al dueño.';
+  return 'Solo recibe desde Supabase los registros que tiene asignados.';
 }
 
 function seatLabel(): string {
   const limit = state.crm.organization.seatLimit;
-  return limit === null ? `${activeSeatCount()} usuarios · sin límite durante el piloto` : `${activeSeatCount()} de ${limit} usuarios`;
+  return limit === null ? `${activeSeatCount()} usuarios · piloto sin límite` : `${activeSeatCount()} de ${limit} usuarios`;
 }
 
 function memberStatusClass(member: TeamMember): string {
   return member.status.toLowerCase().replace(/[^a-z0-9]+/g, '-');
+}
+
+function cloudTeamReady(): boolean {
+  return Boolean(getCloudSession());
 }
 
 function memberOptions(selectedId: number | undefined): string {
@@ -37,15 +46,20 @@ function memberOptions(selectedId: number | undefined): string {
 
 function memberCard(member: TeamMember): string {
   const load = workload(member.id);
-  const manageable = canManageTeam() && member.role !== 'Dueño';
+  const current = activeMember();
+  const manageable = cloudTeamReady()
+    && canManageTeam()
+    && member.role !== 'Dueño'
+    && (current.role === 'Dueño' || member.role === 'Corredor');
+  const roleOptions = roles.filter((role) => role !== 'Dueño');
   return `<article class="team-member-card ${memberStatusClass(member)}">
     <div class="team-member-heading">
       <div class="team-avatar" aria-hidden="true">${escapeHtml(member.name.slice(0, 2).toUpperCase())}</div>
-      <div><h3>${escapeHtml(member.name)}</h3><p>${escapeHtml(member.email || 'Sin correo asociado')}</p></div>
+      <div><h3>${escapeHtml(member.name)}</h3><p>${escapeHtml(member.email || 'Correo pendiente')}</p></div>
       <span class="team-status">${escapeHtml(member.status)}</span>
     </div>
     <label>Rol
-      <select data-team-role="${member.id}"${manageable ? '' : ' disabled'}>${roles.map((role) => `<option${role === member.role ? ' selected' : ''}>${role}</option>`).join('')}</select>
+      <select data-team-role="${member.id}"${manageable ? '' : ' disabled'}>${(member.role === 'Dueño' ? ['Dueño'] : roleOptions).map((role) => `<option${role === member.role ? ' selected' : ''}>${role}</option>`).join('')}</select>
     </label>
     <p class="role-description">${escapeHtml(roleDescription(member.role))}</p>
     <div class="team-workload">
@@ -53,7 +67,7 @@ function memberCard(member: TeamMember): string {
       <span><b>${load.conversations}</b> conversaciones</span><span><b>${load.tasks}</b> tareas</span>
       <span><b>${load.unread}</b> sin leer</span>
     </div>
-    ${manageable ? `<button type="button" class="secondary" data-team-status="${member.id}">${member.status === 'Suspendido' ? 'Reactivar' : 'Suspender acceso'}</button>` : ''}
+    ${manageable ? `<button type="button" class="secondary" data-team-status="${member.id}">${member.status === 'Suspendido' ? 'Reactivar acceso' : 'Suspender acceso'}</button>` : ''}
   </article>`;
 }
 
@@ -83,51 +97,64 @@ function assignmentTableHtml(): string {
   return `<div class="assignment-table">${rows.map((row) => `<article>
     <span class="assignment-type">${escapeHtml(row.type)}</span>
     <div><strong>${escapeHtml(row.title)}</strong><small>${escapeHtml(row.detail)}</small></div>
-    <label>Responsable<select data-assignment-type="${row.type}" data-assignment-id="${row.id}"${canManageTeam() ? '' : ' disabled'}>${memberOptions(row.assignedToId)}</select></label>
+    <label>Responsable<select data-assignment-type="${row.type}" data-assignment-id="${row.id}"${canManageTeam() && cloudTeamReady() ? '' : ' disabled'}>${memberOptions(row.assignedToId)}</select></label>
   </article>`).join('')}</div>`;
 }
 
 function activityHtml(): string {
   const entries = state.crm.activityLog.slice(0, 20);
-  if (!entries.length) return '<p class="empty-state">Las reasignaciones y cambios del equipo aparecerán acá.</p>';
+  if (!entries.length) return '<p class="empty-state">Las reasignaciones y cambios aparecerán acá.</p>';
   return `<div class="activity-list">${entries.map((entry) => `<article><time>${escapeHtml(new Intl.DateTimeFormat('es-AR', { dateStyle: 'short', timeStyle: 'short' }).format(new Date(entry.createdAt)))}</time><div><strong>${escapeHtml(entry.action)}</strong><p>${escapeHtml(entry.detail)}</p><small>Por ${escapeHtml(memberName(entry.actorId))}</small></div></article>`).join('')}</div>`;
 }
 
 function teamFormHtml(): string {
   if (!canManageTeam()) return '';
+  const ready = cloudTeamReady();
   return `<form id="team-member-form" class="data-form ${state.openForms.member ? '' : 'collapsed'}">
-    <div class="form-heading"><div><span class="eyebrow">Nuevo integrante</span><h3>Preparar acceso</h3></div><span>Esto crea el perfil y las asignaciones. El envío real de invitaciones se conectará con Supabase.</span></div>
+    <div class="form-heading"><div><span class="eyebrow">Nuevo integrante</span><h3>Enviar invitación segura</h3></div><span>${ready ? 'Supabase enviará el correo y asociará el usuario a esta inmobiliaria.' : 'Primero ingresá con la cuenta del dueño o administrador.'}</span></div>
     <input name="name" placeholder="Nombre y apellido" required>
     <input name="email" type="email" placeholder="Correo de acceso" required>
     <input name="phone" inputmode="tel" placeholder="Teléfono opcional">
-    <select name="role">${roles.filter((role) => role !== 'Dueño').map((role) => `<option>${role}</option>`).join('')}</select>
-    <button type="submit"${hasSeatAvailable() ? '' : ' disabled'}>${hasSeatAvailable() ? 'Crear perfil pendiente' : 'Cupo completo'}</button>
+    <select name="role"><option>Corredor</option>${activeMember().role === 'Dueño' ? '<option>Administrador</option>' : ''}</select>
+    <button type="submit"${ready && hasSeatAvailable() ? '' : ' disabled'}>${!ready ? 'Ingresá para invitar' : hasSeatAvailable() ? 'Enviar invitación' : 'Cupo completo'}</button>
+    <small data-team-feedback></small>
   </form>`;
 }
 
 export function renderTeamAccount(): void {
   const container = document.querySelector<HTMLElement>('#team-account');
   if (!container) return;
+  const session = getCloudSession();
   const member = activeMember();
-  container.innerHTML = `<label class="team-view-switch"><span>Vista de usuario</span><select data-team-view>${state.crm.teamMembers.filter((item) => item.status !== 'Suspendido').map((item) => `<option value="${item.id}"${item.id === member.id ? ' selected' : ''}>${escapeHtml(item.name)} · ${escapeHtml(item.role)}</option>`).join('')}</select></label>`;
-  container.querySelector<HTMLSelectElement>('[data-team-view]')?.addEventListener('change', (event) => {
-    setActiveMemberId(Number((event.currentTarget as HTMLSelectElement).value));
-    document.dispatchEvent(new CustomEvent('trv-render'));
-  });
+  container.innerHTML = session
+    ? `<div class="team-view-switch"><span>Usuario autenticado</span><strong>${escapeHtml(member.name)}</strong><small>${escapeHtml(member.role)}</small></div>`
+    : '<div class="team-view-switch"><span>Modo local</span><strong>Sin sesión segura</strong></div>';
 }
 
 export function renderTeam(container: HTMLElement): void {
-  const member = activeMember();
   const limit = state.crm.organization.seatLimit;
-  container.innerHTML = `<div class="panel-heading"><div><span class="eyebrow">Organización</span><h2>Equipo y responsabilidades</h2><p class="panel-description">El número de corredores no está fijado: depende del cupo contratado por cada inmobiliaria.</p></div>${canManageTeam() ? '<button type="button" data-toggle-team-member>Agregar integrante</button>' : ''}</div>
-    <section class="team-plan-banner"><div><span class="eyebrow">${escapeHtml(state.crm.organization.planLabel)}</span><h3>${escapeHtml(state.crm.organization.name)}</h3><p>${escapeHtml(seatLabel())}</p></div><div class="team-plan-controls"><label>Cupo de prueba<select data-seat-limit${member.role === 'Dueño' ? '' : ' disabled'}><option value="unlimited"${limit === null ? ' selected' : ''}>Sin límite</option>${[3, 6, 10, 20, 50, 100].map((value) => `<option value="${value}"${limit === value ? ' selected' : ''}>${value} usuarios</option>`).join('')}</select></label><small>En el producto comercial este cupo lo definirá el plan contratado.</small></div></section>
-    <div class="team-safety-note"><b>Acceso real pendiente</b><p>Los perfiles, roles y asignaciones ya se guardan. La invitación por correo y el aislamiento definitivo de datos se habilitarán con autenticación multiusuario y políticas RLS de Supabase.</p></div>
+  container.innerHTML = `<div class="panel-heading"><div><span class="eyebrow">Organización</span><h2>Equipo y responsabilidades</h2><p class="panel-description">Cada integrante usa su propia sesión. Los corredores reciben únicamente los registros autorizados por RLS.</p></div>${canManageTeam() ? '<button type="button" data-toggle-team-member>Invitar integrante</button>' : ''}</div>
+    <section class="team-plan-banner"><div><span class="eyebrow">${escapeHtml(state.crm.organization.planLabel)}</span><h3>${escapeHtml(state.crm.organization.name)}</h3><p>${escapeHtml(seatLabel())}</p></div><div class="team-plan-controls"><label>Cupo contratado<input value="${limit === null ? 'Sin límite durante el piloto' : `${limit} usuarios`}" readonly></label><small>El cupo será administrado por el plan comercial, no desde el navegador.</small></div></section>
+    <div class="team-safety-note"><b>${cloudTeamReady() ? 'Sesión individual activa' : 'Acceso online requerido'}</b><p>${cloudTeamReady() ? 'Las invitaciones y cambios de acceso pasan por el servidor. Supabase RLS controla qué filas puede leer o modificar cada persona.' : 'Ingresá para administrar invitaciones y permisos reales.'}</p></div>
     ${teamFormHtml()}
-    <section><div class="section-heading"><div><span class="eyebrow">Miembros</span><h3>${state.crm.teamMembers.length} perfiles</h3></div><strong>${escapeHtml(seatLabel())}</strong></div><div class="team-grid">${state.crm.teamMembers.map(memberCard).join('')}</div></section>
-    <section class="assignment-center"><div class="section-heading"><div><span class="eyebrow">Distribución operativa</span><h3>Centro de asignaciones</h3></div><span>Dueño y administradores pueden reasignar.</span></div>${assignmentTableHtml()}</section>
+    <section><div class="section-heading"><div><span class="eyebrow">Miembros</span><h3>${state.crm.teamMembers.length} integrantes</h3></div><strong>${escapeHtml(seatLabel())}</strong></div><div class="team-grid">${state.crm.teamMembers.map(memberCard).join('')}</div></section>
+    <section class="assignment-center"><div class="section-heading"><div><span class="eyebrow">Distribución operativa</span><h3>Centro de asignaciones</h3></div><span>Las reasignaciones se validan nuevamente al guardar en Supabase.</span></div>${assignmentTableHtml()}</section>
     <section class="team-activity"><div class="section-heading"><div><span class="eyebrow">Trazabilidad</span><h3>Actividad del equipo</h3></div><span>Últimos 20 cambios</span></div>${activityHtml()}</section>`;
-
   bindTeam(container);
+}
+
+function replaceMember(member: TeamMember): void {
+  const existing = state.crm.teamMembers.some((item) => item.id === member.id);
+  state.crm.teamMembers = existing
+    ? state.crm.teamMembers.map((item) => item.id === member.id ? member : item)
+    : [...state.crm.teamMembers, member].sort((left, right) => left.id - right.id);
+}
+
+function feedback(container: HTMLElement, message: string, error = false): void {
+  const element = container.querySelector<HTMLElement>('[data-team-feedback]');
+  if (!element) return;
+  element.textContent = message;
+  element.classList.toggle('error', error);
 }
 
 function bindTeam(container: HTMLElement): void {
@@ -138,68 +165,76 @@ function bindTeam(container: HTMLElement): void {
 
   container.querySelector<HTMLFormElement>('#team-member-form')?.addEventListener('submit', (event) => {
     event.preventDefault();
-    if (!canManageTeam() || !hasSeatAvailable()) return;
-    const values = formValues(event.currentTarget as HTMLFormElement);
+    if (!canManageTeam() || !hasSeatAvailable() || !getCloudSession()) return;
+    const form = event.currentTarget as HTMLFormElement;
+    const values = formValues(form);
     const email = field(values, 'email').trim().toLowerCase();
     if (state.crm.teamMembers.some((member) => member.email.toLowerCase() === email)) {
-      window.alert('Ya existe un integrante con ese correo.');
+      feedback(container, 'Ya existe un integrante con ese correo.', true);
       return;
     }
-    const newMember: TeamMember = {
-      id: nextId(state.crm.teamMembers),
+    const submit = form.querySelector<HTMLButtonElement>('button[type="submit"]');
+    if (submit) submit.disabled = true;
+    feedback(container, 'Enviando invitación…');
+    void inviteTeamMember({
       name: field(values, 'name').trim(),
       email,
       phone: field(values, 'phone').trim() || undefined,
-      role: field(values, 'role') as TeamRole,
-      status: 'Pendiente de acceso',
-      createdAt: new Date().toISOString(),
-    };
-    state.crm.teamMembers.push(newMember);
-    addActivity({ action: 'Perfil preparado', entityType: 'Equipo', entityId: newMember.id, detail: `${newMember.name} fue agregado como ${newMember.role}.` });
-    state.openForms.member = false;
-    saveData();
-    document.dispatchEvent(new CustomEvent('trv-render'));
+      role: field(values, 'role') as Exclude<TeamRole, 'Dueño'>,
+    }).then((member) => {
+      replaceMember(member);
+      addActivity({ action: 'Invitación enviada', entityType: 'Equipo', entityId: member.id, detail: `${member.name} fue invitado como ${member.role}.` });
+      state.openForms.member = false;
+      saveData();
+      document.dispatchEvent(new CustomEvent('trv-render'));
+    }).catch((error) => {
+      feedback(container, error instanceof Error ? error.message : 'No se pudo enviar la invitación.', true);
+      if (submit) submit.disabled = false;
+    });
   });
 
   container.querySelectorAll<HTMLSelectElement>('[data-team-role]').forEach((select) => select.addEventListener('change', () => {
-    if (!canManageTeam()) return;
+    if (!canManageTeam() || !getCloudSession()) return;
     const memberId = Number(select.dataset.teamRole);
     const target = state.crm.teamMembers.find((member) => member.id === memberId);
     if (!target || target.role === 'Dueño') return;
-    target.role = select.value as TeamRole;
-    addActivity({ action: 'Rol actualizado', entityType: 'Equipo', entityId: target.id, detail: `${target.name} ahora es ${target.role}.` });
-    saveData();
-    document.dispatchEvent(new CustomEvent('trv-render'));
+    const previousRole = target.role;
+    select.disabled = true;
+    void updateTeamMemberAccess(memberId, { role: select.value as Exclude<TeamRole, 'Dueño'> })
+      .then((updated) => {
+        replaceMember(updated);
+        addActivity({ action: 'Rol actualizado', entityType: 'Equipo', entityId: updated.id, detail: `${updated.name} ahora es ${updated.role}.` });
+        saveData();
+        document.dispatchEvent(new CustomEvent('trv-render'));
+      })
+      .catch((error) => {
+        select.value = previousRole;
+        select.disabled = false;
+        window.alert(error instanceof Error ? error.message : 'No se pudo cambiar el rol.');
+      });
   }));
 
   container.querySelectorAll<HTMLButtonElement>('[data-team-status]').forEach((button) => button.addEventListener('click', () => {
-    if (!canManageTeam()) return;
+    if (!canManageTeam() || !getCloudSession()) return;
     const target = state.crm.teamMembers.find((member) => member.id === Number(button.dataset.teamStatus));
     if (!target || target.role === 'Dueño') return;
-    target.status = target.status === 'Suspendido' ? 'Activo' : 'Suspendido';
-    addActivity({ action: 'Estado de acceso', entityType: 'Equipo', entityId: target.id, detail: `${target.name}: ${target.status}.` });
-    saveData();
-    document.dispatchEvent(new CustomEvent('trv-render'));
+    button.disabled = true;
+    const status = target.status === 'Suspendido' ? 'Activo' : 'Suspendido';
+    void updateTeamMemberAccess(target.id, { status })
+      .then((updated) => {
+        replaceMember(updated);
+        addActivity({ action: 'Estado de acceso', entityType: 'Equipo', entityId: updated.id, detail: `${updated.name}: ${updated.status}.` });
+        saveData();
+        document.dispatchEvent(new CustomEvent('trv-render'));
+      })
+      .catch((error) => {
+        button.disabled = false;
+        window.alert(error instanceof Error ? error.message : 'No se pudo cambiar el acceso.');
+      });
   }));
 
-  container.querySelector<HTMLSelectElement>('[data-seat-limit]')?.addEventListener('change', (event) => {
-    if (activeMember().role !== 'Dueño') return;
-    const value = (event.currentTarget as HTMLSelectElement).value;
-    const nextLimit = value === 'unlimited' ? null : Number(value);
-    if (nextLimit !== null && nextLimit < activeSeatCount()) {
-      window.alert('No podés fijar un cupo menor que la cantidad actual de usuarios.');
-      document.dispatchEvent(new CustomEvent('trv-render'));
-      return;
-    }
-    state.crm.organization.seatLimit = nextLimit;
-    state.crm.organization.planLabel = nextLimit === null ? 'Piloto sin límite' : `Plan de ${nextLimit} usuarios`;
-    addActivity({ action: 'Cupo actualizado', entityType: 'Equipo', detail: `Nuevo cupo: ${nextLimit ?? 'sin límite'}.` });
-    saveData();
-    document.dispatchEvent(new CustomEvent('trv-render'));
-  });
-
   container.querySelectorAll<HTMLSelectElement>('[data-assignment-type]').forEach((select) => select.addEventListener('change', () => {
-    if (!canManageTeam()) return;
+    if (!canManageTeam() || !getCloudSession()) return;
     const type = select.dataset.assignmentType as AssignmentEntity;
     const id = Number(select.dataset.assignmentId);
     const assignedToId = Number(select.value);
