@@ -5,6 +5,7 @@ function normalizedData(value: Partial<CrmData>): CrmData {
   return {
     clients: Array.isArray(value.clients) ? value.clients : [],
     properties: Array.isArray(value.properties) ? value.properties : [],
+    contacts: Array.isArray(value.contacts) ? value.contacts : [],
     reminders: Array.isArray(value.reminders) ? value.reminders : [],
     fichas: Array.isArray(value.fichas) ? value.fichas : [],
     conversations: Array.isArray(value.conversations) ? value.conversations : [],
@@ -27,13 +28,17 @@ export const state = {
   editingFichaId: null as number | null,
   editingClientId: null as number | null,
   selectedConversationId: null as number | null,
-  openForms: { client: false, property: false, reminder: false, ficha: false },
+  selectedContactId: null as number | null,
+  editingContactId: null as number | null,
+  openForms: { client: false, property: false, contact: false, reminder: false, ficha: false },
 };
 
 export function replaceData(data: CrmData, syncCloud = false): void {
   state.crm = normalizedData(data);
   state.editingClientId = null;
   state.selectedConversationId = null;
+  state.selectedContactId = null;
+  state.editingContactId = null;
   localStorage.setItem(STORAGE_KEY, JSON.stringify(state.crm));
   if (syncCloud) queueCloudSave(state.crm);
 }
