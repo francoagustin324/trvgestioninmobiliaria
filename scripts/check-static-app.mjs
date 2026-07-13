@@ -19,6 +19,7 @@ const requiredFiles = [
   'src/commercial-network-ui.ts',
   'src/property-network-ui.ts',
   'src/whatsapp-assistant.ts',
+  'src/conversation-audit.ts',
   'src/whatsapp-ui.ts',
   'src/agenda.ts',
   'src/agenda-ui.ts',
@@ -39,6 +40,7 @@ const requiredFiles = [
   'src/server/utils/sanitize.ts',
   'src/tests/whatsapp-webhook.test.ts',
   'src/tests/whatsapp-assistant.test.ts',
+  'src/tests/conversation-audit.test.ts',
   'src/tests/client-editor.test.ts',
   'src/tests/phone-normalizer.test.ts',
   'src/tests/client-list.test.ts',
@@ -158,8 +160,8 @@ for (const text of ['data-mobile-nav-toggle', 'data-mobile-nav-close', 'setMobil
 }
 
 const models = readFileSync('src/models.ts', 'utf8');
-for (const text of ['CommercialContactType', 'CommercialContact', 'contacts: CommercialContact[]', "['red', 'Red comercial']", 'sourceContactId']) {
-  if (!models.includes(text)) throw new Error(`Falta modelo de red comercial: ${text}`);
+for (const text of ['CommercialContactType', 'CommercialContact', 'contacts: CommercialContact[]', "['red', 'Red comercial']", 'sourceContactId', 'ConversationStatus', 'ConversationAudit', 'FollowUpDecision']) {
+  if (!models.includes(text)) throw new Error(`Falta modelo comercial o de auditoría: ${text}`);
 }
 
 const crmUi = readFileSync('src/crm-ui.ts', 'utf8');
@@ -212,8 +214,13 @@ for (const text of ['qualificationState', 'suggestAssistantReply', 'requiresHuma
   if (!whatsappAssistant.includes(text)) throw new Error(`Falta lógica de IA supervisada: ${text}`);
 }
 
+const conversationAudit = readFileSync('src/conversation-audit.ts', 'utf8');
+for (const text of ['auditConversation', 'auditAllConversations', 'safeConversationMode', 'manualConversationAudit', 'addWaitingSaleReminder', 'Contacto comercial', 'No contactar', 'Ante la duda']) {
+  if (!conversationAudit.includes(text)) throw new Error(`Falta auditoría conversacional segura: ${text}`);
+}
+
 const whatsappUi = readFileSync('src/whatsapp-ui.ts', 'utf8');
-for (const text of ['Bandeja supervisada', 'Coexistencia pendiente', 'Simular mensaje entrante', 'Registrar respuesta aprobada', 'Crear plan 24 h / 72 h / 7 días', 'Nada se envía a WhatsApp']) {
+for (const text of ['Bandeja supervisada', 'Coexistencia pendiente', 'Simular mensaje entrante', 'Auditoría masiva', 'Auditar todas', 'Confirmar estado', 'Seguimiento bloqueado', 'Recordar revisar en 30 días']) {
   if (!whatsappUi.includes(text)) throw new Error(`Falta interfaz de WhatsApp supervisado: ${text}`);
 }
 
@@ -228,8 +235,8 @@ for (const text of ['Seguimientos priorizados', 'Abrir cliente', 'data-edit-clie
 }
 
 const source = requiredFiles.filter((file) => file.endsWith('.ts') || file.endsWith('.js')).map((file) => readFileSync(file, 'utf8')).join('\n');
-for (const text of ['Fichas TRV', 'public=', '5493515110069', 'navigator.clipboard', 'window.print', '/api/import-property', '/api/extension-import', 'Crear ficha desde el link', 'Mis propiedades', 'Mejora visual suave', 'TRV_IMPORT_CURRENT', 'validateSafeUrl', 'chromium', 'PropControl', 'Ingresar / crear cuenta', '/api/whatsapp/webhook', 'Red comercial']) {
+for (const text of ['Fichas TRV', 'public=', '5493515110069', 'navigator.clipboard', 'window.print', '/api/import-property', '/api/extension-import', 'Crear ficha desde el link', 'Mis propiedades', 'Mejora visual suave', 'TRV_IMPORT_CURRENT', 'validateSafeUrl', 'chromium', 'PropControl', 'Ingresar / crear cuenta', '/api/whatsapp/webhook', 'Red comercial', 'Auditoría masiva']) {
   if (!source.includes(text)) throw new Error(`Falta función o texto requerido: ${text}`);
 }
 
-console.log('PropControl: red comercial y origen de propiedades, bandeja WhatsApp, matching, duplicados, agenda, Supabase y webhook aprobados');
+console.log('PropControl: auditoría conversacional segura, red comercial, bandeja WhatsApp, matching, duplicados, agenda, Supabase y webhook aprobados');
