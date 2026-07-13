@@ -17,16 +17,18 @@ interface IntentSignal {
 }
 
 const commercialPatterns: Array<[RegExp, string]> = [
-  [/\b(soy|somos) (corredor|corredora|martillero|martillera|inmobiliaria|constructor|constructora|desarrollista|vendedor|vendedora)\b/, 'La persona se identificó como profesional o empresa del sector.'],
+  [/\b(soy|somos) (corredor|corredora|martillero|martillera|asesor inmobiliario|asesora inmobiliaria|inmobiliaria|constructor|constructora|desarrollista|vendedor|vendedora)\b/, 'La persona se identificó como profesional o empresa del sector.'],
   [/\b(trabajo|represento) (en|para) (una )?(inmobiliaria|constructora|desarrollista)\b/, 'Indicó que trabaja para una inmobiliaria, constructora o desarrollista.'],
-  [/\b(te|les) (comparto|paso|envio) (una )?(propiedad|producto|unidad|departamento|casa)\b/, 'El mensaje comparte producto inmobiliario en lugar de expresar una búsqueda.'],
+  [/\b(trabajo en ventas|soy del equipo comercial)\b/, 'Indicó que pertenece a un equipo de ventas.'],
+  [/\b(te|les) (comparto|paso|envio) (una )?(propiedad|producto|unidad|departamento|casa|disponibilidad)\b/, 'El mensaje comparte producto inmobiliario en lugar de expresar una búsqueda.'],
   [/\b(comparto|compartimos) comision\b/, 'Mencionó colaboración o comisión entre colegas.'],
   [/\bsoy propietario\b/, 'Se identificó como propietario.'],
   [/\b(quiero|necesito) vender (mi|una) (casa|departamento|depto|propiedad|terreno)\b/, 'La intención principal detectada es vender una propiedad.'],
 ];
 
 const stoppedPatterns: Array<[RegExp, string]> = [
-  [/\b(no busco mas|ya no busco|ya no estoy buscando|dej[eé] de buscar|dejamos de buscar)\b/, 'Indicó explícitamente que dejó de buscar.'],
+  [/\b(no busco mas|ya no busco|no estoy buscando|ya no estoy buscando|ya no seguimos buscando|deje de buscar|dejamos de buscar)\b/, 'Indicó explícitamente que dejó de buscar.'],
+  [/\b(no quiero comprar|no queremos comprar|desistimos de comprar)\b/, 'Indicó explícitamente que no continuará con la compra.'],
   [/\b(no me escribas|no me escriban|no me contacten|no quiero recibir mensajes|sacame de la lista|borrenme)\b/, 'Pidió no recibir más mensajes.'],
   [/\b(por ahora no busco|suspendi la busqueda|pausamos la busqueda)\b/, 'Indicó que la búsqueda está suspendida.'],
 ];
@@ -37,13 +39,13 @@ const boughtPatterns: Array<[RegExp, string]> = [
 ];
 
 const waitingSalePatterns: Array<[RegExp, string]> = [
-  [/\b(todavia no vendi|aun no vendi|no pude vender|todavia no pude vender)\b/, 'Todavía necesita vender antes de avanzar.'],
-  [/\b(dependo de vender|primero tengo que vender|antes tengo que vender|hasta que no venda|cuando venda)\b/, 'La compra depende de una venta previa.'],
+  [/\b(todavia no vendi|todavia no vendimos|aun no vendi|aun no vendimos|no pude vender|no pudimos vender|todavia no pude vender)\b/, 'Todavía necesita vender antes de avanzar.'],
+  [/\b(dependo de vender|dependemos de vender|primero tengo que vender|primero tenemos que vender|antes tengo que vender|hasta que no venda|cuando venda)\b/, 'La compra depende de una venta previa.'],
   [/\b(estoy esperando vender|seguimos esperando vender)\b/, 'Está esperando concretar una venta antes de retomar.'],
 ];
 
 const activeSearchPatterns: Array<[RegExp, string]> = [
-  [/\b(sigo buscando|seguimos buscando|todavia busco|todavia estamos buscando|continuo buscando|continuamos buscando)\b/, 'Confirmó explícitamente que continúa buscando.'],
+  [/\b(sigo buscando|seguimos buscando|sigo en la busqueda|seguimos en la busqueda|todavia busco|todavia estamos buscando|continuo buscando|continuamos buscando)\b/, 'Confirmó explícitamente que continúa buscando.'],
   [/\b(mandame opciones|mandame mas opciones|enviame opciones|avisame si aparece|quiero seguir viendo)\b/, 'Pidió recibir nuevas opciones.'],
   [/\b(estoy buscando|estamos buscando|quiero comprar|queremos comprar|me interesa ver opciones)\b/, 'Expresó una intención activa de compra.'],
 ];
@@ -68,22 +70,24 @@ function signalFromText(text: string): IntentSignal | null {
   const normalized = normalizeAuditText(text);
   if (!normalized) return null;
 
-  const signals = [
-    ...matchingSignals(normalized, stoppedPatterns, 'No busca más', 99),
-    ...matchingSignals(normalized, boughtPatterns, 'Ya compró', 98),
-    ...matchingSignals(normalized, waitingSalePatterns, 'Esperando vender', 96),
-    ...matchingSignals(normalized, activeSearchPatterns, 'Sigue buscando', 93),
-  ];
+  const stopped = matchingSignals(normalized, stoppedPatterns, 'No busca más', 99);
+  if (stopped.length) return stopped[0]!;
 
-  const statuses = [...new Set(signals.map((signal) => signal.status))];
-  if (statuses.length > 1) {
+  const bought = matchingSignals(normalized, boughtPatterns, 'Ya compró', 98);
+  if (bought.length) return bought[0]!;
+
+  const waiting = matchingSignals(normalized, waitingSalePatterns, 'Esperando vender', 96);
+  const active = matchingSignals(normalized, activeSearchPatterns, 'Sigue buscando', 93);
+  if (waiting.length && active.length) {
     return {
       status: 'Revisar manualmente',
       confidence: 45,
-      reason: 'El mismo mensaje contiene señales contradictorias y no debe generar una acción automática.',
+      reason: 'El mismo mensaje indica que sigue buscando, pero también que depende de una venta previa.',
     };
   }
-  return signals[0] ?? null;
+  if (waiting.length) return waiting[0]!;
+  if (active.length) return active[0]!;
+  return null;
 }
 
 function commercialSignal(messages: WhatsAppConversation['messages']): IntentSignal | null {
