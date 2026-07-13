@@ -27,7 +27,7 @@ test('clientFromFormValues normaliza los campos y conserva el id', () => {
   const client = clientFromFormValues(42, baseValues);
   assert.equal(client.id, 42);
   assert.equal(client.name, 'Franco Test');
-  assert.equal(client.phone, '3510000000');
+  assert.equal(client.phone, '5493510000000');
   assert.equal(client.temperature, 'Caliente');
   assert.equal(client.notes, 'Cliente listo para avanzar');
 });
@@ -49,7 +49,7 @@ test('upsertClient reemplaza un cliente sin duplicarlo', () => {
 
 test('upsertClient agrega un cliente cuando el id no existe', () => {
   const first = clientFromFormValues(1, baseValues);
-  const second = clientFromFormValues(2, { ...baseValues, name: 'Segundo cliente' });
+  const second = clientFromFormValues(2, { ...baseValues, name: 'Segundo cliente', phone: '3510000001' });
   const result = upsertClient([first], second);
 
   assert.equal(result.length, 2);
