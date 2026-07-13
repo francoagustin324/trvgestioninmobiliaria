@@ -158,9 +158,12 @@ const negativeActiveFragments = [
   'no quiero comprar', 'no queremos comprar', 'no necesito comprar', 'no necesitamos comprar',
 ] as const;
 
-const propertyTerms = ['propiedad', 'propiedades', 'casa', 'casas', 'departamento', 'departamentos', 'depto', 'deptos', 'duplex', 'terreno', 'unidad', 'unidades', 'vivienda'];
-const optionTerms = ['opcion', 'opciones', 'alternativa', 'alternativas', 'algo', 'oportunidad', 'oportunidades'];
-const realEstateTerms = [...propertyTerms, 'inmobiliaria', 'inmobiliarias', 'constructora', 'constructor', 'desarrollista', 'desarrollo', 'pozo', 'comision'];
+const propertyTerms = [
+  'propiedad', 'propiedades', 'casa', 'casas', 'departamento', 'departamentos',
+  'depto', 'deptos', 'duplex', 'terreno', 'unidad', 'unidades', 'vivienda',
+] as const;
+const optionTerms = ['opcion', 'opciones', 'alternativa', 'alternativas', 'algo', 'oportunidad', 'oportunidades'] as const;
+const realEstateTerms = [...propertyTerms, 'inmobiliaria', 'inmobiliarias', 'constructora', 'constructor', 'desarrollista', 'desarrollo', 'pozo', 'comision'] as const;
 
 export function normalizeAuditText(value: unknown): string {
   return String(value ?? '')
@@ -209,13 +212,17 @@ function commercialSignalFromText(normalized: string): IntentSignal | null {
 
   const sharesProduct = /(^| )(te|les) (comparto|paso|envio|mando|acerco) (una |un )?(propiedad|producto|unidad|departamento|depto|casa|disponibilidad)( |$)/.test(normalized);
   const wantsToSell = /(^| )(quiero|necesito) vender (mi|una|un) (casa|departamento|depto|propiedad|terreno)( |$)/.test(normalized);
-  if (sharesProduct) return { status: 'Contacto comercial', confidence: 98, reason: 'Compartió producto o disponibilidad inmobiliaria.', engine: 'Reglas de seguridad' };
-  if (wantsToSell) return { status: 'Contacto comercial', confidence: 98, reason: 'La intención principal detectada es vender una propiedad.', engine: 'Reglas de seguridad' };
+  if (sharesProduct) {
+    return { status: 'Contacto comercial', confidence: 98, reason: 'Compartió producto o disponibilidad inmobiliaria.', engine: 'Reglas de seguridad' };
+  }
+  if (wantsToSell) {
+    return { status: 'Contacto comercial', confidence: 98, reason: 'La intención principal detectada es vender una propiedad.', engine: 'Reglas de seguridad' };
+  }
 
   const firstPersonRole = includesAny(normalized, ['soy', 'somos', 'trabajo', 'represento', 'me dedico', 'manejo']);
   const sectorRole = includesStem(normalized, ['corredor', 'corredora', 'martiller', 'inmobiliar', 'constructor', 'desarroll', 'broker', 'asesor', 'agente']);
   const sellerWithContext = includesStem(normalized, ['vendedor', 'vendedora', 'comercializ']) && includesAny(normalized, realEstateTerms);
-  const inventoryContext = includesStem(normalized, ['ofrec', 'compart', 'comercializ', 'public']) && includesAny(normalized, realEstateTerms);
+  const inventoryContext = includesStem(normalized, ['ofrec', 'compart', 'comercializ']) && includesAny(normalized, realEstateTerms);
   const ownerContext = includesAny(normalized, ['soy titular', 'soy el titular', 'la propiedad es mia', 'es de mi propiedad']);
   if ((firstPersonRole && (sectorRole || sellerWithContext)) || inventoryContext || ownerContext) {
     return {
@@ -245,9 +252,17 @@ function activeSignal(normalized: string): IntentSignal | null {
 
   const continuity = includesStem(cleaned, ['segu', 'continu', 'retom', 'and']) || includesAny(cleaned, ['todavia', 'aun']);
   const searchAction = includesStem(cleaned, ['busc', 'encontr', 'ver', 'visit']) || includesAny(cleaned, ['en la busqueda', 'con la busqueda']);
-  const requestAction = includesStem(cleaned, ['manda', 'pasa', 'envia', 'mostra', 'comparti', 'avisa']) && includesAny(cleaned, [...propertyTerms, ...optionTerms]);
-  const saleDependencyContext = includesStem(cleaned, ['vend', 'venta']) && includesAny(cleaned, ['antes', 'primero', 'hasta', 'dependo', 'dependemos', 'depende', 'esperando', 'a la espera', 'cuando venda', 'cuando vendamos', 'si vendo', 'si vendemos', 'atada a la venta', 'sujeta a la venta']);
-  const purchaseIntent = !saleDependencyContext && includesStem(cleaned, ['compr', 'invert', 'mudar']) && includesAny(cleaned, [...propertyTerms, ...optionTerms, 'para vivir', 'para invertir']);
+  const requestAction = includesStem(cleaned, ['manda', 'pasa', 'envia', 'mostra', 'comparti', 'avisa'])
+    && includesAny(cleaned, [...propertyTerms, ...optionTerms]);
+  const saleDependencyContext = includesStem(cleaned, ['vend', 'venta'])
+    && includesAny(cleaned, [
+      'antes', 'primero', 'hasta', 'dependo', 'dependemos', 'depende', 'esperando',
+      'a la espera', 'cuando venda', 'cuando vendamos', 'si vendo', 'si vendemos',
+      'atada a la venta', 'sujeta a la venta',
+    ]);
+  const purchaseIntent = !saleDependencyContext
+    && includesStem(cleaned, ['compr', 'invert', 'mudar'])
+    && includesAny(cleaned, [...propertyTerms, ...optionTerms, 'para vivir', 'para invertir']);
   if ((continuity && searchAction) || requestAction || purchaseIntent) {
     return {
       status: 'Sigue buscando',
@@ -260,8 +275,10 @@ function activeSignal(normalized: string): IntentSignal | null {
 }
 
 function stoppedConceptSignal(normalized: string): IntentSignal | null {
-  const stopAction = includesStem(normalized, ['abandon', 'cancel', 'paus', 'fren', 'desist', 'dej']) || includesAny(normalized, ['dar de baja', 'dimos de baja', 'cerrar la busqueda', 'cerramos la busqueda']);
-  const searchContext = includesStem(normalized, ['busc', 'compr', 'continu', 'avanz']) || includesAny(normalized, [...optionTerms, 'mensajes', 'contactos']);
+  const stopAction = includesStem(normalized, ['abandon', 'cancel', 'paus', 'fren', 'desist', 'dej'])
+    || includesAny(normalized, ['dar de baja', 'dimos de baja', 'cerrar la busqueda', 'cerramos la busqueda']);
+  const searchContext = includesStem(normalized, ['busc', 'compr', 'continu', 'avanz'])
+    || includesAny(normalized, [...optionTerms, 'mensajes', 'contactos']);
   const noContact = includesAny(normalized, ['no me mandes', 'no me envies', 'no me contacten', 'no me escribas', 'prefiero que no']);
   if ((stopAction && searchContext) || noContact) {
     return {
@@ -275,7 +292,10 @@ function stoppedConceptSignal(normalized: string): IntentSignal | null {
 }
 
 function boughtConceptSignal(normalized: string): IntentSignal | null {
-  const resolutionMarker = includesAny(normalized, ['ya', 'finalmente', 'por otro lado', 'por nuestra cuenta', 'otra inmobiliaria', 'otra propiedad', 'otra unidad', 'tema resuelto', 'necesidad resuelta']);
+  const resolutionMarker = includesAny(normalized, [
+    'ya', 'finalmente', 'por otro lado', 'por nuestra cuenta', 'otra inmobiliaria',
+    'otra propiedad', 'otra unidad', 'tema resuelto', 'necesidad resuelta',
+  ]);
   const resolvedAction = includesStem(normalized, ['compr', 'consegu', 'encontr', 'reserv', 'sen', 'firm', 'cerr', 'adquir', 'resolv', 'solucion', 'eleg']);
   const propertyContext = includesAny(normalized, [...propertyTerms, ...optionTerms, 'donde vivir', 'donde mudarnos', 'operacion', 'compra']);
   if (resolutionMarker && resolvedAction && propertyContext) {
@@ -291,8 +311,12 @@ function boughtConceptSignal(normalized: string): IntentSignal | null {
 
 function waitingSaleConceptSignal(normalized: string): IntentSignal | null {
   const saleContext = includesStem(normalized, ['vend', 'venta', 'publicad']);
-  const dependency = includesAny(normalized, ['antes', 'primero', 'hasta', 'dependo', 'dependemos', 'a la espera', 'esperando', 'cuando venda', 'si vendo', 'atada a la venta', 'sujeta a la venta', 'todavia no', 'aun no']);
-  const purchaseContext = includesStem(normalized, ['compr', 'avanz', 'retom', 'mudar']) || includesAny(normalized, ['la busqueda', 'la operacion']);
+  const dependency = includesAny(normalized, [
+    'antes', 'primero', 'hasta', 'dependo', 'dependemos', 'a la espera', 'esperando',
+    'cuando venda', 'si vendo', 'atada a la venta', 'sujeta a la venta', 'todavia no', 'aun no',
+  ]);
+  const purchaseContext = includesStem(normalized, ['compr', 'avanz', 'retom', 'mudar'])
+    || includesAny(normalized, ['la busqueda', 'la operacion']);
   if (saleContext && dependency && purchaseContext) {
     return {
       status: 'Esperando vender',
@@ -407,8 +431,14 @@ export function auditConversation(
   for (const message of [...inbound].reverse()) {
     const signal = signalFromText(auditableMessageText(message));
     if (!signal) continue;
-    const mediaReason = message.kind === 'audio' ? 'El estado fue interpretado desde la transcripción del audio.' : null;
-    const reasons = [signal.reason, mediaReason, 'Se tomó el último estado explícito del cliente dentro del historial disponible.'].filter((reason): reason is string => Boolean(reason));
+    const mediaReason = message.kind === 'audio'
+      ? 'El estado fue interpretado desde la transcripción del audio.'
+      : null;
+    const reasons = [
+      signal.reason,
+      mediaReason,
+      'Se tomó el último estado explícito del cliente dentro del historial disponible.',
+    ].filter((reason): reason is string => Boolean(reason));
     if (signal.status === 'Sigue buscando' && client?.canMoveForward === 'No') {
       return {
         status: 'Revisar manualmente',
@@ -432,13 +462,17 @@ export function auditConversation(
   }
 
   const crmHints = normalizeAuditText([client?.notes, client?.objections, client?.purchaseTimeframe].join(' '));
-  const waitingHint = findGroupSignal(crmHints, waitingSaleGroups, 'Esperando vender', 82) ?? waitingSaleConceptSignal(crmHints);
+  const waitingHint = findGroupSignal(crmHints, waitingSaleGroups, 'Esperando vender', 82)
+    ?? waitingSaleConceptSignal(crmHints);
   if (waitingHint || client?.canMoveForward === 'No') {
     return {
       status: 'Esperando vender',
       decision: 'Pausar',
       confidence: waitingHint ? Math.min(waitingHint.confidence, 82) : 65,
-      reasons: [waitingHint?.reason ?? 'El CRM indica que todavía no puede avanzar.', 'No se habilita contacto automático con información incompleta.'],
+      reasons: [
+        waitingHint?.reason ?? 'El CRM indica que todavía no puede avanzar.',
+        'No se habilita contacto automático con información incompleta.',
+      ],
       auditedAt,
       source: 'Automático',
       engine: waitingHint?.engine ?? 'Reglas de seguridad',
@@ -451,7 +485,11 @@ export function auditConversation(
     decision: 'Revisión manual',
     confidence: pendingAudio ? 10 : inbound.length ? 35 : 15,
     reasons: [
-      pendingAudio ? 'Existe un audio pendiente de transcripción; no se puede decidir con seguridad.' : inbound.length ? 'El historial no contiene una confirmación clara del estado actual.' : 'No hay mensajes entrantes para analizar.',
+      pendingAudio
+        ? 'Existe un audio pendiente de transcripción; no se puede decidir con seguridad.'
+        : inbound.length
+          ? 'El historial no contiene una confirmación clara del estado actual.'
+          : 'No hay mensajes entrantes para analizar.',
       'Ante la duda, la conversación queda pausada.',
     ],
     auditedAt,
@@ -460,7 +498,10 @@ export function auditConversation(
   };
 }
 
-export function manualConversationAudit(status: ConversationStatus, auditedAt = new Date().toISOString()): ConversationAudit {
+export function manualConversationAudit(
+  status: ConversationStatus,
+  auditedAt = new Date().toISOString(),
+): ConversationAudit {
   return {
     status,
     decision: decisionForConversationStatus(status),
@@ -474,7 +515,9 @@ export function manualConversationAudit(status: ConversationStatus, auditedAt = 
 
 export function safeConversationMode(audit: ConversationAudit, current: ConversationMode): ConversationMode {
   if (current === 'Humano') return 'Humano';
-  return audit.status === 'Sigue buscando' && audit.decision === 'Seguimiento supervisado' && audit.confidence >= 90
+  return audit.status === 'Sigue buscando'
+    && audit.decision === 'Seguimiento supervisado'
+    && audit.confidence >= 90
     ? 'IA supervisada'
     : 'Pausada';
 }
@@ -506,7 +549,9 @@ export function auditAllConversations(
   ));
 }
 
-export function conversationAuditSummary(conversations: WhatsAppConversation[]): Record<ConversationStatus, number> {
+export function conversationAuditSummary(
+  conversations: WhatsAppConversation[],
+): Record<ConversationStatus, number> {
   const summary: Record<ConversationStatus, number> = {
     'Sigue buscando': 0,
     'Esperando vender': 0,
@@ -527,14 +572,22 @@ function addDays(isoDate: string, days: number): string {
   return date.toISOString().slice(0, 10);
 }
 
-export function addWaitingSaleReminder(existing: Reminder[], client: Client, baseDate: string): { reminders: Reminder[]; added: number } {
+export function addWaitingSaleReminder(
+  existing: Reminder[],
+  client: Client,
+  baseDate: string,
+): { reminders: Reminder[]; added: number } {
   const candidate = {
     date: addDays(baseDate, 30),
     title: 'Revisar si pudo vender',
     related: `${client.name} · WhatsApp · ${client.interest}`,
     priority: 'Media',
   };
-  const duplicate = existing.some((reminder) => reminder.date === candidate.date && reminder.title === candidate.title && reminder.related === candidate.related);
+  const duplicate = existing.some((reminder) =>
+    reminder.date === candidate.date
+    && reminder.title === candidate.title
+    && reminder.related === candidate.related,
+  );
   if (duplicate) return { reminders: existing, added: 0 };
   const nextId = Math.max(0, ...existing.map((reminder) => reminder.id)) + 1;
   return { reminders: [...existing, { ...candidate, id: nextId }], added: 1 };
