@@ -89,11 +89,24 @@ function render(): void {
 }
 
 function removeItem(collection: string, id: number): void {
-  if (collection === 'clients') state.crm.clients = state.crm.clients.filter((item) => item.id !== id);
+  if (collection === 'clients') {
+    state.crm.clients = state.crm.clients.filter((item) => item.id !== id);
+    if (state.editingClientId === id) {
+      state.editingClientId = null;
+      state.openForms.client = false;
+    }
+  }
   if (collection === 'properties') state.crm.properties = state.crm.properties.filter((item) => item.id !== id);
   if (collection === 'reminders') state.crm.reminders = state.crm.reminders.filter((item) => item.id !== id);
   if (collection === 'fichas') { state.crm.fichas = state.crm.fichas.filter((item) => item.id !== id); if (state.selectedFichaId === id) state.selectedFichaId = state.crm.fichas[0]?.id ?? null; }
   saveData(); render();
+}
+
+function deletionMessage(collection: string): string {
+  if (collection === 'clients') return '¿Eliminar este cliente? Esta acción no se puede deshacer.';
+  if (collection === 'properties') return '¿Eliminar esta propiedad? Esta acción no se puede deshacer.';
+  if (collection === 'reminders') return '¿Eliminar este recordatorio? Esta acción no se puede deshacer.';
+  return '¿Eliminar este registro? Esta acción no se puede deshacer.';
 }
 
 function bindShellEvents(): void {
@@ -120,9 +133,34 @@ function bindShellEvents(): void {
       return;
     }
 
+    const editClientButton = target.closest<HTMLElement>('[data-edit-client]');
+    const editClientId = Number(editClientButton?.dataset.editClient);
+    if (editClientId) {
+      state.activeModule = 'crm';
+      state.editingClientId = editClientId;
+      state.openForms.client = true;
+      render();
+      window.requestAnimationFrame(() => document.querySelector('#client-form')?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
+      return;
+    }
+
+    if (target.closest('[data-cancel-client-edit]')) {
+      state.editingClientId = null;
+      state.openForms.client = false;
+      render();
+      return;
+    }
+
     const toggleButton = target.closest<HTMLElement>('[data-toggle]');
     const toggle = toggleButton?.dataset.toggle;
-    if (toggle === 'client-form') state.openForms.client = !state.openForms.client;
+    if (toggle === 'client-form') {
+      if (state.editingClientId !== null) {
+        state.editingClientId = null;
+        state.openForms.client = true;
+      } else {
+        state.openForms.client = !state.openForms.client;
+      }
+    }
     if (toggle === 'property-form') state.openForms.property = !state.openForms.property;
     if (toggle === 'reminder-form') state.openForms.reminder = !state.openForms.reminder;
     if (toggle === 'ficha-form') state.openForms.ficha = !state.openForms.ficha;
@@ -135,7 +173,10 @@ function bindShellEvents(): void {
     const deleteButton = target.closest<HTMLElement>('[data-delete]');
     const collection = deleteButton?.dataset.delete;
     const id = Number(deleteButton?.dataset.id);
-    if (collection && id) { removeItem(collection, id); return; }
+    if (collection && id) {
+      if (window.confirm(deletionMessage(collection))) removeItem(collection, id);
+      return;
+    }
 
     const actionButton = target.closest<HTMLElement>('[data-ficha-action]');
     const action = actionButton?.dataset.fichaAction;
@@ -144,7 +185,14 @@ function bindShellEvents(): void {
   });
 
   document.addEventListener('keydown', (event) => {
-    if (event.key === 'Escape') setMobileNavigation(false);
+    if (event.key === 'Escape') {
+      setMobileNavigation(false);
+      if (state.editingClientId !== null) {
+        state.editingClientId = null;
+        state.openForms.client = false;
+        render();
+      }
+    }
   });
 
   window.addEventListener('resize', () => {
