@@ -13,6 +13,7 @@ import { clientFromFormValues, upsertClient } from './client-editor.js';
 import { defaultClientListFilters, filterAndSortClients, type ClientListFilters } from './client-list.js';
 import { Client, Temperature } from './models.js';
 import { findDuplicateClient, formatPhone, isPlausiblePhone } from './phone-normalizer.js';
+import { clientPropertyMatchesHtml, propertyClientMatchesHtml } from './property-matching-ui.js';
 import { saveData, state } from './store.js';
 import { escapeHtml, field, formValues, nextId } from './utils.js';
 
@@ -20,6 +21,7 @@ const pipelines = ['Nuevo', 'Contactado', 'Calificado', 'Visita posible', 'Negoc
 let clientListFilters = defaultClientListFilters();
 
 const crmDateFormatter = new Intl.DateTimeFormat('es-AR', { day: '2-digit', month: 'short', year: 'numeric', timeZone: 'UTC' });
+const propertyPriceFormatter = new Intl.NumberFormat('es-AR');
 
 function trafficLight(client: Client): { color: string; label: string; next: string } {
   const ready = client.temperature === 'Caliente' && client.budget && client.paymentMethod && client.purchaseTimeframe && client.canMoveForward === 'Sí';
@@ -65,6 +67,7 @@ function clientCard(client: Client): string {
       <small>${escapeHtml(formatPhone(client.phone))} · ${escapeHtml(client.budget || 'Sin presupuesto')}</small>
       <span class="follow-up-chip">${escapeHtml(followUpLabel(client))}</span>
       <strong class="next-step">${escapeHtml(status.next)}</strong>
+      ${clientPropertyMatchesHtml(client, state.crm.properties)}
     </div>
     <div class="record-actions"><button type="button" class="secondary edit-button" data-edit-client="${client.id}" aria-label="Editar ${escapeHtml(client.name)}">Editar</button><button type="button" class="delete" data-delete="clients" data-id="${client.id}" aria-label="Eliminar ${escapeHtml(client.name)}">×</button></div>
   </article>`;
@@ -248,7 +251,7 @@ export function renderClients(container: HTMLElement): void {
     <label><span>Ordenar</span><select name="sort">${['Seguimiento urgente', 'Último contacto', 'Nombre A-Z', 'Temperatura'].map((value) => selectedOption(value, clientListFilters.sort)).join('')}</select></label>
     <button type="button" class="secondary" data-clear-client-filters>Limpiar</button>
   </form>
-  <div class="client-list-meta"><strong id="client-result-count" aria-live="polite">${clients.length} de ${state.crm.clients.length} clientes</strong><span>La búsqueda no modifica tus datos.</span></div>
+  <div class="client-list-meta"><strong id="client-result-count" aria-live="polite">${clients.length} de ${state.crm.clients.length} clientes</strong><span>La búsqueda y el matching no modifican tus datos.</span></div>
   <div id="client-results" class="card-list">${clientResultsHtml(clients)}</div>`;
 
   bindClientFilters(container);
@@ -282,10 +285,67 @@ export function renderClients(container: HTMLElement): void {
 }
 
 export function renderProperties(container: HTMLElement): void {
-  container.innerHTML = `<div class="panel-heading"><div><span class="eyebrow">Propiedades</span><h2>Inventario activo</h2></div><button data-toggle="property-form">Nueva propiedad</button></div><form id="property-form" class="data-form ${state.openForms.property ? '' : 'collapsed'}"><input name="title" placeholder="Nombre" required><input name="address" placeholder="Zona o dirección" required><select name="type"><option>Departamento</option><option>Casa</option><option>Terreno</option><option>Comercial</option></select><select name="operation"><option>Venta</option><option>Captación</option></select><input name="price" type="number" min="0" placeholder="Precio" required><input name="owner" placeholder="Propietario o colega" required><select name="status"><option>Activa</option><option>Captación</option><option>Reservada</option><option>Cerrada</option></select><button type="submit">Guardar propiedad</button></form><div class="property-board">${state.crm.properties.map((property) => `<article class="property-card"><div><span>${escapeHtml(property.status)}</span><h3>${escapeHtml(property.title)}</h3><p>${escapeHtml(property.address)} · ${escapeHtml(property.type)}</p><strong>USD ${new Intl.NumberFormat('es-AR').format(property.price)}</strong></div><button class="delete" data-delete="properties" data-id="${property.id}">×</button></article>`).join('') || '<p class="empty-state">No hay propiedades.</p>'}</div>`;
+  const cards = state.crm.properties.map((property) => {
+    const details = [
+      property.bedrooms ? `${property.bedrooms} dormitorios` : '',
+      property.bathrooms ? `${property.bathrooms} baños` : '',
+      property.paymentMethod ?? '',
+    ].filter(Boolean).join(' · ');
+    return `<article class="property-card">
+      <div class="property-card-main">
+        <span>${escapeHtml(property.status)}</span>
+        <h3>${escapeHtml(property.title)}</h3>
+        <p>${escapeHtml(property.address)} · ${escapeHtml(property.type)}</p>
+        <strong>USD ${propertyPriceFormatter.format(property.price)}</strong>
+        ${details ? `<div class="property-extra">${escapeHtml(details)}</div>` : ''}
+        ${property.features ? `<div class="property-extra">${escapeHtml(property.features)}</div>` : ''}
+        ${propertyClientMatchesHtml(property, state.crm.clients)}
+      </div>
+      <button class="delete" data-delete="properties" data-id="${property.id}" aria-label="Eliminar ${escapeHtml(property.title)}">×</button>
+    </article>`;
+  }).join('');
+
+  container.innerHTML = `<div class="panel-heading"><div><span class="eyebrow">Propiedades</span><h2>Inventario activo</h2></div><button data-toggle="property-form">Nueva propiedad</button></div>
+  <form id="property-form" class="data-form ${state.openForms.property ? '' : 'collapsed'}">
+    <div class="form-heading"><div><span class="eyebrow">Inventario</span><h3>Nueva propiedad</h3></div><span>Cuanto más completos estén los datos, mejor será el matching.</span></div>
+    <input name="title" aria-label="Nombre de la propiedad" placeholder="Nombre" required>
+    <input name="address" aria-label="Zona o dirección" placeholder="Zona o dirección" required>
+    <select name="type" aria-label="Tipo"><option>Departamento</option><option>Casa</option><option>Dúplex</option><option>Terreno</option><option>Comercial</option></select>
+    <select name="operation" aria-label="Operación"><option>Venta</option><option>Captación</option></select>
+    <input name="price" aria-label="Precio en dólares" type="number" min="0" placeholder="Precio USD" required>
+    <input name="owner" aria-label="Propietario o colega" placeholder="Propietario o colega" required>
+    <select name="status" aria-label="Estado"><option>Activa</option><option>Captación</option><option>Reservada</option><option>Cerrada</option></select>
+    <input name="bedrooms" aria-label="Dormitorios" type="number" min="0" placeholder="Dormitorios">
+    <input name="bathrooms" aria-label="Baños" type="number" min="0" placeholder="Baños">
+    <input name="paymentMethod" aria-label="Forma de pago" placeholder="Contado, crédito, financiación...">
+    <textarea name="features" aria-label="Características" placeholder="Balcón, cochera, pileta, patio, seguridad..."></textarea>
+    <textarea name="notes" aria-label="Notas internas" placeholder="Notas internas para el matching"></textarea>
+    <button type="submit">Guardar propiedad</button>
+  </form>
+  <div class="property-board">${cards || '<p class="empty-state">No hay propiedades.</p>'}</div>`;
+
   container.querySelector<HTMLFormElement>('#property-form')?.addEventListener('submit', (event) => {
-    event.preventDefault(); const values = formValues(event.currentTarget as HTMLFormElement);
-    state.crm.properties.push({ id: nextId(state.crm.properties), title: field(values, 'title'), address: field(values, 'address'), type: field(values, 'type'), operation: field(values, 'operation'), price: Number(field(values, 'price')), owner: field(values, 'owner'), status: field(values, 'status') });
-    state.openForms.property = false; saveData(); document.dispatchEvent(new CustomEvent('trv-render'));
+    event.preventDefault();
+    const values = formValues(event.currentTarget as HTMLFormElement);
+    const bedrooms = Number(field(values, 'bedrooms'));
+    const bathrooms = Number(field(values, 'bathrooms'));
+    state.crm.properties.push({
+      id: nextId(state.crm.properties),
+      title: field(values, 'title'),
+      address: field(values, 'address'),
+      type: field(values, 'type'),
+      operation: field(values, 'operation'),
+      price: Number(field(values, 'price')),
+      owner: field(values, 'owner'),
+      status: field(values, 'status'),
+      bedrooms: bedrooms > 0 ? bedrooms : undefined,
+      bathrooms: bathrooms > 0 ? bathrooms : undefined,
+      paymentMethod: field(values, 'paymentMethod'),
+      features: field(values, 'features'),
+      notes: field(values, 'notes'),
+    });
+    state.openForms.property = false;
+    saveData();
+    document.dispatchEvent(new CustomEvent('trv-render'));
   });
 }
