@@ -1,8 +1,15 @@
+import { todayIsoDate } from './agenda.js';
 import { clientFromFormValues, upsertClient } from './client-editor.js';
+import { defaultClientListFilters, filterAndSortClients, type ClientListFilters } from './client-list.js';
 import { Client, Temperature } from './models.js';
 import { findDuplicateClient, formatPhone, isPlausiblePhone } from './phone-normalizer.js';
 import { saveData, state } from './store.js';
 import { escapeHtml, field, formValues, nextId } from './utils.js';
+
+const pipelines = ['Nuevo', 'Contactado', 'Calificado', 'Visita posible', 'Negociación', 'Cerrado', 'Perdido'];
+let clientListFilters = defaultClientListFilters();
+
+const crmDateFormatter = new Intl.DateTimeFormat('es-AR', { day: '2-digit', month: 'short', year: 'numeric', timeZone: 'UTC' });
 
 function trafficLight(client: Client): { color: string; label: string; next: string } {
   const ready = client.temperature === 'Caliente' && client.budget && client.paymentMethod && client.purchaseTimeframe && client.canMoveForward === 'Sí';
@@ -28,6 +35,76 @@ function showClientFormError(form: HTMLFormElement, message: string, duplicateId
     : `<span>${escapeHtml(message)}</span><button type="button" class="secondary" data-edit-client="${duplicateId}">Abrir cliente existente</button>`;
 }
 
+function formattedCrmDate(value: string): string {
+  return crmDateFormatter.format(new Date(`${value}T00:00:00Z`));
+}
+
+function followUpLabel(client: Client): string {
+  if (!client.nextFollowUp) return 'Sin próximo seguimiento';
+  const today = todayIsoDate();
+  const prefix = client.nextFollowUp < today ? 'Vencido' : client.nextFollowUp === today ? 'Para hoy' : 'Próximo';
+  return `${prefix}: ${formattedCrmDate(client.nextFollowUp)}`;
+}
+
+function clientCard(client: Client): string {
+  const status = trafficLight(client);
+  return `<article class="crm-card ${status.color}">
+    <div>
+      <div class="card-title"><h3>${escapeHtml(client.name)}</h3><span class="traffic ${status.color}">${escapeHtml(status.label)}</span><span class="pipeline-chip">${escapeHtml(client.pipeline)}</span></div>
+      <p>${escapeHtml(client.interest)}</p>
+      <small>${escapeHtml(formatPhone(client.phone))} · ${escapeHtml(client.budget || 'Sin presupuesto')}</small>
+      <span class="follow-up-chip">${escapeHtml(followUpLabel(client))}</span>
+      <strong class="next-step">${escapeHtml(status.next)}</strong>
+    </div>
+    <div class="record-actions"><button type="button" class="secondary edit-button" data-edit-client="${client.id}" aria-label="Editar ${escapeHtml(client.name)}">Editar</button><button type="button" class="delete" data-delete="clients" data-id="${client.id}" aria-label="Eliminar ${escapeHtml(client.name)}">×</button></div>
+  </article>`;
+}
+
+function filteredClients(): Client[] {
+  return filterAndSortClients(state.crm.clients, clientListFilters, todayIsoDate());
+}
+
+function clientResultsHtml(clients: Client[]): string {
+  if (!clients.length) return '<p class="empty-state">No encontramos clientes con esos filtros.</p>';
+  return clients.map(clientCard).join('');
+}
+
+function updateClientResults(container: HTMLElement): void {
+  const clients = filteredClients();
+  const results = container.querySelector<HTMLElement>('#client-results');
+  const count = container.querySelector<HTMLElement>('#client-result-count');
+  if (results) results.innerHTML = clientResultsHtml(clients);
+  if (count) count.textContent = `${clients.length} de ${state.crm.clients.length} clientes`;
+}
+
+function readClientFilters(form: HTMLFormElement): ClientListFilters {
+  const values = formValues(form);
+  return {
+    query: field(values, 'query'),
+    temperature: field(values, 'temperature') as ClientListFilters['temperature'],
+    pipeline: field(values, 'pipeline'),
+    followUp: field(values, 'followUp') as ClientListFilters['followUp'],
+    sort: field(values, 'sort') as ClientListFilters['sort'],
+  };
+}
+
+function bindClientFilters(container: HTMLElement): void {
+  const form = container.querySelector<HTMLFormElement>('#client-filters');
+  if (!form) return;
+  const applyFilters = (): void => {
+    clientListFilters = readClientFilters(form);
+    updateClientResults(container);
+  };
+  form.addEventListener('input', applyFilters);
+  form.addEventListener('change', applyFilters);
+  form.querySelector<HTMLElement>('[data-clear-client-filters]')?.addEventListener('click', () => {
+    clientListFilters = defaultClientListFilters();
+    form.reset();
+    updateClientResults(container);
+    form.querySelector<HTMLInputElement>('[name="query"]')?.focus();
+  });
+}
+
 export function renderHome(container: HTMLElement): void {
   const hot = state.crm.clients.filter((client) => client.temperature === 'Caliente').length;
   const visits = state.crm.clients.filter((client) => client.pipeline === 'Visita posible').length;
@@ -46,7 +123,7 @@ export function renderClients(container: HTMLElement): void {
   const submitLabel = editingClient ? 'Guardar cambios' : 'Guardar cliente';
   const temperatures: Temperature[] = ['Caliente', 'Tibio', 'Frío'];
   const statuses = ['Lead', 'Cliente', 'Seguimiento', 'Cerrado'];
-  const pipelines = ['Nuevo', 'Contactado', 'Calificado', 'Visita posible', 'Negociación', 'Cerrado', 'Perdido'];
+  const clients = filteredClients();
 
   container.innerHTML = `<div class="panel-heading"><div><span class="eyebrow">CRM / Leads</span><h2>Pipeline comercial</h2></div><button type="button" data-toggle="client-form">Nuevo cliente</button></div>
   <form id="client-form" class="data-form ${state.openForms.client ? '' : 'collapsed'}">
@@ -71,9 +148,20 @@ export function renderClients(container: HTMLElement): void {
     <div id="client-form-error" class="form-error" role="alert" hidden></div>
     <div class="form-actions"><button type="submit">${submitLabel}</button>${editingClient ? '<button type="button" class="secondary" data-cancel-client-edit>Cancelar</button>' : ''}</div>
   </form>
-  <div class="card-list">${state.crm.clients.map((client) => { const status = trafficLight(client); return `<article class="crm-card ${status.color}"><div><div class="card-title"><h3>${escapeHtml(client.name)}</h3><span class="traffic ${status.color}">${escapeHtml(status.label)}</span></div><p>${escapeHtml(client.interest)}</p><small>${escapeHtml(formatPhone(client.phone))} · ${escapeHtml(client.budget || 'Sin presupuesto')}</small><strong class="next-step">${escapeHtml(status.next)}</strong></div><div class="record-actions"><button type="button" class="secondary edit-button" data-edit-client="${client.id}" aria-label="Editar ${escapeHtml(client.name)}">Editar</button><button type="button" class="delete" data-delete="clients" data-id="${client.id}" aria-label="Eliminar ${escapeHtml(client.name)}">×</button></div></article>`; }).join('') || '<p class="empty-state">No hay clientes.</p>'}</div>`;
+  <form id="client-filters" class="client-filter-bar" aria-label="Buscar y filtrar clientes">
+    <label class="client-search"><span>Buscar</span><input name="query" type="search" autocomplete="off" placeholder="Nombre, teléfono, zona, presupuesto..." value="${escapeHtml(clientListFilters.query)}"></label>
+    <label><span>Temperatura</span><select name="temperature">${['Todas', ...temperatures].map((value) => selectedOption(value, clientListFilters.temperature)).join('')}</select></label>
+    <label><span>Etapa</span><select name="pipeline">${['Todas', ...pipelines].map((value) => selectedOption(value, clientListFilters.pipeline)).join('')}</select></label>
+    <label><span>Seguimiento</span><select name="followUp">${['Todos', 'Vencidos', 'Hoy', 'Próximos', 'Sin fecha'].map((value) => selectedOption(value, clientListFilters.followUp)).join('')}</select></label>
+    <label><span>Ordenar</span><select name="sort">${['Seguimiento urgente', 'Último contacto', 'Nombre A-Z', 'Temperatura'].map((value) => selectedOption(value, clientListFilters.sort)).join('')}</select></label>
+    <button type="button" class="secondary" data-clear-client-filters>Limpiar</button>
+  </form>
+  <div class="client-list-meta"><strong id="client-result-count" aria-live="polite">${clients.length} de ${state.crm.clients.length} clientes</strong><span>La búsqueda no modifica tus datos.</span></div>
+  <div id="client-results" class="card-list">${clientResultsHtml(clients)}</div>`;
 
-  document.querySelector<HTMLFormElement>('#client-form')?.addEventListener('submit', (event) => {
+  bindClientFilters(container);
+
+  container.querySelector<HTMLFormElement>('#client-form')?.addEventListener('submit', (event) => {
     event.preventDefault();
     const form = event.currentTarget as HTMLFormElement;
     const values = formValues(form);
@@ -102,7 +190,7 @@ export function renderClients(container: HTMLElement): void {
 
 export function renderProperties(container: HTMLElement): void {
   container.innerHTML = `<div class="panel-heading"><div><span class="eyebrow">Propiedades</span><h2>Inventario activo</h2></div><button data-toggle="property-form">Nueva propiedad</button></div><form id="property-form" class="data-form ${state.openForms.property ? '' : 'collapsed'}"><input name="title" placeholder="Nombre" required><input name="address" placeholder="Zona o dirección" required><select name="type"><option>Departamento</option><option>Casa</option><option>Terreno</option><option>Comercial</option></select><select name="operation"><option>Venta</option><option>Captación</option></select><input name="price" type="number" min="0" placeholder="Precio" required><input name="owner" placeholder="Propietario o colega" required><select name="status"><option>Activa</option><option>Captación</option><option>Reservada</option><option>Cerrada</option></select><button type="submit">Guardar propiedad</button></form><div class="property-board">${state.crm.properties.map((property) => `<article class="property-card"><div><span>${escapeHtml(property.status)}</span><h3>${escapeHtml(property.title)}</h3><p>${escapeHtml(property.address)} · ${escapeHtml(property.type)}</p><strong>USD ${new Intl.NumberFormat('es-AR').format(property.price)}</strong></div><button class="delete" data-delete="properties" data-id="${property.id}">×</button></article>`).join('') || '<p class="empty-state">No hay propiedades.</p>'}</div>`;
-  document.querySelector<HTMLFormElement>('#property-form')?.addEventListener('submit', (event) => {
+  container.querySelector<HTMLFormElement>('#property-form')?.addEventListener('submit', (event) => {
     event.preventDefault(); const values = formValues(event.currentTarget as HTMLFormElement);
     state.crm.properties.push({ id: nextId(state.crm.properties), title: field(values, 'title'), address: field(values, 'address'), type: field(values, 'type'), operation: field(values, 'operation'), price: Number(field(values, 'price')), owner: field(values, 'owner'), status: field(values, 'status') });
     state.openForms.property = false; saveData(); document.dispatchEvent(new CustomEvent('trv-render'));
