@@ -43,9 +43,11 @@ function matchesQuery(contact: CommercialContact, properties: Property[], query:
     ...linkedProperties.flatMap((property) => [property.title, property.address, property.type]),
   ].join(' '));
 
+  const queryTokens = normalizedQuery.split(' ').filter(Boolean);
+  const textMatches = queryTokens.every((token) => searchable.includes(token));
   const queryDigits = query.replace(/\D+/g, '');
   const phoneMatches = queryDigits.length >= 5 && phoneIdentity(contact.phone).includes(phoneIdentity(query));
-  return searchable.includes(normalizedQuery) || phoneMatches;
+  return textMatches || phoneMatches;
 }
 
 export function filterCommercialContacts(
