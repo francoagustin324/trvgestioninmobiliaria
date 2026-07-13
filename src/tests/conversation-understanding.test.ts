@@ -41,8 +41,9 @@ function textMessage(text: string): ConversationMessage {
 
 function expectConcept(text: string, expected: ConversationStatus): void {
   const audit = auditConversation(conversation(textMessage(text)), client(), []);
-  assert.equal(audit.status, expected, text);
-  assert.equal(audit.engine, 'Comprensión por conceptos', text);
+  const diagnostic = `${text} · ${JSON.stringify(audit)}`;
+  assert.equal(audit.status, expected, diagnostic);
+  assert.equal(audit.engine, 'Comprensión por conceptos', diagnostic);
 }
 
 test('comprende búsquedas activas mediante conceptos y sinónimos', () => {
