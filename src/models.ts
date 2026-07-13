@@ -151,7 +151,7 @@ export interface CrmData {
 export const modules: Array<[ModuleId, string]> = [
   ['inicio', 'Inicio'], ['crm', 'CRM / Leads'], ['propiedades', 'Propiedades'], ['red', 'Red comercial'],
   ['fichas', 'Fichas TRV'], ['whatsapp', 'WhatsApp + IA'], ['agenda', 'Agenda / Seguimiento'],
-  ['equipo', 'Equipo'], ['reportes', 'Reportes'], ['configuracion', 'Configuración'],
+  ['reportes', 'Reportes'], ['configuracion', 'Configuración'],
 ];
 
 export const initialData: CrmData = {
