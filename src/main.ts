@@ -7,6 +7,7 @@ import { handleFichaAction, renderFichas, setFichaMode } from './fichas-ui.js';
 import { decodePublicFicha, renderPublicMode } from './public-ficha.js';
 import { consumeExtensionImport } from './extension-import-ui.js';
 import { renderExtensionInstallHelp } from './extension-install-ui.js';
+import { renderWhatsApp } from './whatsapp-ui.js';
 import { saveData, state } from './store.js';
 import { qs } from './utils.js';
 
@@ -60,7 +61,6 @@ function showNotice(message: string): void {
 }
 
 function renderSimple(): void {
-  qs<HTMLElement>('#whatsapp').innerHTML = '<div class="empty-module"><span class="eyebrow">WhatsApp + IA</span><h2>Próxima etapa</h2><p>La estructura queda preparada para integración oficial y respuestas sugeridas.</p></div>';
   qs<HTMLElement>('#reportes').innerHTML = `<div class="metric-grid"><article><span>Leads</span><strong>${state.crm.clients.length}</strong></article><article><span>Calientes</span><strong>${state.crm.clients.filter((item) => item.temperature === 'Caliente').length}</strong></article><article><span>Fichas</span><strong>${state.crm.fichas.length}</strong></article><article><span>Propiedades</span><strong>${state.crm.properties.length}</strong></article></div>`;
   qs<HTMLElement>('#configuracion').innerHTML = `<div class="settings-grid"><section class="settings-brand-card"><img src="${PRODUCT_BRAND.wordmark}" alt="${PRODUCT_BRAND.name}"><div><span class="eyebrow">Marca del software</span><h3>${PRODUCT_BRAND.name}</h3><p>${PRODUCT_BRAND.tagline}</p><strong>${PRODUCT_BRAND.phrase}</strong><span class="agency-chip">Inmobiliaria configurada: ${AGENCY_BRAND.name}</span></div></section><section class="cloud-settings-card"><span class="eyebrow">Datos protegidos</span><h3>Cuenta y respaldo online</h3><p>Ingresá para usar los mismos clientes, propiedades, agenda y fichas desde distintos dispositivos.</p><div id="cloud-settings-account"></div></section><label>Software<input value="${PRODUCT_BRAND.name}" readonly></label><label>Inmobiliaria<input value="${AGENCY_BRAND.name}" readonly></label><label>WhatsApp público<input value="${AGENCY_BRAND.displayWhatsapp}" readonly></label><label>Marca de las fichas<img src="${AGENCY_BRAND.logo}" alt="${AGENCY_BRAND.name}"></label></div>`;
   const cloudSettings = document.querySelector<HTMLElement>('#cloud-settings-account');
@@ -74,6 +74,7 @@ function render(): void {
   renderProperties(qs<HTMLElement>('#propiedades'));
   renderFichas(qs<HTMLElement>('#fichas'));
   renderExtensionInstallHelp();
+  renderWhatsApp(qs<HTMLElement>('#whatsapp'));
   renderSimple();
   renderAgenda(qs<HTMLElement>('#agenda'));
   modules.forEach(([id, label]) => {
@@ -92,6 +93,7 @@ function render(): void {
 function removeItem(collection: string, id: number): void {
   if (collection === 'clients') {
     state.crm.clients = state.crm.clients.filter((item) => item.id !== id);
+    state.crm.conversations = state.crm.conversations.filter((item) => item.clientId !== id);
     if (state.editingClientId === id) {
       state.editingClientId = null;
       state.openForms.client = false;
@@ -104,7 +106,7 @@ function removeItem(collection: string, id: number): void {
 }
 
 function deletionMessage(collection: string): string {
-  if (collection === 'clients') return '¿Eliminar este cliente? Esta acción no se puede deshacer.';
+  if (collection === 'clients') return '¿Eliminar este cliente? También se eliminará su conversación de prueba. Esta acción no se puede deshacer.';
   if (collection === 'properties') return '¿Eliminar esta propiedad? Esta acción no se puede deshacer.';
   if (collection === 'reminders') return '¿Eliminar este recordatorio? Esta acción no se puede deshacer.';
   return '¿Eliminar este registro? Esta acción no se puede deshacer.';
