@@ -12,6 +12,9 @@ export type PhotoEnhancement = 'none' | 'soft';
 export type ConversationMode = 'IA supervisada' | 'Humano' | 'Pausada';
 export type MessageSender = 'Cliente' | 'IA' | 'Humano';
 export type CommercialContactType = 'Colega / Inmobiliaria' | 'Constructor / Desarrollista' | 'Propietario';
+export type ConversationStatus = 'Sigue buscando' | 'Esperando vender' | 'Ya compró' | 'No busca más' | 'Contacto comercial' | 'Revisar manualmente';
+export type FollowUpDecision = 'Seguimiento supervisado' | 'Pausar' | 'No contactar' | 'Revisión manual';
+export type AuditSource = 'Automático' | 'Manual';
 
 export interface Client {
   id: number; name: string; phone: string; email?: string; interest: string; status: string;
@@ -54,6 +57,15 @@ export interface ConversationMessage {
   detectedData?: string[];
 }
 
+export interface ConversationAudit {
+  status: ConversationStatus;
+  decision: FollowUpDecision;
+  confidence: number;
+  reasons: string[];
+  auditedAt: string;
+  source: AuditSource;
+}
+
 export interface WhatsAppConversation {
   id: number;
   clientId: number;
@@ -62,6 +74,7 @@ export interface WhatsAppConversation {
   unread: number;
   lastActivity: string;
   messages: ConversationMessage[];
+  audit?: ConversationAudit;
 }
 
 export interface FichaPublica {
