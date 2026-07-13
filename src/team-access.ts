@@ -9,6 +9,14 @@ import type {
 } from './models.js';
 import { modules } from './models.js';
 import { state } from './store.js';
+import {
+  activeMembers,
+  assignmentVisible,
+  roleCanAccessModule,
+  roleCanManageTeam,
+  roleCanViewAll,
+  seatAvailable,
+} from './team-policy.js';
 
 export function activeMember(): TeamMember {
   return state.crm.teamMembers.find((member) => member.id === state.activeMemberId)
@@ -22,16 +30,15 @@ export function memberName(memberId: number | undefined): string {
 }
 
 export function canManageTeam(member = activeMember()): boolean {
-  return member.role === 'Dueño' || member.role === 'Administrador';
+  return roleCanManageTeam(member.role);
 }
 
 export function canViewAll(member = activeMember()): boolean {
-  return member.role === 'Dueño' || member.role === 'Administrador';
+  return roleCanViewAll(member.role);
 }
 
 export function canAccessModule(module: ModuleId, member = activeMember()): boolean {
-  if (member.role !== 'Corredor') return true;
-  return !['reportes', 'configuracion'].includes(module);
+  return roleCanAccessModule(member.role, module);
 }
 
 export function accessibleModules(): Array<[ModuleId, string]> {
@@ -40,7 +47,7 @@ export function accessibleModules(): Array<[ModuleId, string]> {
 
 function visibleByAssignment<T extends { assignedToId?: number }>(items: T[]): T[] {
   const member = activeMember();
-  return canViewAll(member) ? items : items.filter((item) => item.assignedToId === member.id);
+  return items.filter((item) => assignmentVisible(member.role, member.id, item.assignedToId));
 }
 
 export function visibleClients(): Client[] { return visibleByAssignment(state.crm.clients); }
@@ -53,12 +60,11 @@ export function defaultAssigneeId(): number {
 }
 
 export function activeSeatCount(): number {
-  return state.crm.teamMembers.filter((member) => member.status !== 'Suspendido').length;
+  return activeMembers(state.crm.teamMembers).length;
 }
 
 export function hasSeatAvailable(): boolean {
-  const limit = state.crm.organization.seatLimit;
-  return limit === null || activeSeatCount() < limit;
+  return seatAvailable(state.crm.teamMembers, state.crm.organization.seatLimit);
 }
 
 export function workload(memberId: number): { clients: number; properties: number; conversations: number; tasks: number; unread: number } {
