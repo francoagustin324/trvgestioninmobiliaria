@@ -39,6 +39,7 @@ h1, h2, h3, h4, p { margin-top: 0; }
 button { min-height: 42px; padding: 10px 14px; border: 0; border-radius: 12px; color: #102b46; background: #e5b84f; font-weight: 900; }
 button:hover { filter: brightness(.97); }
 .delete { width: 36px; height: 36px; min-height: 36px; padding: 0; border-radius: 50%; color: #991b1b; background: #fee2e2; font-size: 1.2rem; }
+.secondary { color: #173951; background: #edf4f9; border: 1px solid #d9e4ee; }
 
 .metric-grid { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 10px; margin-bottom: 16px; }
 .metric-grid article { min-width: 0; padding: 15px; border: 1px solid #d9e4ee; border-radius: 18px; background: #fff; box-shadow: 0 10px 26px rgba(23,32,51,.05); }
@@ -53,6 +54,11 @@ button:hover { filter: brightness(.97); }
 
 .data-form { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin-bottom: 16px; padding: 14px; border-radius: 17px; background: #f6f9fc; }
 .data-form.collapsed { display: none; }
+.form-heading { grid-column: 1 / -1; display: flex; align-items: center; justify-content: space-between; gap: 16px; padding-bottom: 4px; }
+.form-heading h3 { margin: 4px 0 0; }
+.form-heading > span { max-width: 560px; color: #526273; font-size: .86rem; }
+.form-actions { grid-column: 1 / -1; display: flex; gap: 9px; justify-content: flex-end; }
+.form-actions button { min-width: 150px; }
 input, select, textarea { width: 100%; min-width: 0; padding: 11px 12px; border: 1px solid #d8e2ec; border-radius: 12px; outline: 0; color: #172033; background: #fff; }
 input:focus, select:focus, textarea:focus { border-color: #d0a33c; box-shadow: 0 0 0 3px rgba(208,163,60,.15); }
 textarea { grid-column: 1 / -1; min-height: 82px; resize: vertical; }
@@ -69,6 +75,8 @@ textarea { grid-column: 1 / -1; min-height: 82px; resize: vertical; }
 .traffic.amarillo { color: #8a4a07; background: #fff1d6; }
 .traffic.rojo { color: #991b1b; background: #fee2e2; }
 .next-step { display: block; margin-top: 9px; color: #0d3449; }
+.record-actions { display: flex; align-items: center; gap: 8px; }
+.edit-button { min-width: 78px; }
 .property-card span { display: inline-flex; padding: 5px 8px; border-radius: 999px; color: #155e53; background: #ddf7f1; font-size: .72rem; font-weight: 900; }
 .empty-state { margin: 0; padding: 16px; border-radius: 14px; color: #64748b; background: #f6f9fc; }
 
@@ -132,13 +140,16 @@ time { color: #ad7b23; font-weight: 900; }
   .metric-grid span { min-height: 30px; font-size: .73rem; }
   .metric-grid strong { font-size: 1.4rem; }
   .module-panel:not(#inicio), .panel-card, .empty-module { padding: 12px; border-radius: 17px; }
-  .panel-heading { align-items: stretch; flex-direction: column; }
+  .panel-heading, .form-heading { align-items: stretch; flex-direction: column; }
   .data-form, .settings-grid { grid-template-columns: 1fr; }
+  .form-actions { display: grid; grid-template-columns: 1fr; }
   textarea { grid-column: auto; }
   .crm-card, .property-card { grid-template-columns: 1fr; }
+  .record-actions { width: 100%; justify-content: flex-end; }
+  .record-actions .edit-button { flex: 1; }
   .mode-tabs, .ficha-actions, .public-data, .public-gallery { grid-template-columns: 1fr; }
   button { width: 100%; }
-  .delete { width: 38px; }
+  .delete { width: 38px; flex: 0 0 38px; }
   .public-page { padding: 0; }
   .public-ficha { border-radius: 0; min-height: 100vh; }
   .public-header { padding: 15px; }
