@@ -5,7 +5,7 @@
   "description": "CRM y generador de fichas TRV en TypeScript con extensión gratuita para portales inmobiliarios.",
   "type": "module",
   "scripts": {
-    "build": "tsc && node --test dist/tests/conversation-audit.test.js dist/tests/conversation-audit-corpus.test.js dist/tests/conversation-understanding.test.js && node scripts/build-extension-zip.mjs && node scripts/check-static-app.mjs",
+    "build": "tsc && node scripts/build-extension-zip.mjs && node scripts/check-static-app.mjs",
     "start": "node dist/server.js",
     "test": "npm run build && node --test dist/tests/*.test.js"
   },
