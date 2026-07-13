@@ -87,6 +87,10 @@ function assignedId(value: { assignedToId?: number; createdById?: number }, fall
   return Number(value.assignedToId ?? value.createdById ?? fallback);
 }
 
+export function organizationScopedEntityKey(organizationId: string, entityKey: string | number): string {
+  return `${organizationId}:${String(entityKey)}`;
+}
+
 function row(
   organizationId: string,
   entityType: CloudEntityType,
@@ -98,7 +102,7 @@ function row(
   return {
     organization_id: organizationId,
     entity_type: entityType,
-    entity_key: String(entityKey),
+    entity_key: organizationScopedEntityKey(organizationId, entityKey),
     assigned_member_id: assignedMemberId,
     payload,
     created_by: userId,
@@ -143,7 +147,8 @@ function recordsOf<T>(rows: CloudRecordRow[], entityType: CloudEntityType): T[] 
 }
 
 function organizationFromRows(rows: CloudRecordRow[], fallback: OrganizationSettings, organizationId: string): OrganizationSettings {
-  const payload = rows.find((item) => item.entity_type === 'organization' && item.entity_key === 'settings')?.payload;
+  const expectedKey = organizationScopedEntityKey(organizationId, 'settings');
+  const payload = rows.find((item) => item.entity_type === 'organization' && item.entity_key === expectedKey)?.payload;
   const value = payload && typeof payload === 'object' ? payload as Partial<OrganizationSettings> : {};
   return {
     id: organizationId,
