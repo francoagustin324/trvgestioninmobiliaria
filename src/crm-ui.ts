@@ -1,4 +1,14 @@
 import { todayIsoDate } from './agenda.js';
+import {
+  clientCompletenessScore,
+  findHistoricalDuplicateGroups,
+  hasClientMergeBackup,
+  mergeDuplicateClients,
+  recommendedPrimaryClient,
+  restoreClientMergeBackup,
+  saveClientMergeBackup,
+  type DuplicateClientGroup,
+} from './client-duplicates.js';
 import { clientFromFormValues, upsertClient } from './client-editor.js';
 import { defaultClientListFilters, filterAndSortClients, type ClientListFilters } from './client-list.js';
 import { Client, Temperature } from './models.js';
@@ -105,6 +115,87 @@ function bindClientFilters(container: HTMLElement): void {
   });
 }
 
+function duplicateClientRow(client: Client, recommendedId: number): string {
+  const recommended = client.id === recommendedId;
+  const contact = client.lastContact ? `Último contacto ${formattedCrmDate(client.lastContact)}` : 'Sin fecha de contacto';
+  return `<article class="duplicate-client-row ${recommended ? 'recommended' : ''}">
+    <div>
+      <div class="duplicate-client-title"><strong>${escapeHtml(client.name)}</strong>${recommended ? '<span>Recomendado</span>' : ''}</div>
+      <p>${escapeHtml(formatPhone(client.phone))} · ${escapeHtml(client.pipeline)} · ${escapeHtml(client.temperature)}</p>
+      <small>${escapeHtml(contact)} · ${clientCompletenessScore(client)} campos completos</small>
+    </div>
+    <button type="button" class="secondary" data-merge-client-primary="${client.id}">Conservar este y fusionar</button>
+  </article>`;
+}
+
+function duplicateGroupHtml(group: DuplicateClientGroup): string {
+  const recommended = recommendedPrimaryClient(group);
+  return `<article class="duplicate-group">
+    <div class="duplicate-group-heading">
+      <div><span class="eyebrow">Mismo teléfono</span><h4>${escapeHtml(formatPhone(group.clients[0]?.phone ?? group.identity))}</h4></div>
+      <strong>${group.clients.length} registros</strong>
+    </div>
+    <p class="duplicate-explanation">Elegí cuál conservar. PropControl completará campos vacíos, mantendrá el seguimiento más urgente y guardará los datos de los otros registros dentro de las observaciones.</p>
+    <div class="duplicate-client-list">${group.clients.map((client) => duplicateClientRow(client, recommended.id)).join('')}</div>
+  </article>`;
+}
+
+function duplicateAuditHtml(): string {
+  const groups = findHistoricalDuplicateGroups(state.crm.clients);
+  const duplicateRecords = groups.reduce((total, group) => total + group.clients.length, 0);
+  const backupAction = hasClientMergeBackup()
+    ? '<button type="button" class="secondary" data-undo-client-merge>Deshacer última fusión</button>'
+    : '';
+
+  if (!groups.length) {
+    return `<details class="duplicate-audit is-clean">
+      <summary><span><b>Control de duplicados históricos</b><small>La base no tiene teléfonos repetidos.</small></span><span class="duplicate-summary-actions"><strong>Base limpia</strong>${backupAction}</span></summary>
+      <p>No se encontraron clientes anteriores con el mismo número normalizado. PropControl seguirá bloqueando nuevos duplicados.</p>
+    </details>`;
+  }
+
+  return `<details class="duplicate-audit has-duplicates" open>
+    <summary><span><b>Revisar duplicados históricos</b><small>La fusión siempre requiere tu confirmación.</small></span><span class="duplicate-summary-actions"><strong>${groups.length} grupos · ${duplicateRecords} registros</strong>${backupAction}</span></summary>
+    <div class="duplicate-warning">No se fusionará nada automáticamente. Revisá cada grupo y elegí el registro principal.</div>
+    <div class="duplicate-groups">${groups.map(duplicateGroupHtml).join('')}</div>
+  </details>`;
+}
+
+function bindDuplicateTools(container: HTMLElement): void {
+  container.querySelectorAll<HTMLButtonElement>('[data-merge-client-primary]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const primaryId = Number(button.dataset.mergeClientPrimary);
+      const group = findHistoricalDuplicateGroups(state.crm.clients).find((item) => item.clients.some((client) => client.id === primaryId));
+      const primary = group?.clients.find((client) => client.id === primaryId);
+      if (!group || !primary) return;
+
+      const removedNames = group.clients.filter((client) => client.id !== primaryId).map((client) => client.name).join(', ');
+      const confirmed = window.confirm(`Se conservará ${primary.name} y se fusionarán ${removedNames}. Los datos se respaldarán y podrás deshacer la operación. ¿Continuar?`);
+      if (!confirmed) return;
+
+      saveClientMergeBackup(state.crm.clients);
+      const result = mergeDuplicateClients(state.crm.clients, primaryId);
+      state.crm.clients = result.clients;
+      if (result.removedIds.includes(state.editingClientId ?? -1)) {
+        state.editingClientId = null;
+        state.openForms.client = false;
+      }
+      saveData();
+      document.dispatchEvent(new CustomEvent('trv-render'));
+    });
+  });
+
+  container.querySelector<HTMLButtonElement>('[data-undo-client-merge]')?.addEventListener('click', () => {
+    const restored = restoreClientMergeBackup();
+    if (!restored) return;
+    state.crm.clients = restored;
+    state.editingClientId = null;
+    state.openForms.client = false;
+    saveData();
+    document.dispatchEvent(new CustomEvent('trv-render'));
+  });
+}
+
 export function renderHome(container: HTMLElement): void {
   const hot = state.crm.clients.filter((client) => client.temperature === 'Caliente').length;
   const visits = state.crm.clients.filter((client) => client.pipeline === 'Visita posible').length;
@@ -148,6 +239,7 @@ export function renderClients(container: HTMLElement): void {
     <div id="client-form-error" class="form-error" role="alert" hidden></div>
     <div class="form-actions"><button type="submit">${submitLabel}</button>${editingClient ? '<button type="button" class="secondary" data-cancel-client-edit>Cancelar</button>' : ''}</div>
   </form>
+  ${duplicateAuditHtml()}
   <form id="client-filters" class="client-filter-bar" aria-label="Buscar y filtrar clientes">
     <label class="client-search"><span>Buscar</span><input name="query" type="search" autocomplete="off" placeholder="Nombre, teléfono, zona, presupuesto..." value="${escapeHtml(clientListFilters.query)}"></label>
     <label><span>Temperatura</span><select name="temperature">${['Todas', ...temperatures].map((value) => selectedOption(value, clientListFilters.temperature)).join('')}</select></label>
@@ -160,6 +252,7 @@ export function renderClients(container: HTMLElement): void {
   <div id="client-results" class="card-list">${clientResultsHtml(clients)}</div>`;
 
   bindClientFilters(container);
+  bindDuplicateTools(container);
 
   container.querySelector<HTMLFormElement>('#client-form')?.addEventListener('submit', (event) => {
     event.preventDefault();
