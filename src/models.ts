@@ -6,7 +6,7 @@ export const FICHA_LEGAL = AGENCY_BRAND.publicLegal;
 export const LOGO_PATH = AGENCY_BRAND.logo;
 
 export type Temperature = 'Caliente' | 'Tibio' | 'Frío';
-export type ModuleId = 'inicio' | 'crm' | 'propiedades' | 'red' | 'fichas' | 'whatsapp' | 'agenda' | 'reportes' | 'configuracion';
+export type ModuleId = 'inicio' | 'crm' | 'propiedades' | 'red' | 'fichas' | 'whatsapp' | 'agenda' | 'equipo' | 'reportes' | 'configuracion';
 export type FichaMode = 'manual' | 'property' | 'external';
 export type PhotoEnhancement = 'none' | 'soft';
 export type ConversationMode = 'IA supervisada' | 'Humano' | 'Pausada';
@@ -18,12 +18,44 @@ export type ConversationStatus = 'Sigue buscando' | 'Esperando vender' | 'Ya com
 export type FollowUpDecision = 'Seguimiento supervisado' | 'Pausar' | 'No contactar' | 'Revisión manual';
 export type AuditSource = 'Automático' | 'Manual';
 export type AuditEngine = 'Reglas de seguridad' | 'Comprensión por conceptos' | 'Manual';
+export type TeamRole = 'Dueño' | 'Administrador' | 'Corredor';
+export type TeamMemberStatus = 'Activo' | 'Pendiente de acceso' | 'Suspendido';
+export type AssignmentEntity = 'Cliente' | 'Propiedad' | 'Conversación' | 'Tarea';
+
+export interface OrganizationSettings {
+  id: string;
+  name: string;
+  seatLimit: number | null;
+  planLabel: string;
+}
+
+export interface TeamMember {
+  id: number;
+  name: string;
+  email: string;
+  phone?: string;
+  role: TeamRole;
+  status: TeamMemberStatus;
+  createdAt: string;
+  lastActiveAt?: string;
+}
+
+export interface ActivityEntry {
+  id: number;
+  actorId: number;
+  action: string;
+  entityType: AssignmentEntity | 'Equipo';
+  entityId?: number;
+  detail: string;
+  createdAt: string;
+}
 
 export interface Client {
   id: number; name: string; phone: string; email?: string; interest: string; status: string;
   temperature: Temperature; pipeline: string; lastContact?: string; nextFollowUp?: string;
   budget?: string; paymentMethod?: string; purchaseTimeframe?: string; purpose?: string;
   knowsArea?: string; canMoveForward?: string; objections?: string; notes?: string;
+  assignedToId?: number; createdById?: number;
 }
 
 export interface CommercialContact {
@@ -45,10 +77,12 @@ export interface Property {
   price: number; owner: string; status: string; bedrooms?: number; bathrooms?: number;
   paymentMethod?: string; features?: string; notes?: string;
   sourceContactId?: number; sharedAt?: string; sourceLink?: string;
+  assignedToId?: number; createdById?: number;
 }
 
 export interface Reminder {
   id: number; date: string; title: string; related: string; priority: string;
+  assignedToId?: number; createdById?: number;
 }
 
 export interface ConversationMessage {
@@ -85,6 +119,8 @@ export interface WhatsAppConversation {
   lastActivity: string;
   messages: ConversationMessage[];
   audit?: ConversationAudit;
+  assignedToId?: number;
+  createdById?: number;
 }
 
 export interface FichaPublica {
@@ -101,6 +137,9 @@ export interface Ficha extends FichaPublica {
 }
 
 export interface CrmData {
+  organization: OrganizationSettings;
+  teamMembers: TeamMember[];
+  activityLog: ActivityEntry[];
   clients: Client[];
   properties: Property[];
   contacts: CommercialContact[];
@@ -116,12 +155,29 @@ export const modules: Array<[ModuleId, string]> = [
 ];
 
 export const initialData: CrmData = {
+  organization: {
+    id: 'trv-gestion-inmobiliaria',
+    name: AGENCY_BRAND.name,
+    seatLimit: null,
+    planLabel: 'Piloto sin límite',
+  },
+  teamMembers: [{
+    id: 1,
+    name: 'Franco Solís',
+    email: '',
+    phone: AGENCY_BRAND.whatsapp,
+    role: 'Dueño',
+    status: 'Activo',
+    createdAt: '2026-07-13T00:00:00.000Z',
+  }],
+  activityLog: [],
   clients: [{
     id: 1, name: 'Lucía Martín', phone: '351 555-0101', email: 'lucia@email.com',
     interest: 'Departamento de 2 dormitorios en Nueva Córdoba', status: 'Lead', temperature: 'Caliente',
     pipeline: 'Visita posible', lastContact: '2026-07-06', nextFollowUp: '2026-07-09', budget: 'USD 90.000',
     paymentMethod: 'Contado', purchaseTimeframe: '0-3 meses', purpose: 'Vivir', knowsArea: 'Sí',
     canMoveForward: 'Sí', objections: 'Busca balcón y buena luz natural', notes: 'Revisar opciones antes de coordinar visita.',
+    assignedToId: 1, createdById: 1,
   }],
   contacts: [{
     id: 1,
@@ -140,9 +196,12 @@ export const initialData: CrmData = {
     id: 1, title: 'Departamento en General Paz', address: 'General Paz, Córdoba', type: 'Departamento',
     operation: 'Venta', price: 85000, owner: 'Propietario', status: 'Activa', bedrooms: 2, bathrooms: 1,
     paymentMethod: 'Contado', features: 'Balcón, buena luz natural', notes: '',
-    sourceContactId: 1, sharedAt: '2026-07-11', sourceLink: '',
+    sourceContactId: 1, sharedAt: '2026-07-11', sourceLink: '', assignedToId: 1, createdById: 1,
   }],
-  reminders: [{ id: 1, date: '2026-07-13', title: 'Llamar a Lucía', related: 'Búsqueda Nueva Córdoba', priority: 'Alta' }],
+  reminders: [{
+    id: 1, date: '2026-07-13', title: 'Llamar a Lucía', related: 'Búsqueda Nueva Córdoba', priority: 'Alta',
+    assignedToId: 1, createdById: 1,
+  }],
   fichas: [],
   conversations: [{
     id: 1,
@@ -151,6 +210,8 @@ export const initialData: CrmData = {
     mode: 'IA supervisada',
     unread: 1,
     lastActivity: '2026-07-13T12:15:00.000Z',
+    assignedToId: 1,
+    createdById: 1,
     messages: [{
       id: 1,
       direction: 'inbound',

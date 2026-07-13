@@ -1,6 +1,17 @@
 import { queueCloudSave } from './cloud-api.js';
-import type { ConversationMessage, CrmData, FichaMode, ModuleId, WhatsAppConversation } from './models.js';
+import type {
+  ActivityEntry,
+  ConversationMessage,
+  CrmData,
+  FichaMode,
+  ModuleId,
+  OrganizationSettings,
+  TeamMember,
+  WhatsAppConversation,
+} from './models.js';
 import { STORAGE_KEY, initialData } from './models.js';
+
+const TEAM_VIEW_KEY = 'propcontrol-active-team-member-v1';
 
 function normalizedMessage(value: Partial<ConversationMessage>, fallbackId: number): ConversationMessage {
   const kind = value.kind === 'audio' ? 'audio' : 'text';
@@ -23,7 +34,7 @@ function normalizedMessage(value: Partial<ConversationMessage>, fallbackId: numb
   };
 }
 
-function normalizedConversation(value: Partial<WhatsAppConversation>, fallbackId: number): WhatsAppConversation {
+function normalizedConversation(value: Partial<WhatsAppConversation>, fallbackId: number, fallbackOwnerId: number): WhatsAppConversation {
   const messages = Array.isArray(value.messages)
     ? value.messages.map((message, index) => normalizedMessage(message, index + 1))
     : [];
@@ -36,18 +47,81 @@ function normalizedConversation(value: Partial<WhatsAppConversation>, fallbackId
     lastActivity: String(value.lastActivity ?? messages.at(-1)?.createdAt ?? new Date().toISOString()),
     messages,
     audit: value.audit,
+    assignedToId: Number(value.assignedToId ?? fallbackOwnerId),
+    createdById: Number(value.createdById ?? fallbackOwnerId),
   };
 }
 
-function normalizedData(value: Partial<CrmData>): CrmData {
+function normalizedOrganization(value: Partial<OrganizationSettings> | undefined): OrganizationSettings {
   return {
-    clients: Array.isArray(value.clients) ? value.clients : [],
-    properties: Array.isArray(value.properties) ? value.properties : [],
+    id: String(value?.id || initialData.organization.id),
+    name: String(value?.name || initialData.organization.name),
+    seatLimit: Number.isFinite(value?.seatLimit) && Number(value?.seatLimit) > 0 ? Number(value?.seatLimit) : null,
+    planLabel: String(value?.planLabel || initialData.organization.planLabel),
+  };
+}
+
+function normalizedTeamMembers(value: unknown): TeamMember[] {
+  if (!Array.isArray(value) || !value.length) return structuredClone(initialData.teamMembers);
+  const members = value.map((item, index) => {
+    const record = item && typeof item === 'object' ? item as Partial<TeamMember> : {};
+    const role = record.role === 'Administrador' || record.role === 'Corredor' ? record.role : 'Dueño';
+    const status = record.status === 'Pendiente de acceso' || record.status === 'Suspendido' ? record.status : 'Activo';
+    return {
+      id: Number.isFinite(record.id) ? Number(record.id) : index + 1,
+      name: String(record.name || `Usuario ${index + 1}`),
+      email: String(record.email || ''),
+      phone: record.phone ? String(record.phone) : undefined,
+      role,
+      status,
+      createdAt: String(record.createdAt || new Date().toISOString()),
+      lastActiveAt: record.lastActiveAt ? String(record.lastActiveAt) : undefined,
+    } satisfies TeamMember;
+  });
+  if (!members.some((member) => member.role === 'Dueño')) members[0] = { ...members[0]!, role: 'Dueño', status: 'Activo' };
+  return members;
+}
+
+function normalizedActivityLog(value: unknown): ActivityEntry[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter((item): item is ActivityEntry => Boolean(item && typeof item === 'object'))
+    .map((item, index) => ({
+      id: Number.isFinite(item.id) ? Number(item.id) : index + 1,
+      actorId: Number(item.actorId || 1),
+      action: String(item.action || 'Actualización'),
+      entityType: item.entityType || 'Equipo',
+      entityId: Number.isFinite(item.entityId) ? Number(item.entityId) : undefined,
+      detail: String(item.detail || ''),
+      createdAt: String(item.createdAt || new Date().toISOString()),
+    }));
+}
+
+function normalizedData(value: Partial<CrmData>): CrmData {
+  const teamMembers = normalizedTeamMembers(value.teamMembers);
+  const ownerId = teamMembers.find((member) => member.role === 'Dueño')?.id ?? teamMembers[0]?.id ?? 1;
+  return {
+    organization: normalizedOrganization(value.organization),
+    teamMembers,
+    activityLog: normalizedActivityLog(value.activityLog),
+    clients: Array.isArray(value.clients) ? value.clients.map((client) => ({
+      ...client,
+      assignedToId: Number(client.assignedToId ?? ownerId),
+      createdById: Number(client.createdById ?? ownerId),
+    })) : [],
+    properties: Array.isArray(value.properties) ? value.properties.map((property) => ({
+      ...property,
+      assignedToId: Number(property.assignedToId ?? ownerId),
+      createdById: Number(property.createdById ?? ownerId),
+    })) : [],
     contacts: Array.isArray(value.contacts) ? value.contacts : [],
-    reminders: Array.isArray(value.reminders) ? value.reminders : [],
+    reminders: Array.isArray(value.reminders) ? value.reminders.map((reminder) => ({
+      ...reminder,
+      assignedToId: Number(reminder.assignedToId ?? ownerId),
+      createdById: Number(reminder.createdById ?? ownerId),
+    })) : [],
     fichas: Array.isArray(value.fichas) ? value.fichas : [],
     conversations: Array.isArray(value.conversations)
-      ? value.conversations.map((conversation, index) => normalizedConversation(conversation, index + 1))
+      ? value.conversations.map((conversation, index) => normalizedConversation(conversation, index + 1, ownerId))
       : [],
   };
 }
@@ -60,8 +134,20 @@ function loadData(): CrmData {
   } catch { return structuredClone(initialData); }
 }
 
+function loadActiveMemberId(crm: CrmData): number {
+  const stored = Number(localStorage.getItem(TEAM_VIEW_KEY));
+  if (crm.teamMembers.some((member) => member.id === stored && member.status !== 'Suspendido')) return stored;
+  return crm.teamMembers.find((member) => member.role === 'Dueño' && member.status === 'Activo')?.id
+    ?? crm.teamMembers.find((member) => member.status === 'Activo')?.id
+    ?? crm.teamMembers[0]?.id
+    ?? 1;
+}
+
+const loadedCrm = loadData();
+
 export const state = {
-  crm: loadData(),
+  crm: loadedCrm,
+  activeMemberId: loadActiveMemberId(loadedCrm),
   activeModule: 'inicio' as ModuleId,
   fichaMode: 'property' as FichaMode,
   selectedFichaId: null as number | null,
@@ -70,11 +156,23 @@ export const state = {
   selectedConversationId: null as number | null,
   selectedContactId: null as number | null,
   editingContactId: null as number | null,
-  openForms: { client: false, property: false, contact: false, reminder: false, ficha: false },
+  openForms: { client: false, property: false, contact: false, reminder: false, ficha: false, member: false },
 };
+
+export function setActiveMemberId(memberId: number): void {
+  const member = state.crm.teamMembers.find((item) => item.id === memberId && item.status !== 'Suspendido');
+  if (!member) return;
+  state.activeMemberId = member.id;
+  localStorage.setItem(TEAM_VIEW_KEY, String(member.id));
+  state.editingClientId = null;
+  state.selectedConversationId = member.role === 'Corredor'
+    ? state.crm.conversations.find((conversation) => conversation.assignedToId === member.id)?.id ?? null
+    : null;
+}
 
 export function replaceData(data: CrmData, syncCloud = false): void {
   state.crm = normalizedData(data);
+  state.activeMemberId = loadActiveMemberId(state.crm);
   state.editingClientId = null;
   state.selectedConversationId = null;
   state.selectedContactId = null;
