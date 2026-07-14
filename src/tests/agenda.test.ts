@@ -1,6 +1,14 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { agendaUrgency, buildAgendaItems, groupAgendaItems, isValidIsoDate, todayIsoDate } from '../agenda.js';
+import {
+  agendaUrgency,
+  buildAgendaItems,
+  completedReminders,
+  daysBetweenIsoDates,
+  groupAgendaItems,
+  isValidIsoDate,
+  todayIsoDate,
+} from '../agenda.js';
 import type { Client, Reminder } from '../models.js';
 
 function client(overrides: Partial<Client> = {}): Client {
@@ -38,6 +46,11 @@ test('agendaUrgency clasifica vencido, hoy y próximo', () => {
   assert.equal(agendaUrgency('2026-07-14', '2026-07-13'), 'upcoming');
 });
 
+test('daysBetweenIsoDates calcula días sin errores de zona horaria', () => {
+  assert.equal(daysBetweenIsoDates('2026-07-13', '2026-07-14'), 1);
+  assert.equal(daysBetweenIsoDates('2026-07-13', '2026-07-10'), -3);
+});
+
 test('buildAgendaItems combina clientes y recordatorios por urgencia', () => {
   const items = buildAgendaItems([
     client({ id: 7, name: 'Cliente caliente', temperature: 'Caliente', nextFollowUp: '2026-07-13' }),
@@ -48,6 +61,15 @@ test('buildAgendaItems combina clientes y recordatorios por urgencia', () => {
   assert.equal(items[1]?.sourceId, 7);
 });
 
+test('buildAgendaItems ordena por fecha y luego por prioridad', () => {
+  const sameDay: Reminder[] = [
+    { id: 1, date: '2026-07-13', title: 'Prioridad baja', related: 'A', priority: 'Baja' },
+    { id: 2, date: '2026-07-13', title: 'Prioridad alta', related: 'B', priority: 'Alta' },
+  ];
+  const items = buildAgendaItems([], sameDay, '2026-07-13');
+  assert.deepEqual(items.map((item) => item.title), ['Prioridad alta', 'Prioridad baja']);
+});
+
 test('buildAgendaItems excluye clientes cerrados, perdidos y fechas inválidas', () => {
   const items = buildAgendaItems([
     client({ id: 1, pipeline: 'Cerrado' }),
@@ -55,6 +77,19 @@ test('buildAgendaItems excluye clientes cerrados, perdidos y fechas inválidas',
     client({ id: 3, nextFollowUp: 'fecha inválida' }),
   ], [], '2026-07-13');
   assert.equal(items.length, 0);
+});
+
+test('los recordatorios completados salen de la agenda activa y quedan en el historial', () => {
+  const completed = {
+    id: 9,
+    date: '2026-07-13',
+    title: 'Seguimiento resuelto',
+    related: 'Cliente D',
+    priority: 'Alta',
+    completedAt: '2026-07-13T16:00:00.000Z',
+  };
+  assert.equal(buildAgendaItems([], [completed], '2026-07-13').length, 0);
+  assert.deepEqual(completedReminders([completed]).map((item) => item.id), [9]);
 });
 
 test('groupAgendaItems crea las tres bandejas comerciales', () => {
