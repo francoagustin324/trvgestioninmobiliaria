@@ -16,8 +16,10 @@ test('el menú de cuenta no repite el correo cuando el usuario todavía no está
   assert.ok(auth.includes('${escapeHtml(accountDetail)}'));
 });
 
-test('la entrada principal renueva el módulo para entregar la corrección sin conservar caché anterior', () => {
+test('los módulos principales usan una misma versión de caché explícita', () => {
   const html = readFileSync('index.html', 'utf8');
-  assert.ok(html.includes('/dist/mvp-main.js?v=20260714-22'));
-  assert.ok(html.includes('/dist/cloud-compat-bootstrap.js?v=20260714-22'));
+  const mainVersion = html.match(/\/dist\/mvp-main\.js\?v=([^"']+)/)?.[1];
+  const compatibilityVersion = html.match(/\/dist\/cloud-compat-bootstrap\.js\?v=([^"']+)/)?.[1];
+  assert.ok(mainVersion);
+  assert.equal(compatibilityVersion, mainVersion);
 });
