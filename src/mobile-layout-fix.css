@@ -7,7 +7,7 @@
     position: fixed;
     z-index: 80;
     inset: 0 auto 0 0;
-    width: min(86vw, 330px);
+    width: min(82vw, 310px);
     height: 100dvh;
     overflow-x: hidden;
     overflow-y: auto;
@@ -21,5 +21,81 @@
 
   .sidebar-backdrop[hidden] {
     display: none !important;
+  }
+
+  .mvp-topbar {
+    position: sticky;
+    top: 6px;
+    z-index: 40;
+    display: flex !important;
+    grid-template-columns: none !important;
+    align-items: center !important;
+    justify-content: space-between !important;
+    min-height: 64px !important;
+    height: auto !important;
+    margin: 0 0 14px !important;
+    padding: 10px 12px !important;
+    gap: 10px !important;
+  }
+
+  .mvp-topbar .mobile-nav-trigger {
+    order: 0;
+    display: inline-flex !important;
+    width: auto !important;
+    min-width: 0 !important;
+    height: 44px;
+    min-height: 44px;
+    padding: 0 14px !important;
+    justify-content: flex-start !important;
+    gap: 8px;
+    font-weight: 850;
+  }
+
+  .mvp-topbar .mobile-nav-trigger::before {
+    content: '☰';
+    font-size: 1.1rem;
+    line-height: 1;
+  }
+
+  .mvp-topbar-spacer {
+    display: none !important;
+  }
+
+  .mvp-topbar #cloud-account {
+    order: 2;
+    grid-column: auto !important;
+    width: auto !important;
+    min-width: 44px;
+    margin-left: auto;
+    justify-content: flex-end !important;
+  }
+
+  #cloud-account .mvp-account-menu {
+    margin: 0;
+  }
+
+  #cloud-account .mvp-account-menu summary {
+    width: 44px;
+    height: 44px;
+  }
+}
+
+@media (max-width: 420px) {
+  .mvp-topbar {
+    top: 4px;
+    min-height: 60px !important;
+    padding: 8px 10px !important;
+  }
+
+  .mvp-topbar .mobile-nav-trigger {
+    height: 42px;
+    min-height: 42px;
+    padding: 0 12px !important;
+    font-size: .9rem;
+  }
+
+  #cloud-account .mvp-account-menu summary {
+    width: 42px;
+    height: 42px;
   }
 }
