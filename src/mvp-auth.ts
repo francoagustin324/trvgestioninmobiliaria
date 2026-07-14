@@ -6,7 +6,7 @@ import {
   signInCloud,
   signOutCloud,
   signUpCloud,
-} from './cloud-api.js';
+} from './cloud-api-compatible.js';
 import { replaceData, setActiveMemberId, state } from './store.js';
 import { escapeHtml } from './utils.js';
 
