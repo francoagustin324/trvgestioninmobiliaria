@@ -44,23 +44,22 @@ function errorMessage(error: unknown): string {
 
 export function isLegacySchemaError(error: unknown): boolean {
   const message = errorMessage(error).toLowerCase();
-  return (
-    message.includes('organization_members.member_id')
-    || message.includes('organization_members.display_name')
-    || message.includes('organization_members.status')
-    || message.includes('organization_members.last_active_at')
-    || message.includes('propcontrol_records')
-    || message.includes('pgrst204')
-    || message.includes('pgrst205')
-    || message.includes('42p01')
-    || message.includes('42703')
-  ) && (
-    message.includes('does not exist')
-    || message.includes('could not find')
-    || message.includes('schema cache')
-    || message.includes('undefined')
-    || message.includes('pgrst')
-  );
+  const missingLegacyColumn = message.includes('organization_members') && [
+    'member_id',
+    'display_name',
+    'status',
+    'last_active_at',
+  ].some((column) => message.includes(column));
+  const missingModernRelation = message.includes('propcontrol_records');
+  const schemaCode = ['pgrst204', 'pgrst205', '42p01', '42703'].some((code) => message.includes(code));
+  const missingSignal = [
+    'does not exist',
+    'could not find',
+    'schema cache',
+    'undefined',
+    'pgrst',
+  ].some((signal) => message.includes(signal));
+  return (missingLegacyColumn || missingModernRelation || schemaCode) && missingSignal;
 }
 
 function isCrmData(value: unknown): value is CrmData {
