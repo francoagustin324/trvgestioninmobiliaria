@@ -1,4 +1,4 @@
-import type { Client, Reminder } from './models.js';
+import type { Client, Property, Reminder } from './models.js';
 
 export type AgendaUrgency = 'overdue' | 'today' | 'upcoming';
 export type AgendaSource = 'client' | 'reminder';
@@ -22,9 +22,25 @@ export interface AgendaGroups {
   upcoming: AgendaItem[];
 }
 
+export interface AgendaRelatedOption {
+  key: string;
+  value: string;
+  type: 'Lead' | 'Propiedad';
+  detail: string;
+  searchable: string;
+}
+
 const urgencyOrder: Record<AgendaUrgency, number> = { overdue: 0, today: 1, upcoming: 2 };
 const reminderPriority: Record<string, number> = { Alta: 0, Media: 1, Baja: 2 };
 const clientPriority: Record<Client['temperature'], number> = { Caliente: 0, Tibio: 1, Frío: 2 };
+
+function normalizedSearch(value: string): string {
+  return value
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .trim();
+}
 
 export function todayIsoDate(value = new Date()): string {
   const year = value.getFullYear();
@@ -54,6 +70,46 @@ export function daysBetweenIsoDates(from: string, to: string): number {
   const fromTime = Date.parse(`${from}T00:00:00Z`);
   const toTime = Date.parse(`${to}T00:00:00Z`);
   return Math.round((toTime - fromTime) / 86_400_000);
+}
+
+export function agendaRelatedOptions(clients: Client[], properties: Property[]): AgendaRelatedOption[] {
+  const leadOptions = clients.map<AgendaRelatedOption>((client) => ({
+    key: `lead-${client.id}`,
+    value: client.name,
+    type: 'Lead',
+    detail: [client.interest, client.phone].filter(Boolean).join(' · '),
+    searchable: normalizedSearch([client.name, client.interest, client.phone].filter(Boolean).join(' ')),
+  }));
+  const propertyOptions = properties.map<AgendaRelatedOption>((property) => ({
+    key: `property-${property.id}`,
+    value: property.title,
+    type: 'Propiedad',
+    detail: [property.address, property.operation, property.type].filter(Boolean).join(' · '),
+    searchable: normalizedSearch([property.title, property.address, property.owner].filter(Boolean).join(' ')),
+  }));
+  return [...leadOptions, ...propertyOptions].sort((left, right) => (
+    left.value.localeCompare(right.value, 'es', { sensitivity: 'base' })
+    || left.type.localeCompare(right.type, 'es')
+  ));
+}
+
+export function filterAgendaRelatedOptions(
+  options: AgendaRelatedOption[],
+  query: string,
+  limit = 8,
+): AgendaRelatedOption[] {
+  const normalizedQuery = normalizedSearch(query);
+  if (!normalizedQuery) return [];
+  return options
+    .filter((option) => option.searchable.includes(normalizedQuery))
+    .sort((left, right) => {
+      const leftStarts = normalizedSearch(left.value).startsWith(normalizedQuery) ? 0 : 1;
+      const rightStarts = normalizedSearch(right.value).startsWith(normalizedQuery) ? 0 : 1;
+      return leftStarts - rightStarts
+        || left.value.localeCompare(right.value, 'es', { sensitivity: 'base' })
+        || left.type.localeCompare(right.type, 'es');
+    })
+    .slice(0, limit);
 }
 
 function terminalClient(client: Client): boolean {
