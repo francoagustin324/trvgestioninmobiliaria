@@ -1,4 +1,4 @@
-import { queueCloudSave } from './cloud-api.js';
+import { queueCloudSave } from './cloud-api-compatible.js';
 import type {
   ActivityEntry,
   ConversationMessage,
