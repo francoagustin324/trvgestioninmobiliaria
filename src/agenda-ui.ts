@@ -1,7 +1,9 @@
 import {
+  agendaRelatedOptions,
   buildAgendaItems,
   completedReminders,
   daysBetweenIsoDates,
+  filterAgendaRelatedOptions,
   groupAgendaItems,
   todayIsoDate,
   type AgendaItem,
@@ -48,29 +50,33 @@ function sourceBadge(item: AgendaItem): string {
 }
 
 function reprogramControl(item: AgendaItem): string {
-  return `<details class="agenda-reprogram">
-    <summary>Reprogramar</summary>
+  return `<div class="agenda-reprogram">
+    <strong>Cambiar fecha</strong>
     <form data-reprogram-source="${item.source}" data-reprogram-id="${item.sourceId}">
       <label>Nueva fecha<input name="date" type="date" value="${item.date}" required></label>
       <button type="submit">Guardar fecha</button>
     </form>
-  </details>`;
+  </div>`;
 }
 
 function itemActions(item: AgendaItem): string {
-  if (item.source === 'client') {
-    return `<button type="button" class="secondary" data-complete-agenda="client" data-id="${item.sourceId}">Completar</button>
-      ${reprogramControl(item)}
-      <button type="button" class="secondary agenda-open-client" data-edit-client="${item.sourceId}">Abrir lead</button>`;
-  }
-  return `<button type="button" class="secondary" data-complete-agenda="reminder" data-id="${item.sourceId}">Completar</button>
-    ${reprogramControl(item)}
-    <button type="button" class="secondary" data-edit-reminder="${item.sourceId}">Editar</button>
-    <button type="button" class="delete" data-delete="reminders" data-id="${item.sourceId}" aria-label="Eliminar ${escapeHtml(item.title)}">×</button>`;
+  const secondaryAction = item.source === 'client'
+    ? `<button type="button" class="secondary agenda-open-client" data-edit-client="${item.sourceId}">Abrir lead</button>`
+    : `<button type="button" class="secondary" data-edit-reminder="${item.sourceId}">Editar</button>
+       <button type="button" class="delete agenda-delete" data-delete="reminders" data-id="${item.sourceId}" aria-label="Eliminar ${escapeHtml(item.title)}">Eliminar</button>`;
+  return `<button type="button" class="agenda-complete" data-complete-agenda="${item.source}" data-id="${item.sourceId}">Completar</button>
+    <details class="agenda-more-actions">
+      <summary>Más acciones</summary>
+      <div class="agenda-more-actions-panel">
+        ${secondaryAction}
+        ${reprogramControl(item)}
+      </div>
+    </details>`;
 }
 
-function renderAgendaItem(item: AgendaItem, today: string): string {
+function renderAgendaItem(item: AgendaItem, today: string, position: number): string {
   return `<article class="agenda-card ${item.urgency}">
+    <span class="agenda-position" aria-label="Posición ${position}">${position}</span>
     <div class="agenda-card-content">
       <div class="agenda-card-header"><span class="agenda-source">${sourceBadge(item)}</span><time datetime="${item.date}">${escapeHtml(formattedDate(item.date))}</time></div>
       <span class="agenda-relative-date">${escapeHtml(relativeDateLabel(item, today))}</span>
@@ -85,8 +91,8 @@ function renderAgendaItem(item: AgendaItem, today: string): string {
 function renderAgendaSection(urgency: AgendaUrgency, items: AgendaItem[], today: string): string {
   const labels = sectionLabels[urgency];
   return `<section class="agenda-section ${urgency}">
-    <div class="agenda-section-heading"><div><span class="eyebrow">${labels.eyebrow}</span><h3>${labels.title}</h3></div><strong>${items.length}</strong></div>
-    <div class="agenda-list">${items.map((item) => renderAgendaItem(item, today)).join('') || `<p class="empty-state">${labels.empty}</p>`}</div>
+    <div class="agenda-section-heading"><div><span class="eyebrow">${labels.eyebrow}</span><h3>${labels.title}</h3><p>Ordenados por fecha y prioridad.</p></div><strong>${items.length}</strong></div>
+    <div class="agenda-list">${items.map((item, index) => renderAgendaItem(item, today, index + 1)).join('') || `<p class="empty-state">${labels.empty}</p>`}</div>
   </section>`;
 }
 
@@ -95,6 +101,17 @@ function renderCompletedReminder(reminder: ReminderWithStatus): string {
     <div><span>Completado ${escapeHtml(completedDate(reminder.completedAt))}</span><h4>${escapeHtml(reminder.title)}</h4><p>${escapeHtml(reminder.related)}</p></div>
     <button type="button" class="secondary" data-reopen-reminder="${reminder.id}">Reabrir</button>
   </article>`;
+}
+
+function relatedPicker(value: string): string {
+  return `<div class="agenda-related-field">
+    <label for="agenda-related-input">Lead o propiedad</label>
+    <div class="agenda-related-picker" data-related-picker>
+      <input id="agenda-related-input" name="related" value="${escapeHtml(value)}" placeholder="Escribí un nombre, por ejemplo Fra" autocomplete="off" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="agenda-related-options" required>
+      <div id="agenda-related-options" class="agenda-related-options" role="listbox" hidden></div>
+    </div>
+    <small>Escribí y seleccioná un lead o una propiedad ya cargada.</small>
+  </div>`;
 }
 
 function reminderForm(editing: ReminderWithStatus | null, today: string): string {
@@ -106,7 +123,7 @@ function reminderForm(editing: ReminderWithStatus | null, today: string): string
     <div class="agenda-form-heading"><strong>${editing ? 'Editar seguimiento' : 'Nuevo seguimiento'}</strong><button type="button" class="quiet-button" data-cancel-reminder>Cerrar</button></div>
     <label>Fecha<input name="date" type="date" value="${escapeHtml(date)}" required></label>
     <label>Tarea<input name="title" value="${escapeHtml(title)}" placeholder="Ej. Llamar para confirmar visita" required></label>
-    <label>Lead o propiedad<input name="related" value="${escapeHtml(related)}" placeholder="Ej. Cliente Docta" required></label>
+    ${relatedPicker(related)}
     <label>Prioridad<select name="priority"><option${priority === 'Alta' ? ' selected' : ''}>Alta</option><option${priority === 'Media' ? ' selected' : ''}>Media</option><option${priority === 'Baja' ? ' selected' : ''}>Baja</option></select></label>
     <button type="submit">${editing ? 'Guardar cambios' : 'Guardar seguimiento'}</button>
   </form>`;
@@ -126,6 +143,48 @@ function focusReminderForm(container: HTMLElement): void {
   });
 }
 
+function bindRelatedPicker(container: HTMLElement): void {
+  const picker = container.querySelector<HTMLElement>('[data-related-picker]');
+  const input = picker?.querySelector<HTMLInputElement>('input[name="related"]');
+  const list = picker?.querySelector<HTMLElement>('#agenda-related-options');
+  if (!picker || !input || !list) return;
+
+  const options = agendaRelatedOptions(state.crm.clients, state.crm.properties);
+  const hide = (): void => {
+    list.hidden = true;
+    list.innerHTML = '';
+    input.setAttribute('aria-expanded', 'false');
+  };
+  const showMatches = (): void => {
+    picker.classList.remove('selected');
+    const matches = filterAgendaRelatedOptions(options, input.value);
+    list.innerHTML = matches.map((option) => `<button type="button" role="option" data-related-key="${escapeHtml(option.key)}"><strong>${escapeHtml(option.value)}</strong><span>${escapeHtml(option.type)} · ${escapeHtml(option.detail || 'Sin detalle')}</span></button>`).join('');
+    list.hidden = matches.length === 0;
+    input.setAttribute('aria-expanded', String(matches.length > 0));
+    list.querySelectorAll<HTMLButtonElement>('[data-related-key]').forEach((button) => {
+      button.addEventListener('click', () => {
+        const option = options.find((item) => item.key === button.dataset.relatedKey);
+        if (!option) return;
+        input.value = option.value;
+        picker.classList.add('selected');
+        hide();
+        input.focus();
+      });
+    });
+  };
+
+  input.addEventListener('input', showMatches);
+  input.addEventListener('focus', showMatches);
+  input.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape') hide();
+  });
+  picker.addEventListener('focusout', () => {
+    window.setTimeout(() => {
+      if (!picker.contains(document.activeElement)) hide();
+    }, 0);
+  });
+}
+
 export function renderAgenda(container: HTMLElement): void {
   const today = todayIsoDate();
   const groups = groupAgendaItems(buildAgendaItems(state.crm.clients, state.crm.reminders, today));
@@ -141,7 +200,7 @@ export function renderAgenda(container: HTMLElement): void {
     <article class="upcoming"><span>Próximos</span><strong>${groups.upcoming.length}</strong></article>
     <article class="completed"><span>Completados</span><strong>${completed.length}</strong></article>
   </div>
-  <div class="agenda-total-line"><strong>${total}</strong><span>seguimientos activos ordenados por fecha y prioridad</span></div>
+  <div class="agenda-total-line"><strong>${total}</strong><span>seguimientos activos en orden de atención</span></div>
   <div class="agenda-board">
     ${renderAgendaSection('overdue', groups.overdue, today)}
     ${renderAgendaSection('today', groups.today, today)}
@@ -151,6 +210,8 @@ export function renderAgenda(container: HTMLElement): void {
     <summary>Ver completados (${completed.length})</summary>
     <div class="agenda-completed-list">${completed.map(renderCompletedReminder).join('')}</div>
   </details>`;
+
+  bindRelatedPicker(container);
 
   container.querySelector<HTMLFormElement>('#reminder-form')?.addEventListener('submit', (event) => {
     event.preventDefault();
