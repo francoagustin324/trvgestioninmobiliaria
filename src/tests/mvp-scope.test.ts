@@ -19,27 +19,31 @@ test('index usa solo la entrada MVP y carga las capas visuales aprobadas', () =>
   assert.match(html, /\/dist\/mvp-main\.js/);
   assert.match(html, /\/src\/sidebar-brand\.css/);
   assert.match(html, /\/src\/mvp-polish\.css/);
-  assert.ok(html.includes('20260714-19'));
+  assert.ok(html.includes('20260714-20'));
   for (const legacy of ['/dist/main.js', 'team-bootstrap.js', 'team-scope.js', 'audio-simulation.js', 'intervention-alert.js']) {
     assert.equal(html.includes(legacy), false, legacy);
   }
 });
 
-test('TRV aparece una sola vez como identidad principal dentro de la aplicación', () => {
+test('PropControl aparece como la única marca principal del software en el lateral', () => {
   const source = readFileSync('src/mvp-main.ts', 'utf8');
-  assert.ok(source.includes("import { AGENCY_BRAND } from './branding.js'"));
-  assert.ok(source.includes('class="mvp-agency-brand"'));
-  assert.ok(source.includes('class="mvp-agency-logo"'));
+  assert.ok(source.includes("import { PRODUCT_BRAND } from './branding.js'"));
+  assert.ok(source.includes('class="mvp-product-brand"'));
+  assert.ok(source.includes('class="mvp-product-logo"'));
+  assert.ok(source.includes('class="mvp-product-copy"'));
+  assert.ok(source.includes('CRM inmobiliario'));
+  assert.equal(source.includes('AGENCY_BRAND'), false);
+  assert.equal(source.includes('mvp-agency-brand'), false);
   assert.equal(source.includes('mvp-sidebar-footer'), false);
   assert.equal(source.includes('mvp-company-name'), false);
-  assert.equal(source.includes('PRODUCT_BRAND'), false);
 });
 
-test('el lateral recupera la paleta anterior azul oscuro y dorado', () => {
+test('el lateral conserva la paleta anterior azul oscuro y dorado', () => {
   const css = readFileSync('src/sidebar-brand.css', 'utf8');
   for (const marker of [
-    '.mvp-agency-brand',
-    '.mvp-agency-logo',
+    '.mvp-product-brand',
+    '.mvp-product-logo',
+    '.mvp-product-copy',
     '.mvp-sidebar .nav-button.active::before',
     '.mvp-topbar-spacer',
     '.mvp-account-avatar svg',
@@ -48,6 +52,7 @@ test('el lateral recupera la paleta anterior azul oscuro y dorado', () => {
     '#d4a017',
   ]) assert.ok(css.includes(marker), marker);
   assert.equal(css.includes('#0b3346'), false);
+  assert.equal(css.includes('.mvp-agency-brand'), false);
   assert.equal(css.includes('.mvp-sidebar-footer'), false);
   assert.equal(css.includes('.mvp-company-name'), false);
 });
