@@ -1,6 +1,6 @@
 import type { ModuleId } from './models.js';
 import { modules } from './models.js';
-import { PRODUCT_BRAND } from './branding.js';
+import { AGENCY_BRAND } from './branding.js';
 import { renderProperties } from './crm-ui.js';
 import { renderAgenda } from './agenda-ui.js';
 import { decodePublicFicha, renderPublicMode } from './public-ficha.js';
@@ -23,23 +23,21 @@ const root = qs<HTMLElement>('#root');
 let eventsBound = false;
 
 function renderShell(): void {
-  const organizationName = escapeHtml(state.crm.organization.name);
+  const organizationName = escapeHtml(state.crm.organization.name || AGENCY_BRAND.name);
   root.innerHTML = `<main class="premium-shell mvp-shell">
     <div class="sidebar-backdrop" data-mobile-nav-close hidden></div>
     <aside class="premium-sidebar mvp-sidebar" id="app-sidebar" aria-label="Navegación principal">
       <div class="sidebar-mobile-head"><span>Menú</span><button type="button" class="sidebar-close" data-mobile-nav-close aria-label="Cerrar menú">×</button></div>
-      <div class="mvp-brand" aria-label="${PRODUCT_BRAND.name}">
-        <span class="mvp-brand-mark"><img src="${PRODUCT_BRAND.logo}" alt=""></span>
-        <span class="mvp-brand-copy"><strong>${PRODUCT_BRAND.name}</strong><small>CRM inmobiliario</small></span>
+      <div class="mvp-agency-brand" aria-label="${organizationName}">
+        <span class="mvp-agency-logo"><img src="${AGENCY_BRAND.logo}" alt="Logo de ${organizationName}"></span>
+        <span class="mvp-agency-copy"><strong>${organizationName}</strong><small>Gestión inmobiliaria</small></span>
       </div>
-      <span class="mvp-sidebar-label">Gestión comercial</span>
       <nav>${modules.map(([id, label]) => `<button type="button" class="nav-button" data-module="${id}"><span>${label}</span></button>`).join('')}</nav>
-      <div class="mvp-sidebar-footer"><span>Inmobiliaria activa</span><strong>${organizationName}</strong></div>
     </aside>
     <section class="premium-content mvp-content">
       <header class="topbar mvp-topbar">
         <button type="button" class="mobile-nav-trigger" data-mobile-nav-toggle aria-controls="app-sidebar" aria-expanded="false"><span>Menú</span></button>
-        <div class="mvp-company-name"><span>Espacio de trabajo</span><strong>${organizationName}</strong></div>
+        <div class="mvp-topbar-spacer" aria-hidden="true"></div>
         <div id="cloud-account"></div>
       </header>
       <div id="notice" class="notice" hidden></div>
