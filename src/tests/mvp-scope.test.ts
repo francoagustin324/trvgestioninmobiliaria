@@ -14,20 +14,35 @@ test('la navegación del MVP contiene solo los cinco módulos aprobados', () => 
   ]);
 });
 
-test('index usa solo la entrada MVP y no carga módulos antiguos', () => {
+test('index usa solo la entrada MVP y carga la capa visual de marca', () => {
   const html = readFileSync('index.html', 'utf8');
   assert.match(html, /\/dist\/mvp-main\.js/);
+  assert.match(html, /\/src\/sidebar-brand\.css/);
   for (const legacy of ['/dist/main.js', 'team-bootstrap.js', 'team-scope.js', 'audio-simulation.js', 'intervention-alert.js']) {
     assert.equal(html.includes(legacy), false, legacy);
   }
 });
 
-test('el encabezado interno no repite PropControl ni el título del módulo', () => {
+test('PropControl aparece una sola vez como marca dentro del menú lateral', () => {
   const source = readFileSync('src/mvp-main.ts', 'utf8');
-  assert.equal(source.includes('PRODUCT_BRAND'), false);
+  assert.ok(source.includes("import { PRODUCT_BRAND } from './branding.js'"));
+  assert.ok(source.includes('class="mvp-brand"'));
+  assert.ok(source.includes('class="mvp-brand-mark"'));
+  assert.ok(source.includes('class="mvp-sidebar-footer"'));
   assert.equal(source.includes('module-title'), false);
-  assert.equal(source.includes('mvp-brand'), false);
   assert.ok(source.includes('mvp-company-name'));
+});
+
+test('el diseño lateral combina marca, navegación y contexto de inmobiliaria', () => {
+  const css = readFileSync('src/sidebar-brand.css', 'utf8');
+  for (const marker of [
+    '.mvp-brand',
+    '.mvp-brand-mark',
+    '.mvp-sidebar .nav-button.active::before',
+    '.mvp-sidebar-footer',
+    '.mvp-company-name strong',
+    '#d4a017',
+  ]) assert.ok(css.includes(marker), marker);
 });
 
 test('el formulario visible del lead se limita a cuatro datos comerciales', () => {
