@@ -69,6 +69,7 @@ function normalizedTeamMembers(value: unknown): TeamMember[] {
     const status = record.status === 'Pendiente de acceso' || record.status === 'Suspendido' ? record.status : 'Activo';
     return {
       id: Number.isFinite(record.id) ? Number(record.id) : index + 1,
+      userId: record.userId ? String(record.userId) : undefined,
       name: String(record.name || `Usuario ${index + 1}`),
       email: String(record.email || ''),
       phone: record.phone ? String(record.phone) : undefined,
@@ -113,13 +114,21 @@ function normalizedData(value: Partial<CrmData>): CrmData {
       assignedToId: Number(property.assignedToId ?? ownerId),
       createdById: Number(property.createdById ?? ownerId),
     })) : [],
-    contacts: Array.isArray(value.contacts) ? value.contacts : [],
+    contacts: Array.isArray(value.contacts) ? value.contacts.map((contact) => ({
+      ...contact,
+      assignedToId: Number(contact.assignedToId ?? contact.createdById ?? ownerId),
+      createdById: Number(contact.createdById ?? ownerId),
+    })) : [],
     reminders: Array.isArray(value.reminders) ? value.reminders.map((reminder) => ({
       ...reminder,
       assignedToId: Number(reminder.assignedToId ?? ownerId),
       createdById: Number(reminder.createdById ?? ownerId),
     })) : [],
-    fichas: Array.isArray(value.fichas) ? value.fichas : [],
+    fichas: Array.isArray(value.fichas) ? value.fichas.map((ficha) => ({
+      ...ficha,
+      assignedToId: Number(ficha.assignedToId ?? ficha.createdById ?? ownerId),
+      createdById: Number(ficha.createdById ?? ownerId),
+    })) : [],
     conversations: Array.isArray(value.conversations)
       ? value.conversations.map((conversation, index) => normalizedConversation(conversation, index + 1, ownerId))
       : [],
@@ -148,7 +157,7 @@ const loadedCrm = loadData();
 export const state = {
   crm: loadedCrm,
   activeMemberId: loadActiveMemberId(loadedCrm),
-  activeModule: 'inicio' as ModuleId,
+  activeModule: 'crm' as ModuleId,
   fichaMode: 'property' as FichaMode,
   selectedFichaId: null as number | null,
   editingFichaId: null as number | null,

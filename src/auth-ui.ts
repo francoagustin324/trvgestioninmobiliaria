@@ -6,7 +6,7 @@ import {
   signOutCloud,
   signUpCloud,
 } from './cloud-api.js';
-import { replaceData, state } from './store.js';
+import { replaceData, setActiveMemberId, state } from './store.js';
 import { escapeHtml } from './utils.js';
 
 let authMode: 'login' | 'signup' = 'login';
@@ -21,22 +21,22 @@ export function authShellHtml(): string {
       <button type="button" class="auth-close" data-auth-close aria-label="Cerrar">×</button>
       <span class="eyebrow">Cuenta PropControl</span>
       <h2 id="auth-title">Ingresar</h2>
-      <p class="auth-copy">Usá la misma cuenta en tu computadora y celular.</p>
+      <p class="auth-copy">Cada integrante debe usar su propia cuenta para aplicar los permisos de la inmobiliaria.</p>
       <div class="auth-tabs">
         <button type="button" data-auth-mode="login" class="active">Ingresar</button>
-        <button type="button" data-auth-mode="signup">Crear cuenta</button>
+        <button type="button" data-auth-mode="signup">Crear inmobiliaria</button>
       </div>
       <form id="cloud-login-form" class="auth-form">
         <label>Correo electrónico<input name="email" type="email" autocomplete="email" required></label>
         <label>Contraseña<input name="password" type="password" autocomplete="current-password" minlength="8" required></label>
-        <button type="submit">Ingresar y sincronizar</button>
+        <button type="submit">Ingresar de forma segura</button>
       </form>
       <form id="cloud-signup-form" class="auth-form" hidden>
         <label>Nombre de la inmobiliaria<input name="companyName" value="TRV Gestión Inmobiliaria" required></label>
-        <label>Correo electrónico<input name="email" type="email" autocomplete="email" required></label>
+        <label>Correo del dueño<input name="email" type="email" autocomplete="email" required></label>
         <label>Contraseña<input name="password" type="password" autocomplete="new-password" minlength="8" required></label>
-        <small>Usá al menos 8 caracteres. No compartas esta contraseña.</small>
-        <button type="submit">Crear cuenta</button>
+        <small>La primera cuenta será el dueño de la inmobiliaria. Usá al menos 8 caracteres.</small>
+        <button type="submit">Crear inmobiliaria</button>
       </form>
       <div class="auth-message" id="auth-message" role="status"></div>
     </div>
@@ -47,9 +47,17 @@ export function renderCloudAccount(): void {
   const container = document.querySelector<HTMLElement>('#cloud-account');
   if (!container) return;
   const session = getCloudSession();
+  const member = session ? state.crm.teamMembers.find((item) => item.userId === session.userId) : null;
   container.innerHTML = session
-    ? `<div class="cloud-account signed-in"><span><b>☁ Guardado online</b><small>${escapeHtml(session.email)}</small></span><button type="button" data-cloud-sync>Sincronizar</button><button type="button" class="quiet-button" data-auth-logout>Salir</button></div>`
+    ? `<div class="cloud-account signed-in"><span><b>☁ ${escapeHtml(member?.name || 'Sesión segura')}</b><small>${escapeHtml(member?.role || session.email)}</small></span><button type="button" data-cloud-sync>Sincronizar</button><button type="button" class="quiet-button" data-auth-logout>Salir</button></div>`
     : '<button type="button" class="cloud-login-button" data-auth-open>Ingresar / crear cuenta</button>';
+}
+
+function activateAuthenticatedMember(): void {
+  const session = getCloudSession();
+  if (!session) return;
+  const member = state.crm.teamMembers.find((item) => item.userId === session.userId && item.status !== 'Suspendido');
+  if (member) setActiveMemberId(member.id);
 }
 
 function setAuthMode(mode: 'login' | 'signup'): void {
@@ -58,7 +66,7 @@ function setAuthMode(mode: 'login' | 'signup'): void {
   const signupForm = document.querySelector<HTMLFormElement>('#cloud-signup-form');
   if (loginForm) loginForm.hidden = mode !== 'login';
   if (signupForm) signupForm.hidden = mode !== 'signup';
-  document.querySelector<HTMLElement>('#auth-title')!.textContent = mode === 'login' ? 'Ingresar' : 'Crear cuenta';
+  document.querySelector<HTMLElement>('#auth-title')!.textContent = mode === 'login' ? 'Ingresar' : 'Crear inmobiliaria';
   document.querySelectorAll<HTMLButtonElement>('[data-auth-mode]').forEach((button) => {
     button.classList.toggle('active', button.dataset.authMode === mode);
   });
@@ -91,13 +99,17 @@ function formText(form: HTMLFormElement, name: string): string {
 }
 
 async function syncAfterLogin(notice: Notice, rerender: Rerender): Promise<void> {
-  const cloudData = await pullCloudData();
+  const cloudData = await pullCloudData(state.crm);
   if (cloudData) {
     replaceData(cloudData);
-    notice('Datos cargados desde Supabase.');
+    activateAuthenticatedMember();
+    notice('Datos cargados con los permisos de tu usuario.');
   } else {
     await pushCloudData(state.crm);
-    notice('Cuenta conectada. Tus datos actuales ya están guardados online.');
+    const refreshed = await pullCloudData(state.crm);
+    if (refreshed) replaceData(refreshed);
+    activateAuthenticatedMember();
+    notice('Cuenta conectada y datos migrados al almacenamiento seguro.');
   }
   renderCloudAccount();
   rerender();
@@ -107,11 +119,13 @@ export async function initializeCloudSession(notice: Notice, rerender: Rerender)
   renderCloudAccount();
   if (!getCloudSession()) return;
   try {
-    const cloudData = await pullCloudData();
+    const cloudData = await pullCloudData(state.crm);
     if (cloudData) {
       replaceData(cloudData);
+      activateAuthenticatedMember();
       rerender();
     }
+    renderCloudAccount();
   } catch (error) {
     notice(error instanceof Error ? error.message : 'No se pudo recuperar la sesión online.');
     renderCloudAccount();
@@ -139,12 +153,13 @@ export function bindAuthUi(notice: Notice, rerender: Rerender): void {
     if (target.closest('[data-auth-logout]')) {
       signOutCloud();
       renderCloudAccount();
+      rerender();
       return;
     }
     if (target.closest('[data-cloud-sync]')) {
-      notice('Sincronizando…');
+      notice('Sincronizando con RLS…');
       void pushCloudData(state.crm)
-        .then(() => notice('Datos guardados online.'))
+        .then(() => notice('Datos guardados con permisos de usuario.'))
         .catch((error) => notice(error instanceof Error ? error.message : 'No se pudo sincronizar.'));
     }
     if (target.id === 'auth-modal') closeAuth();

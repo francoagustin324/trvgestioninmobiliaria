@@ -5,13 +5,17 @@ import { fileURLToPath } from 'node:url';
 import { importProperty } from './server/import-service.js';
 import { storeExtensionImport, takeExtensionImport } from './server/extension-import-store.js';
 import { handleWhatsAppWebhook, WebhookDeduplicator } from './server/whatsapp-webhook.js';
+import { handleTeamManagement } from './server/team-management.js';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const port = Number(process.env.PORT || 4173);
 const host = '0.0.0.0';
 const supabaseUrl = (process.env.SUPABASE_URL || '').trim().replace(/\/+$/g, '');
 const supabasePublishableKey = (process.env.SUPABASE_PUBLISHABLE_KEY || '').trim();
+const supabaseSecretKey = (process.env.SUPABASE_SECRET_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY || '').trim();
+const appPublicUrl = (process.env.APP_PUBLIC_URL || '').trim().replace(/\/+$/g, '');
 const cloudConfigured = Boolean(supabaseUrl && supabasePublishableKey);
+const invitationsConfigured = Boolean(cloudConfigured && supabaseSecretKey);
 const whatsappWebhookVerifyToken = (process.env.WHATSAPP_WEBHOOK_VERIFY_TOKEN || '').trim();
 const metaAppSecret = (process.env.META_APP_SECRET || '').trim();
 const whatsappWebhookDeduplicator = new WebhookDeduplicator();
@@ -127,15 +131,23 @@ const server = createServer(async (request, response) => {
   });
   if (whatsappHandled) return;
 
+  const teamHandled = await handleTeamManagement(request, response, {
+    supabaseUrl,
+    publishableKey: supabasePublishableKey,
+    secretKey: supabaseSecretKey,
+    appUrl: appPublicUrl || undefined,
+  });
+  if (teamHandled) return;
+
   if (request.method === 'GET' && pathname === '/health') {
-    sendJson(response, 200, { ok: true, cloudConfigured });
+    sendJson(response, 200, { ok: true, cloudConfigured, invitationsConfigured });
     return;
   }
 
   if (request.method === 'GET' && pathname === '/api/cloud-config') {
     sendJson(response, 200, cloudConfigured
-      ? { configured: true, url: supabaseUrl, publishableKey: supabasePublishableKey }
-      : { configured: false });
+      ? { configured: true, url: supabaseUrl, publishableKey: supabasePublishableKey, invitationsConfigured }
+      : { configured: false, invitationsConfigured: false });
     return;
   }
 
@@ -211,5 +223,5 @@ const server = createServer(async (request, response) => {
 });
 
 server.listen(port, host, () => {
-  console.log(`PropControl listo en http://${host}:${port} · nube ${cloudConfigured ? 'configurada' : 'pendiente'}`);
+  console.log(`PropControl listo en http://${host}:${port} · nube ${cloudConfigured ? 'configurada' : 'pendiente'} · invitaciones ${invitationsConfigured ? 'configuradas' : 'pendientes'}`);
 });

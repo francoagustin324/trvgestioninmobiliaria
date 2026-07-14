@@ -18,7 +18,7 @@ const members: TeamMember[] = [
   { id: 4, name: 'Suspendido', email: 'suspendido@example.com', role: 'Corredor', status: 'Suspendido', createdAt: '2026-07-13T00:00:00.000Z' },
 ];
 
-test('dueño y administrador gestionan el equipo; corredor no', () => {
+test('dueño y administrador gestionan usuarios; corredor no', () => {
   assert.equal(roleCanManageTeam('Dueño'), true);
   assert.equal(roleCanManageTeam('Administrador'), true);
   assert.equal(roleCanManageTeam('Corredor'), false);
@@ -30,12 +30,15 @@ test('dueño y administrador ven toda la operación', () => {
   assert.equal(roleCanViewAll('Corredor'), false);
 });
 
-test('corredor no accede a reportes globales ni configuración', () => {
+test('corredor solo accede a los módulos operativos del MVP', () => {
   assert.equal(roleCanAccessModule('Corredor', 'crm'), true);
-  assert.equal(roleCanAccessModule('Corredor', 'equipo'), true);
+  assert.equal(roleCanAccessModule('Corredor', 'whatsapp'), true);
+  assert.equal(roleCanAccessModule('Corredor', 'agenda'), true);
+  assert.equal(roleCanAccessModule('Corredor', 'propiedades'), true);
+  assert.equal(roleCanAccessModule('Corredor', 'equipo'), false);
   assert.equal(roleCanAccessModule('Corredor', 'reportes'), false);
   assert.equal(roleCanAccessModule('Corredor', 'configuracion'), false);
-  assert.equal(roleCanAccessModule('Dueño', 'configuracion'), true);
+  assert.equal(roleCanAccessModule('Dueño', 'equipo'), true);
 });
 
 test('corredor solo ve registros asignados; superiores ven todos', () => {

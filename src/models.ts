@@ -31,6 +31,7 @@ export interface OrganizationSettings {
 
 export interface TeamMember {
   id: number;
+  userId?: string;
   name: string;
   email: string;
   phone?: string;
@@ -70,6 +71,8 @@ export interface CommercialContact {
   notes?: string;
   lastContact?: string;
   createdAt: string;
+  assignedToId?: number;
+  createdById?: number;
 }
 
 export interface Property {
@@ -134,6 +137,7 @@ export interface FichaPublica {
 export interface Ficha extends FichaPublica {
   id: number; mode: FichaMode; sourcePropertyId?: number; internalOriginalLink?: string;
   source?: string; internalNotes?: string; createdAt: string;
+  assignedToId?: number; createdById?: number;
 }
 
 export interface CrmData {
@@ -149,9 +153,11 @@ export interface CrmData {
 }
 
 export const modules: Array<[ModuleId, string]> = [
-  ['inicio', 'Inicio'], ['crm', 'CRM / Leads'], ['propiedades', 'Propiedades'], ['red', 'Red comercial'],
-  ['fichas', 'Fichas TRV'], ['whatsapp', 'WhatsApp + IA'], ['agenda', 'Agenda / Seguimiento'],
-  ['reportes', 'Reportes'], ['configuracion', 'Configuración'],
+  ['crm', 'Leads'],
+  ['whatsapp', 'Conversaciones'],
+  ['agenda', 'Seguimientos'],
+  ['propiedades', 'Propiedades'],
+  ['equipo', 'Usuarios'],
 ];
 
 export const initialData: CrmData = {

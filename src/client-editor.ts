@@ -7,30 +7,39 @@ function clean(values: Record<string, string>, key: string): string {
   return (values[key] ?? '').trim();
 }
 
+function valueOrCurrent(values: Record<string, string>, key: keyof Client, current?: Client): string {
+  const supplied = values[String(key)];
+  if (supplied !== undefined) return supplied.trim();
+  const existing = current?.[key];
+  return typeof existing === 'string' ? existing : '';
+}
+
 function temperatureValue(value: string): Temperature {
   return temperatures.includes(value as Temperature) ? value as Temperature : 'Tibio';
 }
 
-export function clientFromFormValues(id: number, values: Record<string, string>): Client {
+export function clientFromFormValues(id: number, values: Record<string, string>, current?: Client | null): Client {
   return {
     id,
     name: clean(values, 'name'),
     phone: normalizePhone(clean(values, 'phone')),
-    email: clean(values, 'email'),
+    email: valueOrCurrent(values, 'email', current ?? undefined),
     interest: clean(values, 'interest'),
-    status: clean(values, 'status'),
-    temperature: temperatureValue(clean(values, 'temperature')),
-    pipeline: clean(values, 'pipeline'),
-    lastContact: clean(values, 'lastContact'),
-    nextFollowUp: clean(values, 'nextFollowUp'),
+    status: valueOrCurrent(values, 'status', current ?? undefined) || 'Lead',
+    temperature: temperatureValue(valueOrCurrent(values, 'temperature', current ?? undefined) || 'Tibio'),
+    pipeline: valueOrCurrent(values, 'pipeline', current ?? undefined) || 'Nuevo',
+    lastContact: valueOrCurrent(values, 'lastContact', current ?? undefined),
+    nextFollowUp: valueOrCurrent(values, 'nextFollowUp', current ?? undefined),
     budget: clean(values, 'budget'),
-    paymentMethod: clean(values, 'paymentMethod'),
-    purchaseTimeframe: clean(values, 'purchaseTimeframe'),
-    purpose: clean(values, 'purpose'),
-    knowsArea: clean(values, 'knowsArea'),
-    canMoveForward: clean(values, 'canMoveForward'),
-    objections: clean(values, 'objections'),
-    notes: clean(values, 'notes'),
+    paymentMethod: valueOrCurrent(values, 'paymentMethod', current ?? undefined),
+    purchaseTimeframe: valueOrCurrent(values, 'purchaseTimeframe', current ?? undefined),
+    purpose: valueOrCurrent(values, 'purpose', current ?? undefined),
+    knowsArea: valueOrCurrent(values, 'knowsArea', current ?? undefined),
+    canMoveForward: valueOrCurrent(values, 'canMoveForward', current ?? undefined),
+    objections: valueOrCurrent(values, 'objections', current ?? undefined),
+    notes: valueOrCurrent(values, 'notes', current ?? undefined),
+    assignedToId: current?.assignedToId,
+    createdById: current?.createdById,
   };
 }
 
