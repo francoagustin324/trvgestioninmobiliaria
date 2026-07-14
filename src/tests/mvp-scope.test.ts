@@ -14,11 +14,12 @@ test('la navegación del MVP contiene solo los cinco módulos aprobados', () => 
   ]);
 });
 
-test('index usa solo la entrada MVP y carga la capa visual de marca', () => {
+test('index usa solo la entrada MVP y carga las capas visuales aprobadas', () => {
   const html = readFileSync('index.html', 'utf8');
   assert.match(html, /\/dist\/mvp-main\.js/);
   assert.match(html, /\/src\/sidebar-brand\.css/);
-  assert.ok(html.includes('20260714-18'));
+  assert.match(html, /\/src\/mvp-polish\.css/);
+  assert.ok(html.includes('20260714-19'));
   for (const legacy of ['/dist/main.js', 'team-bootstrap.js', 'team-scope.js', 'audio-simulation.js', 'intervention-alert.js']) {
     assert.equal(html.includes(legacy), false, legacy);
   }
@@ -34,7 +35,7 @@ test('TRV aparece una sola vez como identidad principal dentro de la aplicación
   assert.equal(source.includes('PRODUCT_BRAND'), false);
 });
 
-test('el lateral conserva un diseño profesional sin repetir identidad', () => {
+test('el lateral recupera la paleta anterior azul oscuro y dorado', () => {
   const css = readFileSync('src/sidebar-brand.css', 'utf8');
   for (const marker of [
     '.mvp-agency-brand',
@@ -42,10 +43,29 @@ test('el lateral conserva un diseño profesional sin repetir identidad', () => {
     '.mvp-sidebar .nav-button.active::before',
     '.mvp-topbar-spacer',
     '.mvp-account-avatar svg',
-    '#c69a3d',
+    '#102737',
+    '#0d2230',
+    '#d4a017',
   ]) assert.ok(css.includes(marker), marker);
+  assert.equal(css.includes('#0b3346'), false);
   assert.equal(css.includes('.mvp-sidebar-footer'), false);
   assert.equal(css.includes('.mvp-company-name'), false);
+});
+
+test('el pulido visual mejora consistencia sin sumar funciones', () => {
+  const css = readFileSync('src/mvp-polish.css', 'utf8');
+  for (const marker of [
+    '--mvp-deep: #0d1b2a',
+    '--mvp-blue: #1e3a5f',
+    '--mvp-gold: #d4a017',
+    '.mvp-lead-card:hover',
+    'button:focus-visible',
+    '@media (max-width: 640px)',
+    '@media (prefers-reduced-motion: reduce)',
+  ]) assert.ok(css.includes(marker), marker);
+  for (const forbidden of ['Inicio', 'Reportes', 'Configuración', 'Red comercial', 'Fichas TRV']) {
+    assert.equal(css.includes(forbidden), false, forbidden);
+  }
 });
 
 test('la cuenta usa icono genérico y no repite la inicial de TRV', () => {
