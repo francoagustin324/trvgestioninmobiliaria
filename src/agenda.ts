@@ -33,6 +33,7 @@ export interface AgendaRelatedOption {
 const urgencyOrder: Record<AgendaUrgency, number> = { overdue: 0, today: 1, upcoming: 2 };
 const reminderPriority: Record<string, number> = { Alta: 0, Media: 1, Baja: 2 };
 const clientPriority: Record<Client['temperature'], number> = { Caliente: 0, Tibio: 1, Frío: 2 };
+const relatedTypeOrder: Record<AgendaRelatedOption['type'], number> = { Lead: 0, Propiedad: 1 };
 
 function normalizedSearch(value: string): string {
   return value
@@ -88,8 +89,8 @@ export function agendaRelatedOptions(clients: Client[], properties: Property[]):
     searchable: normalizedSearch([property.title, property.address, property.owner].filter(Boolean).join(' ')),
   }));
   return [...leadOptions, ...propertyOptions].sort((left, right) => (
-    left.value.localeCompare(right.value, 'es', { sensitivity: 'base' })
-    || left.type.localeCompare(right.type, 'es')
+    relatedTypeOrder[left.type] - relatedTypeOrder[right.type]
+    || left.value.localeCompare(right.value, 'es', { sensitivity: 'base' })
   ));
 }
 
@@ -106,8 +107,8 @@ export function filterAgendaRelatedOptions(
       const leftStarts = normalizedSearch(left.value).startsWith(normalizedQuery) ? 0 : 1;
       const rightStarts = normalizedSearch(right.value).startsWith(normalizedQuery) ? 0 : 1;
       return leftStarts - rightStarts
-        || left.value.localeCompare(right.value, 'es', { sensitivity: 'base' })
-        || left.type.localeCompare(right.type, 'es');
+        || relatedTypeOrder[left.type] - relatedTypeOrder[right.type]
+        || left.value.localeCompare(right.value, 'es', { sensitivity: 'base' });
     })
     .slice(0, limit);
 }
