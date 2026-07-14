@@ -5,6 +5,13 @@ on:
     branches: [main]
   push:
     branches: [main]
+  schedule:
+    - cron: "0 10 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: trv-ci-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   build-and-test:
@@ -16,6 +23,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+          cache: npm
       - name: Instalar dependencias
         run: npm install --silent
       - name: Compilar TypeScript
