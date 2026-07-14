@@ -6,7 +6,14 @@ import { decodePublicFicha, renderPublicMode } from './public-ficha.js';
 import { renderMvpLeads } from './mvp-leads-ui.js';
 import { renderMvpUsers } from './mvp-users-ui.js';
 import { renderMvpConversations } from './mvp-conversations-ui.js';
-import { hasAuthenticatedSession, hydrateAuthenticatedSession, renderAccountMenu, renderPublicAuth } from './mvp-auth.js';
+import {
+  hasAuthenticatedSession,
+  hydrateAuthenticatedSession,
+  isLoginPage,
+  isRegisterPage,
+  renderAccountMenu,
+  renderPublicAuth,
+} from './mvp-auth.js';
 import { canAccessModule } from './team-access.js';
 import { saveData, state } from './store.js';
 import { qs } from './utils.js';
@@ -123,10 +130,11 @@ async function bootstrap(): Promise<void> {
     return;
   }
   if (!hasAuthenticatedSession()) {
+    if (!isLoginPage() && !isRegisterPage()) history.replaceState(null, '', '/login');
     renderPublicAuth(root);
-    window.addEventListener('hashchange', () => renderPublicAuth(root));
     return;
   }
+  if (isLoginPage() || isRegisterPage()) history.replaceState(null, '', '/');
   try {
     await hydrateAuthenticatedSession();
     renderShell();
