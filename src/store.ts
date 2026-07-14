@@ -166,6 +166,7 @@ export const state = {
   selectedFichaId: null as number | null,
   editingFichaId: null as number | null,
   editingClientId: null as number | null,
+  editingPropertyId: null as number | null,
   selectedConversationId: null as number | null,
   selectedContactId: null as number | null,
   editingContactId: null as number | null,
@@ -175,6 +176,7 @@ export const state = {
 function resetTransientState(): void {
   state.activeMemberId = loadActiveMemberId(state.crm);
   state.editingClientId = null;
+  state.editingPropertyId = null;
   state.selectedConversationId = null;
   state.selectedContactId = null;
   state.editingContactId = null;
@@ -192,6 +194,7 @@ export function setActiveMemberId(memberId: number): void {
   state.activeMemberId = member.id;
   localStorage.setItem(TEAM_VIEW_KEY, String(member.id));
   state.editingClientId = null;
+  state.editingPropertyId = null;
   state.selectedConversationId = member.role === 'Corredor'
     ? state.crm.conversations.find((conversation) => conversation.assignedToId === member.id)?.id ?? null
     : null;
