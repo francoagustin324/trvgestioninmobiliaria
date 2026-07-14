@@ -153,9 +153,11 @@ export interface CrmData {
 }
 
 export const modules: Array<[ModuleId, string]> = [
-  ['inicio', 'Inicio'], ['crm', 'CRM / Leads'], ['propiedades', 'Propiedades'], ['red', 'Red comercial'],
-  ['fichas', 'Fichas TRV'], ['whatsapp', 'WhatsApp + IA'], ['agenda', 'Agenda / Seguimiento'],
-  ['reportes', 'Reportes'], ['configuracion', 'Configuración'],
+  ['crm', 'Leads'],
+  ['whatsapp', 'Conversaciones'],
+  ['agenda', 'Seguimientos'],
+  ['propiedades', 'Propiedades'],
+  ['equipo', 'Usuarios'],
 ];
 
 export const initialData: CrmData = {
@@ -195,8 +197,6 @@ export const initialData: CrmData = {
     notes: 'Contacto de ejemplo para organizar productos compartidos.',
     lastContact: '2026-07-11',
     createdAt: '2026-07-11T15:00:00.000Z',
-    assignedToId: 1,
-    createdById: 1,
   }],
   properties: [{
     id: 1, title: 'Departamento en General Paz', address: 'General Paz, Córdoba', type: 'Departamento',
