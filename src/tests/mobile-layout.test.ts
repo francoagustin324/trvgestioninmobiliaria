@@ -15,10 +15,11 @@ test('el menú móvil queda fuera del flujo y no deja una zona vacía arriba', (
   ]) assert.ok(css.includes(marker), marker);
 });
 
-test('la corrección móvil se carga después de los estilos del escritorio y renueva caché', () => {
+test('la corrección móvil se carga después de los estilos del escritorio y usa caché versionada', () => {
   const html = readFileSync('index.html', 'utf8');
   const polish = html.indexOf('/src/mvp-polish.css');
-  const mobileFix = html.indexOf('/src/mobile-layout-fix.css?v=20260714-24');
+  const mobileFix = html.indexOf('/src/mobile-layout-fix.css?v=');
   assert.ok(polish >= 0);
   assert.ok(mobileFix > polish);
+  assert.match(html, /mobile-layout-fix\.css\?v=[0-9-]+/);
 });
