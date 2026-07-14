@@ -1,5 +1,10 @@
 import type { CrmData } from './models.js';
-import { stableFingerprint } from './sync-safety.js';
+import {
+  getSyncState,
+  scopedStorageKey,
+  stableFingerprint,
+  type SyncState,
+} from './sync-safety.js';
 
 export interface ReconciliationDifference {
   key: keyof Pick<CrmData, 'clients' | 'properties' | 'contacts' | 'reminders' | 'fichas' | 'conversations' | 'activityLog'>;
@@ -12,6 +17,8 @@ export interface ReconciliationDifference {
 export interface ReconciliationResult {
   merged: CrmData;
   differences: ReconciliationDifference[];
+  localLeadCount: number;
+  cloudLeadCount: number;
   localOnlyCount: number;
   cloudOnlyCount: number;
   conflictCount: number;
@@ -89,11 +96,12 @@ function mergeCollection(localValue: unknown, cloudValue: unknown): {
 
 export function reconcileCrmSnapshots(local: CrmData, cloud: CrmData): ReconciliationResult {
   const merged = structuredClone(cloud);
+  const mutableMerged = merged as unknown as Record<string, unknown>;
   const differences: ReconciliationDifference[] = [];
 
   COLLECTIONS.forEach(({ key, label }) => {
     const result = mergeCollection(local[key], cloud[key]);
-    (merged[key] as unknown) = result.merged;
+    mutableMerged[key] = result.merged;
     differences.push({ key, label, localOnly: result.localOnly, cloudOnly: result.cloudOnly, conflicts: result.conflicts });
   });
 
@@ -104,6 +112,8 @@ export function reconcileCrmSnapshots(local: CrmData, cloud: CrmData): Reconcili
   return {
     merged,
     differences,
+    localLeadCount: local.clients.length,
+    cloudLeadCount: cloud.clients.length,
     localOnlyCount,
     cloudOnlyCount,
     conflictCount,
@@ -114,8 +124,8 @@ export function reconcileCrmSnapshots(local: CrmData, cloud: CrmData): Reconcili
 export function reconciliationMessage(result: ReconciliationResult): string {
   const leadDifference = result.differences.find((item) => item.key === 'clients');
   const lines = [
-    `En esta computadora: ${result.merged.clients.length - (leadDifference?.cloudOnly.length ?? 0)} leads.`,
-    `En la nube: ${result.merged.clients.length - (leadDifference?.localOnly.length ?? 0)} leads.`,
+    `En esta computadora: ${result.localLeadCount} leads.`,
+    `En la nube: ${result.cloudLeadCount} leads.`,
   ];
 
   if (leadDifference?.localOnly.length) lines.push(`Se agregarán a la nube: ${leadDifference.localOnly.join(', ')}.`);
@@ -125,4 +135,22 @@ export function reconciliationMessage(result: ReconciliationResult): string {
   }
   lines.push('Antes de cambiar nada se guardará una copia local de seguridad.');
   return lines.join('\n');
+}
+
+function syncStateStorageKey(): string {
+  return `${scopedStorageKey()}:sync`;
+}
+
+export function restoreSyncStateSnapshot(snapshot: SyncState): void {
+  localStorage.setItem(syncStateStorageKey(), JSON.stringify(snapshot));
+}
+
+export function authorizeConfirmedCloudResolution(remoteVersion: string): void {
+  const current = getSyncState();
+  localStorage.setItem(syncStateStorageKey(), JSON.stringify({
+    ...current,
+    dirty: true,
+    lastCloudVersion: remoteVersion,
+    lastError: undefined,
+  } satisfies SyncState));
 }
