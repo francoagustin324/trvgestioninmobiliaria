@@ -9,6 +9,13 @@ import {
   signUpCloud,
   updateTeamMemberAccess,
 } from './cloud-api.js';
+import {
+  assertRemoteIsSafe,
+  markCloudHydrated,
+  markCloudSaved,
+  markSyncError,
+  stableFingerprint,
+} from './sync-safety.js';
 
 export {
   getCloudSession,
@@ -36,6 +43,7 @@ interface LegacyMembershipRow {
 interface LegacySnapshotRow {
   id: string;
   internal_data?: { crm?: unknown };
+  updated_at?: string;
 }
 
 function errorMessage(error: unknown): string {
@@ -137,11 +145,21 @@ async function legacySnapshotRow(): Promise<{ row: LegacySnapshotRow | null; mem
 async function pullLegacyCloudData(): Promise<CrmData | null> {
   const { row } = await legacySnapshotRow();
   const crm = row?.internal_data?.crm;
+  markCloudHydrated(row?.updated_at || null);
   return isCrmData(crm) ? crm : null;
 }
 
 async function pushLegacyCloudData(crm: CrmData): Promise<void> {
   const { row, membership } = await legacySnapshotRow();
+  const localFingerprint = stableFingerprint(crm);
+  const remoteFingerprint = stableFingerprint(row?.internal_data?.crm ?? null);
+  assertRemoteIsSafe(row?.updated_at || null, localFingerprint, remoteFingerprint);
+
+  if (row && localFingerprint === remoteFingerprint) {
+    markCloudSaved(row.updated_at || null);
+    return;
+  }
+
   const payload = {
     organization_id: membership.organizationId,
     title: 'Estado PropControl',
@@ -161,6 +179,8 @@ async function pushLegacyCloudData(crm: CrmData): Promise<void> {
     },
     body: JSON.stringify(payload),
   }));
+  const refreshed = await legacySnapshotRow();
+  markCloudSaved(refreshed.row?.updated_at || new Date().toISOString());
 }
 
 export async function pullCloudData(fallback?: CrmData): Promise<CrmData | null> {
@@ -192,7 +212,11 @@ export function queueCloudSave(crm: CrmData): void {
     compatibilitySaveTimer = null;
     emitStatus('Guardando en la nube…', 'working');
     void pushCloudData(crm)
-      .then(() => emitStatus('Guardado en la nube.'))
-      .catch((error) => emitStatus(errorMessage(error) || 'No se pudo guardar en la nube.', 'error'));
+      .then(() => emitStatus('Guardado seguro en la nube.'))
+      .catch((error) => {
+        const message = errorMessage(error) || 'No se pudo guardar en la nube.';
+        markSyncError(message);
+        emitStatus(message, 'error');
+      });
   }, 700);
 }
