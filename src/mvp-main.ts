@@ -1,13 +1,11 @@
 import type { ModuleId } from './models.js';
 import { modules } from './models.js';
-import { PRODUCT_BRAND } from './branding.js';
 import { renderProperties } from './crm-ui.js';
 import { renderAgenda } from './agenda-ui.js';
-import { renderWhatsApp } from './whatsapp-ui.js';
 import { decodePublicFicha, renderPublicMode } from './public-ficha.js';
 import { renderMvpLeads } from './mvp-leads-ui.js';
 import { renderMvpUsers } from './mvp-users-ui.js';
-import { appendMessageTemplates } from './message-templates-ui.js';
+import { renderMvpConversations } from './mvp-conversations-ui.js';
 import { hasAuthenticatedSession, hydrateAuthenticatedSession, renderAccountMenu, renderPublicAuth } from './mvp-auth.js';
 import { canAccessModule } from './team-access.js';
 import { saveData, state } from './store.js';
@@ -17,7 +15,26 @@ const root = qs<HTMLElement>('#root');
 let eventsBound = false;
 
 function renderShell(): void {
-  root.innerHTML = `<main class="premium-shell mvp-shell"><div class="sidebar-backdrop" data-mobile-nav-close hidden></div><aside class="premium-sidebar mvp-sidebar" id="app-sidebar" aria-label="Navegación principal"><div class="sidebar-mobile-head"><span>Menú</span><button type="button" class="sidebar-close" data-mobile-nav-close>×</button></div><div class="brand mvp-brand"><img class="product-brand-mark" src="${PRODUCT_BRAND.logo}" alt="${PRODUCT_BRAND.name}"><strong>${PRODUCT_BRAND.name}</strong></div><nav>${modules.map(([id, label]) => `<button type="button" class="nav-button" data-module="${id}">${label}</button>`).join('')}</nav></aside><section class="premium-content mvp-content"><header class="topbar mvp-topbar"><button type="button" class="mobile-nav-trigger" data-mobile-nav-toggle aria-controls="app-sidebar" aria-expanded="false"><span>Menú</span></button><div class="mvp-company-name">${state.crm.organization.name}</div><div id="cloud-account"></div></header><div id="notice" class="notice" hidden></div><section class="module-panel" id="crm"></section><section class="module-panel" id="whatsapp"></section><section class="module-panel" id="agenda"></section><section class="module-panel" id="propiedades"></section><section class="module-panel" id="equipo"></section></section></main>`;
+  root.innerHTML = `<main class="premium-shell mvp-shell">
+    <div class="sidebar-backdrop" data-mobile-nav-close hidden></div>
+    <aside class="premium-sidebar mvp-sidebar" id="app-sidebar" aria-label="Navegación principal">
+      <div class="sidebar-mobile-head"><span>Menú</span><button type="button" class="sidebar-close" data-mobile-nav-close aria-label="Cerrar menú">×</button></div>
+      <nav>${modules.map(([id, label]) => `<button type="button" class="nav-button" data-module="${id}">${label}</button>`).join('')}</nav>
+    </aside>
+    <section class="premium-content mvp-content">
+      <header class="topbar mvp-topbar">
+        <button type="button" class="mobile-nav-trigger" data-mobile-nav-toggle aria-controls="app-sidebar" aria-expanded="false"><span>Menú</span></button>
+        <div class="mvp-company-name">${state.crm.organization.name}</div>
+        <div id="cloud-account"></div>
+      </header>
+      <div id="notice" class="notice" hidden></div>
+      <section class="module-panel" id="crm"></section>
+      <section class="module-panel" id="whatsapp"></section>
+      <section class="module-panel" id="agenda"></section>
+      <section class="module-panel" id="propiedades"></section>
+      <section class="module-panel" id="equipo"></section>
+    </section>
+  </main>`;
 }
 
 function setMobileNavigation(open: boolean): void {
@@ -47,9 +64,7 @@ function ensureActiveModule(): void {
 function render(): void {
   ensureActiveModule();
   renderMvpLeads(qs<HTMLElement>('#crm'));
-  const conversations = qs<HTMLElement>('#whatsapp');
-  renderWhatsApp(conversations);
-  appendMessageTemplates(conversations);
+  renderMvpConversations(qs<HTMLElement>('#whatsapp'));
   renderAgenda(qs<HTMLElement>('#agenda'));
   renderProperties(qs<HTMLElement>('#propiedades'));
   renderMvpUsers(qs<HTMLElement>('#equipo'));
