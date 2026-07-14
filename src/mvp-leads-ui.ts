@@ -20,7 +20,16 @@ function leadRows(): Client[] {
 
 function card(client: Client): string {
   const digits = client.phone.replace(/\D/g, '');
-  return `<article class="mvp-lead-card"><div><div class="mvp-lead-name"><h3>${escapeHtml(client.name)}</h3><span>${escapeHtml(client.budget || 'Sin presupuesto')}</span></div><p>${escapeHtml(client.interest || 'Sin interés definido')}</p><a class="mvp-whatsapp-link" href="https://wa.me/${digits}" target="_blank" rel="noopener noreferrer">WhatsApp · ${escapeHtml(formatPhone(client.phone))}</a></div><div class="mvp-lead-actions"><button type="button" class="secondary" data-edit-client="${client.id}">Editar</button><button type="button" class="delete" data-delete="clients" data-id="${client.id}">×</button></div></article>`;
+  return `<article class="mvp-lead-card"><div><div class="mvp-lead-name"><h3>${escapeHtml(client.name)}</h3><span>${escapeHtml(client.budget || 'Sin presupuesto')}</span></div><p>${escapeHtml(client.interest || 'Sin interés definido')}</p><a class="mvp-whatsapp-link" href="https://wa.me/${digits}" target="_blank" rel="noopener noreferrer">WhatsApp · ${escapeHtml(formatPhone(client.phone))}</a></div><div class="mvp-lead-actions"><button type="button" class="secondary" data-edit-client="${client.id}" aria-controls="mvp-lead-form">Editar</button><button type="button" class="delete" data-delete="clients" data-id="${client.id}">×</button></div></article>`;
+}
+
+function focusLeadForm(container: HTMLElement): void {
+  window.requestAnimationFrame(() => {
+    const form = container.querySelector<HTMLFormElement>('#mvp-lead-form:not(.collapsed)');
+    if (!form) return;
+    form.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    form.querySelector<HTMLInputElement>('input[name="name"]')?.focus({ preventScroll: true });
+  });
 }
 
 export function renderMvpLeads(container: HTMLElement): void {
@@ -32,6 +41,18 @@ export function renderMvpLeads(container: HTMLElement): void {
     searchText = (event.currentTarget as HTMLInputElement).value;
     renderMvpLeads(container);
     container.querySelector<HTMLInputElement>('#mvp-lead-search')?.focus();
+  });
+
+  container.querySelectorAll<HTMLButtonElement>('[data-edit-client]').forEach((button) => {
+    button.addEventListener('click', (event) => {
+      event.stopPropagation();
+      const clientId = Number(button.dataset.editClient);
+      if (!clientId || !state.crm.clients.some((client) => client.id === clientId)) return;
+      state.editingClientId = clientId;
+      state.openForms.client = true;
+      renderMvpLeads(container);
+      focusLeadForm(container);
+    });
   });
 
   container.querySelector<HTMLFormElement>('#mvp-lead-form')?.addEventListener('submit', (event) => {
