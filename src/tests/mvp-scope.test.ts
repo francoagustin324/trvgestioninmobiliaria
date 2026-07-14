@@ -18,31 +18,41 @@ test('index usa solo la entrada MVP y carga la capa visual de marca', () => {
   const html = readFileSync('index.html', 'utf8');
   assert.match(html, /\/dist\/mvp-main\.js/);
   assert.match(html, /\/src\/sidebar-brand\.css/);
+  assert.ok(html.includes('20260714-18'));
   for (const legacy of ['/dist/main.js', 'team-bootstrap.js', 'team-scope.js', 'audio-simulation.js', 'intervention-alert.js']) {
     assert.equal(html.includes(legacy), false, legacy);
   }
 });
 
-test('PropControl aparece una sola vez como marca dentro del menú lateral', () => {
+test('TRV aparece una sola vez como identidad principal dentro de la aplicación', () => {
   const source = readFileSync('src/mvp-main.ts', 'utf8');
-  assert.ok(source.includes("import { PRODUCT_BRAND } from './branding.js'"));
-  assert.ok(source.includes('class="mvp-brand"'));
-  assert.ok(source.includes('class="mvp-brand-mark"'));
-  assert.ok(source.includes('class="mvp-sidebar-footer"'));
-  assert.equal(source.includes('module-title'), false);
-  assert.ok(source.includes('mvp-company-name'));
+  assert.ok(source.includes("import { AGENCY_BRAND } from './branding.js'"));
+  assert.ok(source.includes('class="mvp-agency-brand"'));
+  assert.ok(source.includes('class="mvp-agency-logo"'));
+  assert.equal(source.includes('mvp-sidebar-footer'), false);
+  assert.equal(source.includes('mvp-company-name'), false);
+  assert.equal(source.includes('PRODUCT_BRAND'), false);
 });
 
-test('el diseño lateral combina marca, navegación y contexto de inmobiliaria', () => {
+test('el lateral conserva un diseño profesional sin repetir identidad', () => {
   const css = readFileSync('src/sidebar-brand.css', 'utf8');
   for (const marker of [
-    '.mvp-brand',
-    '.mvp-brand-mark',
+    '.mvp-agency-brand',
+    '.mvp-agency-logo',
     '.mvp-sidebar .nav-button.active::before',
-    '.mvp-sidebar-footer',
-    '.mvp-company-name strong',
-    '#d4a017',
+    '.mvp-topbar-spacer',
+    '.mvp-account-avatar svg',
+    '#c69a3d',
   ]) assert.ok(css.includes(marker), marker);
+  assert.equal(css.includes('.mvp-sidebar-footer'), false);
+  assert.equal(css.includes('.mvp-company-name'), false);
+});
+
+test('la cuenta usa icono genérico y no repite la inicial de TRV', () => {
+  const source = readFileSync('src/mvp-auth.ts', 'utf8');
+  assert.ok(source.includes('aria-label="Abrir menú de cuenta"'));
+  assert.ok(source.includes('<svg viewBox="0 0 24 24"'));
+  assert.equal(source.includes('const initials'), false);
 });
 
 test('el formulario visible del lead se limita a cuatro datos comerciales', () => {
@@ -95,13 +105,6 @@ test('autenticación tiene URLs públicas separadas para login y registro', () =
     assert.ok(source.includes(marker), marker);
   }
   assert.equal(source.includes("location.hash === '#registro'"), false);
-});
-
-test('la cuenta visible es un avatar y el rol queda dentro del menú', () => {
-  const source = readFileSync('src/mvp-auth.ts', 'utf8');
-  assert.ok(source.includes('aria-label="Abrir menú de cuenta"'));
-  assert.ok(source.includes('mvp-account-avatar'));
-  assert.equal(source.includes('<summary><span><b>Dueño'), false);
 });
 
 test('conversaciones usa una bandeja limpia y no la pantalla avanzada anterior', () => {
