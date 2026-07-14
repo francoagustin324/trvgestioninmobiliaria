@@ -10,7 +10,7 @@ export function roleCanViewAll(role: TeamRole): boolean {
 
 export function roleCanAccessModule(role: TeamRole, module: ModuleId): boolean {
   if (role !== 'Corredor') return true;
-  return module !== 'reportes' && module !== 'configuracion';
+  return !['equipo', 'reportes', 'configuracion'].includes(module);
 }
 
 export function assignmentVisible(role: TeamRole, memberId: number, assignedToId: number | undefined): boolean {
