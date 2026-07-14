@@ -10,6 +10,14 @@ import {
   type CloudMembershipRow,
   type CloudRecordRow,
 } from './cloud-records.js';
+import {
+  assertRemoteIsSafe,
+  latestRemoteVersion,
+  markCloudHydrated,
+  markCloudSaved,
+  markSyncError,
+  stableFingerprint,
+} from './sync-safety.js';
 
 const SESSION_KEY = 'propcontrol-cloud-session-v1';
 const SNAPSHOT_SOURCE = 'propcontrol_system_snapshot';
@@ -37,6 +45,11 @@ interface AuthResponse {
   msg?: string;
   message?: string;
   error_description?: string;
+}
+
+interface LegacySnapshot {
+  crm: CrmData;
+  updatedAt?: string;
 }
 
 interface LegacySnapshotRow {
@@ -74,6 +87,10 @@ let saveTimer: number | null = null;
 
 function emitStatus(message: string, kind: 'success' | 'error' | 'working' = 'success'): void {
   document.dispatchEvent(new CustomEvent('propcontrol-cloud-status', { detail: { message, kind } }));
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : 'No se pudo guardar en la nube.';
 }
 
 async function parseResponse(response: Response): Promise<unknown> {
@@ -272,7 +289,7 @@ async function getLegacySnapshot(
   config: Required<Pick<CloudConfig, 'url' | 'publishableKey'>>,
   session: CloudSession,
   organizationId: string,
-): Promise<CrmData | null> {
+): Promise<LegacySnapshot | null> {
   const query = new URL(`${config.url}/rest/v1/fichas`);
   query.searchParams.set('select', 'id,internal_data,updated_at');
   query.searchParams.set('organization_id', `eq.${organizationId}`);
@@ -283,7 +300,7 @@ async function getLegacySnapshot(
     cache: 'no-store',
   })) as LegacySnapshotRow[];
   const crm = rows[0]?.internal_data?.crm;
-  return isCrmData(crm) ? crm : null;
+  return isCrmData(crm) ? { crm, updatedAt: rows[0]?.updated_at } : null;
 }
 
 async function fetchCloudRecords(
@@ -345,6 +362,18 @@ async function deleteStaleRecords(
   }
 }
 
+function recordsFingerprint(records: CloudRecordRow[]): string {
+  return stableFingerprint(records
+    .map((record) => ({
+      organization_id: record.organization_id,
+      entity_type: record.entity_type,
+      entity_key: record.entity_key,
+      assigned_member_id: record.assigned_member_id,
+      payload: record.payload,
+    }))
+    .sort((left, right) => `${left.entity_type}:${left.entity_key}`.localeCompare(`${right.entity_type}:${right.entity_key}`)));
+}
+
 async function pushWithContext(
   crm: CrmData,
   config: Required<Pick<CloudConfig, 'url' | 'publishableKey'>>,
@@ -353,8 +382,20 @@ async function pushWithContext(
 ): Promise<void> {
   const existing = await fetchCloudRecords(config, session, context.organizationId);
   const next = crmToCloudRecords(crm, context, session.userId);
+  const existingFingerprint = recordsFingerprint(existing);
+  const nextFingerprint = recordsFingerprint(next);
+  const remoteVersion = latestRemoteVersion(existing);
+
+  assertRemoteIsSafe(remoteVersion, nextFingerprint, existingFingerprint);
+  if (existingFingerprint === nextFingerprint) {
+    markCloudSaved(remoteVersion);
+    return;
+  }
+
   await upsertRecords(config, session, next);
   await deleteStaleRecords(config, session, staleCloudRecords(existing, next));
+  const refreshed = await fetchCloudRecords(config, session, context.organizationId);
+  markCloudSaved(latestRemoteVersion(refreshed));
 }
 
 export async function pullCloudData(fallback: CrmData = initialData): Promise<CrmData | null> {
@@ -364,24 +405,32 @@ export async function pullCloudData(fallback: CrmData = initialData): Promise<Cr
   const context = membershipContext(await fetchMembershipRows(config, session), session.userId);
   try {
     const records = await fetchCloudRecords(config, session, context.organizationId);
-    if (records.length) return cloudRecordsToCrm(records, context, fallback);
+    if (records.length) {
+      markCloudHydrated(latestRemoteVersion(records));
+      return cloudRecordsToCrm(records, context, fallback);
+    }
 
     if (context.currentRole !== 'Corredor') {
       const legacy = await getLegacySnapshot(config, session, context.organizationId);
       if (legacy) {
-        const migrated = { ...legacy, organization: { ...legacy.organization, id: context.organizationId }, teamMembers: context.members };
+        markCloudHydrated(legacy.updatedAt || null);
+        const migrated = { ...legacy.crm, organization: { ...legacy.crm.organization, id: context.organizationId }, teamMembers: context.members };
         await pushWithContext(migrated, config, session, context);
         return migrated;
       }
+      markCloudHydrated(null);
       return null;
     }
+    markCloudHydrated(null);
     return cloudRecordsToCrm([], context, fallback);
   } catch (error) {
     if (error instanceof CloudHttpError && ['PGRST205', '42P01'].includes(error.code)) {
       if (context.currentRole === 'Corredor') {
         throw new Error('La seguridad multiusuario todavía no fue activada en Supabase.');
       }
-      return await getLegacySnapshot(config, session, context.organizationId);
+      const legacy = await getLegacySnapshot(config, session, context.organizationId);
+      markCloudHydrated(legacy?.updatedAt || null);
+      return legacy?.crm ?? null;
     }
     throw error;
   }
@@ -435,10 +484,14 @@ export function queueCloudSave(crm: CrmData): void {
   if (saveTimer !== null) window.clearTimeout(saveTimer);
   saveTimer = window.setTimeout(() => {
     saveTimer = null;
-    emitStatus('Guardando con permisos seguros…', 'working');
+    emitStatus('Guardando con protección contra sobrescrituras…', 'working');
     void pushCloudData(crm)
       .then(() => emitStatus('Guardado seguro en la nube.'))
-      .catch((error) => emitStatus(error instanceof Error ? error.message : 'No se pudo guardar en la nube.', 'error'));
+      .catch((error) => {
+        const message = errorMessage(error);
+        markSyncError(message);
+        emitStatus(message, 'error');
+      });
   }, 700);
 }
 
