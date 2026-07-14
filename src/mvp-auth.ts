@@ -7,7 +7,23 @@ import {
   signOutCloud,
   signUpCloud,
 } from './cloud-api-compatible.js';
-import { replaceData, setActiveMemberId, state } from './store.js';
+import type { CrmData } from './models.js';
+import { initialData } from './models.js';
+import {
+  activateStorageForCurrentSession,
+  hasLocalBackup,
+  replaceData,
+  restoreLatestLocalBackup,
+  setActiveMemberId,
+  state,
+} from './store.js';
+import {
+  getSyncState,
+  hasPendingLocalChanges,
+  markSyncError,
+  stableFingerprint,
+  syncStatusLabel,
+} from './sync-safety.js';
 import { escapeHtml } from './utils.js';
 
 function formValue(form: HTMLFormElement, name: string): string {
@@ -21,15 +37,67 @@ function activateMember(): void {
   if (member) setActiveMemberId(member.id);
 }
 
+function emptyOperationalData(crm: CrmData): CrmData {
+  return {
+    ...structuredClone(crm),
+    activityLog: [],
+    clients: [],
+    properties: [],
+    contacts: [],
+    reminders: [],
+    fichas: [],
+    conversations: [],
+  };
+}
+
+function isUntouchedDemoData(crm: CrmData): boolean {
+  return stableFingerprint(crm) === stableFingerprint(initialData);
+}
+
+function dispatchCloudStatus(message: string, kind: 'success' | 'error' | 'working' = 'success'): void {
+  document.dispatchEvent(new CustomEvent('propcontrol-cloud-status', { detail: { message, kind } }));
+}
+
 async function hydrateAfterAuth(): Promise<void> {
+  activateStorageForCurrentSession();
+
+  if (hasPendingLocalChanges()) {
+    try {
+      await pushCloudData(state.crm);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'No se pudieron sincronizar los cambios locales.';
+      markSyncError(message);
+      activateMember();
+      return;
+    }
+  }
+
   const cloud = await pullCloudData(state.crm);
-  if (cloud) replaceData(cloud);
-  else {
+  if (cloud) {
+    replaceData(cloud);
+  } else {
+    const firstData = isUntouchedDemoData(state.crm) ? emptyOperationalData(state.crm) : state.crm;
+    if (firstData !== state.crm) replaceData(firstData);
     await pushCloudData(state.crm);
     const refreshed = await pullCloudData(state.crm);
     if (refreshed) replaceData(refreshed);
   }
   activateMember();
+}
+
+async function synchronizeNow(): Promise<void> {
+  try {
+    dispatchCloudStatus('Comprobando datos locales y de la nube…', 'working');
+    if (hasPendingLocalChanges()) await pushCloudData(state.crm);
+    const cloud = await pullCloudData(state.crm);
+    if (cloud) replaceData(cloud);
+    dispatchCloudStatus('Sincronización completada sin sobrescrituras.', 'success');
+    document.dispatchEvent(new CustomEvent('trv-render'));
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'No se pudo sincronizar.';
+    markSyncError(message);
+    dispatchCloudStatus(message, 'error');
+  }
 }
 
 export function hasAuthenticatedSession(): boolean {
@@ -98,9 +166,7 @@ export function renderPublicAuth(root: HTMLElement): void {
 
 export async function hydrateAuthenticatedSession(): Promise<void> {
   if (!getCloudSession()) return;
-  const cloud = await pullCloudData(state.crm);
-  if (cloud) replaceData(cloud);
-  activateMember();
+  await hydrateAfterAuth();
 }
 
 export function renderAccountMenu(): void {
@@ -110,10 +176,21 @@ export function renderAccountMenu(): void {
   const member = session ? state.crm.teamMembers.find((item) => item.userId === session.userId) : null;
   if (!session) { container.innerHTML = ''; return; }
   const name = member?.name || session.email;
+  const syncState = getSyncState();
+  const syncLabel = syncStatusLabel(syncState);
+  const restoreButton = hasLocalBackup()
+    ? '<button type="button" data-account-restore>Recuperar copia anterior</button>'
+    : '';
   container.innerHTML = `<details class="mvp-account-menu">
     <summary aria-label="Abrir menú de cuenta"><span class="mvp-account-avatar" aria-hidden="true"><svg viewBox="0 0 24 24" role="img"><path d="M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8Zm-7 8a7 7 0 0 1 14 0" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></span></summary>
-    <div><header><b>${escapeHtml(name)}</b><small>${escapeHtml(member?.role || session.email)}</small></header><button type="button" data-account-sync>Sincronizar</button><button type="button" data-account-logout>Cerrar sesión</button></div>
+    <div><header><b>${escapeHtml(name)}</b><small>${escapeHtml(member?.role || session.email)}</small><small title="${escapeHtml(syncState.lastError || '')}">${escapeHtml(syncLabel)}</small></header><button type="button" data-account-sync>Sincronizar de forma segura</button>${restoreButton}<button type="button" data-account-logout>Cerrar sesión</button></div>
   </details>`;
-  container.querySelector<HTMLElement>('[data-account-sync]')?.addEventListener('click', () => void pushCloudData(state.crm));
+  container.querySelector<HTMLElement>('[data-account-sync]')?.addEventListener('click', () => void synchronizeNow());
+  container.querySelector<HTMLElement>('[data-account-restore]')?.addEventListener('click', () => {
+    if (!window.confirm('Se recuperará la copia local anterior y quedará pendiente de sincronización. ¿Continuar?')) return;
+    if (!restoreLatestLocalBackup()) return;
+    dispatchCloudStatus('Copia anterior recuperada. PropControl la guardará sin sobrescribir cambios más nuevos.', 'success');
+    document.dispatchEvent(new CustomEvent('trv-render'));
+  });
   container.querySelector<HTMLElement>('[data-account-logout]')?.addEventListener('click', () => { signOutCloud(); location.assign('/login'); });
 }

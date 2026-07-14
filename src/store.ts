@@ -9,7 +9,14 @@ import type {
   TeamMember,
   WhatsAppConversation,
 } from './models.js';
-import { STORAGE_KEY, initialData } from './models.js';
+import { initialData } from './models.js';
+import {
+  activateAccountStorage,
+  hasLocalBackup as hasStoredLocalBackup,
+  readLocalSnapshot,
+  restoreLatestBackup,
+  writeLocalSnapshot,
+} from './sync-safety.js';
 
 const TEAM_VIEW_KEY = 'propcontrol-active-team-member-v1';
 
@@ -136,11 +143,8 @@ function normalizedData(value: Partial<CrmData>): CrmData {
 }
 
 function loadData(): CrmData {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return structuredClone(initialData);
-    return normalizedData(JSON.parse(raw) as Partial<CrmData>);
-  } catch { return structuredClone(initialData); }
+  const local = readLocalSnapshot();
+  return local ? normalizedData(local) : structuredClone(initialData);
 }
 
 function loadActiveMemberId(crm: CrmData): number {
@@ -168,6 +172,20 @@ export const state = {
   openForms: { client: false, property: false, contact: false, reminder: false, ficha: false, member: false },
 };
 
+function resetTransientState(): void {
+  state.activeMemberId = loadActiveMemberId(state.crm);
+  state.editingClientId = null;
+  state.selectedConversationId = null;
+  state.selectedContactId = null;
+  state.editingContactId = null;
+}
+
+export function activateStorageForCurrentSession(): void {
+  activateAccountStorage();
+  state.crm = loadData();
+  resetTransientState();
+}
+
 export function setActiveMemberId(memberId: number): void {
   const member = state.crm.teamMembers.find((item) => item.id === memberId && item.status !== 'Suspendido');
   if (!member) return;
@@ -181,16 +199,29 @@ export function setActiveMemberId(memberId: number): void {
 
 export function replaceData(data: CrmData, syncCloud = false): void {
   state.crm = normalizedData(data);
-  state.activeMemberId = loadActiveMemberId(state.crm);
-  state.editingClientId = null;
-  state.selectedConversationId = null;
-  state.selectedContactId = null;
-  state.editingContactId = null;
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(state.crm));
+  resetTransientState();
+  writeLocalSnapshot(state.crm, {
+    markDirty: syncCloud,
+    reason: syncCloud ? 'Restauración local' : 'Carga desde la nube',
+  });
   if (syncCloud) queueCloudSave(state.crm);
 }
 
-export function saveData(): void {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(state.crm));
+export function saveData(reason = 'Cambio local'): void {
+  writeLocalSnapshot(state.crm, { markDirty: true, reason });
   queueCloudSave(state.crm);
+}
+
+export function hasLocalBackup(): boolean {
+  return hasStoredLocalBackup();
+}
+
+export function restoreLatestLocalBackup(): boolean {
+  const restored = restoreLatestBackup();
+  if (!restored) return false;
+  state.crm = normalizedData(restored);
+  resetTransientState();
+  writeLocalSnapshot(state.crm, { markDirty: true, reason: 'Restauración confirmada', backup: false });
+  queueCloudSave(state.crm);
+  return true;
 }

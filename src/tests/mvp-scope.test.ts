@@ -19,7 +19,7 @@ test('index usa solo la entrada MVP y carga las capas visuales aprobadas', () =>
   assert.match(html, /\/dist\/mvp-main\.js/);
   assert.match(html, /\/src\/sidebar-brand\.css/);
   assert.match(html, /\/src\/mvp-polish\.css/);
-  assert.ok(html.includes('20260714-20'));
+  assert.ok(html.includes('20260714-21'));
   for (const legacy of ['/dist/main.js', 'team-bootstrap.js', 'team-scope.js', 'audio-simulation.js', 'intervention-alert.js']) {
     assert.equal(html.includes(legacy), false, legacy);
   }
@@ -155,4 +155,18 @@ test('administración de usuarios no contiene vista simulada de usuario', () => 
   assert.ok(source.includes('Administrá accesos y roles'));
   assert.equal(source.includes('Vista de usuario'), false);
   assert.equal(source.includes('Carga de trabajo'), false);
+});
+
+test('la cuenta informa sincronización y permite recuperar una copia local', () => {
+  const auth = readFileSync('src/mvp-auth.ts', 'utf8');
+  const store = readFileSync('src/store.ts', 'utf8');
+  const main = readFileSync('src/mvp-main.ts', 'utf8');
+  for (const marker of ['Sincronizar de forma segura', 'Recuperar copia anterior']) {
+    assert.ok(auth.includes(marker), marker);
+  }
+  const safety = readFileSync('src/sync-safety.ts', 'utf8');
+  assert.ok(safety.includes('Cambios pendientes'));
+  assert.ok(store.includes('activateStorageForCurrentSession'));
+  assert.ok(store.includes('restoreLatestLocalBackup'));
+  assert.ok(main.includes('propcontrol-cloud-status'));
 });
