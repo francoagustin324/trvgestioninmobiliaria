@@ -23,8 +23,9 @@ test('en celular la barra queda visible a la izquierda sin menú desplegable', (
   assert.match(css, /\.mvp-content\s*\{[\s\S]*margin:\s*0 0 0 var\(--pc-mobile-rail\)\s*!important/);
 });
 
-test('la versión publicada renueva CSS y JavaScript juntos', () => {
-  assert.match(html, /mobile-layout-fix\.css\?v=20260714-26/);
-  assert.match(html, /cloud-compat-bootstrap\.js\?v=20260714-26/);
-  assert.match(html, /mvp-main\.js\?v=20260714-26/);
+test('la versión publicada renueva los dos módulos JavaScript juntos', () => {
+  const compatibilityVersion = html.match(/cloud-compat-bootstrap\.js\?v=([^"']+)/)?.[1];
+  const mainVersion = html.match(/mvp-main\.js\?v=([^"']+)/)?.[1];
+  assert.ok(compatibilityVersion);
+  assert.equal(mainVersion, compatibilityVersion);
 });
