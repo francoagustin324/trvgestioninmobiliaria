@@ -32,17 +32,7 @@ function focusLeadForm(container: HTMLElement): void {
   });
 }
 
-export function renderMvpLeads(container: HTMLElement): void {
-  const editing = state.crm.clients.find((client) => client.id === state.editingClientId) ?? null;
-  const leads = leadRows();
-  container.innerHTML = `<div class="mvp-page-heading"><div><h1>Leads</h1><p>Nombre, WhatsApp, interés y presupuesto.</p></div><button type="button" data-toggle="client-form">Nuevo lead</button></div><form id="mvp-lead-form" class="mvp-lead-form ${state.openForms.client ? '' : 'collapsed'}"><div class="mvp-form-heading"><h2>${editing ? `Editar ${escapeHtml(editing.name)}` : 'Nuevo lead'}</h2><button type="button" class="quiet-button" data-cancel-client-edit>Cerrar</button></div><label>Nombre<input name="name" value="${value(editing, 'name')}" required></label><label>Número de WhatsApp<input name="phone" value="${value(editing, 'phone')}" inputmode="tel" required></label><label>Lugar o propiedad de interés<input name="interest" value="${value(editing, 'interest')}" required></label><label>Presupuesto<input name="budget" value="${value(editing, 'budget')}" placeholder="Ej. USD 85.000"></label><div data-lead-error class="form-error" hidden></div><button type="submit">${editing ? 'Guardar cambios' : 'Guardar lead'}</button></form><div class="mvp-lead-toolbar"><label><span>Buscar</span><input id="mvp-lead-search" type="search" value="${escapeHtml(searchText)}" placeholder="Nombre, WhatsApp, interés o presupuesto"></label><strong>${leads.length} leads</strong></div><div class="mvp-lead-list">${leads.map(card).join('') || '<p class="empty-state">No hay leads para mostrar.</p>'}</div>`;
-
-  container.querySelector<HTMLInputElement>('#mvp-lead-search')?.addEventListener('input', (event) => {
-    searchText = (event.currentTarget as HTMLInputElement).value;
-    renderMvpLeads(container);
-    container.querySelector<HTMLInputElement>('#mvp-lead-search')?.focus();
-  });
-
+function bindLeadCardActions(container: HTMLElement): void {
   container.querySelectorAll<HTMLButtonElement>('[data-edit-client]').forEach((button) => {
     button.addEventListener('click', (event) => {
       event.stopPropagation();
@@ -54,6 +44,28 @@ export function renderMvpLeads(container: HTMLElement): void {
       focusLeadForm(container);
     });
   });
+}
+
+function updateLeadResults(container: HTMLElement): void {
+  const leads = leadRows();
+  const results = container.querySelector<HTMLElement>('#mvp-lead-results');
+  const count = container.querySelector<HTMLElement>('#mvp-lead-count');
+  if (results) results.innerHTML = leads.map(card).join('') || '<p class="empty-state">No hay leads para mostrar.</p>';
+  if (count) count.textContent = `${leads.length} leads`;
+  bindLeadCardActions(container);
+}
+
+export function renderMvpLeads(container: HTMLElement): void {
+  const editing = state.crm.clients.find((client) => client.id === state.editingClientId) ?? null;
+  const leads = leadRows();
+  container.innerHTML = `<div class="mvp-page-heading"><div><h1>Leads</h1><p>Nombre, WhatsApp, interés y presupuesto.</p></div><button type="button" data-toggle="client-form">Nuevo lead</button></div><form id="mvp-lead-form" class="mvp-lead-form ${state.openForms.client ? '' : 'collapsed'}"><div class="mvp-form-heading"><h2>${editing ? `Editar ${escapeHtml(editing.name)}` : 'Nuevo lead'}</h2><button type="button" class="quiet-button" data-cancel-client-edit>Cerrar</button></div><label>Nombre<input name="name" value="${value(editing, 'name')}" required></label><label>Número de WhatsApp<input name="phone" value="${value(editing, 'phone')}" inputmode="tel" required></label><label>Lugar o propiedad de interés<input name="interest" value="${value(editing, 'interest')}" required></label><label>Presupuesto<input name="budget" value="${value(editing, 'budget')}" placeholder="Ej. USD 85.000"></label><div data-lead-error class="form-error" hidden></div><button type="submit">${editing ? 'Guardar cambios' : 'Guardar lead'}</button></form><div class="mvp-lead-toolbar"><label><span>Buscar</span><input id="mvp-lead-search" type="search" value="${escapeHtml(searchText)}" placeholder="Nombre, WhatsApp, interés o presupuesto"></label><strong id="mvp-lead-count">${leads.length} leads</strong></div><div id="mvp-lead-results" class="mvp-lead-list">${leads.map(card).join('') || '<p class="empty-state">No hay leads para mostrar.</p>'}</div>`;
+
+  container.querySelector<HTMLInputElement>('#mvp-lead-search')?.addEventListener('input', (event) => {
+    searchText = (event.currentTarget as HTMLInputElement).value;
+    updateLeadResults(container);
+  });
+
+  bindLeadCardActions(container);
 
   container.querySelector<HTMLFormElement>('#mvp-lead-form')?.addEventListener('submit', (event) => {
     event.preventDefault();
