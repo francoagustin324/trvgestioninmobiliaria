@@ -78,6 +78,29 @@ function focusPropertyForm(container: HTMLElement): void {
   });
 }
 
+function bindPropertyCardActions(container: HTMLElement): void {
+  container.querySelectorAll<HTMLButtonElement>('[data-edit-property]').forEach((button) => {
+    button.addEventListener('click', (event) => {
+      event.stopPropagation();
+      const propertyId = Number(button.dataset.editProperty);
+      if (!propertyId || !state.crm.properties.some((property) => property.id === propertyId)) return;
+      state.editingPropertyId = propertyId;
+      state.openForms.property = true;
+      renderMvpProperties(container);
+      focusPropertyForm(container);
+    });
+  });
+}
+
+function updatePropertyResults(container: HTMLElement): void {
+  const properties = propertyRows();
+  const results = container.querySelector<HTMLElement>('#mvp-property-results');
+  const count = container.querySelector<HTMLElement>('#mvp-property-count');
+  if (results) results.innerHTML = properties.map(card).join('') || '<p class="empty-state">No hay propiedades para mostrar.</p>';
+  if (count) count.textContent = `${properties.length} propiedades`;
+  bindPropertyCardActions(container);
+}
+
 export function renderMvpProperties(container: HTMLElement): void {
   const editing = state.crm.properties.find((property) => property.id === state.editingPropertyId) ?? null;
   const properties = propertyRows();
@@ -111,27 +134,16 @@ export function renderMvpProperties(container: HTMLElement): void {
   </form>
   <div class="mvp-lead-toolbar">
     <label><span>Buscar</span><input id="mvp-property-search" type="search" value="${escapeHtml(searchText)}" placeholder="Nombre, zona, tipo, propietario o precio"></label>
-    <strong>${properties.length} propiedades</strong>
+    <strong id="mvp-property-count">${properties.length} propiedades</strong>
   </div>
-  <div class="mvp-lead-list">${properties.map(card).join('') || '<p class="empty-state">No hay propiedades para mostrar.</p>'}</div>`;
+  <div id="mvp-property-results" class="mvp-lead-list">${properties.map(card).join('') || '<p class="empty-state">No hay propiedades para mostrar.</p>'}</div>`;
 
   container.querySelector<HTMLInputElement>('#mvp-property-search')?.addEventListener('input', (event) => {
     searchText = (event.currentTarget as HTMLInputElement).value;
-    renderMvpProperties(container);
-    container.querySelector<HTMLInputElement>('#mvp-property-search')?.focus();
+    updatePropertyResults(container);
   });
 
-  container.querySelectorAll<HTMLButtonElement>('[data-edit-property]').forEach((button) => {
-    button.addEventListener('click', (event) => {
-      event.stopPropagation();
-      const propertyId = Number(button.dataset.editProperty);
-      if (!propertyId || !state.crm.properties.some((property) => property.id === propertyId)) return;
-      state.editingPropertyId = propertyId;
-      state.openForms.property = true;
-      renderMvpProperties(container);
-      focusPropertyForm(container);
-    });
-  });
+  bindPropertyCardActions(container);
 
   container.querySelector<HTMLButtonElement>('[data-cancel-property-edit]')?.addEventListener('click', () => {
     state.editingPropertyId = null;
