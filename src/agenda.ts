@@ -2,6 +2,7 @@ import type { Client, Reminder } from './models.js';
 
 export type AgendaUrgency = 'overdue' | 'today' | 'upcoming';
 export type AgendaSource = 'client' | 'reminder';
+export type ReminderWithStatus = Reminder & { completedAt?: string };
 
 export interface AgendaItem {
   id: string;
@@ -48,6 +49,13 @@ export function agendaUrgency(date: string, today: string): AgendaUrgency {
   return 'upcoming';
 }
 
+export function daysBetweenIsoDates(from: string, to: string): number {
+  if (!isValidIsoDate(from) || !isValidIsoDate(to)) return 0;
+  const fromTime = Date.parse(`${from}T00:00:00Z`);
+  const toTime = Date.parse(`${to}T00:00:00Z`);
+  return Math.round((toTime - fromTime) / 86_400_000);
+}
+
 function terminalClient(client: Client): boolean {
   return client.status === 'Cerrado' || client.pipeline === 'Cerrado' || client.pipeline === 'Perdido';
 }
@@ -70,7 +78,8 @@ export function buildAgendaItems(clients: Client[], reminders: Reminder[], today
   });
 
   const reminderItems = reminders.flatMap<AgendaItem>((reminder) => {
-    if (!isValidIsoDate(reminder.date)) return [];
+    const reminderWithStatus = reminder as ReminderWithStatus;
+    if (reminderWithStatus.completedAt || !isValidIsoDate(reminder.date)) return [];
     return [{
       id: `reminder-${reminder.id}`,
       source: 'reminder',
@@ -90,6 +99,13 @@ export function buildAgendaItems(clients: Client[], reminders: Reminder[], today
     || left.priority - right.priority
     || left.title.localeCompare(right.title, 'es')
   ));
+}
+
+export function completedReminders(reminders: Reminder[]): ReminderWithStatus[] {
+  return reminders
+    .map((reminder) => reminder as ReminderWithStatus)
+    .filter((reminder) => Boolean(reminder.completedAt))
+    .sort((left, right) => String(right.completedAt).localeCompare(String(left.completedAt)));
 }
 
 export function groupAgendaItems(items: AgendaItem[]): AgendaGroups {
