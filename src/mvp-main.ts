@@ -100,7 +100,7 @@ function removeItem(collection: string, id: number): void {
   }
   if (collection === 'properties') state.crm.properties = state.crm.properties.filter((item) => item.id !== id);
   if (collection === 'reminders') state.crm.reminders = state.crm.reminders.filter((item) => item.id !== id);
-  saveData();
+  saveData(`Eliminación de ${collection}`);
   render();
 }
 
@@ -108,6 +108,11 @@ function bindEvents(): void {
   if (eventsBound) return;
   eventsBound = true;
   document.addEventListener('trv-render', render);
+  document.addEventListener('propcontrol-cloud-status', (event) => {
+    const detail = (event as CustomEvent<{ message?: string }>).detail;
+    if (detail?.message) showNotice(detail.message);
+    renderAccountMenu();
+  });
   document.addEventListener('click', (event) => {
     const target = event.target as HTMLElement;
     if (target.closest('[data-mobile-nav-toggle]')) { setMobileNavigation(!document.body.classList.contains('mobile-nav-open')); return; }
@@ -124,7 +129,7 @@ function bindEvents(): void {
     const deleteButton = target.closest<HTMLElement>('[data-delete]');
     const collection = deleteButton?.dataset.delete;
     const id = Number(deleteButton?.dataset.id);
-    if (collection && id && window.confirm('¿Eliminar este registro?')) removeItem(collection, id);
+    if (collection && id && window.confirm('¿Eliminar este registro? PropControl guardará una copia local anterior.')) removeItem(collection, id);
   });
   window.addEventListener('resize', () => { if (window.innerWidth > 980) setMobileNavigation(false); });
 }
