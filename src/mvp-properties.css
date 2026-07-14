@@ -1,0 +1,18 @@
+.mvp-property-form select,
+.mvp-property-form textarea { min-height:44px; border:1px solid #ccd9e0; border-radius:10px; background:#fff; }
+.mvp-property-form textarea { min-height:92px; resize:vertical; }
+.mvp-property-form .mvp-property-wide { grid-column:1 / -1; }
+.mvp-property-form > button,
+.mvp-property-form .form-error { grid-column:1 / -1; }
+
+.mvp-property-card { align-items:center; }
+.mvp-property-main { min-width:0; }
+.mvp-property-title { flex-wrap:wrap; }
+.mvp-property-meta { display:flex; flex-wrap:wrap; gap:6px; margin-top:9px; }
+.mvp-property-meta span { padding:5px 8px; border-radius:999px; color:#526773; background:#f0f4f6; font-size:.69rem; font-weight:800; }
+
+@media (max-width:640px) {
+  .mvp-property-form .mvp-property-wide { grid-column:auto; }
+  .mvp-property-card { align-items:flex-start; }
+  .mvp-property-main { width:100%; }
+}
