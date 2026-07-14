@@ -157,7 +157,7 @@ const loadedCrm = loadData();
 export const state = {
   crm: loadedCrm,
   activeMemberId: loadActiveMemberId(loadedCrm),
-  activeModule: 'inicio' as ModuleId,
+  activeModule: 'crm' as ModuleId,
   fichaMode: 'property' as FichaMode,
   selectedFichaId: null as number | null,
   editingFichaId: null as number | null,
