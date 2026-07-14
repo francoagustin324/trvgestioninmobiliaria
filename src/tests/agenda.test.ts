@@ -1,15 +1,17 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
+  agendaRelatedOptions,
   agendaUrgency,
   buildAgendaItems,
   completedReminders,
   daysBetweenIsoDates,
+  filterAgendaRelatedOptions,
   groupAgendaItems,
   isValidIsoDate,
   todayIsoDate,
 } from '../agenda.js';
-import type { Client, Reminder } from '../models.js';
+import type { Client, Property, Reminder } from '../models.js';
 
 function client(overrides: Partial<Client> = {}): Client {
   return {
@@ -21,6 +23,20 @@ function client(overrides: Partial<Client> = {}): Client {
     temperature: 'Tibio',
     pipeline: 'Contactado',
     nextFollowUp: '2026-07-13',
+    ...overrides,
+  };
+}
+
+function property(overrides: Partial<Property> = {}): Property {
+  return {
+    id: 1,
+    title: 'Dúplex Docta',
+    address: 'Docta Urbanización',
+    type: 'Dúplex',
+    operation: 'Venta',
+    price: 148000,
+    owner: 'Propietario',
+    status: 'Disponible',
     ...overrides,
   };
 }
@@ -49,6 +65,27 @@ test('agendaUrgency clasifica vencido, hoy y próximo', () => {
 test('daysBetweenIsoDates calcula días sin errores de zona horaria', () => {
   assert.equal(daysBetweenIsoDates('2026-07-13', '2026-07-14'), 1);
   assert.equal(daysBetweenIsoDates('2026-07-13', '2026-07-10'), -3);
+});
+
+test('el buscador encuentra leads y propiedades recién cargados por texto parcial', () => {
+  const options = agendaRelatedOptions([
+    client({ id: 7, name: 'Franco Prueba', interest: 'Casa en Urca' }),
+  ], [
+    property({ id: 9, title: 'Fracción en Docta', address: 'Etapa 2' }),
+  ]);
+  const matches = filterAgendaRelatedOptions(options, 'fra');
+  assert.deepEqual(matches.map((item) => [item.type, item.value]), [
+    ['Lead', 'Franco Prueba'],
+    ['Propiedad', 'Fracción en Docta'],
+  ]);
+});
+
+test('el buscador ignora mayúsculas y acentos y prioriza nombres que comienzan igual', () => {
+  const options = agendaRelatedOptions([
+    client({ id: 7, name: 'Álvaro', interest: 'Fracción en Docta' }),
+    client({ id: 8, name: 'Franco', interest: 'Departamento' }),
+  ], []);
+  assert.deepEqual(filterAgendaRelatedOptions(options, 'FRÁ').map((item) => item.value), ['Franco', 'Álvaro']);
 });
 
 test('buildAgendaItems combina clientes y recordatorios por urgencia', () => {
