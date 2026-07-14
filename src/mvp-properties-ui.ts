@@ -1,0 +1,189 @@
+import type { Property } from './models.js';
+import { saveData, state } from './store.js';
+import { escapeHtml, field, formValues, nextId } from './utils.js';
+
+let searchText = '';
+const priceFormatter = new Intl.NumberFormat('es-AR');
+
+function normalized(value: unknown): string {
+  return String(value ?? '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .trim();
+}
+
+function textValue(property: Property | null, key: keyof Property): string {
+  const current = property?.[key];
+  return escapeHtml(current === undefined || current === null ? '' : String(current));
+}
+
+function selected(value: string, current: string | undefined): string {
+  return `<option${value === current ? ' selected' : ''}>${escapeHtml(value)}</option>`;
+}
+
+function propertyRows(): Property[] {
+  const query = normalized(searchText);
+  const properties = query
+    ? state.crm.properties.filter((property) => [
+      property.title,
+      property.address,
+      property.type,
+      property.operation,
+      property.owner,
+      property.status,
+      property.price,
+    ].some((item) => normalized(item).includes(query)))
+    : [...state.crm.properties];
+
+  return properties.sort((left, right) => (
+    left.status.localeCompare(right.status, 'es', { sensitivity: 'base' })
+    || left.title.localeCompare(right.title, 'es', { sensitivity: 'base' })
+  ));
+}
+
+function card(property: Property): string {
+  const details = [
+    property.type,
+    property.bedrooms ? `${property.bedrooms} dorm.` : '',
+    property.bathrooms ? `${property.bathrooms} baños` : '',
+  ].filter(Boolean).join(' · ');
+
+  return `<article class="mvp-lead-card mvp-property-card">
+    <div class="mvp-property-main">
+      <div class="mvp-lead-name mvp-property-title">
+        <h3>${escapeHtml(property.title)}</h3>
+        <span>USD ${priceFormatter.format(property.price)}</span>
+      </div>
+      <p>${escapeHtml(property.address)}${details ? ` · ${escapeHtml(details)}` : ''}</p>
+      <div class="mvp-property-meta">
+        <span>${escapeHtml(property.operation)}</span>
+        <span>${escapeHtml(property.status)}</span>
+        <span>${escapeHtml(property.owner || 'Sin propietario')}</span>
+      </div>
+    </div>
+    <div class="mvp-lead-actions">
+      <button type="button" class="secondary" data-edit-property="${property.id}" aria-controls="mvp-property-form">Editar</button>
+      <button type="button" class="delete" data-delete="properties" data-id="${property.id}" aria-label="Eliminar ${escapeHtml(property.title)}">×</button>
+    </div>
+  </article>`;
+}
+
+function focusPropertyForm(container: HTMLElement): void {
+  window.requestAnimationFrame(() => {
+    const form = container.querySelector<HTMLFormElement>('#mvp-property-form:not(.collapsed)');
+    if (!form) return;
+    form.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    form.querySelector<HTMLInputElement>('input[name="title"]')?.focus({ preventScroll: true });
+  });
+}
+
+export function renderMvpProperties(container: HTMLElement): void {
+  const editing = state.crm.properties.find((property) => property.id === state.editingPropertyId) ?? null;
+  const properties = propertyRows();
+  const types = ['Departamento', 'Casa', 'Dúplex', 'Terreno', 'Comercial'];
+  const operations = ['Venta', 'Captación'];
+  const statuses = ['Activa', 'Captación', 'Reservada', 'Cerrada'];
+
+  container.innerHTML = `<div class="mvp-page-heading">
+    <div><h1>Propiedades</h1><p>Inventario, ubicación, precio, operación y estado.</p></div>
+    <button type="button" data-toggle="property-form">Nueva propiedad</button>
+  </div>
+  <form id="mvp-property-form" class="mvp-lead-form mvp-property-form ${state.openForms.property ? '' : 'collapsed'}">
+    <div class="mvp-form-heading">
+      <h2>${editing ? `Editar ${escapeHtml(editing.title)}` : 'Nueva propiedad'}</h2>
+      <button type="button" class="quiet-button" data-cancel-property-edit>Cerrar</button>
+    </div>
+    <label>Nombre<input name="title" value="${textValue(editing, 'title')}" required></label>
+    <label>Zona o dirección<input name="address" value="${textValue(editing, 'address')}" required></label>
+    <label>Tipo<select name="type">${types.map((item) => selected(item, editing?.type)).join('')}</select></label>
+    <label>Operación<select name="operation">${operations.map((item) => selected(item, editing?.operation)).join('')}</select></label>
+    <label>Precio USD<input name="price" type="number" min="0" value="${textValue(editing, 'price')}" required></label>
+    <label>Propietario o colega<input name="owner" value="${textValue(editing, 'owner')}" required></label>
+    <label>Estado<select name="status">${statuses.map((item) => selected(item, editing?.status)).join('')}</select></label>
+    <label>Dormitorios<input name="bedrooms" type="number" min="0" value="${textValue(editing, 'bedrooms')}"></label>
+    <label>Baños<input name="bathrooms" type="number" min="0" value="${textValue(editing, 'bathrooms')}"></label>
+    <label>Forma de pago<input name="paymentMethod" value="${textValue(editing, 'paymentMethod')}" placeholder="Contado, crédito, financiación..."></label>
+    <label class="mvp-property-wide">Características<textarea name="features" placeholder="Balcón, cochera, pileta, patio, seguridad...">${textValue(editing, 'features')}</textarea></label>
+    <label class="mvp-property-wide">Notas internas<textarea name="notes" placeholder="Datos internos de la propiedad">${textValue(editing, 'notes')}</textarea></label>
+    <div data-property-error class="form-error" hidden></div>
+    <button type="submit">${editing ? 'Guardar cambios' : 'Guardar propiedad'}</button>
+  </form>
+  <div class="mvp-lead-toolbar">
+    <label><span>Buscar</span><input id="mvp-property-search" type="search" value="${escapeHtml(searchText)}" placeholder="Nombre, zona, tipo, propietario o precio"></label>
+    <strong>${properties.length} propiedades</strong>
+  </div>
+  <div class="mvp-lead-list">${properties.map(card).join('') || '<p class="empty-state">No hay propiedades para mostrar.</p>'}</div>`;
+
+  container.querySelector<HTMLInputElement>('#mvp-property-search')?.addEventListener('input', (event) => {
+    searchText = (event.currentTarget as HTMLInputElement).value;
+    renderMvpProperties(container);
+    container.querySelector<HTMLInputElement>('#mvp-property-search')?.focus();
+  });
+
+  container.querySelectorAll<HTMLButtonElement>('[data-edit-property]').forEach((button) => {
+    button.addEventListener('click', (event) => {
+      event.stopPropagation();
+      const propertyId = Number(button.dataset.editProperty);
+      if (!propertyId || !state.crm.properties.some((property) => property.id === propertyId)) return;
+      state.editingPropertyId = propertyId;
+      state.openForms.property = true;
+      renderMvpProperties(container);
+      focusPropertyForm(container);
+    });
+  });
+
+  container.querySelector<HTMLButtonElement>('[data-cancel-property-edit]')?.addEventListener('click', () => {
+    state.editingPropertyId = null;
+    state.openForms.property = false;
+    renderMvpProperties(container);
+  });
+
+  container.querySelector<HTMLFormElement>('#mvp-property-form')?.addEventListener('submit', (event) => {
+    event.preventDefault();
+    const form = event.currentTarget as HTMLFormElement;
+    const values = formValues(form);
+    const price = Number(field(values, 'price'));
+    const error = form.querySelector<HTMLElement>('[data-property-error]');
+    if (!Number.isFinite(price) || price < 0) {
+      if (error) {
+        error.textContent = 'Ingresá un precio válido.';
+        error.hidden = false;
+      }
+      return;
+    }
+
+    const bedrooms = Number(field(values, 'bedrooms'));
+    const bathrooms = Number(field(values, 'bathrooms'));
+    const property: Property = {
+      ...(editing || {}),
+      id: editing?.id ?? nextId(state.crm.properties),
+      title: field(values, 'title').trim(),
+      address: field(values, 'address').trim(),
+      type: field(values, 'type'),
+      operation: field(values, 'operation'),
+      price,
+      owner: field(values, 'owner').trim(),
+      status: field(values, 'status'),
+      bedrooms: bedrooms > 0 ? bedrooms : undefined,
+      bathrooms: bathrooms > 0 ? bathrooms : undefined,
+      paymentMethod: field(values, 'paymentMethod').trim(),
+      features: field(values, 'features').trim(),
+      notes: field(values, 'notes').trim(),
+      assignedToId: editing?.assignedToId ?? state.activeMemberId,
+      createdById: editing?.createdById ?? state.activeMemberId,
+    };
+
+    if (editing) {
+      const index = state.crm.properties.findIndex((item) => item.id === editing.id);
+      if (index >= 0) state.crm.properties[index] = property;
+    } else {
+      state.crm.properties.push(property);
+    }
+
+    state.editingPropertyId = null;
+    state.openForms.property = false;
+    saveData(editing ? 'Propiedad editada' : 'Propiedad creada');
+    document.dispatchEvent(new CustomEvent('trv-render'));
+  });
+}

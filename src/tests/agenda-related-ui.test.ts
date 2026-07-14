@@ -6,9 +6,11 @@ const ui = readFileSync('src/agenda-ui.ts', 'utf8');
 const css = readFileSync('src/agenda.css', 'utf8');
 const html = readFileSync('index.html', 'utf8');
 
-test('el formulario usa un selector buscable de leads y propiedades', () => {
-  assert.ok(ui.includes('agendaRelatedOptions(state.crm.clients, state.crm.properties)'));
+test('el formulario usa un selector buscable únicamente de leads', () => {
+  assert.ok(ui.includes('agendaRelatedOptions(state.crm.clients)'));
+  assert.ok(!ui.includes('state.crm.properties'));
   assert.ok(ui.includes('filterAgendaRelatedOptions(options, input.value)'));
+  assert.ok(ui.includes('<label for="agenda-related-input">Lead</label>'));
   assert.ok(ui.includes('role="combobox"'));
   assert.ok(ui.includes('role="listbox"'));
   assert.ok(ui.includes('data-related-key'));

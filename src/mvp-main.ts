@@ -1,10 +1,10 @@
 import type { ModuleId } from './models.js';
 import { modules } from './models.js';
 import { PRODUCT_BRAND } from './branding.js';
-import { renderProperties } from './crm-ui.js';
 import { renderAgenda } from './agenda-ui.js';
 import { decodePublicFicha, renderPublicMode } from './public-ficha.js';
 import { renderMvpLeads } from './mvp-leads-ui.js';
+import { renderMvpProperties } from './mvp-properties-ui.js';
 import { renderMvpUsers } from './mvp-users-ui.js';
 import { renderMvpConversations } from './mvp-conversations-ui.js';
 import {
@@ -86,7 +86,7 @@ function render(): void {
   renderMvpLeads(qs<HTMLElement>('#crm'));
   renderMvpConversations(qs<HTMLElement>('#whatsapp'));
   renderAgenda(qs<HTMLElement>('#agenda'));
-  renderProperties(qs<HTMLElement>('#propiedades'));
+  renderMvpProperties(qs<HTMLElement>('#propiedades'));
   renderMvpUsers(qs<HTMLElement>('#equipo'));
   renderAccountMenu();
   modules.forEach(([id]) => {
@@ -106,7 +106,10 @@ function removeItem(collection: string, id: number): void {
     state.crm.clients = state.crm.clients.filter((item) => item.id !== id);
     state.crm.conversations = state.crm.conversations.filter((item) => item.clientId !== id);
   }
-  if (collection === 'properties') state.crm.properties = state.crm.properties.filter((item) => item.id !== id);
+  if (collection === 'properties') {
+    state.crm.properties = state.crm.properties.filter((item) => item.id !== id);
+    if (state.editingPropertyId === id) state.editingPropertyId = null;
+  }
   if (collection === 'reminders') state.crm.reminders = state.crm.reminders.filter((item) => item.id !== id);
   saveData(`Eliminación de ${collection}`);
   render();
@@ -132,7 +135,7 @@ function bindEvents(): void {
     if (target.closest('[data-cancel-client-edit]')) { state.editingClientId = null; state.openForms.client = false; render(); return; }
     const toggle = target.closest<HTMLElement>('[data-toggle]')?.dataset.toggle;
     if (toggle === 'client-form') { state.editingClientId = null; state.openForms.client = !state.openForms.client; render(); return; }
-    if (toggle === 'property-form') { state.openForms.property = !state.openForms.property; render(); return; }
+    if (toggle === 'property-form') { state.editingPropertyId = null; state.openForms.property = !state.openForms.property; render(); return; }
     if (toggle === 'reminder-form') { state.openForms.reminder = !state.openForms.reminder; render(); return; }
     const deleteButton = target.closest<HTMLElement>('[data-delete]');
     const collection = deleteButton?.dataset.delete;
