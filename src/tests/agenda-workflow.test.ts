@@ -16,7 +16,8 @@ test('Seguimientos permite editar, completar, reprogramar y reabrir', () => {
 
 test('los seguimientos vencidos muestran antigüedad y los activos se ordenan', () => {
   assert.ok(agendaUi.includes('Vencido hace'));
-  assert.ok(agendaUi.includes('seguimientos activos ordenados por fecha y prioridad'));
+  assert.ok(agendaUi.includes('seguimientos activos en orden de atención'));
+  assert.ok(agendaUi.includes('Ordenados por fecha y prioridad.'));
   assert.ok(agendaUi.includes("renderAgendaSection('overdue'"));
   assert.ok(agendaUi.includes("renderAgendaSection('today'"));
   assert.ok(agendaUi.includes("renderAgendaSection('upcoming'"));
