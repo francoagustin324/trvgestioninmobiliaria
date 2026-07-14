@@ -175,7 +175,8 @@ export function renderAccountMenu(): void {
   const session = getCloudSession();
   const member = session ? state.crm.teamMembers.find((item) => item.userId === session.userId) : null;
   if (!session) { container.innerHTML = ''; return; }
-  const name = member?.name || session.email;
+  const accountName = member?.name || state.crm.organization.name || 'Cuenta PropControl';
+  const accountDetail = member?.role || session.email;
   const syncState = getSyncState();
   const syncLabel = syncStatusLabel(syncState);
   const restoreButton = hasLocalBackup()
@@ -183,7 +184,7 @@ export function renderAccountMenu(): void {
     : '';
   container.innerHTML = `<details class="mvp-account-menu">
     <summary aria-label="Abrir menú de cuenta"><span class="mvp-account-avatar" aria-hidden="true"><svg viewBox="0 0 24 24" role="img"><path d="M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8Zm-7 8a7 7 0 0 1 14 0" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></span></summary>
-    <div><header><b>${escapeHtml(name)}</b><small>${escapeHtml(member?.role || session.email)}</small><small title="${escapeHtml(syncState.lastError || '')}">${escapeHtml(syncLabel)}</small></header><button type="button" data-account-sync>Sincronizar de forma segura</button>${restoreButton}<button type="button" data-account-logout>Cerrar sesión</button></div>
+    <div><header><b>${escapeHtml(accountName)}</b><small>${escapeHtml(accountDetail)}</small><small title="${escapeHtml(syncState.lastError || '')}">${escapeHtml(syncLabel)}</small></header><button type="button" data-account-sync>Sincronizar de forma segura</button>${restoreButton}<button type="button" data-account-logout>Cerrar sesión</button></div>
   </details>`;
   container.querySelector<HTMLElement>('[data-account-sync]')?.addEventListener('click', () => void synchronizeNow());
   container.querySelector<HTMLElement>('[data-account-restore]')?.addEventListener('click', () => {
