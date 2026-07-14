@@ -105,12 +105,12 @@ function renderCompletedReminder(reminder: ReminderWithStatus): string {
 
 function relatedPicker(value: string): string {
   return `<div class="agenda-related-field">
-    <label for="agenda-related-input">Lead o propiedad</label>
+    <label for="agenda-related-input">Lead</label>
     <div class="agenda-related-picker" data-related-picker>
-      <input id="agenda-related-input" name="related" value="${escapeHtml(value)}" placeholder="Escribí un nombre, por ejemplo Fra" autocomplete="off" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="agenda-related-options" required>
+      <input id="agenda-related-input" name="related" value="${escapeHtml(value)}" placeholder="Escribí el nombre del lead, por ejemplo Fra" autocomplete="off" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="agenda-related-options" required>
       <div id="agenda-related-options" class="agenda-related-options" role="listbox" hidden></div>
     </div>
-    <small>Escribí y seleccioná un lead o una propiedad ya cargada.</small>
+    <small>Escribí y seleccioná un lead ya cargado.</small>
   </div>`;
 }
 
@@ -149,7 +149,7 @@ function bindRelatedPicker(container: HTMLElement): void {
   const list = picker?.querySelector<HTMLElement>('#agenda-related-options');
   if (!picker || !input || !list) return;
 
-  const options = agendaRelatedOptions(state.crm.clients, state.crm.properties);
+  const options = agendaRelatedOptions(state.crm.clients);
   const hide = (): void => {
     list.hidden = true;
     list.innerHTML = '';
