@@ -18,11 +18,18 @@ import {
   state,
 } from './store.js';
 import {
+  authorizeConfirmedCloudResolution,
+  reconcileCrmSnapshots,
+  reconciliationMessage,
+  restoreSyncStateSnapshot,
+} from './sync-reconciliation.js';
+import {
   getSyncState,
   hasPendingLocalChanges,
   markSyncError,
   stableFingerprint,
   syncStatusLabel,
+  writeLocalSnapshot,
 } from './sync-safety.js';
 import { escapeHtml } from './utils.js';
 
@@ -97,6 +104,83 @@ async function synchronizeNow(): Promise<void> {
     const message = error instanceof Error ? error.message : 'No se pudo sincronizar.';
     markSyncError(message);
     dispatchCloudStatus(message, 'error');
+  }
+}
+
+async function inspectCloudWithoutChangingLocalState(local: CrmData): Promise<{ cloud: CrmData | null; remoteVersion: string }> {
+  const previousSyncState = getSyncState();
+  try {
+    const cloud = await pullCloudData(local);
+    const inspectedState = getSyncState();
+    return { cloud, remoteVersion: inspectedState.lastCloudVersion || '' };
+  } finally {
+    restoreSyncStateSnapshot(previousSyncState);
+  }
+}
+
+function isDifferenceError(message: string | undefined): boolean {
+  const text = String(message || '').toLowerCase();
+  return text.includes('datos distintos') || text.includes('cambios más nuevos en la nube');
+}
+
+async function resolveSyncDifferences(): Promise<void> {
+  const originalLocal = structuredClone(state.crm);
+  try {
+    dispatchCloudStatus('Revisando diferencias sin modificar tus datos…', 'working');
+    const inspected = await inspectCloudWithoutChangingLocalState(originalLocal);
+    if (!inspected.cloud || !inspected.remoteVersion) {
+      throw new Error('No se encontró una copia válida en la nube. No se modificó ningún dato.');
+    }
+
+    const result = reconcileCrmSnapshots(originalLocal, inspected.cloud);
+    if (!result.canMergeSafely) {
+      const conflictNames = result.differences.flatMap((item) => item.conflicts).slice(0, 5).join(', ');
+      throw new Error(`Hay ${result.conflictCount} registros editados de forma diferente en ambos dispositivos${conflictNames ? `: ${conflictNames}` : ''}. PropControl no modificó nada.`);
+    }
+
+    const hasDifferences = result.localOnlyCount > 0 || result.cloudOnlyCount > 0;
+    if (hasDifferences && !window.confirm(`${reconciliationMessage(result)}\n\n¿Unir ambas copias y continuar?`)) {
+      dispatchCloudStatus('No se realizó ningún cambio.', 'success');
+      return;
+    }
+
+    const latestInspection = await inspectCloudWithoutChangingLocalState(originalLocal);
+    if (!latestInspection.cloud || !latestInspection.remoteVersion) {
+      throw new Error('No se pudo volver a comprobar la nube. No se modificó ningún dato.');
+    }
+    if (stableFingerprint(latestInspection.cloud) !== stableFingerprint(inspected.cloud)) {
+      throw new Error('La nube cambió durante la revisión. PropControl frenó la operación para no sobrescribir información.');
+    }
+
+    const latestResult = reconcileCrmSnapshots(originalLocal, latestInspection.cloud);
+    if (!latestResult.canMergeSafely) {
+      throw new Error('Aparecieron cambios incompatibles durante la revisión. No se modificó ningún dato.');
+    }
+
+    replaceData(latestResult.merged);
+    writeLocalSnapshot(state.crm, {
+      markDirty: true,
+      reason: 'Unión segura antes de sincronizar',
+      backup: false,
+    });
+    authorizeConfirmedCloudResolution(latestInspection.remoteVersion);
+    await pushCloudData(state.crm);
+
+    const verified = await pullCloudData(state.crm);
+    if (!verified) throw new Error('La nube no devolvió la copia verificada después de guardar.');
+    const verification = reconcileCrmSnapshots(state.crm, verified);
+    if (verification.localOnlyCount || verification.conflictCount) {
+      throw new Error('La verificación final no coincidió. La copia local unida sigue protegida.');
+    }
+    replaceData(verified);
+    activateMember();
+    dispatchCloudStatus('Datos unidos y verificados. La computadora y la nube ya tienen la misma información.', 'success');
+    document.dispatchEvent(new CustomEvent('trv-render'));
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'No se pudieron resolver las diferencias.';
+    markSyncError(message);
+    dispatchCloudStatus(message, 'error');
+    document.dispatchEvent(new CustomEvent('trv-render'));
   }
 }
 
@@ -179,14 +263,19 @@ export function renderAccountMenu(): void {
   const accountDetail = member?.role || session.email;
   const syncState = getSyncState();
   const syncLabel = syncStatusLabel(syncState);
+  const differencePending = isDifferenceError(syncState.lastError);
+  const syncButton = differencePending
+    ? '<button type="button" data-account-resolve>Revisar y unir datos</button>'
+    : '<button type="button" data-account-sync>Sincronizar de forma segura</button>';
   const restoreButton = hasLocalBackup()
     ? '<button type="button" data-account-restore>Recuperar copia anterior</button>'
     : '';
   container.innerHTML = `<details class="mvp-account-menu">
     <summary aria-label="Abrir menú de cuenta"><span class="mvp-account-avatar" aria-hidden="true"><svg viewBox="0 0 24 24" role="img"><path d="M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8Zm-7 8a7 7 0 0 1 14 0" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></span></summary>
-    <div><header><b>${escapeHtml(accountName)}</b><small>${escapeHtml(accountDetail)}</small><small title="${escapeHtml(syncState.lastError || '')}">${escapeHtml(syncLabel)}</small></header><button type="button" data-account-sync>Sincronizar de forma segura</button>${restoreButton}<button type="button" data-account-logout>Cerrar sesión</button></div>
+    <div><header><b>${escapeHtml(accountName)}</b><small>${escapeHtml(accountDetail)}</small><small title="${escapeHtml(syncState.lastError || '')}">${escapeHtml(syncLabel)}</small></header>${syncButton}${restoreButton}<button type="button" data-account-logout>Cerrar sesión</button></div>
   </details>`;
   container.querySelector<HTMLElement>('[data-account-sync]')?.addEventListener('click', () => void synchronizeNow());
+  container.querySelector<HTMLElement>('[data-account-resolve]')?.addEventListener('click', () => void resolveSyncDifferences());
   container.querySelector<HTMLElement>('[data-account-restore]')?.addEventListener('click', () => {
     if (!window.confirm('Se recuperará la copia local anterior y quedará pendiente de sincronización. ¿Continuar?')) return;
     if (!restoreLatestLocalBackup()) return;
