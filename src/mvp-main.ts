@@ -22,6 +22,14 @@ import { qs } from './utils.js';
 const root = qs<HTMLElement>('#root');
 let eventsBound = false;
 
+const moduleIcons: Partial<Record<ModuleId, string>> = {
+  crm: '<svg viewBox="0 0 24 24" role="img"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M19 8v6M22 11h-6"/></svg>',
+  whatsapp: '<svg viewBox="0 0 24 24" role="img"><path d="M21 15a4 4 0 0 1-4 4H8l-5 3 1.7-5A8 8 0 1 1 21 15Z"/><path d="M8 10h8M8 14h5"/></svg>',
+  agenda: '<svg viewBox="0 0 24 24" role="img"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M16 3v4M8 3v4M3 10h18M8 15l2 2 5-5"/></svg>',
+  propiedades: '<svg viewBox="0 0 24 24" role="img"><path d="m3 11 9-8 9 8"/><path d="M5 10v11h14V10M9 21v-7h6v7"/></svg>',
+  equipo: '<svg viewBox="0 0 24 24" role="img"><path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="8.5" cy="7" r="4"/><path d="M20 8v6M23 11h-6"/></svg>',
+};
+
 function renderShell(): void {
   root.innerHTML = `<main class="premium-shell mvp-shell">
     <div class="sidebar-backdrop" data-mobile-nav-close hidden></div>
@@ -31,7 +39,7 @@ function renderShell(): void {
         <span class="mvp-product-logo"><img src="${PRODUCT_BRAND.logo}" alt=""></span>
         <span class="mvp-product-copy"><strong>${PRODUCT_BRAND.name}</strong><small>CRM inmobiliario</small></span>
       </div>
-      <nav>${modules.map(([id, label]) => `<button type="button" class="nav-button" data-module="${id}"><span>${label}</span></button>`).join('')}</nav>
+      <nav>${modules.map(([id, label]) => `<button type="button" class="nav-button" data-module="${id}" title="${label}"><span class="nav-icon" aria-hidden="true">${moduleIcons[id] ?? ''}</span><span class="nav-label">${label}</span></button>`).join('')}</nav>
     </aside>
     <section class="premium-content mvp-content">
       <header class="topbar mvp-topbar">
