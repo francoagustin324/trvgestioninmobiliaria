@@ -1,0 +1,1 @@
+Este cambio no debe fusionarse sin una nueva autorización exacta PUBLICAR.
