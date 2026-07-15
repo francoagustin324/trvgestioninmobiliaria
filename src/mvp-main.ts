@@ -7,6 +7,7 @@ import { renderMvpLeads } from './mvp-leads-ui.js';
 import { renderMvpProperties } from './mvp-properties-ui.js';
 import { renderMvpUsers } from './mvp-users-ui.js';
 import { renderMvpConversations } from './mvp-conversations-ui.js';
+import { installPropertyPhotoUxGuard } from './property-photo-ux.js';
 import {
   hasAuthenticatedSession,
   hydrateAuthenticatedSession,
@@ -118,6 +119,7 @@ function removeItem(collection: string, id: number): void {
 function bindEvents(): void {
   if (eventsBound) return;
   eventsBound = true;
+  installPropertyPhotoUxGuard();
   document.addEventListener('trv-render', render);
   document.addEventListener('propcontrol-cloud-status', (event) => {
     const detail = (event as CustomEvent<{ message?: string }>).detail;
