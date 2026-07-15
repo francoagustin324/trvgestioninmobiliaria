@@ -1,6 +1,5 @@
 import { randomUUID } from 'node:crypto';
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import { supabaseServerHeaders } from './team-management.js';
 
 const BUCKET = 'property-photos';
 const MAX_UPLOAD_BYTES = 1_800_000;
@@ -15,6 +14,15 @@ interface PropertyPhotoStorageOptions {
 interface MembershipRow {
   organization_id?: string;
   status?: string;
+}
+
+function supabaseServerHeaders(secretKey: string): Record<string, string> {
+  const headers: Record<string, string> = {
+    apikey: secretKey,
+    'Content-Type': 'application/json',
+  };
+  if (!secretKey.startsWith('sb_secret_')) headers.Authorization = `Bearer ${secretKey}`;
+  return headers;
 }
 
 function sendJson(response: ServerResponse, status: number, payload: unknown): void {
