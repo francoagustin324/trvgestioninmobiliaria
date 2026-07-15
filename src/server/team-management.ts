@@ -1,4 +1,5 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
+import { handlePropertyPhotoStorage } from './property-photo-storage.js';
 
 interface TeamManagementOptions {
   supabaseUrl: string;
@@ -269,6 +270,9 @@ export async function handleTeamManagement(
   response: ServerResponse,
   options: TeamManagementOptions,
 ): Promise<boolean> {
+  const photoHandled = await handlePropertyPhotoStorage(request, response, options);
+  if (photoHandled) return true;
+
   const pathname = new URL(request.url || '/', 'http://localhost').pathname;
   const invitation = pathname === '/api/team/invitations' && request.method === 'POST';
   const memberMatch = pathname.match(/^\/api\/team\/members\/(\d+)$/);
