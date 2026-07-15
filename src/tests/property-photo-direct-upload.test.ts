@@ -35,8 +35,9 @@ test('la carga mantiene fallback al servidor cuando existe clave privada', () =>
 test('la migración crea bucket público con políticas por inmobiliaria', () => {
   assert.ok(migration.includes("'property-photos'"));
   assert.ok(migration.includes('file_size_limit'));
+  assert.ok(migration.includes('create or replace function public.can_manage_property_photo'));
   assert.ok(migration.includes('member.user_id = auth.uid()'));
-  assert.ok(migration.includes("member.organization_id::text = (storage.foldername(name))[1]"));
+  assert.ok(migration.includes('member.organization_id::text = target_organization'));
   assert.ok(migration.includes('for insert'));
   assert.ok(migration.includes('for delete'));
 });
