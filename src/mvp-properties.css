@@ -22,6 +22,7 @@
 .mvp-property-form .form-error { grid-column:1 / -1; }
 .mvp-property-form label small { display:block; margin-top:6px; color:#64748b; font-size:.72rem; font-weight:700; }
 .mvp-property-form .mvp-form-heading p { margin:5px 0 0; color:#64748b; font-size:.8rem; }
+.mvp-property-form.photo-uploading { cursor:progress; }
 
 .mvp-property-form-section {
   grid-column:1 / -1;
@@ -38,7 +39,33 @@
 .mvp-property-form-section span { color:#60727e; font-size:.72rem; font-weight:800; }
 .mvp-property-form-section-internal { color:#6f4d08; background:#fff7dd; }
 
-.mvp-property-card { align-items:center; }
+.mvp-property-photo-manager {
+  padding:14px;
+  border:1px solid #ccd9e0;
+  border-radius:16px;
+  background:#fff;
+}
+.mvp-property-photo-heading { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:12px; }
+.mvp-property-photo-heading > div { display:grid; gap:3px; }
+.mvp-property-photo-heading span { color:#64748b; font-size:.74rem; font-weight:800; }
+.mvp-property-photo-heading button { min-width:140px; color:#fff; background:#0d3449; }
+.mvp-property-photo-grid { display:grid; grid-template-columns:repeat(4, minmax(0,1fr)); gap:10px; }
+.mvp-property-photo-item { overflow:hidden; border:1px solid #d9e4ee; border-radius:14px; background:#f7fafc; }
+.mvp-property-photo-item img { display:block; width:100%; aspect-ratio:4 / 3; object-fit:cover; background:#e7eef3; }
+.mvp-property-photo-caption { display:flex; align-items:center; justify-content:space-between; gap:8px; padding:8px; }
+.mvp-property-photo-caption strong { color:#173951; font-size:.74rem; }
+.mvp-property-photo-caption span { color:#64748b; font-size:.68rem; }
+.mvp-property-photo-actions { display:grid; grid-template-columns:repeat(3, 1fr); gap:5px; padding:0 8px 8px; }
+.mvp-property-photo-actions button { min-width:0; min-height:34px; height:34px; padding:4px; }
+.mvp-property-photo-actions .delete { width:auto; border-radius:9px; }
+.mvp-property-photo-actions button:disabled { opacity:.35; cursor:not-allowed; }
+.mvp-property-photo-empty { grid-column:1 / -1; display:grid; place-items:center; gap:5px; min-height:130px; padding:20px; border:1px dashed #b9c9d3; border-radius:14px; color:#64748b; text-align:center; background:#f8fafb; }
+.mvp-property-photo-empty strong { color:#173951; }
+.mvp-property-photo-status { margin:10px 0 0; color:#64748b; font-size:.76rem; line-height:1.45; }
+
+.mvp-property-card { grid-template-columns:112px minmax(0,1fr) auto; align-items:center; }
+.mvp-property-cover { width:112px; height:88px; object-fit:cover; border-radius:13px; background:#e9f0f4; }
+.mvp-property-cover-empty { display:grid; place-items:center; color:#73838e; font-size:.72rem; font-weight:800; }
 .mvp-property-main { min-width:0; }
 .mvp-property-title { flex-wrap:wrap; }
 .mvp-property-meta { display:flex; flex-wrap:wrap; gap:6px; margin-top:9px; }
@@ -54,15 +81,27 @@
 .mvp-property-card-actions .delete { width:auto; height:auto; border-radius:11px; }
 .mvp-property-share { color:#fff; background:#0d3449; }
 
+@media (max-width:980px) {
+  .mvp-property-photo-grid { grid-template-columns:repeat(3, minmax(0,1fr)); }
+  .mvp-property-card { grid-template-columns:92px minmax(0,1fr); }
+  .mvp-property-cover { width:92px; height:78px; }
+  .mvp-property-card-actions { grid-column:1 / -1; width:100%; min-width:0; }
+}
+
 @media (max-width:760px) {
   .mvp-property-flow { align-items:flex-start; justify-content:flex-start; overflow-x:auto; white-space:nowrap; }
-  .mvp-property-card { align-items:flex-start; }
+  .mvp-property-photo-grid { grid-template-columns:repeat(2, minmax(0,1fr)); }
+  .mvp-property-card { grid-template-columns:82px minmax(0,1fr); align-items:start; }
+  .mvp-property-cover { width:82px; height:72px; }
   .mvp-property-main { width:100%; }
-  .mvp-property-card-actions { width:100%; min-width:0; }
 }
 
 @media (max-width:640px) {
   .mvp-property-form .mvp-property-wide { grid-column:auto; }
   .mvp-property-form-section { grid-column:auto; align-items:flex-start; flex-direction:column; gap:3px; }
+  .mvp-property-photo-manager { grid-column:1 / -1 !important; padding:12px; }
+  .mvp-property-photo-heading { align-items:flex-start; flex-direction:column; }
+  .mvp-property-photo-heading button { width:100%; }
+  .mvp-property-photo-card-actions,
   .mvp-property-card-actions { grid-template-columns:repeat(2, minmax(0, 1fr)); }
 }
