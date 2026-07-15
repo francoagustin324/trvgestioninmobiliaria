@@ -1,9 +1,11 @@
 import type { Property } from './models.js';
+import { MAX_PROPERTY_PHOTOS, uploadPropertyPhoto } from './property-photo-upload.js';
 import { propertyFichaLink, type PropertyWithFicha } from './property-ficha.js';
 import { saveData, state } from './store.js';
-import { escapeHtml, field, formValues, nextId } from './utils.js';
+import { escapeHtml, field, formValues, nextId, safePhotoUrl } from './utils.js';
 
 let searchText = '';
+let photoUploadInProgress = false;
 const priceFormatter = new Intl.NumberFormat('es-AR');
 
 function normalized(value: unknown): string {
@@ -19,8 +21,11 @@ function textValue(property: PropertyWithFicha | null, key: keyof PropertyWithFi
   return escapeHtml(current === undefined || current === null ? '' : String(current));
 }
 
-function photoValue(property: PropertyWithFicha | null): string {
-  return escapeHtml((property?.photoUrls ?? []).join('\n'));
+function validPhotoUrls(property: PropertyWithFicha | null): string[] {
+  return (property?.photoUrls ?? [])
+    .map(safePhotoUrl)
+    .filter((url): url is string => Boolean(url))
+    .slice(0, MAX_PROPERTY_PHOTOS);
 }
 
 function option(value: string, label: string, current: string | undefined): string {
@@ -29,7 +34,7 @@ function option(value: string, label: string, current: string | undefined): stri
 
 function propertyRows(): PropertyWithFicha[] {
   const query = normalized(searchText);
-  const properties = (state.crm.properties as PropertyWithFicha[]);
+  const properties = state.crm.properties as PropertyWithFicha[];
   const filtered = query
     ? properties.filter((property) => [
       property.title,
@@ -57,9 +62,11 @@ function card(property: PropertyWithFicha): string {
     property.bathrooms ? `${property.bathrooms} baños` : '',
     property.coveredMeters ? `${property.coveredMeters} m² cubiertos` : '',
   ].filter(Boolean).join(' · ');
-  const photoCount = property.photoUrls?.length ?? 0;
+  const photos = validPhotoUrls(property);
+  const cover = photos[0];
 
   return `<article class="mvp-lead-card mvp-property-card">
+    ${cover ? `<img class="mvp-property-cover" src="${escapeHtml(cover)}" alt="Foto principal de ${escapeHtml(property.title)}" loading="lazy">` : '<div class="mvp-property-cover mvp-property-cover-empty">Sin foto</div>'}
     <div class="mvp-property-main">
       <div class="mvp-lead-name mvp-property-title">
         <h3>${escapeHtml(property.title)}</h3>
@@ -69,7 +76,7 @@ function card(property: PropertyWithFicha): string {
       <div class="mvp-property-meta">
         <span>${escapeHtml(property.operation)}</span>
         <span>${escapeHtml(property.status)}</span>
-        <span>${photoCount ? `${photoCount} foto${photoCount === 1 ? '' : 's'}` : 'Sin fotos'}</span>
+        <span>${photos.length ? `${photos.length} foto${photos.length === 1 ? '' : 's'}` : 'Sin fotos'}</span>
         <span class="mvp-property-internal">Interno: ${escapeHtml(property.owner || 'Sin propietario')}</span>
       </div>
     </div>
@@ -184,17 +191,125 @@ function optionalNumber(value: string): number | undefined {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined;
 }
 
-function photoUrls(value: string): string[] {
-  return value
+function photoPreviewHtml(urls: string[]): string {
+  if (!urls.length) {
+    return '<div class="mvp-property-photo-empty"><strong>Todavía no cargaste fotos</strong><span>La primera foto será la portada de la ficha.</span></div>';
+  }
+  return urls.map((url, index) => `<article class="mvp-property-photo-item">
+    <img src="${escapeHtml(url)}" alt="Foto ${index + 1}" loading="lazy">
+    <div class="mvp-property-photo-caption"><strong>${index === 0 ? 'Foto principal' : `Foto ${index + 1}`}</strong><span>${index + 1} de ${urls.length}</span></div>
+    <div class="mvp-property-photo-actions">
+      <button type="button" class="secondary" data-photo-left="${index}" ${index === 0 ? 'disabled' : ''} aria-label="Mover foto a la izquierda">←</button>
+      <button type="button" class="secondary" data-photo-right="${index}" ${index === urls.length - 1 ? 'disabled' : ''} aria-label="Mover foto a la derecha">→</button>
+      <button type="button" class="delete" data-photo-remove="${index}" aria-label="Quitar foto">×</button>
+    </div>
+  </article>`).join('');
+}
+
+function formPhotoUrls(form: HTMLFormElement): string[] {
+  const storage = form.querySelector<HTMLTextAreaElement>('textarea[name="photoUrls"]');
+  return (storage?.value ?? '')
     .split(/\r?\n/)
-    .map((item) => item.trim())
-    .filter(Boolean)
-    .slice(0, 8);
+    .map((value) => safePhotoUrl(value.trim()))
+    .filter((url): url is string => Boolean(url))
+    .slice(0, MAX_PROPERTY_PHOTOS);
+}
+
+function updatePhotoManager(form: HTMLFormElement, urls: string[], statusMessage = ''): void {
+  const cleanUrls = urls
+    .map(safePhotoUrl)
+    .filter((url): url is string => Boolean(url))
+    .slice(0, MAX_PROPERTY_PHOTOS);
+  const storage = form.querySelector<HTMLTextAreaElement>('textarea[name="photoUrls"]');
+  const preview = form.querySelector<HTMLElement>('[data-property-photo-preview]');
+  const count = form.querySelector<HTMLElement>('[data-property-photo-count]');
+  const status = form.querySelector<HTMLElement>('[data-property-photo-status]');
+  if (storage) storage.value = cleanUrls.join('\n');
+  if (preview) preview.innerHTML = photoPreviewHtml(cleanUrls);
+  if (count) count.textContent = `${cleanUrls.length} de ${MAX_PROPERTY_PHOTOS} fotos`;
+  if (status) status.textContent = statusMessage;
+}
+
+function setPhotoUploading(form: HTMLFormElement, active: boolean, message: string): void {
+  photoUploadInProgress = active;
+  form.querySelectorAll<HTMLButtonElement>('button[type="submit"], [data-property-photo-picker], [data-cancel-property-edit]')
+    .forEach((button) => { button.disabled = active; });
+  const input = form.querySelector<HTMLInputElement>('[data-property-photo-input]');
+  if (input) input.disabled = active;
+  const status = form.querySelector<HTMLElement>('[data-property-photo-status]');
+  if (status) status.textContent = message;
+  form.classList.toggle('photo-uploading', active);
+}
+
+async function handlePhotoSelection(form: HTMLFormElement, input: HTMLInputElement, propertyId: number): Promise<void> {
+  const selected = Array.from(input.files ?? []);
+  input.value = '';
+  if (!selected.length) return;
+
+  const urls = formPhotoUrls(form);
+  const available = MAX_PROPERTY_PHOTOS - urls.length;
+  if (available <= 0) {
+    updatePhotoManager(form, urls, `Ya cargaste el máximo de ${MAX_PROPERTY_PHOTOS} fotos.`);
+    return;
+  }
+
+  const files = selected.slice(0, available);
+  const omitted = selected.length - files.length;
+  const errors: string[] = [];
+  setPhotoUploading(form, true, `Preparando 1 de ${files.length} fotos…`);
+
+  for (let index = 0; index < files.length; index += 1) {
+    const file = files[index]!;
+    setPhotoUploading(form, true, `Comprimiendo y cargando ${index + 1} de ${files.length}: ${file.name}`);
+    try {
+      urls.push(await uploadPropertyPhoto(file, propertyId));
+      updatePhotoManager(form, urls, `Foto ${index + 1} de ${files.length} cargada.`);
+    } catch (error) {
+      errors.push(error instanceof Error ? error.message : `No se pudo cargar ${file.name}.`);
+    }
+  }
+
+  const finalMessage = errors.length
+    ? `${urls.length} fotos listas. ${errors.join(' ')}`
+    : `${urls.length} fotos listas para la ficha.${omitted > 0 ? ` Se omitieron ${omitted} por el límite.` : ''}`;
+  setPhotoUploading(form, false, finalMessage);
+  updatePhotoManager(form, urls, finalMessage);
+}
+
+function bindPhotoManager(form: HTMLFormElement, propertyId: number): void {
+  const input = form.querySelector<HTMLInputElement>('[data-property-photo-input]');
+  form.querySelector<HTMLButtonElement>('[data-property-photo-picker]')?.addEventListener('click', () => input?.click());
+  input?.addEventListener('change', () => { void handlePhotoSelection(form, input, propertyId); });
+
+  form.querySelector<HTMLElement>('[data-property-photo-preview]')?.addEventListener('click', (event) => {
+    const target = event.target as HTMLElement;
+    const urls = formPhotoUrls(form);
+    const removeIndex = Number(target.closest<HTMLElement>('[data-photo-remove]')?.dataset.photoRemove);
+    const leftIndex = Number(target.closest<HTMLElement>('[data-photo-left]')?.dataset.photoLeft);
+    const rightIndex = Number(target.closest<HTMLElement>('[data-photo-right]')?.dataset.photoRight);
+
+    if (Number.isInteger(removeIndex) && removeIndex >= 0 && removeIndex < urls.length) {
+      urls.splice(removeIndex, 1);
+      updatePhotoManager(form, urls, 'Foto quitada. Guardá la propiedad para confirmar el cambio.');
+      return;
+    }
+    if (Number.isInteger(leftIndex) && leftIndex > 0 && leftIndex < urls.length) {
+      [urls[leftIndex - 1], urls[leftIndex]] = [urls[leftIndex]!, urls[leftIndex - 1]!];
+      updatePhotoManager(form, urls, 'Orden actualizado.');
+      return;
+    }
+    if (Number.isInteger(rightIndex) && rightIndex >= 0 && rightIndex < urls.length - 1) {
+      [urls[rightIndex], urls[rightIndex + 1]] = [urls[rightIndex + 1]!, urls[rightIndex]!];
+      updatePhotoManager(form, urls, 'Orden actualizado.');
+    }
+  });
 }
 
 export function renderMvpProperties(container: HTMLElement): void {
   const editing = findProperty(state.editingPropertyId ?? 0);
   const properties = propertyRows();
+  const formPropertyId = editing?.id ?? nextId(state.crm.properties);
+  const editingPhotos = validPhotoUrls(editing);
   const types = ['Departamento', 'Casa', 'Dúplex', 'Terreno', 'Comercial'];
   const operations = ['Venta', 'Alquiler', 'Captación'];
   const statuses = ['Activa', 'Captación', 'Reservada', 'Cerrada'];
@@ -204,7 +319,7 @@ export function renderMvpProperties(container: HTMLElement): void {
     <button type="button" data-toggle="property-form">Nueva propiedad</button>
   </div>
   <div class="mvp-property-flow" aria-label="Flujo comercial">
-    <strong>1. Cargá la propiedad</strong><span>→</span><strong>2. Revisá la ficha</strong><span>→</span><strong>3. Compartí el enlace</strong>
+    <strong>1. Cargá la propiedad</strong><span>→</span><strong>2. Agregá y ordená las fotos</strong><span>→</span><strong>3. Compartí la ficha</strong>
   </div>
   <form id="mvp-property-form" class="mvp-lead-form mvp-property-form ${state.openForms.property ? '' : 'collapsed'}">
     <div class="mvp-form-heading">
@@ -230,7 +345,17 @@ export function renderMvpProperties(container: HTMLElement): void {
     <label>Forma de pago<input name="paymentMethod" value="${textValue(editing, 'paymentMethod')}" placeholder="Contado, crédito, financiación..."></label>
     <label class="mvp-property-wide">Características<textarea name="features" placeholder="Balcón, cochera, pileta, patio, seguridad...">${textValue(editing, 'features')}</textarea></label>
     <label class="mvp-property-wide">Descripción comercial<textarea name="description" placeholder="Descripción clara y breve para presentar la propiedad al cliente.">${textValue(editing, 'description')}</textarea></label>
-    <label class="mvp-property-wide">Fotos para la ficha<textarea name="photoUrls" placeholder="Pegá hasta 8 enlaces de fotos, uno por línea.">${photoValue(editing)}</textarea><small>Se mostrarán en el mismo orden. La primera será la foto principal.</small></label>
+
+    <section class="mvp-property-photo-manager mvp-property-wide" aria-labelledby="property-photo-title">
+      <div class="mvp-property-photo-heading">
+        <div><strong id="property-photo-title">Fotos de la ficha</strong><span data-property-photo-count>${editingPhotos.length} de ${MAX_PROPERTY_PHOTOS} fotos</span></div>
+        <button type="button" data-property-photo-picker>Agregar fotos</button>
+        <input type="file" accept="image/*" multiple hidden data-property-photo-input>
+      </div>
+      <textarea name="photoUrls" hidden>${escapeHtml(editingPhotos.join('\n'))}</textarea>
+      <div class="mvp-property-photo-grid" data-property-photo-preview>${photoPreviewHtml(editingPhotos)}</div>
+      <p class="mvp-property-photo-status" data-property-photo-status>Elegí fotos desde la galería o la cámara. Se comprimen automáticamente.</p>
+    </section>
 
     <div class="mvp-property-form-section mvp-property-form-section-internal"><strong>Información interna</strong><span>No aparece en la ficha del cliente</span></div>
     <label>Propietario o colega<input name="owner" value="${textValue(editing, 'owner')}" required></label>
@@ -252,15 +377,19 @@ export function renderMvpProperties(container: HTMLElement): void {
 
   bindPropertyCardActions(container);
 
+  const form = container.querySelector<HTMLFormElement>('#mvp-property-form');
+  if (form) bindPhotoManager(form, formPropertyId);
+
   container.querySelector<HTMLButtonElement>('[data-cancel-property-edit]')?.addEventListener('click', () => {
+    if (photoUploadInProgress) return;
     state.editingPropertyId = null;
     state.openForms.property = false;
     renderMvpProperties(container);
   });
 
-  container.querySelector<HTMLFormElement>('#mvp-property-form')?.addEventListener('submit', (event) => {
+  form?.addEventListener('submit', (event) => {
     event.preventDefault();
-    const form = event.currentTarget as HTMLFormElement;
+    if (photoUploadInProgress) return;
     const values = formValues(form);
     const price = Number(field(values, 'price'));
     const error = form.querySelector<HTMLElement>('[data-property-error]');
@@ -274,7 +403,7 @@ export function renderMvpProperties(container: HTMLElement): void {
 
     const property: PropertyWithFicha = {
       ...(editing || {}),
-      id: editing?.id ?? nextId(state.crm.properties),
+      id: editing?.id ?? formPropertyId,
       title: field(values, 'title').trim(),
       address: field(values, 'address').trim(),
       type: field(values, 'type'),
@@ -293,7 +422,7 @@ export function renderMvpProperties(container: HTMLElement): void {
       paymentMethod: field(values, 'paymentMethod').trim(),
       features: field(values, 'features').trim(),
       description: field(values, 'description').trim(),
-      photoUrls: photoUrls(field(values, 'photoUrls')),
+      photoUrls: formPhotoUrls(form),
       notes: field(values, 'notes').trim(),
       assignedToId: editing?.assignedToId ?? state.activeMemberId,
       createdById: editing?.createdById ?? state.activeMemberId,
