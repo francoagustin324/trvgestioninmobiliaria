@@ -41,6 +41,7 @@ test('el enlace compartible abre una ficha autocontenida y válida', () => {
   const link = propertyFichaLink(property, 'https://propcontrol.example', '/');
   assert.ok(link.startsWith('https://propcontrol.example/#public='));
   const encoded = link.split('#public=')[1];
+  if (!encoded) throw new Error('El enlace no contiene una ficha pública.');
   const decoded = decodePublicFicha(encoded);
   assert.equal(decoded?.title, property.title);
   assert.equal(decoded?.description, property.description);
