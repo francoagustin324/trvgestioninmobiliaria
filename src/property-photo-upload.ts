@@ -4,11 +4,49 @@ export const MAX_PROPERTY_PHOTOS = 8;
 export const MAX_SOURCE_PHOTO_BYTES = 20_000_000;
 export const MAX_COMPRESSED_PHOTO_BYTES = 1_700_000;
 export const MAX_PHOTO_DIMENSION = 1600;
+const PHOTO_BUCKET = 'property-photos';
 
 interface UploadResponse {
   success?: boolean;
   url?: string;
   error?: string;
+  message?: string;
+  msg?: string;
+  code?: string;
+}
+
+interface CloudConfigResponse {
+  configured?: boolean;
+  url?: string;
+  publishableKey?: string;
+  photoStorageConfigured?: boolean;
+}
+
+interface MembershipRow {
+  organization_id?: string;
+  status?: string;
+}
+
+export type PropertyPhotoUploadErrorCode =
+  | 'SESSION_REQUIRED'
+  | 'STORAGE_NOT_READY'
+  | 'STORAGE_FORBIDDEN'
+  | 'NETWORK_ERROR'
+  | 'UPLOAD_FAILED';
+
+export class PropertyPhotoUploadError extends Error {
+  constructor(
+    message: string,
+    readonly code: PropertyPhotoUploadErrorCode,
+    readonly stopBatch = false,
+  ) {
+    super(message);
+    this.name = 'PropertyPhotoUploadError';
+  }
+}
+
+export function shouldStopPropertyPhotoBatch(error: unknown): boolean {
+  return error instanceof PropertyPhotoUploadError && error.stopBatch;
 }
 
 function imageFromFile(file: File): Promise<HTMLImageElement> {
@@ -80,31 +118,217 @@ function blobToDataUrl(blob: Blob): Promise<string> {
   });
 }
 
-async function uploadResponse(response: Response): Promise<UploadResponse> {
+async function responsePayload(response: Response): Promise<UploadResponse> {
   const text = await response.text();
-  let payload: UploadResponse = {};
-  try { payload = text ? JSON.parse(text) as UploadResponse : {}; } catch { payload = { error: text }; }
-  if (!response.ok || !payload.success || !payload.url) {
-    throw new Error(payload.error || 'No se pudo guardar la foto en la nube.');
+  try {
+    return text ? JSON.parse(text) as UploadResponse : {};
+  } catch {
+    return { error: text };
   }
-  return payload;
 }
 
-export async function uploadPropertyPhoto(file: File, propertyId: number): Promise<string> {
-  const session = getCloudSession();
-  if (!session?.accessToken) throw new Error('La sesión venció. Volvé a ingresar.');
-  const compressed = await compressPropertyPhoto(file);
+function responseError(payload: UploadResponse, fallback: string): string {
+  return [payload.error, payload.message, payload.msg]
+    .find((value) => typeof value === 'string' && value.trim()) || fallback;
+}
 
-  const payload = await uploadResponse(await fetch('/api/property-photos', {
+async function fetchWithRetry(input: RequestInfo | URL, init: RequestInit): Promise<Response> {
+  try {
+    return await fetch(input, init);
+  } catch {
+    await new Promise((resolve) => window.setTimeout(resolve, 500));
+    try {
+      return await fetch(input, init);
+    } catch {
+      throw new PropertyPhotoUploadError(
+        'No hubo conexión para cargar la foto. Revisá internet y volvé a intentar.',
+        'NETWORK_ERROR',
+      );
+    }
+  }
+}
+
+async function cloudConfig(): Promise<Required<Pick<CloudConfigResponse, 'url' | 'publishableKey'>> & Pick<CloudConfigResponse, 'photoStorageConfigured'>> {
+  let response: Response;
+  try {
+    response = await fetch('/api/cloud-config', {
+      headers: { Accept: 'application/json' },
+      cache: 'no-store',
+    });
+  } catch {
+    throw new PropertyPhotoUploadError(
+      'No se pudo verificar el almacenamiento de fotos.',
+      'NETWORK_ERROR',
+      true,
+    );
+  }
+  const payload = await responsePayload(response) as CloudConfigResponse;
+  if (!response.ok || !payload.configured || !payload.url || !payload.publishableKey) {
+    throw new PropertyPhotoUploadError(
+      'El almacenamiento de fotos todavía no está activado.',
+      'STORAGE_NOT_READY',
+      true,
+    );
+  }
+  return {
+    url: payload.url.replace(/\/+$/g, ''),
+    publishableKey: payload.publishableKey,
+    photoStorageConfigured: Boolean(payload.photoStorageConfigured),
+  };
+}
+
+async function organizationId(
+  config: Required<Pick<CloudConfigResponse, 'url' | 'publishableKey'>>,
+  accessToken: string,
+  userId: string,
+): Promise<string> {
+  const query = new URL(`${config.url}/rest/v1/organization_members`);
+  query.searchParams.set('select', 'organization_id,status');
+  query.searchParams.set('user_id', `eq.${userId}`);
+  query.searchParams.set('limit', '1');
+  const response = await fetchWithRetry(query, {
+    headers: {
+      apikey: config.publishableKey,
+      Authorization: `Bearer ${accessToken}`,
+      Accept: 'application/json',
+    },
+    cache: 'no-store',
+  });
+  const payload = await responsePayload(response);
+  if (response.status === 401) {
+    throw new PropertyPhotoUploadError('La sesión venció. Volvé a ingresar.', 'SESSION_REQUIRED', true);
+  }
+  if (!response.ok || !Array.isArray(payload)) {
+    throw new PropertyPhotoUploadError(
+      responseError(payload, 'No se pudo verificar la inmobiliaria.'),
+      'UPLOAD_FAILED',
+      true,
+    );
+  }
+  const membership = (payload as MembershipRow[])[0];
+  if (!membership?.organization_id) {
+    throw new PropertyPhotoUploadError(
+      'La cuenta no tiene una inmobiliaria asociada.',
+      'STORAGE_FORBIDDEN',
+      true,
+    );
+  }
+  if (String(membership.status || 'active').toLowerCase() === 'suspended') {
+    throw new PropertyPhotoUploadError('El acceso está suspendido.', 'STORAGE_FORBIDDEN', true);
+  }
+  return membership.organization_id;
+}
+
+function randomSegment(): string {
+  return typeof crypto.randomUUID === 'function'
+    ? crypto.randomUUID()
+    : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
+function objectPath(organization: string, propertyId: number): string {
+  const safeOrganization = organization.replace(/[^a-zA-Z0-9_-]/g, '');
+  const safePropertyId = Number.isInteger(propertyId) && propertyId > 0 ? propertyId : 'draft';
+  return `${safeOrganization}/${safePropertyId}/${Date.now()}-${randomSegment()}.jpg`;
+}
+
+function encodedPath(path: string): string {
+  return path.split('/').map((part) => encodeURIComponent(part)).join('/');
+}
+
+async function directStorageUpload(
+  compressed: Blob,
+  propertyId: number,
+  accessToken: string,
+  userId: string,
+): Promise<string> {
+  const config = await cloudConfig();
+  const organization = await organizationId(config, accessToken, userId);
+  const path = objectPath(organization, propertyId);
+  const response = await fetchWithRetry(
+    `${config.url}/storage/v1/object/${PHOTO_BUCKET}/${encodedPath(path)}`,
+    {
+      method: 'POST',
+      headers: {
+        apikey: config.publishableKey,
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'image/jpeg',
+        'Cache-Control': '31536000',
+        'x-upsert': 'false',
+      },
+      body: compressed,
+    },
+  );
+  const payload = await responsePayload(response);
+  if (response.ok) {
+    return `${config.url}/storage/v1/object/public/${PHOTO_BUCKET}/${encodedPath(path)}`;
+  }
+  if (response.status === 401) {
+    throw new PropertyPhotoUploadError('La sesión venció. Volvé a ingresar.', 'SESSION_REQUIRED', true);
+  }
+  const message = responseError(payload, 'No se pudo guardar la foto.');
+  if (response.status === 404 || /bucket|not found|does not exist/i.test(message)) {
+    throw new PropertyPhotoUploadError(
+      'El almacenamiento de fotos todavía no está activado en Supabase.',
+      'STORAGE_NOT_READY',
+      true,
+    );
+  }
+  if (response.status === 403 || /policy|permission|unauthorized|row-level security/i.test(message)) {
+    throw new PropertyPhotoUploadError(
+      'Falta habilitar el permiso seguro para cargar fotos.',
+      'STORAGE_FORBIDDEN',
+      true,
+    );
+  }
+  throw new PropertyPhotoUploadError(message, 'UPLOAD_FAILED');
+}
+
+async function serverStorageUpload(compressed: Blob, propertyId: number, accessToken: string): Promise<string> {
+  const response = await fetchWithRetry('/api/property-photos', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      Authorization: `Bearer ${session.accessToken}`,
+      Authorization: `Bearer ${accessToken}`,
     },
     body: JSON.stringify({
       propertyId,
       dataUrl: await blobToDataUrl(compressed),
     }),
-  }));
-  return payload.url!;
+  });
+  const payload = await responsePayload(response);
+  if (response.ok && payload.success && payload.url) return payload.url;
+  if (response.status === 401 || response.status === 403) {
+    throw new PropertyPhotoUploadError(
+      responseError(payload, 'La sesión venció. Volvé a ingresar.'),
+      'SESSION_REQUIRED',
+      true,
+    );
+  }
+  if (response.status === 503 || /todavía no está configurado/i.test(responseError(payload, ''))) {
+    throw new PropertyPhotoUploadError(
+      'El almacenamiento de fotos todavía no está activado.',
+      'STORAGE_NOT_READY',
+      true,
+    );
+  }
+  throw new PropertyPhotoUploadError(responseError(payload, 'No se pudo guardar la foto.'), 'UPLOAD_FAILED');
+}
+
+export async function uploadPropertyPhoto(file: File, propertyId: number): Promise<string> {
+  const session = getCloudSession();
+  if (!session?.accessToken || !session.userId) {
+    throw new PropertyPhotoUploadError('La sesión venció. Volvé a ingresar.', 'SESSION_REQUIRED', true);
+  }
+  const compressed = await compressPropertyPhoto(file);
+  const config = await cloudConfig();
+
+  if (config.photoStorageConfigured) {
+    try {
+      return await serverStorageUpload(compressed, propertyId, session.accessToken);
+    } catch (error) {
+      if (!(error instanceof PropertyPhotoUploadError) || error.code !== 'STORAGE_NOT_READY') throw error;
+    }
+  }
+
+  return directStorageUpload(compressed, propertyId, session.accessToken, session.userId);
 }
