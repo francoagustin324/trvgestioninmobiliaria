@@ -1,4 +1,4 @@
-import { getCloudMembershipContext, getCloudSession } from './cloud-api.js';
+import { getCloudSession } from './cloud-api.js';
 
 export const MAX_PROPERTY_PHOTOS = 8;
 export const MAX_SOURCE_PHOTO_BYTES = 20_000_000;
@@ -91,10 +91,9 @@ async function uploadResponse(response: Response): Promise<UploadResponse> {
 }
 
 export async function uploadPropertyPhoto(file: File, propertyId: number): Promise<string> {
-  const compressed = await compressPropertyPhoto(file);
-  await getCloudMembershipContext();
   const session = getCloudSession();
   if (!session?.accessToken) throw new Error('La sesión venció. Volvé a ingresar.');
+  const compressed = await compressPropertyPhoto(file);
 
   const payload = await uploadResponse(await fetch('/api/property-photos', {
     method: 'POST',
