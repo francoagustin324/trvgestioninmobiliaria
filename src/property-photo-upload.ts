@@ -45,6 +45,8 @@ export class PropertyPhotoUploadError extends Error {
   }
 }
 
+let suppressedFatalUntil = 0;
+
 export function shouldStopPropertyPhotoBatch(error: unknown): boolean {
   return error instanceof PropertyPhotoUploadError && error.stopBatch;
 }
@@ -118,17 +120,24 @@ function blobToDataUrl(blob: Blob): Promise<string> {
   });
 }
 
-async function responsePayload(response: Response): Promise<UploadResponse> {
+async function responsePayload(response: Response): Promise<unknown> {
   const text = await response.text();
   try {
-    return text ? JSON.parse(text) as UploadResponse : {};
+    return text ? JSON.parse(text) : {};
   } catch {
     return { error: text };
   }
 }
 
-function responseError(payload: UploadResponse, fallback: string): string {
-  return [payload.error, payload.message, payload.msg]
+function responseRecord(payload: unknown): UploadResponse {
+  return payload && typeof payload === 'object' && !Array.isArray(payload)
+    ? payload as UploadResponse
+    : {};
+}
+
+function responseError(payload: unknown, fallback: string): string {
+  const record = responseRecord(payload);
+  return [record.error, record.message, record.msg]
     .find((value) => typeof value === 'string' && value.trim()) || fallback;
 }
 
@@ -296,7 +305,8 @@ async function serverStorageUpload(compressed: Blob, propertyId: number, accessT
     }),
   });
   const payload = await responsePayload(response);
-  if (response.ok && payload.success && payload.url) return payload.url;
+  const record = responseRecord(payload);
+  if (response.ok && record.success && record.url) return record.url;
   if (response.status === 401 || response.status === 403) {
     throw new PropertyPhotoUploadError(
       responseError(payload, 'La sesión venció. Volvé a ingresar.'),
@@ -314,21 +324,36 @@ async function serverStorageUpload(compressed: Blob, propertyId: number, accessT
   throw new PropertyPhotoUploadError(responseError(payload, 'No se pudo guardar la foto.'), 'UPLOAD_FAILED');
 }
 
-export async function uploadPropertyPhoto(file: File, propertyId: number): Promise<string> {
-  const session = getCloudSession();
-  if (!session?.accessToken || !session.userId) {
-    throw new PropertyPhotoUploadError('La sesión venció. Volvé a ingresar.', 'SESSION_REQUIRED', true);
-  }
-  const compressed = await compressPropertyPhoto(file);
-  const config = await cloudConfig();
-
-  if (config.photoStorageConfigured) {
-    try {
-      return await serverStorageUpload(compressed, propertyId, session.accessToken);
-    } catch (error) {
-      if (!(error instanceof PropertyPhotoUploadError) || error.code !== 'STORAGE_NOT_READY') throw error;
+function suppressRepeatedFatal(error: unknown): never {
+  if (error instanceof PropertyPhotoUploadError && error.stopBatch) {
+    const now = Date.now();
+    if (now < suppressedFatalUntil) {
+      throw new PropertyPhotoUploadError('', error.code, true);
     }
+    suppressedFatalUntil = now + 4000;
   }
+  throw error;
+}
 
-  return directStorageUpload(compressed, propertyId, session.accessToken, session.userId);
+export async function uploadPropertyPhoto(file: File, propertyId: number): Promise<string> {
+  try {
+    const session = getCloudSession();
+    if (!session?.accessToken || !session.userId) {
+      throw new PropertyPhotoUploadError('La sesión venció. Volvé a ingresar.', 'SESSION_REQUIRED', true);
+    }
+    const compressed = await compressPropertyPhoto(file);
+    const config = await cloudConfig();
+
+    if (config.photoStorageConfigured) {
+      try {
+        return await serverStorageUpload(compressed, propertyId, session.accessToken);
+      } catch (error) {
+        if (!(error instanceof PropertyPhotoUploadError) || error.code !== 'STORAGE_NOT_READY') throw error;
+      }
+    }
+
+    return await directStorageUpload(compressed, propertyId, session.accessToken, session.userId);
+  } catch (error) {
+    suppressRepeatedFatal(error);
+  }
 }
