@@ -22,5 +22,5 @@ test('servidor y migración no dependen de member_id ni status', () => {
 });
 
 test('la versión nueva fuerza la actualización en celular', () => {
-  assert.ok(html.includes('/dist/mvp-main.js?v=20260715-36'));
+  assert.ok(html.includes('/dist/mvp-main.js?v=20260715-37'));
 });
