@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import {
   PropertyPhotoUploadError,
+  propertyPhotoMime,
   shouldStopPropertyPhotoBatch,
 } from '../property-photo-upload.js';
 
@@ -18,9 +19,15 @@ test('los errores estructurales detienen el lote', () => {
   ), false);
 });
 
+test('reconoce JPG de Android aunque el tipo MIME venga vacío', () => {
+  assert.equal(propertyPhotoMime({ name: '1000822648.jpg', type: '' }), 'image/jpeg');
+  assert.equal(propertyPhotoMime({ name: 'foto.JPEG', type: 'application/octet-stream' }), 'image/jpeg');
+  assert.equal(propertyPhotoMime({ name: 'foto.heic', type: 'image/heic' }), null);
+});
+
 test('la carga directa usa sesión, inmobiliaria y ruta aislada', () => {
   assert.ok(upload.includes('/rest/v1/organization_members'));
-  assert.ok(upload.includes("select', 'organization_id,status'"));
+  assert.ok(upload.includes("select', 'organization_id'"));
   assert.ok(upload.includes('/storage/v1/object/'));
   assert.ok(upload.includes('Authorization: `Bearer ${accessToken}`'));
   assert.ok(upload.includes("const PHOTO_BUCKET = 'property-photos'"));
@@ -38,6 +45,7 @@ test('la migración crea bucket público con políticas por inmobiliaria', () =>
   assert.ok(migration.includes('create or replace function public.can_manage_property_photo'));
   assert.ok(migration.includes('member.user_id = auth.uid()'));
   assert.ok(migration.includes('member.organization_id::text = target_organization'));
+  assert.equal(migration.includes('member.status'), false);
   assert.ok(migration.includes('for insert'));
   assert.ok(migration.includes('for delete'));
 });
