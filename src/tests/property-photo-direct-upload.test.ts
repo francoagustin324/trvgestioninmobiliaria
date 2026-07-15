@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import {
+  preparePropertyPhoto,
   PropertyPhotoUploadError,
   propertyPhotoMime,
   shouldStopPropertyPhotoBatch,
@@ -23,6 +24,14 @@ test('reconoce JPG de Android aunque el tipo MIME venga vacío', () => {
   assert.equal(propertyPhotoMime({ name: '1000822648.jpg', type: '' }), 'image/jpeg');
   assert.equal(propertyPhotoMime({ name: 'foto.JPEG', type: 'application/octet-stream' }), 'image/jpeg');
   assert.equal(propertyPhotoMime({ name: 'foto.heic', type: 'image/heic' }), null);
+});
+
+test('un JPG liviano se prepara sin abrirlo ni recodificarlo', async () => {
+  const file = new File([Buffer.from('contenido-jpg')], '1000822648.jpg', { type: '' });
+  const prepared = await preparePropertyPhoto(file);
+  assert.equal(prepared.mimeType, 'image/jpeg');
+  assert.equal(prepared.extension, 'jpg');
+  assert.equal(prepared.blob.size, file.size);
 });
 
 test('la carga directa usa sesión, inmobiliaria y ruta aislada', () => {
