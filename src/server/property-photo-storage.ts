@@ -13,7 +13,6 @@ interface PropertyPhotoStorageOptions {
 
 interface MembershipRow {
   organization_id?: string;
-  status?: string;
 }
 
 function supabaseServerHeaders(secretKey: string): Record<string, string> {
@@ -97,7 +96,7 @@ async function authenticatedOrganization(
   if (!userId) throw new Error('La sesión no identifica un usuario válido.');
 
   const query = new URL(`${options.supabaseUrl}/rest/v1/organization_members`);
-  query.searchParams.set('select', 'organization_id,status');
+  query.searchParams.set('select', 'organization_id');
   query.searchParams.set('user_id', `eq.${userId}`);
   query.searchParams.set('limit', '1');
   const rows = await responsePayload(await fetch(query, {
@@ -105,7 +104,6 @@ async function authenticatedOrganization(
   })) as MembershipRow[];
   const membership = rows[0];
   if (!membership?.organization_id) throw new Error('La cuenta no pertenece a una inmobiliaria.');
-  if (String(membership.status || 'active').toLowerCase() === 'suspended') throw new Error('El acceso está suspendido.');
   return membership.organization_id;
 }
 
@@ -134,7 +132,7 @@ export function parsePropertyPhotoDataUrl(value: unknown): { mimeType: string; b
   if (!match?.[1] || !match[2]) throw new Error('El formato de la foto no está permitido.');
   const mimeType = match[1];
   const bytes = Buffer.from(match[2], 'base64');
-  if (!bytes.length || bytes.byteLength > MAX_UPLOAD_BYTES) throw new Error('La foto comprimida supera el límite permitido.');
+  if (!bytes.length || bytes.byteLength > MAX_UPLOAD_BYTES) throw new Error('La foto preparada supera el límite permitido.');
   const extension = mimeType === 'image/png' ? 'png' : mimeType === 'image/webp' ? 'webp' : 'jpg';
   return { mimeType, bytes, extension };
 }
