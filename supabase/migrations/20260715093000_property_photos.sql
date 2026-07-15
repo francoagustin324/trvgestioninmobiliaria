@@ -33,7 +33,6 @@ as $$
     from public.organization_members as member
     where member.user_id = auth.uid()
       and member.organization_id::text = target_organization
-      and coalesce(member.status::text, 'active') <> 'suspended'
   );
 $$;
 
