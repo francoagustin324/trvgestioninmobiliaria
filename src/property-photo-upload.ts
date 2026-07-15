@@ -6,6 +6,9 @@ export const MAX_COMPRESSED_PHOTO_BYTES = 1_700_000;
 export const MAX_PHOTO_DIMENSION = 1600;
 const PHOTO_BUCKET = 'property-photos';
 
+type AllowedPhotoMime = 'image/jpeg' | 'image/png' | 'image/webp';
+type AllowedPhotoExtension = 'jpg' | 'png' | 'webp';
+
 interface UploadResponse {
   success?: boolean;
   url?: string;
@@ -24,7 +27,19 @@ interface CloudConfigResponse {
 
 interface MembershipRow {
   organization_id?: string;
-  status?: string;
+}
+
+interface PreparedPropertyPhoto {
+  blob: Blob;
+  mimeType: AllowedPhotoMime;
+  extension: AllowedPhotoExtension;
+}
+
+interface DrawablePhoto {
+  source: CanvasImageSource;
+  width: number;
+  height: number;
+  close?: () => void;
 }
 
 export type PropertyPhotoUploadErrorCode =
@@ -51,7 +66,25 @@ export function shouldStopPropertyPhotoBatch(error: unknown): boolean {
   return error instanceof PropertyPhotoUploadError && error.stopBatch;
 }
 
-function imageFromFile(file: File): Promise<HTMLImageElement> {
+export function propertyPhotoMime(file: Pick<File, 'name' | 'type'>): AllowedPhotoMime | null {
+  const declared = String(file.type || '').toLowerCase();
+  if (declared === 'image/jpeg' || declared === 'image/jpg') return 'image/jpeg';
+  if (declared === 'image/png') return 'image/png';
+  if (declared === 'image/webp') return 'image/webp';
+  const name = String(file.name || '').toLowerCase();
+  if (/\.(jpe?g)$/.test(name)) return 'image/jpeg';
+  if (/\.png$/.test(name)) return 'image/png';
+  if (/\.webp$/.test(name)) return 'image/webp';
+  return null;
+}
+
+function photoExtension(mimeType: AllowedPhotoMime): AllowedPhotoExtension {
+  if (mimeType === 'image/png') return 'png';
+  if (mimeType === 'image/webp') return 'webp';
+  return 'jpg';
+}
+
+function imageFromObjectUrl(file: File): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
     const image = new Image();
     const objectUrl = URL.createObjectURL(file);
@@ -61,10 +94,61 @@ function imageFromFile(file: File): Promise<HTMLImageElement> {
     };
     image.onerror = () => {
       URL.revokeObjectURL(objectUrl);
-      reject(new Error(`No se pudo leer ${file.name}. Probá con una foto JPG, PNG o WEBP.`));
+      reject(new Error('object-url-decode-failed'));
     };
     image.src = objectUrl;
   });
+}
+
+function fileDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => typeof reader.result === 'string'
+      ? resolve(reader.result)
+      : reject(new Error('data-url-read-failed'));
+    reader.onerror = () => reject(new Error('data-url-read-failed'));
+    reader.readAsDataURL(file);
+  });
+}
+
+async function imageFromDataUrl(file: File): Promise<HTMLImageElement> {
+  const dataUrl = await fileDataUrl(file);
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => resolve(image);
+    image.onerror = () => reject(new Error('data-url-decode-failed'));
+    image.src = dataUrl;
+  });
+}
+
+async function drawablePhoto(file: File): Promise<DrawablePhoto> {
+  if (typeof createImageBitmap === 'function') {
+    try {
+      const bitmap = await createImageBitmap(file);
+      return {
+        source: bitmap,
+        width: bitmap.width,
+        height: bitmap.height,
+        close: () => bitmap.close(),
+      };
+    } catch {
+      // Algunos Android entregan JPG válidos que createImageBitmap no puede abrir.
+    }
+  }
+
+  try {
+    const image = await imageFromObjectUrl(file);
+    return { source: image, width: image.naturalWidth, height: image.naturalHeight };
+  } catch {
+    try {
+      const image = await imageFromDataUrl(file);
+      return { source: image, width: image.naturalWidth, height: image.naturalHeight };
+    } catch {
+      throw new Error(
+        `No se pudo procesar ${file.name}. Abrila en la galería, guardá una copia y cargá esa copia.`,
+      );
+    }
+  }
 }
 
 function canvasBlob(canvas: HTMLCanvasElement, quality: number): Promise<Blob> {
@@ -76,37 +160,57 @@ function canvasBlob(canvas: HTMLCanvasElement, quality: number): Promise<Blob> {
   });
 }
 
-function drawScaled(image: HTMLImageElement, maxDimension: number): HTMLCanvasElement {
-  const ratio = Math.min(1, maxDimension / Math.max(image.naturalWidth, image.naturalHeight));
+function drawScaled(photo: DrawablePhoto, maxDimension: number): HTMLCanvasElement {
+  const ratio = Math.min(1, maxDimension / Math.max(photo.width, photo.height));
   const canvas = document.createElement('canvas');
-  canvas.width = Math.max(1, Math.round(image.naturalWidth * ratio));
-  canvas.height = Math.max(1, Math.round(image.naturalHeight * ratio));
+  canvas.width = Math.max(1, Math.round(photo.width * ratio));
+  canvas.height = Math.max(1, Math.round(photo.height * ratio));
   const context = canvas.getContext('2d');
   if (!context) throw new Error('El navegador no pudo preparar la foto.');
-  context.drawImage(image, 0, 0, canvas.width, canvas.height);
+  context.drawImage(photo.source, 0, 0, canvas.width, canvas.height);
   return canvas;
 }
 
 export function validatePropertyPhoto(file: File): void {
-  if (!file.type.startsWith('image/')) throw new Error(`${file.name} no es una imagen.`);
+  if (!propertyPhotoMime(file)) throw new Error(`${file.name} no es una foto JPG, PNG o WEBP compatible.`);
   if (file.size <= 0) throw new Error(`${file.name} está vacía.`);
   if (file.size > MAX_SOURCE_PHOTO_BYTES) throw new Error(`${file.name} supera los 20 MB.`);
 }
 
-export async function compressPropertyPhoto(file: File): Promise<Blob> {
+export async function preparePropertyPhoto(file: File): Promise<PreparedPropertyPhoto> {
   validatePropertyPhoto(file);
-  const image = await imageFromFile(file);
-  let canvas = drawScaled(image, MAX_PHOTO_DIMENSION);
-  let blob = await canvasBlob(canvas, 0.82);
-  if (blob.size > MAX_COMPRESSED_PHOTO_BYTES) blob = await canvasBlob(canvas, 0.7);
-  if (blob.size > MAX_COMPRESSED_PHOTO_BYTES) {
-    canvas = drawScaled(image, 1280);
-    blob = await canvasBlob(canvas, 0.68);
+  const originalMime = propertyPhotoMime(file)!;
+
+  // Las fotos ya livianas se suben sin abrirlas ni recodificarlas. Esto evita fallos
+  // de lectura frecuentes en JPG generados por algunas galerías Android.
+  if (file.size <= MAX_COMPRESSED_PHOTO_BYTES) {
+    return {
+      blob: new Blob([file], { type: originalMime }),
+      mimeType: originalMime,
+      extension: photoExtension(originalMime),
+    };
   }
-  if (blob.size > MAX_COMPRESSED_PHOTO_BYTES) {
-    throw new Error(`${file.name} no pudo reducirse lo suficiente.`);
+
+  const photo = await drawablePhoto(file);
+  try {
+    let canvas = drawScaled(photo, MAX_PHOTO_DIMENSION);
+    let blob = await canvasBlob(canvas, 0.82);
+    if (blob.size > MAX_COMPRESSED_PHOTO_BYTES) blob = await canvasBlob(canvas, 0.7);
+    if (blob.size > MAX_COMPRESSED_PHOTO_BYTES) {
+      canvas = drawScaled(photo, 1280);
+      blob = await canvasBlob(canvas, 0.68);
+    }
+    if (blob.size > MAX_COMPRESSED_PHOTO_BYTES) {
+      throw new Error(`${file.name} no pudo reducirse lo suficiente.`);
+    }
+    return { blob, mimeType: 'image/jpeg', extension: 'jpg' };
+  } finally {
+    photo.close?.();
   }
-  return blob;
+}
+
+export async function compressPropertyPhoto(file: File): Promise<Blob> {
+  return (await preparePropertyPhoto(file)).blob;
 }
 
 function blobToDataUrl(blob: Blob): Promise<string> {
@@ -115,7 +219,7 @@ function blobToDataUrl(blob: Blob): Promise<string> {
     reader.onload = () => typeof reader.result === 'string'
       ? resolve(reader.result)
       : reject(new Error('No se pudo preparar la foto.'));
-    reader.onerror = () => reject(new Error('No se pudo leer la foto comprimida.'));
+    reader.onerror = () => reject(new Error('No se pudo leer la foto preparada.'));
     reader.readAsDataURL(blob);
   });
 }
@@ -192,7 +296,7 @@ async function organizationId(
   userId: string,
 ): Promise<string> {
   const query = new URL(`${config.url}/rest/v1/organization_members`);
-  query.searchParams.set('select', 'organization_id,status');
+  query.searchParams.set('select', 'organization_id');
   query.searchParams.set('user_id', `eq.${userId}`);
   query.searchParams.set('limit', '1');
   const response = await fetchWithRetry(query, {
@@ -222,9 +326,6 @@ async function organizationId(
       true,
     );
   }
-  if (String(membership.status || 'active').toLowerCase() === 'suspended') {
-    throw new PropertyPhotoUploadError('El acceso está suspendido.', 'STORAGE_FORBIDDEN', true);
-  }
   return membership.organization_id;
 }
 
@@ -234,10 +335,10 @@ function randomSegment(): string {
     : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 }
 
-function objectPath(organization: string, propertyId: number): string {
+function objectPath(organization: string, propertyId: number, extension: AllowedPhotoExtension): string {
   const safeOrganization = organization.replace(/[^a-zA-Z0-9_-]/g, '');
   const safePropertyId = Number.isInteger(propertyId) && propertyId > 0 ? propertyId : 'draft';
-  return `${safeOrganization}/${safePropertyId}/${Date.now()}-${randomSegment()}.jpg`;
+  return `${safeOrganization}/${safePropertyId}/${Date.now()}-${randomSegment()}.${extension}`;
 }
 
 function encodedPath(path: string): string {
@@ -245,14 +346,14 @@ function encodedPath(path: string): string {
 }
 
 async function directStorageUpload(
-  compressed: Blob,
+  photo: PreparedPropertyPhoto,
   propertyId: number,
   accessToken: string,
   userId: string,
 ): Promise<string> {
   const config = await cloudConfig();
   const organization = await organizationId(config, accessToken, userId);
-  const path = objectPath(organization, propertyId);
+  const path = objectPath(organization, propertyId, photo.extension);
   const response = await fetchWithRetry(
     `${config.url}/storage/v1/object/${PHOTO_BUCKET}/${encodedPath(path)}`,
     {
@@ -260,11 +361,11 @@ async function directStorageUpload(
       headers: {
         apikey: config.publishableKey,
         Authorization: `Bearer ${accessToken}`,
-        'Content-Type': 'image/jpeg',
+        'Content-Type': photo.mimeType,
         'Cache-Control': '31536000',
         'x-upsert': 'false',
       },
-      body: compressed,
+      body: photo.blob,
     },
   );
   const payload = await responsePayload(response);
@@ -292,7 +393,7 @@ async function directStorageUpload(
   throw new PropertyPhotoUploadError(message, 'UPLOAD_FAILED');
 }
 
-async function serverStorageUpload(compressed: Blob, propertyId: number, accessToken: string): Promise<string> {
+async function serverStorageUpload(photo: PreparedPropertyPhoto, propertyId: number, accessToken: string): Promise<string> {
   const response = await fetchWithRetry('/api/property-photos', {
     method: 'POST',
     headers: {
@@ -301,7 +402,7 @@ async function serverStorageUpload(compressed: Blob, propertyId: number, accessT
     },
     body: JSON.stringify({
       propertyId,
-      dataUrl: await blobToDataUrl(compressed),
+      dataUrl: await blobToDataUrl(photo.blob),
     }),
   });
   const payload = await responsePayload(response);
@@ -341,18 +442,18 @@ export async function uploadPropertyPhoto(file: File, propertyId: number): Promi
     if (!session?.accessToken || !session.userId) {
       throw new PropertyPhotoUploadError('La sesión venció. Volvé a ingresar.', 'SESSION_REQUIRED', true);
     }
-    const compressed = await compressPropertyPhoto(file);
+    const photo = await preparePropertyPhoto(file);
     const config = await cloudConfig();
 
     if (config.photoStorageConfigured) {
       try {
-        return await serverStorageUpload(compressed, propertyId, session.accessToken);
+        return await serverStorageUpload(photo, propertyId, session.accessToken);
       } catch (error) {
         if (!(error instanceof PropertyPhotoUploadError) || error.code !== 'STORAGE_NOT_READY') throw error;
       }
     }
 
-    return await directStorageUpload(compressed, propertyId, session.accessToken, session.userId);
+    return await directStorageUpload(photo, propertyId, session.accessToken, session.userId);
   } catch (error) {
     suppressRepeatedFatal(error);
   }
