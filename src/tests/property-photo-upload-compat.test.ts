@@ -7,10 +7,12 @@ const server = readFileSync('src/server/property-photo-storage.ts', 'utf8');
 const migration = readFileSync('supabase/migrations/20260715093000_property_photos.sql', 'utf8');
 const html = readFileSync('index.html', 'utf8');
 
-test('el navegador no consulta directamente Supabase', () => {
+test('el navegador no consulta directamente Supabase ni convierte el upload a base64', () => {
   assert.equal(upload.includes('getCloudMembershipContext'), false);
   assert.ok(upload.includes('getCloudSession'));
-  assert.ok(upload.includes("fetchWithRetry('/api/property-photos'"));
+  assert.ok(upload.includes('/api/property-photos?'));
+  assert.ok(upload.includes('body: photo.blob'));
+  assert.equal(upload.includes('blobToDataUrl'), false);
   assert.equal(upload.includes('/rest/v1/organization_members'), false);
   assert.equal(upload.includes('/storage/v1/object/'), false);
 });
@@ -23,5 +25,5 @@ test('el servidor consulta sólo organization_id y no exige columnas inexistente
 });
 
 test('la versión nueva fuerza la actualización en celular', () => {
-  assert.ok(html.includes('/dist/mvp-main.js?v=20260715-38'));
+  assert.ok(html.includes('/dist/mvp-main.js?v=20260715-39'));
 });
