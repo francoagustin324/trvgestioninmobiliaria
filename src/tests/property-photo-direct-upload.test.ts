@@ -45,24 +45,23 @@ test('el navegador envía la foto como binario a PropControl', () => {
   assert.equal(upload.includes('/storage/v1/object/'), false);
 });
 
-test('el servidor acepta binario y mantiene compatibilidad JSON', () => {
-  assert.ok(server.includes('readBinaryPhoto(request)'));
-  assert.ok(server.includes("contentType.startsWith('application/json')"));
-  assert.ok(server.includes("'x-upsert': 'true'"));
-  assert.ok(server.includes('safeUploadIdentifier(uploadId)'));
+test('el servidor guarda en una carpeta del usuario autenticado', () => {
+  assert.ok(server.includes('authenticatedPhotoOwner'));
+  assert.ok(server.includes('return { userId, accessToken }'));
+  assert.ok(server.includes('propertyPhotoObjectPath(\n    userId'));
   assert.ok(server.includes('/auth/v1/user'));
   assert.ok(server.includes('/rest/v1/organization_members'));
   assert.ok(server.includes('/storage/v1/object/'));
   assert.ok(server.includes('Authorization: `Bearer ${accessToken}`'));
 });
 
-test('la migración crea bucket público con políticas por inmobiliaria', () => {
+test('la migración reemplaza las políticas por carpeta de usuario', () => {
   assert.ok(migration.includes("'property-photos'"));
   assert.ok(migration.includes('file_size_limit'));
-  assert.ok(migration.includes('create or replace function public.can_manage_property_photo'));
-  assert.ok(migration.includes('member.user_id = auth.uid()'));
-  assert.ok(migration.includes('member.organization_id::text = target_organization'));
-  assert.equal(migration.includes('member.status'), false);
-  assert.ok(migration.includes('for insert'));
-  assert.ok(migration.includes('for delete'));
+  assert.ok(migration.includes('property_photos_select_by_user'));
+  assert.ok(migration.includes('property_photos_insert_by_user'));
+  assert.ok(migration.includes('property_photos_update_by_user'));
+  assert.ok(migration.includes('property_photos_delete_by_user'));
+  assert.ok(migration.includes("(storage.foldername(name))[1] = auth.uid()::text"));
+  assert.equal(migration.includes('can_manage_property_photo((storage.foldername(name))[1])'), false);
 });

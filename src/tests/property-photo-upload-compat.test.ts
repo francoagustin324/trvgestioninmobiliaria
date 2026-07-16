@@ -17,13 +17,20 @@ test('el navegador no consulta directamente Supabase ni convierte el upload a ba
   assert.equal(upload.includes('/storage/v1/object/'), false);
 });
 
-test('el servidor consulta sólo organization_id y no exige columnas inexistentes', () => {
+test('el servidor usa userId y no exige columnas inexistentes', () => {
   assert.ok(server.includes("select', 'organization_id'"));
+  assert.ok(server.includes('return { userId, accessToken }'));
   assert.equal(server.includes('member_id'), false);
   assert.equal(server.includes('membership.status'), false);
   assert.equal(migration.includes('member.status'), false);
 });
 
+test('los bloqueos RLS se consideran estructurales y no se repiten', () => {
+  assert.ok(upload.includes("'STORAGE_FORBIDDEN'"));
+  assert.ok(upload.includes('blockedFatalUntil = now + 60_000'));
+  assert.ok(server.includes('La política de seguridad de fotos todavía no está actualizada.'));
+});
+
 test('la versión nueva fuerza la actualización en celular', () => {
-  assert.ok(html.includes('/dist/mvp-main.js?v=20260715-39'));
+  assert.ok(html.includes('/dist/mvp-main.js?v=20260715-40'));
 });

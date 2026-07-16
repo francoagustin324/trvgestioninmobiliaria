@@ -108,10 +108,10 @@ function authenticatedHeaders(options: PropertyPhotoStorageOptions, accessToken:
   };
 }
 
-async function authenticatedOrganization(
+async function authenticatedPhotoOwner(
   request: IncomingMessage,
   options: PropertyPhotoStorageOptions,
-): Promise<{ organizationId: string; accessToken: string }> {
+): Promise<{ userId: string; accessToken: string }> {
   const accessToken = bearerToken(request);
   const authHeaders = authenticatedHeaders(options, accessToken);
   const authResponse = await fetch(`${options.supabaseUrl}/auth/v1/user`, {
@@ -131,9 +131,8 @@ async function authenticatedOrganization(
       Accept: 'application/json',
     },
   })) as MembershipRow[];
-  const membership = rows[0];
-  if (!membership?.organization_id) throw new Error('La cuenta no pertenece a una inmobiliaria.');
-  return { organizationId: membership.organization_id, accessToken };
+  if (!rows[0]?.organization_id) throw new Error('La cuenta no pertenece a una inmobiliaria.');
+  return { userId, accessToken };
 }
 
 export function parsePropertyPhotoDataUrl(value: unknown): PreparedPhoto {
@@ -156,15 +155,16 @@ function safeUploadIdentifier(value: unknown): string {
 }
 
 export function propertyPhotoObjectPath(
-  organizationId: string,
+  userId: string,
   propertyId: unknown,
   extension: string,
   uploadId?: unknown,
 ): string {
-  const safeOrganization = organizationId.replace(/[^a-zA-Z0-9_-]/g, '');
+  const safeUserId = userId.replace(/[^a-zA-Z0-9_-]/g, '');
+  if (!safeUserId) throw new Error('No se pudo identificar al usuario de la foto.');
   const numericPropertyId = Number(propertyId);
   const propertySegment = Number.isInteger(numericPropertyId) && numericPropertyId > 0 ? String(numericPropertyId) : 'draft';
-  return `${safeOrganization}/${propertySegment}/${safeUploadIdentifier(uploadId)}.${extension}`;
+  return `${safeUserId}/${propertySegment}/${safeUploadIdentifier(uploadId)}.${extension}`;
 }
 
 export function publicPropertyPhotoUrl(supabaseUrl: string, objectPath: string): string {
@@ -177,7 +177,7 @@ async function uploadPhoto(
   options: PropertyPhotoStorageOptions,
 ): Promise<void> {
   const requestUrl = new URL(request.url || '/', 'http://localhost');
-  const { organizationId, accessToken } = await authenticatedOrganization(request, options);
+  const { userId, accessToken } = await authenticatedPhotoOwner(request, options);
   const contentType = String(request.headers['content-type'] || '').toLowerCase();
 
   let photo: PreparedPhoto;
@@ -194,7 +194,7 @@ async function uploadPhoto(
   }
 
   const objectPath = propertyPhotoObjectPath(
-    organizationId,
+    userId,
     propertyId,
     photo.extension,
     uploadId,
@@ -238,8 +238,14 @@ export async function handlePropertyPhotoStorage(
     await uploadPhoto(request, response, options);
   } catch (error) {
     const message = error instanceof Error ? error.message : 'No se pudo cargar la foto.';
-    const status = /sesión|usuario válido|pertenece/i.test(message) ? 403 : 400;
-    sendJson(response, status, { success: false, error: message });
+    const rlsError = /row-level security|policy|permission|unauthorized/i.test(message);
+    const status = /sesión|usuario válido|pertenece/i.test(message) || rlsError ? 403 : 400;
+    sendJson(response, status, {
+      success: false,
+      error: rlsError
+        ? 'La política de seguridad de fotos todavía no está actualizada.'
+        : message,
+    });
   }
   return true;
 }
