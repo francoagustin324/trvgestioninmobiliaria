@@ -259,10 +259,17 @@ async function serverStorageUpload(photo: PreparedPropertyPhoto, propertyId: num
   const payload = await responsePayload(response);
   const record = responseRecord(payload);
   if (response.ok && record.success && record.url) return record.url;
-  if (response.status === 401 || response.status === 403) {
+  if (response.status === 401) {
     throw new PropertyPhotoUploadError(
       responseError(payload, 'La sesión venció. Volvé a ingresar.'),
       'SESSION_REQUIRED',
+      true,
+    );
+  }
+  if (response.status === 403 || /row-level security|policy|permiso|seguridad/i.test(responseError(payload, ''))) {
+    throw new PropertyPhotoUploadError(
+      responseError(payload, 'La política de seguridad de fotos todavía no está actualizada.'),
+      'STORAGE_FORBIDDEN',
       true,
     );
   }
