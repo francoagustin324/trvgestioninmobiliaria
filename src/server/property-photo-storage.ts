@@ -8,20 +8,11 @@ const requestWindows = new Map<string, { count: number; resetAt: number }>();
 interface PropertyPhotoStorageOptions {
   supabaseUrl: string;
   publishableKey: string;
-  secretKey: string;
+  secretKey?: string;
 }
 
 interface MembershipRow {
   organization_id?: string;
-}
-
-function supabaseServerHeaders(secretKey: string): Record<string, string> {
-  const headers: Record<string, string> = {
-    apikey: secretKey,
-    'Content-Type': 'application/json',
-  };
-  if (!secretKey.startsWith('sb_secret_')) headers.Authorization = `Bearer ${secretKey}`;
-  return headers;
 }
 
 function sendJson(response: ServerResponse, status: number, payload: unknown): void {
@@ -61,17 +52,21 @@ async function readJson(request: IncomingMessage, maxBytes = 2_600_000): Promise
   return parsed as Record<string, unknown>;
 }
 
-async function responsePayload(response: Response): Promise<Record<string, unknown> | unknown[]> {
+async function parseResponse(response: Response): Promise<Record<string, unknown> | unknown[]> {
   const text = await response.text();
   let payload: unknown = {};
   try { payload = text ? JSON.parse(text) : {}; } catch { payload = { message: text }; }
   if (!response.ok) {
-    const record = payload && typeof payload === 'object' && !Array.isArray(payload) ? payload as Record<string, unknown> : {};
+    const record = payload && typeof payload === 'object' && !Array.isArray(payload)
+      ? payload as Record<string, unknown>
+      : {};
     const message = [record.message, record.error, record.msg]
       .find((value) => typeof value === 'string' && value.trim());
     throw new Error(typeof message === 'string' ? message : `Supabase respondió ${response.status}.`);
   }
-  return payload && typeof payload === 'object' ? payload as Record<string, unknown> | unknown[] : {};
+  return payload && typeof payload === 'object'
+    ? payload as Record<string, unknown> | unknown[]
+    : {};
 }
 
 function bearerToken(request: IncomingMessage): string {
@@ -81,17 +76,23 @@ function bearerToken(request: IncomingMessage): string {
   return match[1];
 }
 
+function authenticatedHeaders(options: PropertyPhotoStorageOptions, accessToken: string): Record<string, string> {
+  return {
+    apikey: options.publishableKey,
+    Authorization: `Bearer ${accessToken}`,
+  };
+}
+
 async function authenticatedOrganization(
   request: IncomingMessage,
   options: PropertyPhotoStorageOptions,
-): Promise<string> {
+): Promise<{ organizationId: string; accessToken: string }> {
+  const accessToken = bearerToken(request);
+  const authHeaders = authenticatedHeaders(options, accessToken);
   const authResponse = await fetch(`${options.supabaseUrl}/auth/v1/user`, {
-    headers: {
-      apikey: options.publishableKey,
-      Authorization: `Bearer ${bearerToken(request)}`,
-    },
+    headers: authHeaders,
   });
-  const user = await responsePayload(authResponse) as Record<string, unknown>;
+  const user = await parseResponse(authResponse) as Record<string, unknown>;
   const userId = typeof user.id === 'string' ? user.id : '';
   if (!userId) throw new Error('La sesión no identifica un usuario válido.');
 
@@ -99,32 +100,15 @@ async function authenticatedOrganization(
   query.searchParams.set('select', 'organization_id');
   query.searchParams.set('user_id', `eq.${userId}`);
   query.searchParams.set('limit', '1');
-  const rows = await responsePayload(await fetch(query, {
-    headers: supabaseServerHeaders(options.secretKey),
+  const rows = await parseResponse(await fetch(query, {
+    headers: {
+      ...authHeaders,
+      Accept: 'application/json',
+    },
   })) as MembershipRow[];
   const membership = rows[0];
   if (!membership?.organization_id) throw new Error('La cuenta no pertenece a una inmobiliaria.');
-  return membership.organization_id;
-}
-
-async function ensureBucket(options: PropertyPhotoStorageOptions): Promise<void> {
-  const headers = supabaseServerHeaders(options.secretKey);
-  const existing = await fetch(`${options.supabaseUrl}/storage/v1/bucket/${BUCKET}`, { headers });
-  if (existing.ok) return;
-  if (existing.status !== 404) await responsePayload(existing);
-
-  const created = await fetch(`${options.supabaseUrl}/storage/v1/bucket`, {
-    method: 'POST',
-    headers,
-    body: JSON.stringify({
-      id: BUCKET,
-      name: BUCKET,
-      public: true,
-      file_size_limit: MAX_UPLOAD_BYTES,
-      allowed_mime_types: ['image/jpeg', 'image/webp', 'image/png'],
-    }),
-  });
-  if (!created.ok && created.status !== 409) await responsePayload(created);
+  return { organizationId: membership.organization_id, accessToken };
 }
 
 export function parsePropertyPhotoDataUrl(value: unknown): { mimeType: string; bytes: Buffer; extension: string } {
@@ -157,22 +141,21 @@ async function uploadPhoto(
   response: ServerResponse,
   options: PropertyPhotoStorageOptions,
 ): Promise<void> {
-  const organizationId = await authenticatedOrganization(request, options);
+  const { organizationId, accessToken } = await authenticatedOrganization(request, options);
   const body = await readJson(request);
   const photo = parsePropertyPhotoDataUrl(body.dataUrl);
-  await ensureBucket(options);
-
   const objectPath = propertyPhotoObjectPath(organizationId, body.propertyId, photo.extension);
-  await responsePayload(await fetch(`${options.supabaseUrl}/storage/v1/object/${BUCKET}/${encodedPath(objectPath)}`, {
+  const uploadResponse = await fetch(`${options.supabaseUrl}/storage/v1/object/${BUCKET}/${encodedPath(objectPath)}`, {
     method: 'POST',
     headers: {
-      ...supabaseServerHeaders(options.secretKey),
+      ...authenticatedHeaders(options, accessToken),
       'Content-Type': photo.mimeType,
       'x-upsert': 'false',
       'Cache-Control': '31536000',
     },
     body: photo.bytes,
-  }));
+  });
+  await parseResponse(uploadResponse);
 
   sendJson(response, 201, {
     success: true,
@@ -188,7 +171,7 @@ export async function handlePropertyPhotoStorage(
   const pathname = new URL(request.url || '/', 'http://localhost').pathname;
   if (pathname !== '/api/property-photos' || request.method !== 'POST') return false;
 
-  if (!options.supabaseUrl || !options.publishableKey || !options.secretKey) {
+  if (!options.supabaseUrl || !options.publishableKey) {
     sendJson(response, 503, { success: false, error: 'El almacenamiento de fotos todavía no está configurado.' });
     return true;
   }
@@ -200,10 +183,9 @@ export async function handlePropertyPhotoStorage(
   try {
     await uploadPhoto(request, response, options);
   } catch (error) {
-    sendJson(response, 400, {
-      success: false,
-      error: error instanceof Error ? error.message : 'No se pudo cargar la foto.',
-    });
+    const message = error instanceof Error ? error.message : 'No se pudo cargar la foto.';
+    const status = /sesión|usuario válido|pertenece/i.test(message) ? 403 : 400;
+    sendJson(response, status, { success: false, error: message });
   }
   return true;
 }
