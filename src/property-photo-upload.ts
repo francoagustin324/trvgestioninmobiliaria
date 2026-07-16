@@ -24,7 +24,6 @@ interface CloudConfigResponse {
 
 interface MembershipRow {
   organization_id?: string;
-  status?: string;
 }
 
 export type PropertyPhotoUploadErrorCode =
@@ -192,7 +191,7 @@ async function organizationId(
   userId: string,
 ): Promise<string> {
   const query = new URL(`${config.url}/rest/v1/organization_members`);
-  query.searchParams.set('select', 'organization_id,status');
+  query.searchParams.set('select', 'organization_id');
   query.searchParams.set('user_id', `eq.${userId}`);
   query.searchParams.set('limit', '1');
   const response = await fetchWithRetry(query, {
@@ -221,9 +220,6 @@ async function organizationId(
       'STORAGE_FORBIDDEN',
       true,
     );
-  }
-  if (String(membership.status || 'active').toLowerCase() === 'suspended') {
-    throw new PropertyPhotoUploadError('El acceso está suspendido.', 'STORAGE_FORBIDDEN', true);
   }
   return membership.organization_id;
 }

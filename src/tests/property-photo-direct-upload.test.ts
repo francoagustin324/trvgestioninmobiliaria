@@ -20,7 +20,8 @@ test('los errores estructurales detienen el lote', () => {
 
 test('la carga directa usa sesión, inmobiliaria y ruta aislada', () => {
   assert.ok(upload.includes('/rest/v1/organization_members'));
-  assert.ok(upload.includes("select', 'organization_id,status'"));
+  assert.ok(upload.includes("select', 'organization_id'"));
+  assert.ok(!upload.includes("select', 'organization_id,status'"));
   assert.ok(upload.includes('/storage/v1/object/'));
   assert.ok(upload.includes('Authorization: `Bearer ${accessToken}`'));
   assert.ok(upload.includes("const PHOTO_BUCKET = 'property-photos'"));
