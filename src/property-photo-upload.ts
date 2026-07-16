@@ -199,17 +199,6 @@ export async function compressPropertyPhoto(file: File): Promise<Blob> {
   return (await preparePropertyPhoto(file)).blob;
 }
 
-function blobToDataUrl(blob: Blob): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => typeof reader.result === 'string'
-      ? resolve(reader.result)
-      : reject(new Error('No se pudo preparar la foto.'));
-    reader.onerror = () => reject(new Error('No se pudo leer la foto preparada.'));
-    reader.readAsDataURL(blob);
-  });
-}
-
 async function responsePayload(response: Response): Promise<unknown> {
   const text = await response.text();
   try {
@@ -247,18 +236,25 @@ async function fetchWithRetry(input: RequestInfo | URL, init: RequestInit): Prom
   }
 }
 
+function uploadIdentifier(): string {
+  return typeof crypto.randomUUID === 'function'
+    ? crypto.randomUUID()
+    : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
 async function serverStorageUpload(photo: PreparedPropertyPhoto, propertyId: number, accessToken: string): Promise<string> {
-  const response = await fetchWithRetry('/api/property-photos', {
+  const query = new URLSearchParams({
+    propertyId: String(propertyId),
+    uploadId: uploadIdentifier(),
+  });
+  const response = await fetchWithRetry(`/api/property-photos?${query.toString()}`, {
     method: 'POST',
     headers: {
-      'Content-Type': 'application/json',
+      'Content-Type': photo.mimeType,
       Authorization: `Bearer ${accessToken}`,
     },
     cache: 'no-store',
-    body: JSON.stringify({
-      propertyId,
-      dataUrl: await blobToDataUrl(photo.blob),
-    }),
+    body: photo.blob,
   });
   const payload = await responsePayload(response);
   const record = responseRecord(payload);
