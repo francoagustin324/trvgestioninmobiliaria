@@ -15,6 +15,12 @@ interface MembershipRow {
   organization_id?: string;
 }
 
+interface PreparedPhoto {
+  mimeType: string;
+  bytes: Buffer;
+  extension: string;
+}
+
 function sendJson(response: ServerResponse, status: number, payload: unknown): void {
   response.writeHead(status, {
     'Content-Type': 'application/json; charset=utf-8',
@@ -36,9 +42,7 @@ function rateLimited(request: IncomingMessage): boolean {
   return current.count > 50;
 }
 
-async function readJson(request: IncomingMessage, maxBytes = 2_600_000): Promise<Record<string, unknown>> {
-  const contentType = String(request.headers['content-type'] || '').toLowerCase();
-  if (!contentType.startsWith('application/json')) throw new Error('La foto debe enviarse como JSON.');
+async function readBody(request: IncomingMessage, maxBytes: number): Promise<Buffer> {
   const chunks: Buffer[] = [];
   let size = 0;
   for await (const chunk of request) {
@@ -47,9 +51,30 @@ async function readJson(request: IncomingMessage, maxBytes = 2_600_000): Promise
     if (size > maxBytes) throw new Error('La foto es demasiado grande.');
     chunks.push(buffer);
   }
-  const parsed: unknown = JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}');
+  return Buffer.concat(chunks);
+}
+
+async function readJson(request: IncomingMessage, maxBytes = 2_600_000): Promise<Record<string, unknown>> {
+  const raw = await readBody(request, maxBytes);
+  const parsed: unknown = JSON.parse(raw.toString('utf8') || '{}');
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('La foto enviada no es válida.');
   return parsed as Record<string, unknown>;
+}
+
+function photoMime(contentType: string): { mimeType: string; extension: string } | null {
+  const mimeType = contentType.split(';')[0]?.trim().toLowerCase();
+  if (mimeType === 'image/jpeg' || mimeType === 'image/jpg') return { mimeType: 'image/jpeg', extension: 'jpg' };
+  if (mimeType === 'image/png') return { mimeType, extension: 'png' };
+  if (mimeType === 'image/webp') return { mimeType, extension: 'webp' };
+  return null;
+}
+
+async function readBinaryPhoto(request: IncomingMessage): Promise<PreparedPhoto> {
+  const meta = photoMime(String(request.headers['content-type'] || ''));
+  if (!meta) throw new Error('El formato de la foto no está permitido.');
+  const bytes = await readBody(request, MAX_UPLOAD_BYTES);
+  if (!bytes.length) throw new Error('La foto enviada está vacía.');
+  return { ...meta, bytes };
 }
 
 async function parseResponse(response: Response): Promise<Record<string, unknown> | unknown[]> {
@@ -111,7 +136,7 @@ async function authenticatedOrganization(
   return { organizationId: membership.organization_id, accessToken };
 }
 
-export function parsePropertyPhotoDataUrl(value: unknown): { mimeType: string; bytes: Buffer; extension: string } {
+export function parsePropertyPhotoDataUrl(value: unknown): PreparedPhoto {
   const match = String(value || '').match(/^data:(image\/(?:jpeg|webp|png));base64,([A-Za-z0-9+/=]+)$/);
   if (!match?.[1] || !match[2]) throw new Error('El formato de la foto no está permitido.');
   const mimeType = match[1];
@@ -125,11 +150,21 @@ function encodedPath(path: string): string {
   return path.split('/').map((part) => encodeURIComponent(part)).join('/');
 }
 
-export function propertyPhotoObjectPath(organizationId: string, propertyId: unknown, extension: string): string {
+function safeUploadIdentifier(value: unknown): string {
+  const candidate = String(value || '').trim();
+  return /^[a-zA-Z0-9_-]{8,80}$/.test(candidate) ? candidate : randomUUID();
+}
+
+export function propertyPhotoObjectPath(
+  organizationId: string,
+  propertyId: unknown,
+  extension: string,
+  uploadId?: unknown,
+): string {
   const safeOrganization = organizationId.replace(/[^a-zA-Z0-9_-]/g, '');
   const numericPropertyId = Number(propertyId);
   const propertySegment = Number.isInteger(numericPropertyId) && numericPropertyId > 0 ? String(numericPropertyId) : 'draft';
-  return `${safeOrganization}/${propertySegment}/${Date.now()}-${randomUUID()}.${extension}`;
+  return `${safeOrganization}/${propertySegment}/${safeUploadIdentifier(uploadId)}.${extension}`;
 }
 
 export function publicPropertyPhotoUrl(supabaseUrl: string, objectPath: string): string {
@@ -141,16 +176,35 @@ async function uploadPhoto(
   response: ServerResponse,
   options: PropertyPhotoStorageOptions,
 ): Promise<void> {
+  const requestUrl = new URL(request.url || '/', 'http://localhost');
   const { organizationId, accessToken } = await authenticatedOrganization(request, options);
-  const body = await readJson(request);
-  const photo = parsePropertyPhotoDataUrl(body.dataUrl);
-  const objectPath = propertyPhotoObjectPath(organizationId, body.propertyId, photo.extension);
+  const contentType = String(request.headers['content-type'] || '').toLowerCase();
+
+  let photo: PreparedPhoto;
+  let propertyId: unknown = requestUrl.searchParams.get('propertyId');
+  let uploadId: unknown = requestUrl.searchParams.get('uploadId');
+
+  if (contentType.startsWith('application/json')) {
+    const body = await readJson(request);
+    photo = parsePropertyPhotoDataUrl(body.dataUrl);
+    propertyId = body.propertyId;
+    uploadId = body.uploadId;
+  } else {
+    photo = await readBinaryPhoto(request);
+  }
+
+  const objectPath = propertyPhotoObjectPath(
+    organizationId,
+    propertyId,
+    photo.extension,
+    uploadId,
+  );
   const uploadResponse = await fetch(`${options.supabaseUrl}/storage/v1/object/${BUCKET}/${encodedPath(objectPath)}`, {
     method: 'POST',
     headers: {
       ...authenticatedHeaders(options, accessToken),
       'Content-Type': photo.mimeType,
-      'x-upsert': 'false',
+      'x-upsert': 'true',
       'Cache-Control': '31536000',
     },
     body: photo.bytes,

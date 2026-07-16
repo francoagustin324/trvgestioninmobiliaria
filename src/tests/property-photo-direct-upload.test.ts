@@ -35,21 +35,25 @@ test('un JPG liviano se prepara sin abrirlo ni recodificarlo', async () => {
   assert.equal(prepared.blob.size, file.size);
 });
 
-test('el navegador carga únicamente contra PropControl', () => {
-  assert.ok(upload.includes("fetchWithRetry('/api/property-photos'"));
+test('el navegador envía la foto como binario a PropControl', () => {
+  assert.ok(upload.includes('/api/property-photos?'));
+  assert.ok(upload.includes("'Content-Type': photo.mimeType"));
+  assert.ok(upload.includes('body: photo.blob'));
+  assert.ok(upload.includes('uploadId: uploadIdentifier()'));
+  assert.equal(upload.includes('blobToDataUrl'), false);
+  assert.equal(upload.includes('dataUrl: await'), false);
   assert.equal(upload.includes('/storage/v1/object/'), false);
-  assert.equal(upload.includes('/rest/v1/organization_members'), false);
-  assert.equal(upload.includes('directStorageUpload'), false);
 });
 
-test('el servidor usa la sesión del usuario para Supabase sin exigir clave secreta', () => {
+test('el servidor acepta binario y mantiene compatibilidad JSON', () => {
+  assert.ok(server.includes('readBinaryPhoto(request)'));
+  assert.ok(server.includes("contentType.startsWith('application/json')"));
+  assert.ok(server.includes("'x-upsert': 'true'"));
+  assert.ok(server.includes('safeUploadIdentifier(uploadId)'));
   assert.ok(server.includes('/auth/v1/user'));
   assert.ok(server.includes('/rest/v1/organization_members'));
   assert.ok(server.includes('/storage/v1/object/'));
   assert.ok(server.includes('Authorization: `Bearer ${accessToken}`'));
-  assert.ok(server.includes('apikey: options.publishableKey'));
-  assert.ok(server.includes('if (!options.supabaseUrl || !options.publishableKey)'));
-  assert.equal(server.includes('!options.secretKey'), false);
 });
 
 test('la migración crea bucket público con políticas por inmobiliaria', () => {
