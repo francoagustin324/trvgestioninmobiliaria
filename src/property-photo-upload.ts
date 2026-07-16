@@ -48,7 +48,8 @@ export class PropertyPhotoUploadError extends Error {
   }
 }
 
-let suppressedFatalUntil = 0;
+let blockedFatalUntil = 0;
+let blockedFatalCode: PropertyPhotoUploadErrorCode = 'UPLOAD_FAILED';
 
 export function shouldStopPropertyPhotoBatch(error: unknown): boolean {
   return error instanceof PropertyPhotoUploadError && error.stopBatch;
@@ -283,19 +284,23 @@ async function serverStorageUpload(photo: PreparedPropertyPhoto, propertyId: num
   throw new PropertyPhotoUploadError(responseError(payload, 'No se pudo guardar la foto.'), 'UPLOAD_FAILED');
 }
 
-function suppressRepeatedFatal(error: unknown): never {
+function rememberFatalUpload(error: unknown): never {
   if (error instanceof PropertyPhotoUploadError && error.stopBatch) {
     const now = Date.now();
-    if (now < suppressedFatalUntil) {
-      throw new PropertyPhotoUploadError('', error.code, true);
+    if (now < blockedFatalUntil) {
+      throw new PropertyPhotoUploadError('', blockedFatalCode, true);
     }
-    suppressedFatalUntil = now + 4000;
+    blockedFatalUntil = now + 60_000;
+    blockedFatalCode = error.code;
   }
   throw error;
 }
 
 export async function uploadPropertyPhoto(file: File, propertyId: number): Promise<string> {
   try {
+    if (Date.now() < blockedFatalUntil) {
+      throw new PropertyPhotoUploadError('', blockedFatalCode, true);
+    }
     const session = getCloudSession();
     if (!session?.accessToken) {
       throw new PropertyPhotoUploadError('La sesión venció. Volvé a ingresar.', 'SESSION_REQUIRED', true);
@@ -303,6 +308,6 @@ export async function uploadPropertyPhoto(file: File, propertyId: number): Promi
     const photo = await preparePropertyPhoto(file);
     return await serverStorageUpload(photo, propertyId, session.accessToken);
   } catch (error) {
-    suppressRepeatedFatal(error);
+    rememberFatalUpload(error);
   }
 }
