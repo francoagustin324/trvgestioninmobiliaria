@@ -15,14 +15,14 @@ test('acepta imágenes permitidas y rechaza formatos inseguros', () => {
   assert.throws(() => parsePropertyPhotoDataUrl('javascript:alert(1)'));
 });
 
-test('la ruta queda aislada por inmobiliaria y propiedad', () => {
-  const path = propertyPhotoObjectPath('trv-gestion_inmobiliaria', 27, 'jpg');
-  assert.ok(path.startsWith('trv-gestion_inmobiliaria/27/'));
-  assert.ok(path.endsWith('.jpg'));
+test('la ruta queda aislada por usuario y propiedad', () => {
+  const userId = '2ce3f73d-0ea3-4be6-a1c5-5a26dc502f53';
+  const path = propertyPhotoObjectPath(userId, 27, 'jpg', 'foto-segura-123');
+  assert.equal(path, `${userId}/27/foto-segura-123.jpg`);
   assert.equal(path.includes('..'), false);
 });
 
 test('genera una dirección pública del bucket de propiedades', () => {
-  const url = publicPropertyPhotoUrl('https://example.supabase.co', 'org/27/foto principal.jpg');
-  assert.equal(url, 'https://example.supabase.co/storage/v1/object/public/property-photos/org/27/foto%20principal.jpg');
+  const url = publicPropertyPhotoUrl('https://example.supabase.co', 'usuario/27/foto principal.jpg');
+  assert.equal(url, 'https://example.supabase.co/storage/v1/object/public/property-photos/usuario/27/foto%20principal.jpg');
 });
