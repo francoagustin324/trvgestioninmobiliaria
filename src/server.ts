@@ -14,6 +14,7 @@ const supabaseUrl = (process.env.SUPABASE_URL || '').trim().replace(/\/+$/g, '')
 const supabasePublishableKey = (process.env.SUPABASE_PUBLISHABLE_KEY || '').trim();
 const supabaseSecretKey = (process.env.SUPABASE_SECRET_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY || '').trim();
 const appPublicUrl = (process.env.APP_PUBLIC_URL || '').trim().replace(/\/+$/g, '');
+const publicFichaUrl = (process.env.PUBLIC_FICHA_URL || appPublicUrl).trim().replace(/\/+$/g, '');
 const cloudConfigured = Boolean(supabaseUrl && supabasePublishableKey);
 const invitationsConfigured = Boolean(cloudConfigured && supabaseSecretKey);
 const whatsappWebhookVerifyToken = (process.env.WHATSAPP_WEBHOOK_VERIFY_TOKEN || '').trim();
@@ -146,7 +147,13 @@ const server = createServer(async (request, response) => {
 
   if (request.method === 'GET' && pathname === '/api/cloud-config') {
     sendJson(response, 200, cloudConfigured
-      ? { configured: true, url: supabaseUrl, publishableKey: supabasePublishableKey, invitationsConfigured }
+      ? {
+        configured: true,
+        url: supabaseUrl,
+        publishableKey: supabasePublishableKey,
+        invitationsConfigured,
+        publicUrl: publicFichaUrl || undefined,
+      }
       : { configured: false, invitationsConfigured: false });
     return;
   }
