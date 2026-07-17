@@ -11,6 +11,7 @@ export type PropertyWithFicha = Property & {
   creditReady?: string;
   description?: string;
   photoUrls?: string[];
+  publicSlug?: string;
 };
 
 const priceFormatter = new Intl.NumberFormat('es-AR');
@@ -49,5 +50,8 @@ export function propertyFichaLink(
   origin = location.origin,
   pathname = location.pathname,
 ): string {
+  if (property.publicSlug && /^[a-z0-9][a-z0-9-]{4,79}$/.test(property.publicSlug)) {
+    return `${origin.replace(/\/+$/g, '')}/ficha/${encodeURIComponent(property.publicSlug)}`;
+  }
   return `${origin}${pathname}#public=${encodePublicFicha(propertyToPublicFicha(property))}`;
 }
