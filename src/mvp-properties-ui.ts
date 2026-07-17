@@ -1,6 +1,7 @@
 import type { Property } from './models.js';
 import { MAX_PROPERTY_PHOTOS, uploadPropertyPhoto } from './property-photo-upload.js';
-import { propertyFichaLink, type PropertyWithFicha } from './property-ficha.js';
+import type { PropertyWithFicha } from './property-ficha.js';
+import { publishPropertyFicha } from './public-property-share.js';
 import { saveData, state } from './store.js';
 import { escapeHtml, field, formValues, nextId, safePhotoUrl } from './utils.js';
 
@@ -77,6 +78,7 @@ function card(property: PropertyWithFicha): string {
         <span>${escapeHtml(property.operation)}</span>
         <span>${escapeHtml(property.status)}</span>
         <span>${photos.length ? `${photos.length} foto${photos.length === 1 ? '' : 's'}` : 'Sin fotos'}</span>
+        <span>${property.publicSlug ? 'Ficha publicada' : 'Ficha sin publicar'}</span>
         <span class="mvp-property-internal">Interno: ${escapeHtml(property.owner || 'Sin propietario')}</span>
       </div>
     </div>
@@ -128,22 +130,57 @@ async function copyText(value: string): Promise<void> {
   if (!copied) throw new Error('No se pudo copiar el enlace.');
 }
 
+function rememberPublishedFicha(property: PropertyWithFicha, slug: string): void {
+  if (property.publicSlug === slug) return;
+  property.publicSlug = slug;
+  saveData('Ficha pública publicada');
+}
+
 async function sharePropertyFicha(property: PropertyWithFicha, button: HTMLButtonElement): Promise<void> {
-  const url = propertyFichaLink(property);
+  const original = button.textContent ?? 'Compartir ficha';
+  button.disabled = true;
+  button.textContent = 'Preparando enlace…';
   try {
+    const published = await publishPropertyFicha(property);
+    rememberPublishedFicha(property, published.slug);
     if (navigator.share) {
       await navigator.share({
         title: property.title,
         text: `Te comparto esta propiedad de TRV Gestión Inmobiliaria: ${property.title}`,
-        url,
+        url: published.url,
       });
+      button.textContent = original;
+      button.disabled = false;
       return;
     }
-    await copyText(url);
-    showButtonFeedback(button, 'Enlace copiado');
+    await copyText(published.url);
+    button.textContent = original;
+    button.disabled = false;
+    showButtonFeedback(button, 'Enlace corto copiado');
   } catch (error) {
+    button.textContent = original;
+    button.disabled = false;
     if (error instanceof DOMException && error.name === 'AbortError') return;
     window.alert(error instanceof Error ? error.message : 'No se pudo compartir la ficha.');
+  }
+}
+
+async function openPropertyFicha(property: PropertyWithFicha, button: HTMLButtonElement): Promise<void> {
+  const original = button.textContent ?? 'Ver ficha';
+  const preview = window.open('', '_blank');
+  button.disabled = true;
+  button.textContent = 'Abriendo…';
+  try {
+    const published = await publishPropertyFicha(property);
+    rememberPublishedFicha(property, published.slug);
+    if (preview) preview.location.replace(published.url);
+    else location.assign(published.url);
+  } catch (error) {
+    preview?.close();
+    window.alert(error instanceof Error ? error.message : 'No se pudo abrir la ficha.');
+  } finally {
+    button.textContent = original;
+    button.disabled = false;
   }
 }
 
@@ -164,7 +201,7 @@ function bindPropertyCardActions(container: HTMLElement): void {
     button.addEventListener('click', () => {
       const property = findProperty(Number(button.dataset.openPropertyFicha));
       if (!property) return;
-      window.open(propertyFichaLink(property), '_blank', 'noopener,noreferrer');
+      void openPropertyFicha(property, button);
     });
   });
 
@@ -387,7 +424,7 @@ export function renderMvpProperties(container: HTMLElement): void {
     renderMvpProperties(container);
   });
 
-  form?.addEventListener('submit', (event) => {
+  form?.addEventListener('submit', async (event) => {
     event.preventDefault();
     if (photoUploadInProgress) return;
     const values = formValues(form);
@@ -435,9 +472,33 @@ export function renderMvpProperties(container: HTMLElement): void {
       state.crm.properties.push(property as Property);
     }
 
+    saveData(editing ? 'Propiedad editada' : 'Propiedad creada');
+
+    if (property.publicSlug) {
+      const submit = form.querySelector<HTMLButtonElement>('button[type="submit"]');
+      if (submit) {
+        submit.disabled = true;
+        submit.textContent = 'Actualizando ficha pública…';
+      }
+      try {
+        const published = await publishPropertyFicha(property);
+        property.publicSlug = published.slug;
+        saveData('Ficha pública actualizada');
+      } catch (publishError) {
+        if (error) {
+          error.textContent = `La propiedad se guardó, pero la ficha pública no se actualizó: ${publishError instanceof Error ? publishError.message : 'error desconocido'}`;
+          error.hidden = false;
+        }
+        if (submit) {
+          submit.disabled = false;
+          submit.textContent = 'Reintentar actualización';
+        }
+        return;
+      }
+    }
+
     state.editingPropertyId = null;
     state.openForms.property = false;
-    saveData(editing ? 'Propiedad editada' : 'Propiedad creada');
     document.dispatchEvent(new CustomEvent('trv-render'));
   });
 }
