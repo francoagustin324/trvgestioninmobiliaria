@@ -3,6 +3,7 @@ import { modules } from './models.js';
 import { PRODUCT_BRAND } from './branding.js';
 import { renderAgenda } from './agenda-ui.js';
 import { decodePublicFicha, renderPublicMode } from './public-ficha.js';
+import { loadPublicPropertyFicha } from './public-property-share.js';
 import { renderMvpLeads } from './mvp-leads-ui.js';
 import { renderMvpProperties } from './mvp-properties-ui.js';
 import { renderMvpUsers } from './mvp-users-ui.js';
@@ -148,6 +149,17 @@ function bindEvents(): void {
 }
 
 async function bootstrap(): Promise<void> {
+  const shortFichaMatch = location.pathname.match(/^\/ficha\/([a-z0-9-]+)\/?$/i);
+  if (shortFichaMatch?.[1]) {
+    document.title = 'Ficha de propiedad | PropControl';
+    root.innerHTML = '<main class="public-page"><div class="public-error"><h1>Cargando ficha…</h1><p>Un momento.</p></div></main>';
+    try {
+      renderPublicMode(root, await loadPublicPropertyFicha(shortFichaMatch[1].toLowerCase()));
+    } catch {
+      renderPublicMode(root, null);
+    }
+    return;
+  }
   if (location.hash.startsWith('#public=')) {
     renderPublicMode(root, decodePublicFicha(location.hash.slice('#public='.length)));
     return;
