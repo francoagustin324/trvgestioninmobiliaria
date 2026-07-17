@@ -36,6 +36,36 @@ const contentTypes: Record<string, string> = {
 
 const requestWindows = new Map<string, { count: number; resetAt: number }>();
 
+function safeOrigin(value: string): string {
+  try {
+    const origin = new URL(value).origin;
+    return origin === 'null' ? '' : origin;
+  } catch {
+    return '';
+  }
+}
+
+function applySecurityHeaders(response: ServerResponse): void {
+  const connectSources = ["'self'", safeOrigin(supabaseUrl)].filter(Boolean).join(' ');
+  response.setHeader('Content-Security-Policy', [
+    "default-src 'self'",
+    "base-uri 'self'",
+    `connect-src ${connectSources}`,
+    "font-src 'self' data:",
+    "form-action 'self'",
+    "frame-ancestors 'none'",
+    "img-src 'self' data: blob: https:",
+    "object-src 'none'",
+    "script-src 'self'",
+    "style-src 'self' 'unsafe-inline'",
+  ].join('; '));
+  response.setHeader('Permissions-Policy', 'geolocation=(), microphone=(), payment=()');
+  response.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+  response.setHeader('X-Content-Type-Options', 'nosniff');
+  response.setHeader('X-Frame-Options', 'DENY');
+  response.setHeader('X-Permitted-Cross-Domain-Policies', 'none');
+}
+
 function rateLimit(request: IncomingMessage): boolean {
   const key = request.socket.remoteAddress || 'unknown';
   const now = Date.now();
@@ -115,6 +145,7 @@ function serveStatic(request: IncomingMessage, response: ServerResponse): void {
 }
 
 const server = createServer(async (request, response) => {
+  applySecurityHeaders(response);
   const pathname = new URL(request.url || '/', `http://${host}:${port}`).pathname;
 
   const whatsappHandled = await handleWhatsAppWebhook(request, response, {
