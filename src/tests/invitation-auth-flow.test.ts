@@ -29,11 +29,12 @@ test('la contraseña se actualiza con la sesión del invitado y sin clave secret
   assert.ok(!source.includes('service_role'));
 });
 
-test('el bootstrap intercepta la invitación antes de cargar el CRM', () => {
-  const bootstrap = readFileSync('src/mvp-bootstrap.ts', 'utf8');
-  const html = readFileSync('index.html', 'utf8');
-  assert.ok(bootstrap.includes('isInvitationPage()'));
-  assert.ok(bootstrap.includes('renderInvitationAuth(root)'));
-  assert.ok(bootstrap.includes("import('./mvp-main.js')"));
-  assert.ok(html.includes('/dist/mvp-bootstrap.js'));
+test('el MVP intercepta la invitación antes de cargar login o CRM', () => {
+  const main = readFileSync('src/mvp-main.ts', 'utf8');
+  const invitationCheck = main.indexOf('if (isInvitationPage())');
+  const loginCheck = main.indexOf('if (!hasAuthenticatedSession())');
+  assert.ok(main.includes("from './mvp-invitation-auth.js'"));
+  assert.ok(main.includes('await renderInvitationAuth(root)'));
+  assert.ok(invitationCheck >= 0);
+  assert.ok(loginCheck > invitationCheck);
 });
