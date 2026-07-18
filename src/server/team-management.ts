@@ -144,6 +144,20 @@ async function requesterMembership(userId: string, options: TeamManagementOption
   return membership;
 }
 
+async function organizationMemberByEmail(
+  organizationId: string,
+  email: string,
+  options: TeamManagementOptions,
+): Promise<MembershipRow | null> {
+  const query = new URL(`${options.supabaseUrl}/rest/v1/organization_members`);
+  query.searchParams.set('select', 'organization_id,member_id,user_id,role,status,display_name,email,phone,created_at,last_active_at');
+  query.searchParams.set('organization_id', `eq.${organizationId}`);
+  query.searchParams.set('email', `eq.${email}`);
+  query.searchParams.set('limit', '1');
+  const rows = await responsePayload(await fetch(query, { headers: serviceHeaders(options) })) as MembershipRow[];
+  return rows[0] || null;
+}
+
 async function organizationSeatLimit(organizationId: string, options: TeamManagementOptions): Promise<number | null> {
   const query = new URL(`${options.supabaseUrl}/rest/v1/organizations`);
   query.searchParams.set('select', 'seat_limit');
@@ -186,6 +200,31 @@ function generatedUser(payload: Record<string, unknown>): Record<string, unknown
   return payload;
 }
 
+async function generateTeamLink(
+  type: 'invite' | 'recovery',
+  email: string,
+  options: TeamManagementOptions,
+  data?: Record<string, unknown>,
+): Promise<{ inviteLink: string; userId: string }> {
+  const body: Record<string, unknown> = {
+    type,
+    email,
+    redirect_to: invitationRedirect(options),
+  };
+  if (data) body.data = data;
+  const generated = await responsePayload(await fetch(`${options.supabaseUrl}/auth/v1/admin/generate_link`, {
+    method: 'POST',
+    headers: serviceHeaders(options),
+    body: JSON.stringify(body),
+  })) as Record<string, unknown>;
+  const inviteLink = generatedActionLink(generated);
+  const linkedUser = generatedUser(generated);
+  const userId = typeof linkedUser.id === 'string' ? linkedUser.id : '';
+  if (!userId) throw new Error('Supabase no devolvió el usuario del enlace.');
+  if (!inviteLink) throw new Error('Supabase no devolvió el enlace de acceso.');
+  return { inviteLink, userId };
+}
+
 async function inviteMember(request: IncomingMessage, response: ServerResponse, options: TeamManagementOptions): Promise<void> {
   const user = await authenticatedUser(request, options);
   const requester = await requesterMembership(user.id!, options);
@@ -196,27 +235,35 @@ async function inviteMember(request: IncomingMessage, response: ServerResponse, 
   const role = requestedRole(body.role);
   if (!displayName || displayName.length > 120) throw new Error('Ingresá un nombre válido.');
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || email.length > 254) throw new Error('Ingresá un correo válido.');
-  await ensureSeat(requester.organization_id, options);
 
-  const generated = await responsePayload(await fetch(`${options.supabaseUrl}/auth/v1/admin/generate_link`, {
-    method: 'POST',
-    headers: serviceHeaders(options),
-    body: JSON.stringify({
-      type: 'invite',
-      email,
-      redirect_to: invitationRedirect(options),
-      data: {
-        organization_id: requester.organization_id,
-        organization_role: role,
-        display_name: displayName,
-      },
-    }),
-  })) as Record<string, unknown>;
-  const inviteLink = generatedActionLink(generated);
-  const invitedUser = generatedUser(generated);
-  const invitedUserId = typeof invitedUser.id === 'string' ? invitedUser.id : '';
-  if (!invitedUserId) throw new Error('Supabase no devolvió el usuario invitado.');
-  if (!inviteLink) throw new Error('Supabase no devolvió el enlace de invitación.');
+  const existingMember = await organizationMemberByEmail(requester.organization_id, email, options);
+  if (existingMember) {
+    const status = String(existingMember.status || 'active').toLowerCase();
+    const existingRole = normalizedRole(existingMember.role);
+    if (status === 'suspended') throw new Error('El usuario está suspendido. Reactivalo antes de generar un enlace.');
+    if (existingRole === 'owner') throw new Error('No se puede generar un enlace de acceso para el dueño desde esta pantalla.');
+    if (normalizedRole(requester.role) === 'admin' && existingRole !== 'agent') {
+      throw new Error('Un administrador solo puede generar acceso para corredores.');
+    }
+    const generated = await generateTeamLink('recovery', email, options);
+    if (generated.userId !== existingMember.user_id) {
+      throw new Error('El correo no coincide con el usuario registrado en esta inmobiliaria.');
+    }
+    sendJson(response, 200, {
+      success: true,
+      member: existingMember,
+      inviteLink: generated.inviteLink,
+      linkType: 'recovery',
+    });
+    return;
+  }
+
+  await ensureSeat(requester.organization_id, options);
+  const generated = await generateTeamLink('invite', email, options, {
+    organization_id: requester.organization_id,
+    organization_role: role,
+    display_name: displayName,
+  });
 
   const target = new URL(`${options.supabaseUrl}/rest/v1/organization_members`);
   target.searchParams.set('on_conflict', 'organization_id,user_id');
@@ -228,7 +275,7 @@ async function inviteMember(request: IncomingMessage, response: ServerResponse, 
     },
     body: JSON.stringify({
       organization_id: requester.organization_id,
-      user_id: invitedUserId,
+      user_id: generated.userId,
       role,
       status: 'invited',
       display_name: displayName,
@@ -238,7 +285,12 @@ async function inviteMember(request: IncomingMessage, response: ServerResponse, 
   })) as MembershipRow[];
   const member = rows[0];
   if (!member) throw new Error('No se pudo asociar la invitación a la inmobiliaria.');
-  sendJson(response, 201, { success: true, member, inviteLink });
+  sendJson(response, 201, {
+    success: true,
+    member,
+    inviteLink: generated.inviteLink,
+    linkType: 'invite',
+  });
 }
 
 async function updateMember(request: IncomingMessage, response: ServerResponse, options: TeamManagementOptions, memberId: number): Promise<void> {
