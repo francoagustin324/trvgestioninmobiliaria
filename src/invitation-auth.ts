@@ -161,6 +161,22 @@ export async function consumeInvitationSessionFromUrl(): Promise<void> {
   history.replaceState(null, '', '/aceptar-invitacion');
 }
 
+async function activateInvitationMemberships(
+  session: StoredCloudSession,
+  config: Required<Pick<PublicCloudConfig, 'url' | 'publishableKey'>>,
+): Promise<void> {
+  await parseResponse(await fetch(`${config.url}/rest/v1/rpc/activate_my_organization_memberships`, {
+    method: 'POST',
+    headers: {
+      apikey: config.publishableKey,
+      Authorization: `Bearer ${session.accessToken}`,
+      'Content-Type': 'application/json',
+    },
+    body: '{}',
+    cache: 'no-store',
+  }));
+}
+
 export async function setInvitationPassword(password: string): Promise<void> {
   if (password.length < 8) throw new Error('La contraseña debe tener al menos 8 caracteres.');
   const session = readStoredSession();
@@ -179,5 +195,6 @@ export async function setInvitationPassword(password: string): Promise<void> {
     },
     body: JSON.stringify({ password }),
   }));
+  await activateInvitationMemberships(session, config);
   localStorage.removeItem(INVITATION_KEY);
 }

@@ -29,6 +29,22 @@ test('la contraseña se actualiza con la sesión del invitado y sin clave secret
   assert.ok(!source.includes('service_role'));
 });
 
+test('la aceptación activa la membresía antes de entrar al CRM', () => {
+  const source = readFileSync('src/invitation-auth.ts', 'utf8');
+  const migration = readFileSync('supabase/migrations/20260713_auth_multiusuario_rls.sql', 'utf8');
+  const passwordUpdate = source.indexOf("fetch(`${config.url}/auth/v1/user`");
+  const activation = source.indexOf('/rest/v1/rpc/activate_my_organization_memberships');
+  const cleanup = source.indexOf('localStorage.removeItem(INVITATION_KEY)');
+  assert.ok(passwordUpdate >= 0);
+  assert.ok(activation > passwordUpdate);
+  assert.ok(cleanup > activation);
+  assert.ok(source.includes("method: 'POST'"));
+  assert.ok(source.includes("Authorization: `Bearer ${session.accessToken}`"));
+  assert.ok(migration.includes('create or replace function public.activate_my_organization_memberships()'));
+  assert.ok(migration.includes("set status = 'active', last_active_at = now()"));
+  assert.ok(migration.includes('where user_id = auth.uid()'));
+});
+
 test('los mensajes externos se escapan antes de insertarse en la pantalla', () => {
   const source = readFileSync('src/mvp-invitation-auth.ts', 'utf8');
   assert.ok(source.includes("import { escapeHtml } from './utils.js'"));
