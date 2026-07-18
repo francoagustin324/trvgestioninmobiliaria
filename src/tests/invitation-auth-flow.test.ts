@@ -29,6 +29,12 @@ test('la contraseña se actualiza con la sesión del invitado y sin clave secret
   assert.ok(!source.includes('service_role'));
 });
 
+test('los mensajes externos se escapan antes de insertarse en la pantalla', () => {
+  const source = readFileSync('src/mvp-invitation-auth.ts', 'utf8');
+  assert.ok(source.includes("import { escapeHtml } from './utils.js'"));
+  assert.ok(source.includes('${escapeHtml(message)}'));
+});
+
 test('el MVP intercepta la invitación antes de cargar login o CRM', () => {
   const main = readFileSync('src/mvp-main.ts', 'utf8');
   const invitationCheck = main.indexOf('if (isInvitationPage())');
