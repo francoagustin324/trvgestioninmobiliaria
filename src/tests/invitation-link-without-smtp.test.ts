@@ -17,13 +17,17 @@ test('el servidor genera enlaces sin enviar correo', () => {
   assert.ok(!server.includes('/auth/v1/invite'));
 });
 
-test('el enlace sólo se genera detrás de sesión y permisos de equipo', () => {
-  const authIndex = server.indexOf('authenticatedUser(request, options)');
-  const membershipIndex = server.indexOf('requesterMembership(user.id!, options)');
-  const generateIndex = server.indexOf('/auth/v1/admin/generate_link');
-  assert.ok(authIndex >= 0);
+test('el enlace sólo se solicita después de validar sesión y permisos de equipo', () => {
+  const inviteHandlerIndex = server.indexOf('async function inviteMember');
+  const authIndex = server.indexOf('authenticatedUser(request, options)', inviteHandlerIndex);
+  const membershipIndex = server.indexOf('requesterMembership(user.id!, options)', authIndex);
+  const existingLinkIndex = server.indexOf("generateTeamLink('recovery'", membershipIndex);
+  const newLinkIndex = server.indexOf("generateTeamLink('invite'", membershipIndex);
+  assert.ok(inviteHandlerIndex >= 0);
+  assert.ok(authIndex > inviteHandlerIndex);
   assert.ok(membershipIndex > authIndex);
-  assert.ok(generateIndex > membershipIndex);
+  assert.ok(existingLinkIndex > membershipIndex);
+  assert.ok(newLinkIndex > membershipIndex);
   assert.ok(server.includes("['owner', 'admin'].includes"));
 });
 
