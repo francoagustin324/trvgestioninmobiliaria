@@ -9,6 +9,7 @@ import { renderMvpProperties } from './mvp-properties-ui.js';
 import { renderMvpUsers } from './mvp-users-ui.js';
 import { renderMvpConversations } from './mvp-conversations-ui.js';
 import { installPropertyPhotoUxGuard } from './property-photo-ux.js';
+import { isInvitationPage, renderInvitationAuth } from './mvp-invitation-auth.js';
 import {
   hasAuthenticatedSession,
   hydrateAuthenticatedSession,
@@ -149,6 +150,10 @@ function bindEvents(): void {
 }
 
 async function bootstrap(): Promise<void> {
+  if (isInvitationPage()) {
+    await renderInvitationAuth(root);
+    return;
+  }
   const shortFichaMatch = location.pathname.match(/^\/ficha\/([a-z0-9-]+)\/?$/i);
   if (shortFichaMatch?.[1]) {
     document.title = 'Ficha de propiedad | PropControl';
