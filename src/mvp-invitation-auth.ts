@@ -5,6 +5,7 @@ import {
   isInvitationCallback,
   setInvitationPassword,
 } from './invitation-auth.js';
+import { escapeHtml } from './utils.js';
 
 function formValue(form: HTMLFormElement, name: string): string {
   return String(new FormData(form).get(name) || '').trim();
@@ -28,7 +29,7 @@ function invitationShell(content: string): string {
 }
 
 function renderInvitationError(root: HTMLElement, message: string): void {
-  root.innerHTML = invitationShell(`<h2>No se pudo abrir la invitación</h2><p>${message}</p><a class="button-link" href="/login">Volver a ingresar</a>`);
+  root.innerHTML = invitationShell(`<h2>No se pudo abrir la invitación</h2><p>${escapeHtml(message)}</p><a class="button-link" href="/login">Volver a ingresar</a>`);
 }
 
 export async function renderInvitationAuth(root: HTMLElement): Promise<void> {
