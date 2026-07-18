@@ -3,6 +3,7 @@ import { getCloudSession } from './cloud-api.js';
 interface InvitationResponse {
   success?: boolean;
   inviteLink?: string;
+  linkType?: 'invite' | 'recovery';
   error?: string;
 }
 
@@ -20,7 +21,7 @@ async function responsePayload(response: Response): Promise<InvitationResponse> 
   const record = payload && typeof payload === 'object' && !Array.isArray(payload)
     ? payload as InvitationResponse
     : {};
-  if (!response.ok) throw new Error(record.error || `No se pudo crear la invitación (${response.status}).`);
+  if (!response.ok) throw new Error(record.error || `No se pudo crear el enlace (${response.status}).`);
   return record;
 }
 
@@ -41,15 +42,16 @@ async function copyText(value: string): Promise<void> {
   if (!copied) throw new Error('No se pudo copiar automáticamente. Seleccioná el enlace y copialo.');
 }
 
-function showInvitationLink(link: string, email: string): void {
+function showInvitationLink(link: string, email: string, linkType: 'invite' | 'recovery' = 'invite'): void {
   document.querySelector('#invitation-link-dialog')?.remove();
+  const existingUser = linkType === 'recovery';
   const modal = document.createElement('div');
   modal.id = 'invitation-link-dialog';
   modal.className = 'auth-modal';
   modal.innerHTML = `<div class="auth-dialog" role="dialog" aria-modal="true" aria-labelledby="invitation-link-title">
-    <span class="eyebrow">Invitación creada</span>
+    <span class="eyebrow">${existingUser ? 'Enlace renovado' : 'Invitación creada'}</span>
     <h2 id="invitation-link-title">Compartí este enlace</h2>
-    <p class="auth-copy">Enviáselo únicamente a <strong data-invitation-email></strong>. El invitado podrá crear su contraseña y entrar como usuario de tu inmobiliaria.</p>
+    <p class="auth-copy">Enviáselo únicamente a <strong data-invitation-email></strong>. ${existingUser ? 'El usuario ya estaba registrado y podrá crear o restablecer su contraseña.' : 'El invitado podrá crear su contraseña y entrar como usuario de tu inmobiliaria.'}</p>
     <label>Enlace seguro<input data-invitation-link type="text" readonly></label>
     <div class="auth-message" data-invitation-copy-status role="status">Usalo cuanto antes y no lo publiques.</div>
     <button type="button" data-copy-invitation-link>Copiar enlace</button>
@@ -103,11 +105,11 @@ async function createInvitation(form: HTMLFormElement): Promise<void> {
       },
       body: JSON.stringify({ name, email, role }),
     }));
-    if (!payload.success || !payload.inviteLink) throw new Error(payload.error || 'El servidor no devolvió el enlace de invitación.');
-    feedback(form, 'Invitación creada. Copiá el enlace para enviarlo.');
-    showInvitationLink(payload.inviteLink, email);
+    if (!payload.success || !payload.inviteLink) throw new Error(payload.error || 'El servidor no devolvió el enlace de acceso.');
+    feedback(form, payload.linkType === 'recovery' ? 'Enlace renovado. Copialo para enviarlo.' : 'Invitación creada. Copiá el enlace para enviarlo.');
+    showInvitationLink(payload.inviteLink, email, payload.linkType);
   } catch (error) {
-    feedback(form, error instanceof Error ? error.message : 'No se pudo crear la invitación.', true);
+    feedback(form, error instanceof Error ? error.message : 'No se pudo crear el enlace.', true);
     if (submit) submit.disabled = false;
   }
 }
