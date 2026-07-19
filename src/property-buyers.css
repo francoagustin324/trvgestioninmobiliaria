@@ -1,0 +1,26 @@
+.mvp-property-buyers,
+.mvp-buyer-match-empty { grid-column:1 / -1; }
+.mvp-property-buyers { border-top:1px solid #e3eaee; padding-top:12px; }
+.mvp-property-buyers summary { display:flex; align-items:center; justify-content:space-between; gap:12px; color:#294755; cursor:pointer; font-size:.76rem; font-weight:850; list-style:none; }
+.mvp-property-buyers summary::-webkit-details-marker { display:none; }
+.mvp-property-buyers summary::before { content:'▸'; color:#d0a33c; }
+.mvp-property-buyers[open] summary::before { content:'▾'; }
+.mvp-property-buyers summary span { flex:1; }
+.mvp-property-buyers summary strong { padding:5px 8px; border-radius:999px; color:#173951; background:#edf4f9; font-size:.68rem; }
+.mvp-buyer-match-list { display:grid; gap:8px; margin-top:11px; }
+.mvp-buyer-match-row { display:grid; grid-template-columns:minmax(0,1fr) auto; align-items:center; gap:14px; padding:12px; border:1px solid #dce5e9; border-radius:11px; background:#f8fafb; }
+.mvp-buyer-match-main { min-width:0; }
+.mvp-buyer-match-title { display:flex; flex-wrap:wrap; align-items:center; gap:8px; }
+.mvp-buyer-match-title strong { color:#173951; font-size:.82rem; }
+.mvp-buyer-match-title span { color:#385c6e; font-size:.72rem; font-weight:850; }
+.mvp-buyer-match-main p { margin:4px 0 0; color:#617580; font-size:.72rem; }
+.mvp-buyer-match-main small { display:block; margin-top:7px; color:#8a5b18; font-size:.68rem; font-weight:750; }
+.mvp-buyer-match-actions { display:grid; justify-items:end; gap:7px; }
+.mvp-buyer-match-actions button { min-height:34px; padding:7px 10px; font-size:.72rem; }
+.mvp-buyer-match-empty { margin:0; padding-top:10px; border-top:1px solid #e3eaee; color:#71818a; font-size:.72rem; }
+@media (max-width:640px) {
+  .mvp-buyer-match-row { grid-template-columns:1fr; }
+  .mvp-buyer-match-actions { grid-template-columns:auto 1fr; align-items:center; justify-items:start; }
+  .mvp-buyer-match-actions button { justify-self:end; }
+  .mvp-property-buyers summary { align-items:flex-start; }
+}
