@@ -1,0 +1,31 @@
+.mvp-lead-card-with-matches { display:grid; align-items:stretch; gap:14px; }
+.mvp-lead-card-main { display:flex; align-items:center; justify-content:space-between; gap:18px; }
+.mvp-lead-matches { border-top:1px solid #e3eaee; padding-top:12px; }
+.mvp-lead-matches summary { display:flex; align-items:center; justify-content:space-between; gap:12px; color:#294755; cursor:pointer; font-size:.76rem; font-weight:850; list-style:none; }
+.mvp-lead-matches summary::-webkit-details-marker { display:none; }
+.mvp-lead-matches summary::before { content:'▸'; color:#d0a33c; }
+.mvp-lead-matches[open] summary::before { content:'▾'; }
+.mvp-lead-matches summary span { flex:1; }
+.mvp-lead-matches summary strong { padding:5px 8px; border-radius:999px; color:#173951; background:#edf4f9; font-size:.68rem; }
+.mvp-match-list { display:grid; gap:8px; margin-top:11px; }
+.mvp-match-row { display:grid; grid-template-columns:minmax(0,1fr) auto; align-items:center; gap:14px; padding:12px; border:1px solid #dce5e9; border-radius:11px; background:#f8fafb; }
+.mvp-match-property { min-width:0; }
+.mvp-match-title { display:flex; flex-wrap:wrap; align-items:center; gap:8px; }
+.mvp-match-title strong { color:#173951; font-size:.82rem; }
+.mvp-match-title span { color:#385c6e; font-size:.72rem; font-weight:850; }
+.mvp-match-property p { margin-top:4px; font-size:.72rem; }
+.mvp-match-property small { display:block; margin-top:7px; color:#8a5b18; font-size:.68rem; font-weight:750; }
+.mvp-match-actions { display:grid; justify-items:end; gap:7px; }
+.mvp-match-score { padding:5px 8px; border-radius:999px; font-size:.7rem; }
+.mvp-match-score.alta { color:#166347; background:#e8f7ef; }
+.mvp-match-score.buena { color:#285267; background:#edf4f7; }
+.mvp-match-score.posible { color:#7b5819; background:#fff1d8; }
+.mvp-match-actions button { min-height:34px; padding:7px 10px; font-size:.72rem; }
+.mvp-match-empty { margin-top:4px!important; padding-top:10px; border-top:1px solid #e3eaee; color:#71818a!important; font-size:.72rem; }
+@media (max-width:640px) {
+  .mvp-lead-card-main { align-items:flex-start; flex-direction:column; }
+  .mvp-match-row { grid-template-columns:1fr; }
+  .mvp-match-actions { grid-template-columns:auto 1fr; align-items:center; justify-items:start; }
+  .mvp-match-actions button { justify-self:end; }
+  .mvp-lead-matches summary { align-items:flex-start; }
+}
