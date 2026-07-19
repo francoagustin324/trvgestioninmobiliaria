@@ -21,7 +21,7 @@ test('el matching respeta la visibilidad del usuario activo', () => {
 });
 
 test('la interfaz abre el lead compatible sin modificar datos', () => {
-  assert.ok(buyersUi.includes("state.activeModule = 'leads'"));
+  assert.ok(buyersUi.includes("state.activeModule = 'crm'"));
   assert.ok(buyersUi.includes('state.editingClientId = clientId'));
   assert.ok(buyersUi.includes('state.openForms.client = true'));
   assert.ok(buyersUi.includes("new CustomEvent('trv-render')"));
