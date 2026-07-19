@@ -65,7 +65,7 @@ function scheduleEnhancement(): void {
 
 function openMatchedLead(clientId: number): void {
   if (!visibleClients().some((client) => client.id === clientId)) return;
-  state.activeModule = 'leads';
+  state.activeModule = 'crm';
   state.editingClientId = clientId;
   state.openForms.client = true;
   document.dispatchEvent(new CustomEvent('trv-render'));
