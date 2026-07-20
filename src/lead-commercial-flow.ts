@@ -27,6 +27,18 @@ export interface CommercialProgressResult {
 
 const TERMINAL_STAGES = new Set<CommercialStage>(['Ganada', 'Perdida']);
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
+const STYLE_ID = 'propcontrol-lead-commercial-flow-styles';
+
+function installCommercialFlowStyles(): void {
+  if (typeof document === 'undefined' || document.getElementById(STYLE_ID)) return;
+  const link = document.createElement('link');
+  link.id = STYLE_ID;
+  link.rel = 'stylesheet';
+  link.href = '/src/lead-commercial-flow.css?v=20260720-44';
+  document.head.append(link);
+}
+
+installCommercialFlowStyles();
 
 function normalizedDate(value: string | undefined): string | undefined {
   const trimmed = value?.trim();
