@@ -64,7 +64,9 @@ test('la ficha pública prioriza fotos, resumen, datos clave y contacto', () => 
   assert.ok(factsPosition < whatsappPosition);
   assert.ok(whatsappPosition < descriptionPosition);
   assert.ok(descriptionPosition < detailsPosition);
-  assert.match(html, /Consultar disponibilidad por WhatsApp/);
+  assert.match(html, />Consultar por WhatsApp<\/a>/);
+  assert.doesNotMatch(html, /Consultar disponibilidad por WhatsApp/);
+  assert.doesNotMatch(html, /<svg[^>]*aria-hidden="true"/);
   assert.match(html, /Ver todos los detalles/);
   assert.match(html, /class="public-key-item"/);
 });
