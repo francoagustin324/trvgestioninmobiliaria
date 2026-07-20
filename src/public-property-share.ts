@@ -41,8 +41,18 @@ async function parseResponse(response: Response): Promise<unknown> {
   return payload;
 }
 
-async function shareConfig(): Promise<Required<Pick<ShareConfig, 'url' | 'publishableKey'>> & Pick<ShareConfig, 'publicUrl'>> {
-  configPromise ??= fetch('/api/cloud-config', {
+async function fetchWithTimeout(input: RequestInfo | URL, init: RequestInit = {}, timeoutMs = 10_000): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(input, { ...init, signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function loadShareConfig(): Promise<Required<Pick<ShareConfig, 'url' | 'publishableKey'>> & Pick<ShareConfig, 'publicUrl'>> {
+  return fetchWithTimeout('/api/cloud-config', {
     headers: { Accept: 'application/json' },
     cache: 'no-store',
   }).then(parseResponse).then((payload) => {
@@ -56,7 +66,19 @@ async function shareConfig(): Promise<Required<Pick<ShareConfig, 'url' | 'publis
       publicUrl: config.publicUrl?.replace(/\/+$/g, ''),
     };
   });
-  return configPromise;
+}
+
+async function shareConfig(): Promise<Required<Pick<ShareConfig, 'url' | 'publishableKey'>> & Pick<ShareConfig, 'publicUrl'>> {
+  // Memoiza SOLO la config exitosa. Si la primera consulta falla (señal floja en
+  // el celular), se descarta la promesa rechazada para que el próximo intento
+  // reintente, en vez de quedar "pegada" en el error hasta recargar la página.
+  configPromise ??= loadShareConfig();
+  try {
+    return await configPromise;
+  } catch (error) {
+    configPromise = null;
+    throw error;
+  }
 }
 
 function headers(config: Required<Pick<ShareConfig, 'url' | 'publishableKey'>>, accessToken?: string): Record<string, string> {
@@ -159,7 +181,7 @@ function validPublicFicha(value: unknown): FichaPublica | null {
 export async function loadPublicPropertyFicha(slug: string): Promise<FichaPublica | null> {
   if (!/^[a-z0-9][a-z0-9-]{4,79}$/.test(slug)) return null;
   const config = await shareConfig();
-  const response = await parseResponse(await fetch(`${config.url}/rest/v1/rpc/get_public_property_ficha`, {
+  const response = await parseResponse(await fetchWithTimeout(`${config.url}/rest/v1/rpc/get_public_property_ficha`, {
     method: 'POST',
     headers: headers(config),
     body: JSON.stringify({ target_slug: slug }),

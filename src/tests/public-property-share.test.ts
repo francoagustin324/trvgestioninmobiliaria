@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
-import { createPropertyPublicSlug, propertyPublicUrl } from '../public-property-share.js';
+import { createPropertyPublicSlug, loadPublicPropertyFicha, propertyPublicUrl } from '../public-property-share.js';
 
 const share = readFileSync('src/public-property-share.ts', 'utf8');
 const main = readFileSync('src/mvp-main.ts', 'utf8');
@@ -47,4 +47,38 @@ test('la tabla pública protege escritura y no expone información interna', () 
 test('el servidor admite un dominio exclusivo para fichas PropControl', () => {
   assert.ok(server.includes('PUBLIC_FICHA_URL'));
   assert.ok(server.includes('publicUrl: publicFichaUrl || undefined'));
+});
+
+test('un fallo transitorio de red no deja la ficha pegada: el siguiente intento reintenta', async () => {
+  const realFetch = globalThis.fetch;
+  let configCalls = 0;
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    const url = String(input);
+    if (url.includes('/api/cloud-config')) {
+      configCalls += 1;
+      if (configCalls === 1) throw new Error('fallo de red transitorio');
+      return new Response(
+        JSON.stringify({ configured: true, url: 'https://x.supabase.co', publishableKey: 'pk_test' }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      );
+    }
+    if (url.includes('get_public_property_ficha')) {
+      return new Response(
+        JSON.stringify({ title: 'Casa Duarte Quirós', photoUrls: [] }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      );
+    }
+    throw new Error(`URL inesperada: ${url}`);
+  }) as typeof fetch;
+
+  try {
+    // Primer intento: la config falla → la ficha no carga.
+    await assert.rejects(() => loadPublicPropertyFicha('casa-duarte-quiros-a7k3p9x'));
+    // Segundo intento: NO queda pegado en el error memorizado → carga bien.
+    const ficha = await loadPublicPropertyFicha('casa-duarte-quiros-a7k3p9x');
+    assert.equal(ficha?.title, 'Casa Duarte Quirós');
+    assert.equal(configCalls, 2);
+  } finally {
+    globalThis.fetch = realFetch;
+  }
 });
