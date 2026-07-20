@@ -99,7 +99,6 @@ export function publicFichaHtml(ficha: FichaPublica): string {
   const galleryBadge = photoUrls.length ? `<span class="public-gallery-badge">${photoUrls.length} ${photoUrls.length === 1 ? 'foto' : 'fotos'}</span>` : '';
   const zone = hasValue(ficha.zone) ? String(ficha.zone) : hasValue(ficha.approxAddress) ? String(ficha.approxAddress) : '';
   const details = secondaryDetails(ficha);
-  const phoneIcon = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 15a4 4 0 0 1-4 4H8l-5 3 1.7-5A8 8 0 1 1 21 15Z"/><path d="M8.5 9.5c1 2.4 2.6 4 5 5"/></svg>';
 
   return `<article class="public-ficha">
     <header class="public-header"><img src="${LOGO_PATH}" alt="${AGENCY_BRAND.name}"><div><span>${AGENCY_BRAND.name}</span><h1>${escapeHtml(ficha.title)}</h1></div></header>
@@ -110,7 +109,7 @@ export function publicFichaHtml(ficha: FichaPublica): string {
       ${zone ? `<p class="public-location">${escapeHtml(zone)}</p>` : ''}
     </section>
     <section class="public-key-facts" aria-label="Características principales">${keyFacts(ficha)}</section>
-    <a class="whatsapp-public" href="https://wa.me/${WHATSAPP_NUMBER}?text=${contactText}" target="_blank" rel="noopener">${phoneIcon}<span>Consultar disponibilidad por WhatsApp</span></a>
+    <a class="whatsapp-public" href="https://wa.me/${WHATSAPP_NUMBER}?text=${contactText}" target="_blank" rel="noopener">Consultar por WhatsApp</a>
     ${hasValue(ficha.description) ? `<section class="public-description"><h2>Descripción</h2><p>${escapeHtml(ficha.description)}</p></section>` : ''}
     <details class="public-details"><summary>Ver todos los detalles</summary><section class="public-data">${details}</section></details>
     <small>${FICHA_LEGAL}</small>
