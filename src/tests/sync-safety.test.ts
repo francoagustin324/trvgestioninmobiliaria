@@ -37,7 +37,7 @@ function signedStorage(userId = 'franco-user'): MemoryStorage {
   return storage;
 }
 
-test('separa la base local por cuenta y migra la base anterior sin borrarla', () => {
+test('separa la base local por cuenta sin heredar la base pre-login', () => {
   const storage = signedStorage();
   storage.setItem(STORAGE_KEY, JSON.stringify(initialData));
 
@@ -45,9 +45,29 @@ test('separa la base local por cuenta y migra la base anterior sin borrarla', ()
 
   assert.equal(key, `${STORAGE_KEY}:user:franco-user`);
   assert.equal(scopedStorageKey(storage), key);
-  assert.equal(readLocalSnapshot(storage)?.clients[0]?.name, initialData.clients[0]?.name);
-  assert.equal(getSyncState(storage).dirty, true);
+  // La cuenta nueva NO hereda los datos de la clave base pre-login...
+  assert.equal(readLocalSnapshot(storage), null);
+  // ...ni queda marcada como pendiente de subir (no se empuja nada a la nube).
+  assert.equal(getSyncState(storage).dirty, false);
+  // La clave base se conserva intacta (no se borra).
   assert.ok(storage.getItem(STORAGE_KEY));
+});
+
+test('los datos de una cuenta no se filtran a otra en el mismo navegador', () => {
+  // El usuario A deja datos en la clave base del navegador (uso sin iniciar sesión).
+  const storage = new MemoryStorage();
+  const datosDeA = structuredClone(initialData);
+  datosDeA.clients[0]!.name = 'Cliente privado de A';
+  storage.setItem(STORAGE_KEY, JSON.stringify(datosDeA));
+
+  // El usuario B (otra inmobiliaria) inicia sesión en el mismo navegador.
+  storage.setItem('propcontrol-cloud-session-v1', JSON.stringify({ userId: 'usuario-b' }));
+  activateAccountStorage(storage);
+
+  // B arranca vacío (bajará SUS datos de la nube), nunca ve los de A...
+  assert.equal(readLocalSnapshot(storage), null);
+  // ...y no queda nada marcado para subir a la organización de B.
+  assert.equal(getSyncState(storage).dirty, false);
 });
 
 test('crea copias locales rotativas y recupera la versión anterior', () => {

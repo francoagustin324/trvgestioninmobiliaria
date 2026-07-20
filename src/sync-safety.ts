@@ -71,21 +71,15 @@ export function getSyncState(storage?: StorageLike): SyncState {
 }
 
 export function activateAccountStorage(storage?: StorageLike): string {
-  const target = activeStorage(storage);
-  const key = scopedStorageKey(target);
-  if (key === STORAGE_KEY || target.getItem(key)) return key;
-
-  const legacy = target.getItem(STORAGE_KEY);
-  if (!legacy) return key;
-
-  target.setItem(key, legacy);
-  writeSyncState({
-    ...getSyncState(target),
-    dirty: true,
-    localUpdatedAt: new Date().toISOString(),
-    lastError: undefined,
-  }, target);
-  return key;
+  // Devuelve la clave del almacén local de la cuenta activa.
+  //
+  // Importante: NO copia la clave base (pre-login) dentro de la cuenta. Antes lo
+  // hacía y marcaba los datos como "pendientes de subir", lo que podía filtrar a
+  // la organización de un usuario los datos que otra persona hubiera dejado en el
+  // mismo navegador sin iniciar sesión. Una cuenta recién iniciada arranca vacía y
+  // baja sus propios datos de la nube; los cambios locales genuinos ya viven en la
+  // clave de su cuenta y no dependen de esta función.
+  return scopedStorageKey(activeStorage(storage));
 }
 
 export function readLocalSnapshot(storage?: StorageLike): CrmData | null {
