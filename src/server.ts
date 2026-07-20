@@ -6,6 +6,7 @@ import { importProperty } from './server/import-service.js';
 import { storeExtensionImport, takeExtensionImport } from './server/extension-import-store.js';
 import { handleWhatsAppWebhook, WebhookDeduplicator } from './server/whatsapp-webhook.js';
 import { handleTeamManagement } from './server/team-management.js';
+import { clientIp, staticCacheControl } from './server/request-helpers.js';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const port = Number(process.env.PORT || 4173);
@@ -67,7 +68,7 @@ function applySecurityHeaders(response: ServerResponse): void {
 }
 
 function rateLimit(request: IncomingMessage): boolean {
-  const key = request.socket.remoteAddress || 'unknown';
+  const key = clientIp(request.headers, request.socket.remoteAddress || undefined);
   const now = Date.now();
   const current = requestWindows.get(key);
   if (!current || current.resetAt <= now) {
@@ -134,13 +135,17 @@ function serveStatic(request: IncomingMessage, response: ServerResponse): void {
   let filePath: string;
   try { filePath = resolveRequestPath(request.url || '/'); } catch { filePath = join(root, 'index.html'); }
   const target = existsSync(filePath) && statSync(filePath).isFile() ? filePath : join(root, 'index.html');
-  response.writeHead(200, {
+  const cacheControl = staticCacheControl(request.url || '/', extname(target));
+  const headers: Record<string, string> = {
     'Content-Type': contentTypes[extname(target)] || 'application/octet-stream',
-    'Cache-Control': 'no-store, no-cache, must-revalidate, max-age=0',
-    Pragma: 'no-cache',
-    Expires: '0',
+    'Cache-Control': cacheControl,
     'X-Content-Type-Options': 'nosniff',
-  });
+  };
+  if (cacheControl.startsWith('no-store')) {
+    headers.Pragma = 'no-cache';
+    headers.Expires = '0';
+  }
+  response.writeHead(200, headers);
   createReadStream(target).on('error', () => response.destroy()).pipe(response);
 }
 
