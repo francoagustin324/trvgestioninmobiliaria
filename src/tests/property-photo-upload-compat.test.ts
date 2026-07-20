@@ -17,9 +17,9 @@ test('el navegador no consulta directamente Supabase ni convierte el upload a ba
   assert.equal(upload.includes('/storage/v1/object/'), false);
 });
 
-test('el servidor usa userId y no exige columnas inexistentes', () => {
+test('el servidor identifica usuario e inmobiliaria sin exigir columnas inexistentes', () => {
   assert.ok(server.includes("select', 'organization_id'"));
-  assert.ok(server.includes('return { userId, accessToken }'));
+  assert.ok(server.includes('return { userId, organizationId, accessToken }'));
   assert.equal(server.includes('member_id'), false);
   assert.equal(server.includes('membership.status'), false);
   assert.equal(migration.includes('member.status'), false);
