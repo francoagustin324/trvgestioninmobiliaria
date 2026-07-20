@@ -15,10 +15,10 @@ test('acepta imágenes permitidas y rechaza formatos inseguros', () => {
   assert.throws(() => parsePropertyPhotoDataUrl('javascript:alert(1)'));
 });
 
-test('la ruta queda aislada por usuario y propiedad', () => {
-  const userId = '2ce3f73d-0ea3-4be6-a1c5-5a26dc502f53';
-  const path = propertyPhotoObjectPath(userId, 27, 'jpg', 'foto-segura-123');
-  assert.equal(path, `${userId}/27/foto-segura-123.jpg`);
+test('la ruta queda aislada por inmobiliaria y propiedad', () => {
+  const organizationId = '2ce3f73d-0ea3-4be6-a1c5-5a26dc502f53';
+  const path = propertyPhotoObjectPath(organizationId, 27, 'jpg', 'foto-segura-123');
+  assert.equal(path, `${organizationId}/27/foto-segura-123.jpg`);
   assert.equal(path.includes('..'), false);
 });
 

@@ -111,7 +111,7 @@ function authenticatedHeaders(options: PropertyPhotoStorageOptions, accessToken:
 async function authenticatedPhotoOwner(
   request: IncomingMessage,
   options: PropertyPhotoStorageOptions,
-): Promise<{ userId: string; accessToken: string }> {
+): Promise<{ userId: string; organizationId: string; accessToken: string }> {
   const accessToken = bearerToken(request);
   const authHeaders = authenticatedHeaders(options, accessToken);
   const authResponse = await fetch(`${options.supabaseUrl}/auth/v1/user`, {
@@ -131,8 +131,9 @@ async function authenticatedPhotoOwner(
       Accept: 'application/json',
     },
   })) as MembershipRow[];
-  if (!rows[0]?.organization_id) throw new Error('La cuenta no pertenece a una inmobiliaria.');
-  return { userId, accessToken };
+  const organizationId = rows[0]?.organization_id;
+  if (!organizationId) throw new Error('La cuenta no pertenece a una inmobiliaria.');
+  return { userId, organizationId, accessToken };
 }
 
 export function parsePropertyPhotoDataUrl(value: unknown): PreparedPhoto {
@@ -155,16 +156,16 @@ function safeUploadIdentifier(value: unknown): string {
 }
 
 export function propertyPhotoObjectPath(
-  userId: string,
+  organizationId: string,
   propertyId: unknown,
   extension: string,
   uploadId?: unknown,
 ): string {
-  const safeUserId = userId.replace(/[^a-zA-Z0-9_-]/g, '');
-  if (!safeUserId) throw new Error('No se pudo identificar al usuario de la foto.');
+  const safeOrganizationId = organizationId.replace(/[^a-zA-Z0-9_-]/g, '');
+  if (!safeOrganizationId) throw new Error('No se pudo identificar la inmobiliaria de la foto.');
   const numericPropertyId = Number(propertyId);
   const propertySegment = Number.isInteger(numericPropertyId) && numericPropertyId > 0 ? String(numericPropertyId) : 'draft';
-  return `${safeUserId}/${propertySegment}/${safeUploadIdentifier(uploadId)}.${extension}`;
+  return `${safeOrganizationId}/${propertySegment}/${safeUploadIdentifier(uploadId)}.${extension}`;
 }
 
 export function publicPropertyPhotoUrl(supabaseUrl: string, objectPath: string): string {
@@ -177,7 +178,7 @@ async function uploadPhoto(
   options: PropertyPhotoStorageOptions,
 ): Promise<void> {
   const requestUrl = new URL(request.url || '/', 'http://localhost');
-  const { userId, accessToken } = await authenticatedPhotoOwner(request, options);
+  const { organizationId, accessToken } = await authenticatedPhotoOwner(request, options);
   const contentType = String(request.headers['content-type'] || '').toLowerCase();
 
   let photo: PreparedPhoto;
@@ -194,7 +195,7 @@ async function uploadPhoto(
   }
 
   const objectPath = propertyPhotoObjectPath(
-    userId,
+    organizationId,
     propertyId,
     photo.extension,
     uploadId,

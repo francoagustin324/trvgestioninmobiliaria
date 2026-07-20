@@ -10,7 +10,7 @@ import {
 
 const upload = readFileSync('src/property-photo-upload.ts', 'utf8');
 const server = readFileSync('src/server/property-photo-storage.ts', 'utf8');
-const migration = readFileSync('supabase/migrations/20260715093000_property_photos.sql', 'utf8');
+const migration = readFileSync('supabase/migrations/20260720120000_property_photos_by_organization.sql', 'utf8');
 
 test('los errores estructurales detienen el lote', () => {
   assert.equal(shouldStopPropertyPhotoBatch(
@@ -45,23 +45,22 @@ test('el navegador envía la foto como binario a PropControl', () => {
   assert.equal(upload.includes('/storage/v1/object/'), false);
 });
 
-test('el servidor guarda en una carpeta del usuario autenticado', () => {
+test('el servidor guarda en una carpeta de la inmobiliaria autenticada', () => {
   assert.ok(server.includes('authenticatedPhotoOwner'));
-  assert.ok(server.includes('return { userId, accessToken }'));
-  assert.ok(server.includes('propertyPhotoObjectPath(\n    userId'));
+  assert.ok(server.includes('return { userId, organizationId, accessToken }'));
+  assert.ok(server.includes('propertyPhotoObjectPath(\n    organizationId'));
   assert.ok(server.includes('/auth/v1/user'));
   assert.ok(server.includes('/rest/v1/organization_members'));
   assert.ok(server.includes('/storage/v1/object/'));
   assert.ok(server.includes('Authorization: `Bearer ${accessToken}`'));
 });
 
-test('la migración reemplaza las políticas por carpeta de usuario', () => {
-  assert.ok(migration.includes("'property-photos'"));
-  assert.ok(migration.includes('file_size_limit'));
-  assert.ok(migration.includes('property_photos_select_by_user'));
-  assert.ok(migration.includes('property_photos_insert_by_user'));
-  assert.ok(migration.includes('property_photos_update_by_user'));
-  assert.ok(migration.includes('property_photos_delete_by_user'));
-  assert.ok(migration.includes("(storage.foldername(name))[1] = auth.uid()::text"));
-  assert.equal(migration.includes('can_manage_property_photo((storage.foldername(name))[1])'), false);
+test('la migración aísla las fotos por inmobiliaria', () => {
+  assert.ok(migration.includes('property_photos_select_by_org'));
+  assert.ok(migration.includes('property_photos_insert_by_org'));
+  assert.ok(migration.includes('property_photos_update_by_org'));
+  assert.ok(migration.includes('property_photos_delete_by_org'));
+  assert.ok(migration.includes('private.can_access_property_photo((storage.foldername(name))[1])'));
+  assert.ok(migration.includes('private.is_active_org_member'));
+  assert.equal(migration.includes("(storage.foldername(name))[1] = auth.uid()::text"), false);
 });
