@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { decodePublicFicha } from '../public-ficha.js';
+import { decodePublicFicha, publicFichaHtml } from '../public-ficha.js';
 import { propertyFichaLink, propertyToPublicFicha, type PropertyWithFicha } from '../property-ficha.js';
 
 const property: PropertyWithFicha = {
@@ -46,4 +46,25 @@ test('el enlace compartible abre una ficha autocontenida y válida', () => {
   assert.equal(decoded?.title, property.title);
   assert.equal(decoded?.description, property.description);
   assert.equal(decoded?.photoUrls.length, 1);
+});
+
+test('la ficha pública prioriza fotos, resumen, datos clave y contacto', () => {
+  const payload = propertyToPublicFicha(property);
+  const html = publicFichaHtml(payload);
+  const galleryPosition = html.indexOf('class="public-gallery');
+  const summaryPosition = html.indexOf('class="public-summary"');
+  const factsPosition = html.indexOf('class="public-key-facts"');
+  const whatsappPosition = html.indexOf('class="whatsapp-public"');
+  const descriptionPosition = html.indexOf('class="public-description"');
+  const detailsPosition = html.indexOf('class="public-details"');
+
+  assert.ok(galleryPosition >= 0);
+  assert.ok(galleryPosition < summaryPosition);
+  assert.ok(summaryPosition < factsPosition);
+  assert.ok(factsPosition < whatsappPosition);
+  assert.ok(whatsappPosition < descriptionPosition);
+  assert.ok(descriptionPosition < detailsPosition);
+  assert.match(html, /Consultar disponibilidad por WhatsApp/);
+  assert.match(html, /Ver todos los detalles/);
+  assert.match(html, /class="public-key-item"/);
 });
