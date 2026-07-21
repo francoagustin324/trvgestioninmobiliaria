@@ -15,7 +15,8 @@ test('Leads utiliza el motor existente y muestra hasta tres propiedades compatib
 });
 
 test('el acceso a una coincidencia respeta propiedades visibles y abre el módulo existente', () => {
-  assert.ok(leadUi.includes("import { visibleProperties } from './team-access.js'"));
+  assert.ok(leadUi.includes("from './team-access.js'"));
+  assert.ok(leadUi.includes('visibleProperties'));
   assert.ok(leadUi.includes('visibleProperties().some((property) => property.id === propertyId)'));
   assert.ok(leadUi.includes("state.activeModule = 'propiedades'"));
   assert.ok(leadUi.includes('state.editingPropertyId = propertyId'));
