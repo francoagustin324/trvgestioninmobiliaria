@@ -18,9 +18,11 @@ test('define superficies glass y compatibilidad sin backdrop-filter', () => {
   assert.ok(tokens.includes('@supports not ((backdrop-filter: blur(1px))'));
 });
 
-test('incluye movimiento accesible y foco visible', () => {
+test('define un fondo estático accesible y foco visible', () => {
   assert.ok(tokens.includes('.app-backdrop {'));
-  assert.ok(tokens.includes('@keyframes backdrop-drift'));
+  // el fondo NO debe animarse ni desenfocarse en tiempo real (evita lentitud en toda la app)
+  assert.equal(tokens.includes('@keyframes backdrop-drift'), false);
+  assert.equal(tokens.includes('.app-backdrop::before'), false);
   assert.ok(tokens.includes('@media (prefers-reduced-motion: reduce)'));
   assert.ok(tokens.includes(':focus-visible'));
 });

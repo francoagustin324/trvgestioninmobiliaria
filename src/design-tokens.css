@@ -78,22 +78,9 @@ html {
     var(--bg-0);
 }
 
-.app-backdrop::before {
-  content: "";
-  position: absolute;
-  inset: -26%;
-  background: inherit;
-  filter: blur(80px);
-  opacity: 0.62;
-  animation: backdrop-drift 32s var(--ease-ui) infinite alternate;
-  will-change: transform;
-}
-
-@keyframes backdrop-drift {
-  to {
-    transform: translate3d(4%, -3%, 0) scale(1.1);
-  }
-}
+/* Fondo estático (sin animación ni blur en tiempo real): el degradado radial ya se ve
+   suave y no consume GPU. Antes había una capa animada con blur(80px) que corría en
+   todas las pantallas y volvía lenta la app. */
 
 :where(a, button, input, select, textarea, summary):focus-visible {
   outline: 3px solid color-mix(in srgb, var(--brand) 82%, white);
@@ -108,10 +95,5 @@ html {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
-  }
-
-  .app-backdrop::before {
-    animation: none;
-    transform: none;
   }
 }
