@@ -1,0 +1,176 @@
+/* Usuarios móvil premium — solo presentación. No modifica permisos ni accesos. */
+
+@media (max-width: 720px) {
+  #equipo.module-panel {
+    width: 100%;
+    min-width: 0;
+    padding-inline: 0;
+  }
+
+  #equipo .mvp-page-heading {
+    margin-bottom: 18px;
+  }
+
+  #equipo .mvp-page-heading h1 {
+    font-size: clamp(1.62rem, 6.7vw, 1.95rem);
+    line-height: 1.1;
+  }
+
+  #equipo .mvp-page-heading p {
+    color: #b5c5bc;
+    font-size: 0.96rem;
+    line-height: 1.48;
+  }
+
+  #equipo .mvp-page-heading > button {
+    min-height: 50px;
+    border-radius: 15px;
+    font-size: 1rem;
+    font-weight: 850;
+  }
+
+  #equipo .mvp-user-list {
+    display: grid;
+    gap: 12px;
+  }
+
+  #equipo .mvp-user-row {
+    display: grid;
+    grid-template-columns: 46px minmax(0, 1fr);
+    grid-template-areas:
+      "avatar info"
+      "role role"
+      "status action";
+    align-items: center;
+    gap: 11px 12px;
+    width: 100%;
+    min-width: 0;
+    padding: 15px;
+    border-color: rgba(255, 255, 255, 0.14);
+    border-radius: 18px;
+    background:
+      linear-gradient(180deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0) 42%),
+      rgba(10, 31, 22, 0.88);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.1);
+  }
+
+  #equipo .mvp-user-avatar {
+    grid-area: avatar;
+    width: 46px;
+    height: 46px;
+    color: var(--brand-ink);
+    background: linear-gradient(150deg, var(--brand-bright), var(--brand));
+    font-size: 0.88rem;
+  }
+
+  #equipo .mvp-user-info {
+    grid-area: info;
+    gap: 3px;
+    min-width: 0;
+  }
+
+  #equipo .mvp-user-info strong {
+    color: #f3f7f4;
+    font-size: 1rem;
+    line-height: 1.2;
+    overflow-wrap: anywhere;
+  }
+
+  #equipo .mvp-user-info span {
+    color: #a8bbb0;
+    font-size: 0.76rem;
+    line-height: 1.35;
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+
+  #equipo .mvp-user-row > label {
+    grid-area: role;
+    gap: 6px;
+    color: #aebfb5;
+    font-size: 0.72rem;
+  }
+
+  #equipo .mvp-user-row > label select {
+    width: 100%;
+    min-height: 44px;
+    padding-inline: 13px;
+    border-color: rgba(255, 255, 255, 0.14);
+    border-radius: 12px;
+    background: rgba(255, 255, 255, 0.045);
+    color: #e5ece8;
+    font-size: 0.9rem;
+    font-weight: 760;
+  }
+
+  #equipo .mvp-user-row > label select:disabled {
+    color: #9eb0a6;
+    background: rgba(255, 255, 255, 0.025);
+    opacity: 0.78;
+  }
+
+  #equipo .mvp-user-status {
+    grid-area: status;
+    justify-self: start;
+    padding: 6px 9px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 999px;
+    color: #c6d4cc;
+    background: rgba(255, 255, 255, 0.045);
+    font-size: 0.69rem;
+    line-height: 1.1;
+  }
+
+  #equipo .mvp-user-row > button {
+    grid-area: action;
+    justify-self: end;
+    min-width: 118px;
+    min-height: 42px;
+    padding: 9px 13px;
+    border-radius: 12px;
+    color: #e5ece8;
+    border-color: rgba(255, 255, 255, 0.13);
+    background: rgba(255, 255, 255, 0.045);
+    font-size: 0.8rem;
+    font-weight: 820;
+  }
+
+  #equipo .mvp-user-form {
+    gap: 12px;
+    padding: 15px;
+    border-radius: 18px;
+  }
+
+  #equipo .mvp-user-form input,
+  #equipo .mvp-user-form select {
+    min-height: 46px;
+    font-size: 0.94rem;
+  }
+
+  #equipo .mvp-user-form > button[type="submit"] {
+    min-height: 48px;
+    border-radius: 13px;
+  }
+}
+
+@media (max-width: 430px) {
+  #equipo .mvp-user-row {
+    grid-template-columns: 42px minmax(0, 1fr);
+    grid-template-areas:
+      "avatar info"
+      "role role"
+      "status status"
+      "action action";
+    padding: 14px;
+  }
+
+  #equipo .mvp-user-avatar {
+    width: 42px;
+    height: 42px;
+  }
+
+  #equipo .mvp-user-row > button {
+    width: 100%;
+    justify-self: stretch;
+  }
+}
