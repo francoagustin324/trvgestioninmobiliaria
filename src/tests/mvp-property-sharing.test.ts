@@ -47,5 +47,5 @@ test('el diseño presenta un flujo profesional y responsive', () => {
   assert.ok(css.includes('.mvp-property-form-section-internal'));
   assert.ok(css.includes('@media (max-width:640px)'));
   assert.ok(html.includes('/src/mvp-properties.css?v=20260717-41'));
-  assert.ok(html.includes('/dist/mvp-main.js?v=20260722-44'));
+  assert.ok(html.includes('/dist/mvp-main.js?v=20260722-95'));
 });
