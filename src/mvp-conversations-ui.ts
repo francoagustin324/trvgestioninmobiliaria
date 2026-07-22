@@ -3,6 +3,7 @@ import { visibleConversations } from './team-access.js';
 import { state } from './store.js';
 import { escapeHtml } from './utils.js';
 import { renderMessageTemplates } from './message-templates-ui.js';
+import { appIcons } from './icons.js';
 
 let activeTab: 'bandeja' | 'plantillas' = 'bandeja';
 let conversationSearch = '';
@@ -62,7 +63,7 @@ function messageBubble(message: ConversationMessage): string {
 }
 
 function emptyConversation(): string {
-  return `<div class="mvp-conversation-empty"><div>💬</div><h2>Seleccioná una conversación</h2><p>Acá vas a ver el historial del lead y sus datos principales.</p></div>`;
+  return `<div class="mvp-conversation-empty"><div class="mvp-empty-icon">${appIcons.conversaciones}</div><h2>Seleccioná una conversación</h2><p>Acá vas a ver el historial del lead y sus datos principales.</p></div>`;
 }
 
 function conversationDetail(conversation: WhatsAppConversation | null): string {
