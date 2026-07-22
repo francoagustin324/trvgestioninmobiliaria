@@ -199,6 +199,8 @@ export function isLoginPage(): boolean {
 export function renderPublicAuth(root: HTMLElement): void {
   const register = isRegisterPage();
   root.innerHTML = `<main class="public-auth-shell">
+    <video class="public-auth-bg" autoplay muted loop playsinline preload="auto" poster="/src/assets/fondo-inicio-poster.jpg?v=20260722-1"><source src="/src/assets/fondo-inicio.mp4?v=20260722-1" type="video/mp4"></video>
+    <div class="public-auth-overlay" aria-hidden="true"></div>
     <section class="public-auth-brand">
       <img src="${PRODUCT_BRAND.logo}" alt="${PRODUCT_BRAND.name}">
       <div><span>CRM inmobiliario</span><h1>Ordená cada consulta y cada seguimiento.</h1><p>Una herramienta simple para responder mejor, no perder oportunidades y trabajar en equipo.</p></div>

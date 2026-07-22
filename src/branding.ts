@@ -2,7 +2,7 @@ export const PRODUCT_BRAND = {
   name: 'PropControl',
   tagline: 'Control comercial para inmobiliarias',
   phrase: 'Ordená. Seguí. Cerrá.',
-  logo: '/src/assets/propcontrol-mark.svg',
+  logo: '/src/assets/logo-propcontrol.png',
   wordmark: '/src/assets/propcontrol-logo.svg',
   colors: {
     deepBlue: '#0D1B2A',
