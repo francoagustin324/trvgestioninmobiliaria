@@ -1,9 +1,10 @@
-import { AGENCY_BRAND } from './branding.js';
+import { AGENCY_BRAND, PRODUCT_BRAND } from './branding.js';
 
 export const STORAGE_KEY = 'trv-crm-basico';
 export const WHATSAPP_NUMBER = AGENCY_BRAND.whatsapp;
 export const FICHA_LEGAL = AGENCY_BRAND.publicLegal;
-export const LOGO_PATH = AGENCY_BRAND.logo;
+// Logo de la ficha pública: la casita (logo lindo), manteniendo el nombre TRV.
+export const LOGO_PATH = PRODUCT_BRAND.logo;
 
 export type Temperature = 'Caliente' | 'Tibio' | 'Frío';
 export type ModuleId = 'inicio' | 'crm' | 'propiedades' | 'red' | 'fichas' | 'whatsapp' | 'agenda' | 'equipo' | 'reportes' | 'configuracion';
