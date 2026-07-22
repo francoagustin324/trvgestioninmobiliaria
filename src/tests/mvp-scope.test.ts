@@ -25,12 +25,12 @@ test('index usa solo la entrada MVP y carga las capas visuales aprobadas', () =>
   }
 });
 
-test('PropControl aparece como la única marca principal del software en el lateral', () => {
+test('PropControl aparece como la única marca principal del software en la barra superior', () => {
   const source = readFileSync('src/mvp-main.ts', 'utf8');
   assert.ok(source.includes("import { PRODUCT_BRAND } from './branding.js'"));
-  assert.ok(source.includes('class="mvp-product-brand"'));
-  assert.ok(source.includes('class="mvp-product-logo"'));
-  assert.ok(source.includes('class="mvp-product-copy"'));
+  assert.ok(source.includes('class="app-brand"'));
+  assert.ok(source.includes('class="app-brand-logo"'));
+  assert.ok(source.includes('class="app-brand-copy"'));
   assert.ok(source.includes('CRM inmobiliario'));
   assert.equal(source.includes('AGENCY_BRAND'), false);
   assert.equal(source.includes('mvp-agency-brand'), false);
