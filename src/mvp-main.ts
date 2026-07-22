@@ -34,6 +34,22 @@ const moduleIcons: Partial<Record<ModuleId, string>> = {
   equipo: appIcons.usuarios,
 };
 
+const mobileModuleLabels: Partial<Record<ModuleId, string>> = {
+  crm: 'Leads',
+  whatsapp: 'Chats',
+  agenda: 'Agenda',
+  propiedades: 'Propiedades',
+  equipo: 'Equipo',
+};
+
+function renderNavigationButtons(mobile = false): string {
+  return modules.map(([id, label]) => {
+    const visibleLabel = mobile ? (mobileModuleLabels[id] ?? label) : label;
+    const mobileAttribute = mobile ? ' data-mobile-module' : '';
+    return `<button type="button" class="nav-button" data-module="${id}"${mobileAttribute} title="${label}" aria-label="${label}"><span class="nav-icon" aria-hidden="true">${moduleIcons[id] ?? ''}</span><span class="nav-label">${visibleLabel}</span></button>`;
+  }).join('');
+}
+
 function renderShell(): void {
   root.innerHTML = `<main class="premium-shell mvp-shell">
     <div class="sidebar-backdrop" data-mobile-nav-close hidden></div>
@@ -48,7 +64,7 @@ function renderShell(): void {
     </header>
     <aside class="premium-sidebar mvp-sidebar" id="app-sidebar" aria-label="Navegación principal">
       <div class="sidebar-mobile-head"><span>Menú</span><button type="button" class="sidebar-close" data-mobile-nav-close aria-label="Cerrar menú">×</button></div>
-      <nav>${modules.map(([id, label]) => `<button type="button" class="nav-button" data-module="${id}" title="${label}"><span class="nav-icon" aria-hidden="true">${moduleIcons[id] ?? ''}</span><span class="nav-label">${label}</span></button>`).join('')}</nav>
+      <nav>${renderNavigationButtons()}</nav>
     </aside>
     <section class="premium-content mvp-content">
       <div id="notice" class="notice" hidden></div>
@@ -58,6 +74,7 @@ function renderShell(): void {
       <section class="module-panel" id="propiedades"></section>
       <section class="module-panel" id="equipo"></section>
     </section>
+    <nav class="mobile-bottom-nav" aria-label="Navegación móvil">${renderNavigationButtons(true)}</nav>
   </main>`;
 }
 
@@ -96,12 +113,14 @@ function render(): void {
   modules.forEach(([id]) => {
     const allowed = canAccessModule(id);
     const panel = qs<HTMLElement>(`#${id}`);
-    const button = document.querySelector<HTMLButtonElement>(`[data-module="${id}"]`);
-    button?.toggleAttribute('hidden', !allowed);
+    const buttons = document.querySelectorAll<HTMLButtonElement>(`[data-module="${id}"]`);
+    buttons.forEach((button) => {
+      button.toggleAttribute('hidden', !allowed);
+      button.classList.toggle('active', allowed && id === state.activeModule);
+      if (allowed && id === state.activeModule) button.setAttribute('aria-current', 'page');
+      else button.removeAttribute('aria-current');
+    });
     panel.classList.toggle('active', allowed && id === state.activeModule);
-    button?.classList.toggle('active', allowed && id === state.activeModule);
-    if (allowed && id === state.activeModule) button?.setAttribute('aria-current', 'page');
-    else button?.removeAttribute('aria-current');
   });
 }
 
