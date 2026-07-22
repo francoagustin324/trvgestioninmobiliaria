@@ -433,6 +433,40 @@ button.secondary:not(.delete):not(.nav-button):not(.quiet-button) {
 .mvp-contact-btn.call { color: var(--brand-bright); border-color: rgba(198, 171, 120, 0.32); background: rgba(198, 171, 120, 0.12); }
 .mvp-contact-btn.mail { color: var(--cold); }
 .mvp-contact-btn[data-disabled] { opacity: 0.4; cursor: not-allowed; pointer-events: none; }
+.mvp-contact-btn.wa svg { fill: currentColor; stroke: none; }
+
+/* Acciones de la tarjeta (lápiz + ×) en la esquina superior derecha. */
+.mvp-lead-card { position: relative; }
+.mvp-lead-card-with-matches .mvp-lead-actions,
+.mvp-lead-card .mvp-lead-actions {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  gap: 7px;
+}
+.mvp-icon-btn {
+  width: 34px;
+  height: 34px;
+  min-height: 0;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  border-radius: 10px;
+}
+.mvp-icon-btn svg {
+  width: 17px;
+  height: 17px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.mvp-icon-btn.delete { font-size: 1.3rem; }
+
+/* Fuera la línea divisoria arriba de "propiedades compatibles". */
+.mvp-lead-matches,
+.mvp-match-empty { border-top: 0; padding-top: 6px; }
 
 /* Desplegables nativos en oscuro (los popups dejan de ser blancos). */
 .premium-shell { color-scheme: dark; }
