@@ -70,7 +70,8 @@
     bottom: 8px;
     left: 8px;
     display: grid;
-    grid-template-columns: repeat(5, minmax(0, 1fr));
+    grid-auto-flow: column;
+    grid-auto-columns: minmax(0, 1fr);
     gap: 2px;
     padding: 7px 7px calc(7px + env(safe-area-inset-bottom));
     min-height: var(--pc-mobile-nav-height);

@@ -261,8 +261,12 @@ export function renderAccountMenu(): void {
   const session = getCloudSession();
   const member = session ? state.crm.teamMembers.find((item) => item.userId === session.userId) : null;
   if (!session) { container.innerHTML = ''; return; }
-  const accountName = member?.name || state.crm.organization.name || 'Cuenta PropControl';
+  const settings = state.crm.settings;
+  const accountName = settings?.profileName?.trim() || member?.name || state.crm.organization.name || 'Cuenta PropControl';
   const accountDetail = member?.role || session.email;
+  const avatarGlyph = settings?.avatar
+    ? `<img src="${escapeHtml(settings.avatar)}" alt="">`
+    : '<svg viewBox="0 0 24 24" role="img"><path d="M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8Zm-7 8a7 7 0 0 1 14 0" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>';
   const syncState = getSyncState();
   const syncLabel = syncStatusLabel(syncState);
   const differencePending = isDifferenceError(syncState.lastError);
@@ -273,7 +277,7 @@ export function renderAccountMenu(): void {
     ? '<button type="button" data-account-restore>Recuperar copia anterior</button>'
     : '';
   container.innerHTML = `<details class="mvp-account-menu">
-    <summary aria-label="Abrir menú de cuenta"><span class="mvp-account-avatar" aria-hidden="true"><svg viewBox="0 0 24 24" role="img"><path d="M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8Zm-7 8a7 7 0 0 1 14 0" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></span></summary>
+    <summary aria-label="Abrir menú de cuenta"><span class="mvp-account-avatar${settings?.avatar ? ' has-photo' : ''}" aria-hidden="true">${avatarGlyph}</span></summary>
     <div><header><b>${escapeHtml(accountName)}</b><small>${escapeHtml(accountDetail)}</small><small title="${escapeHtml(syncState.lastError || '')}">${escapeHtml(syncLabel)}</small></header>${syncButton}${restoreButton}<button type="button" data-account-logout>Cerrar sesión</button></div>
   </details>`;
   container.querySelector<HTMLElement>('[data-account-sync]')?.addEventListener('click', () => void synchronizeNow());
