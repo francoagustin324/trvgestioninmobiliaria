@@ -396,6 +396,16 @@ button.secondary:not(.delete):not(.nav-button):not(.quiet-button) {
   background: var(--glass-bg);
   color: var(--ink);
 }
+/* La tarjeta con matches es grid con columna 'auto' → el contenido no se estira y los
+   botones quedaban escalonados. Forzamos la columna a todo el ancho. */
+.mvp-lead-card-with-matches { grid-template-columns: minmax(0, 1fr); }
+/* Ícono de temperatura del cliente (llamita / pulgar / copo). */
+.mvp-temp-icon {
+  width: 22px;
+  height: 22px;
+  flex: 0 0 auto;
+  object-fit: contain;
+}
 .mvp-lead-card p { color: var(--ink-soft); }
 .mvp-lead-name span {
   color: var(--brand-ink);
