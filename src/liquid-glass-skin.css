@@ -36,7 +36,9 @@
 
 .public-auth-panel { background: transparent; }
 
-.public-auth-brand { background: transparent; color: var(--ink); }
+/* Agrupa logo + texto como un solo bloque centrado verticalmente (evita el hueco). */
+.public-auth-brand { background: transparent; color: var(--ink); justify-content: center; gap: 24px; }
+.public-auth-brand > div { margin: 0; }
 .public-auth-brand span { color: var(--brand-bright); opacity: 1; }
 .public-auth-brand h1 { color: var(--ink); }
 .public-auth-brand p { color: var(--ink-soft); }
