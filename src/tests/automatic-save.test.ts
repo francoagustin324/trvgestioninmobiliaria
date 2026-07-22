@@ -10,8 +10,10 @@ test('el guardado automático usa la misma compatibilidad segura que la sincroni
 
 test('el menú de cuenta no repite el correo cuando el usuario todavía no está vinculado al directorio', () => {
   const auth = readFileSync('src/mvp-auth.ts', 'utf8');
-  assert.ok(auth.includes("const accountName = member?.name || state.crm.organization.name || 'Cuenta PropControl';"));
+  assert.ok(auth.includes("member?.name || state.crm.organization.name || 'Cuenta PropControl';"));
   assert.ok(auth.includes('const accountDetail = member?.role || session.email;'));
+  // El correo solo se usa como detalle secundario, nunca como nombre de la cuenta.
+  assert.equal(auth.includes('const accountName = member?.name || session.email'), false);
   assert.ok(auth.includes('${escapeHtml(accountName)}'));
   assert.ok(auth.includes('${escapeHtml(accountDetail)}'));
 });

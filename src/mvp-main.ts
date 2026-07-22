@@ -8,6 +8,7 @@ import { renderMvpLeads } from './mvp-leads-ui.js';
 import { renderMvpProperties } from './mvp-properties-ui.js';
 import { renderMvpUsers } from './mvp-users-ui.js';
 import { renderMvpConversations } from './mvp-conversations-ui.js';
+import { renderSettings } from './settings-ui.js';
 import { installPropertyPhotoUxGuard } from './property-photo-ux.js';
 import { isInvitationPage, renderInvitationAuth } from './mvp-invitation-auth.js';
 import { appIcons } from './icons.js';
@@ -32,6 +33,7 @@ const moduleIcons: Partial<Record<ModuleId, string>> = {
   agenda: appIcons.seguimientos,
   propiedades: appIcons.propiedades,
   equipo: appIcons.usuarios,
+  configuracion: appIcons.config,
 };
 
 const mobileModuleLabels: Partial<Record<ModuleId, string>> = {
@@ -40,6 +42,7 @@ const mobileModuleLabels: Partial<Record<ModuleId, string>> = {
   agenda: 'Agenda',
   propiedades: 'Propiedades',
   equipo: 'Equipo',
+  configuracion: 'Ajustes',
 };
 
 function renderNavigationButtons(mobile = false): string {
@@ -73,6 +76,7 @@ function renderShell(): void {
       <section class="module-panel" id="agenda"></section>
       <section class="module-panel" id="propiedades"></section>
       <section class="module-panel" id="equipo"></section>
+      <section class="module-panel" id="configuracion"></section>
     </section>
     <nav class="mobile-bottom-nav" aria-label="Navegación móvil">${renderNavigationButtons(true)}</nav>
   </main>`;
@@ -109,6 +113,7 @@ function render(): void {
   renderAgenda(qs<HTMLElement>('#agenda'));
   renderMvpProperties(qs<HTMLElement>('#propiedades'));
   renderMvpUsers(qs<HTMLElement>('#equipo'));
+  renderSettings(qs<HTMLElement>('#configuracion'));
   renderAccountMenu();
   modules.forEach(([id]) => {
     const allowed = canAccessModule(id);

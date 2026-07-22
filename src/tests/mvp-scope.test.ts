@@ -4,13 +4,14 @@ import test from 'node:test';
 import { clientFromFormValues } from '../client-editor.js';
 import { modules, type Client } from '../models.js';
 
-test('la navegación del MVP contiene solo los cinco módulos aprobados', () => {
+test('la navegación del MVP contiene los módulos aprobados', () => {
   assert.deepEqual(modules, [
     ['crm', 'Leads'],
     ['whatsapp', 'Conversaciones'],
     ['agenda', 'Seguimientos'],
     ['propiedades', 'Propiedades'],
     ['equipo', 'Usuarios'],
+    ['configuracion', 'Configuración'],
   ]);
 });
 

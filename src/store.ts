@@ -9,7 +9,7 @@ import type {
   TeamMember,
   WhatsAppConversation,
 } from './models.js';
-import { initialData } from './models.js';
+import { defaultSettings, initialData } from './models.js';
 import {
   activateAccountStorage,
   hasLocalBackup as hasStoredLocalBackup,
@@ -139,6 +139,7 @@ function normalizedData(value: Partial<CrmData>): CrmData {
     conversations: Array.isArray(value.conversations)
       ? value.conversations.map((conversation, index) => normalizedConversation(conversation, index + 1, ownerId))
       : [],
+    settings: { ...defaultSettings, ...(value.settings ?? {}) },
   };
 }
 

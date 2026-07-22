@@ -151,6 +151,7 @@ export interface CrmData {
   reminders: Reminder[];
   fichas: Ficha[];
   conversations: WhatsAppConversation[];
+  settings: Settings;
 }
 
 export const modules: Array<[ModuleId, string]> = [
@@ -159,7 +160,36 @@ export const modules: Array<[ModuleId, string]> = [
   ['agenda', 'Seguimientos'],
   ['propiedades', 'Propiedades'],
   ['equipo', 'Usuarios'],
+  ['configuracion', 'Configuración'],
 ];
+
+export interface Settings {
+  profileName: string;
+  profileEmail: string;
+  profilePhone: string;
+  avatar: string;
+  agencyName: string;
+  agencyWhatsapp: string;
+  agencyLegal: string;
+  currency: string;
+  defaultZone: string;
+  shareText: string;
+  overdueDays: number;
+}
+
+export const defaultSettings: Settings = {
+  profileName: '',
+  profileEmail: '',
+  profilePhone: '',
+  avatar: '',
+  agencyName: AGENCY_BRAND.name,
+  agencyWhatsapp: AGENCY_BRAND.displayWhatsapp,
+  agencyLegal: AGENCY_BRAND.publicLegal,
+  currency: 'USD',
+  defaultZone: '',
+  shareText: '',
+  overdueDays: 3,
+};
 
 export const initialData: CrmData = {
   organization: {
@@ -229,4 +259,5 @@ export const initialData: CrmData = {
       transcriptionStatus: 'No requerida',
     }],
   }],
+  settings: { ...defaultSettings },
 };

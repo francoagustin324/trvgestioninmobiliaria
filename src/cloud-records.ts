@@ -219,6 +219,7 @@ export function cloudRecordsToCrm(
     reminders: recordsOf<Reminder>(rows, 'reminder'),
     fichas: recordsOf<Ficha>(rows, 'ficha'),
     conversations: recordsOf<WhatsAppConversation>(rows, 'conversation'),
+    settings: fallback.settings,
   };
 }
 
