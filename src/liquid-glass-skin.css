@@ -1,6 +1,6 @@
 /* Liquid Glass skin — reviste componentes existentes con la paleta Esmeralda & Champán.
    Se carga al final del <head>: sobrescribe por orden de cascada. Solo aspecto visual,
-   no toca estructura, lógica ni datos. Cada pantalla se va sumando acá. */
+   no toca estructura, lógica ni datos. */
 
 /* ============ Login / Registro ============ */
 
@@ -83,3 +83,435 @@
 
 .public-auth-card .auth-message { color: var(--ink-soft); }
 .public-auth-card .auth-message.error { color: #f0946f; }
+
+/* ============ App interna (Leads, Conversaciones, Seguimientos, Propiedades, Equipo) ============
+   El shell real lleva las clases premium-* y mvp-* juntas. Reviste las clases mvp-* (styles.css,
+   mvp.css, sidebar-brand.css, mvp-properties.css). Al cargarse ÚLTIMO, gana por orden de cascada
+   incluso frente a los selectores descendentes .mvp-sidebar .nav-button / .mvp-lead-form input. */
+
+/* Fondo esmeralda de toda la app interna (capa final opaca; tapa el body claro). */
+.premium-shell {
+  color: var(--ink);
+  background:
+    radial-gradient(56% 48% at 12% 6%, var(--brand-deep), transparent 60%),
+    radial-gradient(40% 34% at 92% 10%, rgba(198, 171, 120, 0.10), transparent 62%),
+    radial-gradient(72% 60% at 50% 104%, #03110b, transparent 60%),
+    var(--bg-0);
+}
+
+/* El panel de módulo es solo un contenedor: transparente, las tarjetas internas dan el vidrio. */
+.module-panel:not(#inicio) {
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+
+/* --- Barra lateral --- */
+.mvp-sidebar {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0) 42%), rgba(5, 18, 12, 0.52);
+  -webkit-backdrop-filter: blur(20px) saturate(1.4);
+  backdrop-filter: blur(20px) saturate(1.4);
+  border-right: 1px solid var(--glass-stroke);
+  box-shadow: var(--glass-lo);
+}
+.mvp-sidebar::after { border-color: rgba(198, 171, 120, 0.14); }
+.mvp-product-brand {
+  border-color: var(--glass-stroke);
+  background: linear-gradient(145deg, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0.03));
+}
+.mvp-product-logo {
+  border-color: rgba(198, 171, 120, 0.32);
+  background: linear-gradient(145deg, rgba(255, 255, 255, 0.1), rgba(255, 255, 255, 0.04));
+}
+.mvp-product-copy strong { color: var(--ink); }
+.mvp-product-copy small { color: var(--brand-bright); }
+.mvp-sidebar .nav-button { color: var(--ink-soft); }
+.mvp-sidebar .nav-button:hover {
+  color: var(--ink);
+  background: rgba(255, 255, 255, 0.07);
+}
+.mvp-sidebar .nav-button.active {
+  color: var(--brand-bright);
+  border-color: rgba(198, 171, 120, 0.28);
+  background: linear-gradient(90deg, rgba(198, 171, 120, 0.18), rgba(255, 255, 255, 0.05));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+.mvp-sidebar .nav-button.active::before { background: var(--brand); }
+
+/* --- Topbar --- */
+.mvp-topbar {
+  border-bottom: 1px solid var(--glass-stroke);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0) 70%), rgba(6, 20, 14, 0.4);
+  -webkit-backdrop-filter: blur(16px) saturate(1.3);
+  backdrop-filter: blur(16px) saturate(1.3);
+}
+.mvp-company-name { color: var(--ink-soft); }
+
+/* --- Encabezados de página --- */
+.mvp-page-heading h1 { color: var(--ink); }
+.mvp-page-heading p { color: var(--ink-soft); }
+.mvp-section-heading h2 { color: var(--ink); }
+.mvp-section-heading p { color: var(--ink-soft); }
+.mvp-form-heading h2 { color: var(--ink); }
+
+/* --- Formularios (leads, usuarios, propiedades, agenda) --- */
+.mvp-lead-form,
+.mvp-user-form,
+.data-form {
+  border: 1px solid var(--glass-stroke);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0) 48%), var(--glass-bg);
+  -webkit-backdrop-filter: blur(16px) saturate(1.3);
+  backdrop-filter: blur(16px) saturate(1.3);
+  box-shadow: var(--glass-hi), var(--glass-lo);
+}
+.mvp-lead-form label,
+.mvp-user-form label,
+.mvp-lead-toolbar label,
+.mvp-user-row label,
+.mvp-conversation-search,
+.meta-template-toolbar label,
+.mvp-property-form label small { color: var(--ink-soft); }
+.mvp-lead-toolbar strong { color: var(--ink-soft); }
+
+/* Inputs internos (0,2,0 para vencer a mvp.css / mvp-properties.css). */
+.mvp-lead-form input,
+.mvp-user-form input,
+.mvp-user-form select,
+.mvp-lead-toolbar input,
+.mvp-conversation-search input,
+.meta-template-toolbar input,
+.mvp-property-form select,
+.mvp-property-form textarea,
+.mvp-compose-disabled textarea,
+.premium-content input,
+.premium-content select,
+.premium-content textarea {
+  border: 1px solid var(--glass-stroke);
+  background: rgba(255, 255, 255, 0.045);
+  color: var(--ink);
+}
+.premium-content input::placeholder,
+.premium-content textarea::placeholder { color: var(--ink-faint); }
+.premium-content input:focus,
+.premium-content select:focus,
+.premium-content textarea:focus {
+  border-color: rgba(198, 171, 120, 0.55);
+  box-shadow: 0 0 0 3px rgba(198, 171, 120, 0.14);
+}
+
+/* --- Botones: champán en toda la app (vence el degradé dorado global de mobile-premium.css). --- */
+button:not(.delete):not(.nav-button):not(.quiet-button):not(.auth-close):not(.secondary) {
+  border: 1px solid transparent;
+  color: var(--brand-ink);
+  background: linear-gradient(150deg, var(--brand-bright), var(--brand));
+  box-shadow: var(--glass-hi);
+}
+button:not(.delete):not(.nav-button):not(.quiet-button):not(.auth-close):not(.secondary):hover {
+  filter: brightness(1.05);
+  transform: translateY(-1px);
+}
+button.secondary:not(.delete):not(.nav-button):not(.quiet-button) {
+  color: var(--ink);
+  border: 1px solid var(--glass-stroke);
+  background: rgba(255, 255, 255, 0.06);
+  box-shadow: none;
+}
+/* .quiet-button y .auth-close vienen con !important desde cloud-auth.css → los igualamos. */
+.quiet-button {
+  color: var(--ink-soft) !important;
+  border: 1px solid var(--glass-stroke) !important;
+  background: rgba(255, 255, 255, 0.05) !important;
+  box-shadow: none !important;
+}
+.quiet-button:hover { color: var(--ink) !important; background: rgba(255, 255, 255, 0.09) !important; }
+.auth-close {
+  color: var(--ink-soft) !important;
+  border: 1px solid var(--glass-stroke) !important;
+  background: rgba(255, 255, 255, 0.05) !important;
+}
+.premium-content .delete,
+.mvp-content .delete {
+  color: #f0a58c;
+  background: rgba(224, 120, 80, 0.16);
+}
+/* Botones que son filas / ítems / pestañas (no acciones): superficie tenue, no champán.
+   Usan !important para vencer el pintado global de botones de mobile-premium.css (especificidad
+   0,4,1) sin depender de una cadena de :not() frágil. */
+.mvp-conversation-item,
+.meta-template-row {
+  color: var(--ink) !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+.mvp-conversation-item:hover,
+.mvp-conversation-item.active,
+.meta-template-row:hover,
+.meta-template-row.active { background: rgba(255, 255, 255, 0.06) !important; }
+.mvp-conversation-tabs button,
+.meta-template-filters button {
+  color: var(--ink-soft) !important;
+  background: rgba(255, 255, 255, 0.05) !important;
+  box-shadow: none !important;
+}
+.mvp-conversation-tabs button.active,
+.meta-template-filters button.active {
+  color: var(--brand-ink) !important;
+  background: linear-gradient(150deg, var(--brand-bright), var(--brand)) !important;
+}
+.agenda-related-options button {
+  color: var(--ink) !important;
+  background: transparent !important;
+}
+.agenda-related-options button:hover,
+.agenda-related-options button:focus { background: rgba(255, 255, 255, 0.06) !important; }
+
+/* --- Tarjetas de lead --- */
+.mvp-lead-card {
+  border: 1px solid var(--glass-stroke);
+  background: var(--glass-bg);
+  color: var(--ink);
+}
+.mvp-lead-card p { color: var(--ink-soft); }
+.mvp-lead-name span {
+  color: var(--brand-ink);
+  background: linear-gradient(150deg, var(--brand-bright), var(--brand));
+}
+.mvp-whatsapp-link,
+.mvp-chat-header a { color: #6fd39b; }
+
+/* --- Coincidencias de propiedad (dentro de la tarjeta de lead) --- */
+.mvp-match-row { background: rgba(255, 255, 255, 0.035); }
+.mvp-match-score.posible { color: var(--warm); background: rgba(214, 154, 70, 0.18); }
+
+/* --- Filas de usuario (Equipo) + avatares --- */
+.mvp-user-row {
+  border: 1px solid var(--glass-stroke);
+  background: var(--glass-bg);
+  color: var(--ink);
+}
+.mvp-user-info span,
+.mvp-user-status { color: var(--ink-soft); }
+.mvp-user-avatar,
+.mvp-account-avatar,
+.mvp-conversation-avatar {
+  color: var(--brand-ink);
+  background: linear-gradient(150deg, var(--brand-bright), var(--brand));
+}
+
+/* --- Menú de cuenta --- */
+.mvp-account-menu > div {
+  border: 1px solid var(--glass-stroke);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0) 46%), rgba(8, 26, 18, 0.96);
+  -webkit-backdrop-filter: blur(18px) saturate(1.4);
+  backdrop-filter: blur(18px) saturate(1.4);
+}
+.mvp-account-menu > div header { border-color: var(--glass-stroke); }
+.mvp-account-menu b { color: var(--ink); }
+.mvp-account-menu small { color: var(--ink-soft); }
+/* Ítems del menú: quietos, no botones champán. El id #cloud-account gana al botón global. */
+#cloud-account .mvp-account-menu > div button {
+  color: var(--ink);
+  background: transparent;
+  box-shadow: none;
+}
+#cloud-account .mvp-account-menu > div button:hover { background: rgba(255, 255, 255, 0.06); }
+
+/* --- Conversaciones (WhatsApp) --- */
+.mvp-conversation-tabs { background: rgba(255, 255, 255, 0.04); }
+.mvp-conversation-tabs button { color: var(--ink-soft); }
+.mvp-conversation-tabs button.active {
+  color: var(--brand-ink);
+  background: linear-gradient(150deg, var(--brand-bright), var(--brand));
+}
+.mvp-conversations-layout {
+  border: 1px solid var(--glass-stroke);
+  background: var(--glass-bg);
+}
+.mvp-conversation-list {
+  border-color: var(--glass-stroke);
+  background: rgba(255, 255, 255, 0.02);
+}
+.mvp-conversation-count { color: var(--ink-soft); }
+.mvp-conversation-item {
+  color: var(--ink);
+  border-top-color: var(--glass-stroke);
+}
+.mvp-conversation-item:hover,
+.mvp-conversation-item.active { background: rgba(255, 255, 255, 0.06); }
+.mvp-conversation-summary small,
+.mvp-conversation-item time { color: var(--ink-soft); }
+.mvp-conversation-summary strong { color: var(--brand-ink); background: var(--brand); }
+.mvp-chat-header { border-bottom-color: var(--glass-stroke); }
+.mvp-chat-header p { color: var(--ink-soft); }
+.mvp-chat-lead-data { background: var(--glass-stroke); }
+.mvp-chat-lead-data > div { background: rgba(10, 26, 19, 0.55); }
+.mvp-chat-lead-data span { color: var(--ink-soft); }
+.mvp-chat-lead-data strong { color: var(--ink); }
+.mvp-message-history { background: rgba(0, 0, 0, 0.16); }
+.mvp-message.inbound { color: var(--ink); background: rgba(255, 255, 255, 0.07); }
+.mvp-message.outbound { color: var(--ink); background: rgba(99, 185, 138, 0.18); }
+.mvp-message time { color: var(--ink-faint); }
+.mvp-message-type { color: var(--ink-soft); }
+.mvp-compose-disabled {
+  border-top-color: var(--glass-stroke);
+  background: rgba(255, 255, 255, 0.03);
+}
+.mvp-conversation-empty p { color: var(--ink-soft); }
+
+/* --- Plantillas Meta (WhatsApp) --- */
+.meta-template-table,
+.meta-template-detail {
+  border: 1px solid var(--glass-stroke);
+  background: var(--glass-bg);
+}
+.meta-template-columns { color: var(--ink-soft); background: rgba(255, 255, 255, 0.04); }
+.meta-template-row {
+  color: var(--ink);
+  background: transparent;
+  border-top-color: var(--glass-stroke);
+}
+.meta-template-row:hover,
+.meta-template-row.active { background: rgba(255, 255, 255, 0.06); }
+.meta-template-main small,
+.meta-template-detail dt,
+.meta-detail-label,
+.meta-template-note,
+.meta-template-detail header span,
+.meta-template-detail header small { color: var(--ink-soft); }
+.meta-template-filters button { color: var(--ink-soft); background: rgba(255, 255, 255, 0.05); }
+.meta-template-filters button.active {
+  color: var(--brand-ink);
+  background: linear-gradient(150deg, var(--brand-bright), var(--brand));
+}
+.meta-phone-preview { background: rgba(255, 255, 255, 0.03); }
+.meta-phone-preview button { color: var(--cold); background: rgba(255, 255, 255, 0.06); }
+.template-variables b { color: var(--ink-soft); background: rgba(255, 255, 255, 0.05); }
+.template-status,
+.template-quality { color: var(--warm); background: rgba(214, 154, 70, 0.16); }
+.template-status.aprobada,
+.template-quality.alta { color: var(--ok); background: rgba(99, 185, 138, 0.16); }
+.template-status.rechazada,
+.template-quality.no-disponible { color: #f0a58c; background: rgba(224, 120, 80, 0.16); }
+
+/* --- Propiedades --- */
+.mvp-property-flow {
+  border-color: var(--glass-stroke);
+  color: var(--ink-soft);
+  background: rgba(255, 255, 255, 0.03);
+}
+.mvp-property-flow strong { color: var(--ink); }
+.mvp-property-flow span { color: var(--brand-bright); }
+.mvp-property-form-section {
+  color: var(--ink);
+  background: rgba(255, 255, 255, 0.05);
+}
+.mvp-property-form-section span { color: var(--ink-soft); }
+.mvp-property-form-section-internal { color: var(--warm); background: rgba(214, 154, 70, 0.14); }
+.mvp-property-photo-manager {
+  border-color: var(--glass-stroke);
+  background: var(--glass-bg);
+}
+.mvp-property-photo-heading span { color: var(--ink-soft); }
+.mvp-property-photo-item {
+  border-color: var(--glass-stroke);
+  background: rgba(255, 255, 255, 0.03);
+}
+.mvp-property-photo-caption strong { color: var(--ink); }
+.mvp-property-photo-caption span { color: var(--ink-soft); }
+.mvp-property-photo-empty {
+  border-color: var(--glass-stroke);
+  color: var(--ink-soft);
+  background: rgba(255, 255, 255, 0.02);
+}
+.mvp-property-photo-empty strong { color: var(--ink); }
+.mvp-property-photo-status { color: var(--ink-soft); }
+.mvp-property-card {
+  border: 1px solid var(--glass-stroke);
+  background: var(--glass-bg);
+  color: var(--ink);
+}
+.mvp-property-cover,
+.mvp-property-cover-empty { background: rgba(255, 255, 255, 0.05); color: var(--ink-soft); }
+.mvp-property-meta span { color: var(--ink-soft); background: rgba(255, 255, 255, 0.05); }
+.mvp-property-meta .mvp-property-internal { color: var(--warm); background: rgba(214, 154, 70, 0.14); }
+
+/* --- Seguimientos (agenda) --- */
+.panel-description { color: var(--ink-soft); }
+.agenda-form label,
+.agenda-related-field { color: var(--ink-soft); }
+.agenda-related-field > small { color: var(--ink-faint); }
+.agenda-related-options {
+  border-color: var(--glass-stroke);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0) 46%), rgba(8, 26, 18, 0.97);
+  -webkit-backdrop-filter: blur(18px);
+  backdrop-filter: blur(18px);
+}
+.agenda-related-options button { color: var(--ink); }
+.agenda-related-options button:hover,
+.agenda-related-options button:focus { background: rgba(255, 255, 255, 0.06); }
+.agenda-related-options span { color: var(--ink-soft); }
+.agenda-summary article {
+  border: 1px solid var(--glass-stroke);
+  background: var(--glass-bg);
+}
+.agenda-summary span { color: var(--ink-soft); }
+.agenda-summary strong { color: var(--brand-bright); }
+.agenda-total-line { color: var(--ink-soft); }
+.agenda-total-line strong { color: var(--ink); }
+.agenda-section {
+  border: 1px solid var(--glass-stroke);
+  background: rgba(255, 255, 255, 0.02);
+}
+.agenda-section.overdue { background: rgba(224, 120, 80, 0.06); }
+.agenda-section.today { background: rgba(214, 154, 70, 0.06); }
+.agenda-section.upcoming { background: rgba(99, 185, 138, 0.05); }
+.agenda-section-heading p { color: var(--ink-soft); }
+.agenda-section-heading > strong {
+  color: var(--brand-bright);
+  border: 1px solid var(--glass-stroke);
+  background: rgba(255, 255, 255, 0.04);
+}
+.agenda-card {
+  border: 1px solid var(--glass-stroke);
+  background: var(--glass-bg);
+  color: var(--ink);
+}
+.agenda-position { color: var(--brand-bright); background: rgba(198, 171, 120, 0.16); }
+.agenda-source { color: var(--ink-soft); background: rgba(255, 255, 255, 0.06); }
+.agenda-relative-date { color: var(--ink-soft); }
+.agenda-card.overdue .agenda-relative-date { color: #f0a58c; }
+.agenda-card.today .agenda-relative-date { color: var(--warm); }
+.agenda-card p { color: var(--ink-soft); }
+.agenda-card small { color: var(--ink-faint); }
+.agenda-more-actions {
+  border-color: var(--glass-stroke);
+  background: rgba(255, 255, 255, 0.03);
+}
+.agenda-more-actions > summary { color: var(--ink); }
+.agenda-reprogram { border-top-color: var(--glass-stroke); }
+.agenda-reprogram > strong,
+.agenda-reprogram label { color: var(--ink-soft); }
+.agenda-completed {
+  border-color: var(--glass-stroke);
+  background: var(--glass-bg);
+}
+.agenda-completed > summary { color: var(--ink); }
+.agenda-completed-card {
+  border-color: var(--glass-stroke);
+  background: rgba(255, 255, 255, 0.03);
+}
+.agenda-completed-card span,
+.agenda-completed-card p { color: var(--ink-soft); }
+.agenda-completed-card h4 { color: var(--ink); }
+
+/* --- Estados vacíos y avisos --- */
+.empty-state { color: var(--ink-soft); background: rgba(255, 255, 255, 0.03); }
+.notice {
+  color: var(--ink);
+  border: 1px solid var(--glass-stroke);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0) 46%), rgba(10, 39, 27, 0.94);
+}
+.premium-content time,
+.mvp-content time { color: var(--brand-bright); }
