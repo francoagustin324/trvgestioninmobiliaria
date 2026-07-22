@@ -468,6 +468,59 @@ button.secondary:not(.delete):not(.nav-button):not(.quiet-button) {
 .mvp-lead-matches,
 .mvp-match-empty { border-top: 0; padding-top: 6px; }
 
+/* ============ Ficha pública (lo que ven los clientes) — Esmeralda & Champán ============ */
+.public-page {
+  background:
+    radial-gradient(58% 50% at 15% 6%, var(--brand-deep), transparent 60%),
+    radial-gradient(48% 40% at 90% 12%, rgba(198, 171, 120, 0.10), transparent 62%),
+    var(--bg-0);
+}
+.public-ficha {
+  border: 1px solid var(--glass-stroke);
+  color: var(--ink);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.045), rgba(255, 255, 255, 0) 40%), rgba(9, 33, 23, 0.82);
+  box-shadow: var(--glass-hi), var(--glass-glow);
+}
+.public-header {
+  background: linear-gradient(135deg, var(--brand-deep), #06140e);
+  border-bottom: 1px solid var(--glass-stroke);
+}
+.public-header img {
+  object-fit: contain;
+  border-color: var(--glass-stroke);
+  background: rgba(255, 255, 255, 0.05);
+  padding: 7px;
+}
+.public-header span { color: var(--brand-bright); }
+.public-header h1 { color: var(--ink); }
+.public-gallery { background: rgba(255, 255, 255, 0.03); }
+.public-gallery-badge { color: var(--ink); border-color: var(--glass-stroke); background: rgba(4, 14, 9, 0.72); }
+.gallery-placeholder { color: var(--brand-bright); }
+.public-summary-tags span {
+  color: var(--brand-bright);
+  border-color: rgba(198, 171, 120, 0.35);
+  background: rgba(198, 171, 120, 0.12);
+}
+.public-price { color: var(--ink); }
+.public-location { color: var(--ink-soft); }
+.public-key-item,
+.public-data-item {
+  border-color: var(--glass-stroke);
+  background: rgba(255, 255, 255, 0.05);
+}
+.public-key-item b,
+.public-data-item b { color: var(--brand-bright); }
+.public-description h2 { color: var(--ink); }
+.public-description p { color: var(--ink-soft); }
+.public-details {
+  border-color: var(--glass-stroke);
+  background: rgba(255, 255, 255, 0.03);
+}
+.public-details summary { color: var(--brand-bright); }
+.public-details[open] summary { border-bottom-color: var(--glass-stroke); }
+.public-ficha small { color: var(--ink-faint); }
+.public-error { color: var(--ink); border: 1px solid var(--glass-stroke); background: rgba(9, 33, 23, 0.9); }
+
 /* Desplegables nativos en oscuro (los popups dejan de ser blancos). */
 .premium-shell { color-scheme: dark; }
 
