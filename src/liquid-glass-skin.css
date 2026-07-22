@@ -435,10 +435,11 @@ button.secondary:not(.delete):not(.nav-button):not(.quiet-button) {
 .mvp-contact-btn[data-disabled] { opacity: 0.4; cursor: not-allowed; pointer-events: none; }
 .mvp-contact-btn.wa svg { fill: currentColor; stroke: none; }
 
-/* Acciones de la tarjeta (lápiz + ×) en la esquina superior derecha. */
-.mvp-lead-card { position: relative; }
-.mvp-lead-card-with-matches .mvp-lead-actions,
-.mvp-lead-card .mvp-lead-actions {
+/* Acciones de la tarjeta de LEAD (lápiz + ×) en la esquina superior derecha.
+   Se acota a .mvp-lead-card-with-matches para NO afectar a las propiedades
+   (que también usan .mvp-lead-card + .mvp-lead-actions). */
+.mvp-lead-card-with-matches { position: relative; }
+.mvp-lead-card-with-matches > .mvp-lead-card-main > .mvp-lead-actions {
   position: absolute;
   top: 14px;
   right: 14px;
