@@ -1,0 +1,107 @@
+:root {
+  /* Identidad PropControl */
+  --brand: #d0a33c;
+  --brand-deep: #173951;
+  --ink: #0f1c24;
+  --ink-soft: #526b78;
+  --ok: #2f9e6f;
+  --warn: #d98a2b;
+
+  /* Superficies translúcidas */
+  --glass-bg: rgba(255, 255, 255, 0.1);
+  --glass-brand: rgba(208, 163, 60, 0.18);
+  --glass-stroke: rgba(255, 255, 255, 0.22);
+
+  /* Profundidad del vidrio */
+  --glass-hi: inset 0 1px 0 rgba(255, 255, 255, 0.55);
+  --glass-lo: inset 0 -1px 0 rgba(0, 0, 0, 0.18);
+  --glass-glow: 0 18px 40px -14px rgba(0, 0, 0, 0.4);
+
+  /* Forma */
+  --radius-md: 0.8rem;
+  --radius-xl: 1.1rem;
+  --radius-2xl: 1.5rem;
+
+  /* Movimiento */
+  --ease-ui: cubic-bezier(0.4, 0, 0.2, 1);
+  --dur-ui: 0.2s;
+
+  /* Tipografía */
+  --font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, sans-serif;
+}
+
+html {
+  font-family: var(--font);
+  letter-spacing: -0.01em;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+.glass {
+  background: var(--glass-bg);
+  -webkit-backdrop-filter: blur(18px) saturate(1.6);
+  backdrop-filter: blur(18px) saturate(1.6);
+  border: 1px solid var(--glass-stroke);
+  border-radius: var(--radius-2xl);
+  box-shadow: var(--glass-hi), var(--glass-lo), var(--glass-glow);
+}
+
+.glass-brand {
+  background: var(--glass-brand);
+}
+
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .glass {
+    background: rgba(14, 28, 36, 0.86);
+  }
+}
+
+.app-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  overflow: hidden;
+  pointer-events: none;
+  background:
+    radial-gradient(60% 55% at 18% 20%, var(--brand-deep), transparent 60%),
+    radial-gradient(55% 45% at 82% 28%, var(--brand), transparent 55%),
+    radial-gradient(70% 60% at 50% 92%, #0b2330, transparent 62%),
+    #07141b;
+}
+
+.app-backdrop::before {
+  content: "";
+  position: absolute;
+  inset: -25%;
+  background: inherit;
+  filter: blur(70px);
+  animation: backdrop-drift 26s var(--ease-ui) infinite alternate;
+  will-change: transform;
+}
+
+@keyframes backdrop-drift {
+  to {
+    transform: translate3d(5%, -4%, 0) scale(1.12);
+  }
+}
+
+:where(a, button, input, select, textarea, summary):focus-visible {
+  outline: 3px solid color-mix(in srgb, var(--brand) 82%, white);
+  outline-offset: 3px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+
+  .app-backdrop::before {
+    animation: none;
+    transform: none;
+  }
+}
