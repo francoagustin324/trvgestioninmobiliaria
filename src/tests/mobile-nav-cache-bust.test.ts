@@ -4,7 +4,8 @@ import test from 'node:test';
 
 const html = readFileSync('index.html', 'utf8');
 
-test('carga una versión nueva del shell principal después de la navegación inferior', () => {
+test('carga una versión nueva y coordinada del shell móvil', () => {
+  assert.ok(html.includes('/dist/cloud-compat-bootstrap.js?v=20260722-95'));
   assert.ok(html.includes('/dist/mvp-main.js?v=20260722-95'));
   assert.equal(html.includes('/dist/mvp-main.js?v=20260722-44'), false);
 });
