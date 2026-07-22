@@ -3,12 +3,22 @@ import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
 const main = readFileSync('src/mvp-main.ts', 'utf8');
+const icons = readFileSync('src/icons.ts', 'utf8');
 const css = readFileSync('src/mobile-layout-fix.css', 'utf8');
 const html = readFileSync('index.html', 'utf8');
 
 test('cada módulo principal muestra icono y etiqueta accesible', () => {
-  for (const moduleId of ['crm', 'whatsapp', 'agenda', 'propiedades', 'equipo']) {
-    assert.ok(main.includes(`${moduleId}: '<svg`), moduleId);
+  // Los íconos viven en un módulo compartido (icons.ts) y se reutilizan por nombre.
+  const iconByModule: Record<string, string> = {
+    crm: 'leads',
+    whatsapp: 'conversaciones',
+    agenda: 'seguimientos',
+    propiedades: 'propiedades',
+    equipo: 'usuarios',
+  };
+  for (const [moduleId, iconKey] of Object.entries(iconByModule)) {
+    assert.ok(main.includes(`${moduleId}: appIcons.${iconKey}`), moduleId);
+    assert.ok(icons.includes(`${iconKey}: '<svg`), iconKey);
   }
   assert.ok(main.includes('class="nav-icon"'));
   assert.ok(main.includes('class="nav-label"'));

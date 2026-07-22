@@ -202,7 +202,7 @@ export function renderPublicAuth(root: HTMLElement): void {
     <video class="public-auth-bg" autoplay muted loop playsinline preload="auto" poster="/src/assets/fondo-inicio-poster.jpg?v=20260722-1"><source src="/src/assets/fondo-inicio.mp4?v=20260722-2" type="video/mp4"></video>
     <div class="public-auth-overlay" aria-hidden="true"></div>
     <section class="public-auth-brand">
-      <img src="${PRODUCT_BRAND.logo}" alt="${PRODUCT_BRAND.name}">
+      <div class="public-auth-lockup"><img src="${PRODUCT_BRAND.logo}" alt=""><strong>${PRODUCT_BRAND.name}</strong></div>
       <div><span>CRM inmobiliario</span><h1>Ordená cada consulta y cada seguimiento.</h1><p>Una herramienta simple para responder mejor, no perder oportunidades y trabajar en equipo.</p></div>
     </section>
     <section class="public-auth-panel">
