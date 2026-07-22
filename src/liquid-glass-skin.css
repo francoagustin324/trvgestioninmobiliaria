@@ -1,0 +1,62 @@
+/* Liquid Glass skin — reviste componentes existentes con la paleta Esmeralda & Champán.
+   Se carga al final del <head>: sobrescribe por orden de cascada. Solo aspecto visual,
+   no toca estructura, lógica ni datos. Cada pantalla se va sumando acá. */
+
+/* ============ Login / Registro ============ */
+
+/* El shell lleva el fondo esmeralda directo (robusto, no depende del backdrop fijo). */
+.public-auth-shell {
+  background:
+    radial-gradient(58% 55% at 16% 14%, var(--brand-deep), transparent 62%),
+    radial-gradient(32% 28% at 86% 16%, rgba(198, 171, 120, 0.14), transparent 64%),
+    radial-gradient(72% 62% at 50% 102%, #03110b, transparent 60%),
+    var(--bg-0);
+  color: var(--ink);
+}
+.public-auth-panel { background: transparent; }
+
+.public-auth-brand { background: transparent; color: var(--ink); }
+.public-auth-brand span { color: var(--brand-bright); opacity: 1; }
+.public-auth-brand h1 { color: var(--ink); }
+.public-auth-brand p { color: var(--ink-soft); }
+
+/* La tarjeta de login: vidrio esmeralda (gota de agua). */
+.public-auth-card {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.07), rgba(255, 255, 255, 0) 40%), var(--glass-bg);
+  -webkit-backdrop-filter: blur(22px) saturate(1.45);
+  backdrop-filter: blur(22px) saturate(1.45);
+  border: 1px solid var(--glass-stroke);
+  border-radius: var(--radius-2xl);
+  box-shadow: var(--glass-hi), var(--glass-lo), var(--glass-glow);
+}
+
+.public-auth-tabs { background: rgba(255, 255, 255, 0.04); }
+.public-auth-tabs a { color: var(--ink-soft); }
+.public-auth-tabs a.active {
+  color: var(--brand-ink);
+  background: linear-gradient(150deg, var(--brand-bright), var(--brand));
+  box-shadow: var(--glass-hi);
+}
+
+.public-auth-card h2 { color: var(--ink); }
+.public-auth-card > p { color: var(--ink-soft); }
+.public-auth-card label { color: var(--ink-soft); }
+
+.public-auth-card input {
+  background: rgba(255, 255, 255, 0.045);
+  border: 1px solid var(--glass-stroke);
+  color: var(--ink);
+}
+.public-auth-card input::placeholder { color: var(--ink-faint); }
+.public-auth-card input:focus { border-color: rgba(198, 171, 120, 0.55); }
+
+.public-auth-card form button[type="submit"] {
+  color: var(--brand-ink);
+  background: linear-gradient(150deg, var(--brand-bright), var(--brand));
+  border: 0;
+  box-shadow: var(--glass-hi);
+}
+.public-auth-card form button[type="submit"]:hover { filter: brightness(1.05); }
+
+.public-auth-card .auth-message { color: var(--ink-soft); }
+.public-auth-card .auth-message.error { color: #f0946f; }
