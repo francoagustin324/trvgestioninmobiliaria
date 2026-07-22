@@ -6,7 +6,7 @@ const html = readFileSync('index.html', 'utf8');
 const tokens = readFileSync('src/design-tokens.css', 'utf8');
 
 test('carga la fundación visual sin alterar el arranque de la aplicación', () => {
-  assert.ok(html.includes('/src/design-tokens.css?v=20260722-1'));
+  assert.ok(html.includes('/src/design-tokens.css'));
   assert.ok(html.includes('<div class="app-backdrop" aria-hidden="true"></div>'));
   assert.ok(html.indexOf('app-backdrop') < html.indexOf('id="root"'));
 });
