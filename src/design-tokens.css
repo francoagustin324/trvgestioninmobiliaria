@@ -1,46 +1,55 @@
 :root {
-  /* Identidad PropControl */
-  --brand: #d0a33c;
-  --brand-deep: #173951;
-  --ink: #0f1c24;
-  --ink-soft: #526b78;
-  --ok: #2f9e6f;
-  --warn: #d98a2b;
+  /* Identidad PropControl — Esmeralda & Champán */
+  --bg-0: #040f0a;          /* fondo principal: verde casi negro */
+  --brand: #c6ab78;         /* champán / acento principal */
+  --brand-bright: #dec593;  /* champán claro (texto de acento) */
+  --brand-deep: #0a271b;    /* esmeralda profundo */
+  --brand-ink: #20291c;     /* texto oscuro sobre champán */
+  --ink: #eaf2ec;           /* texto principal */
+  --ink-soft: #97aca0;      /* texto secundario */
+  --ink-faint: #647a6e;     /* texto tenue */
+  --ok: #63b98a;
+  --warn: #e0a34a;
 
-  /* Superficies translúcidas */
-  --glass-bg: rgba(255, 255, 255, 0.1);
-  --glass-brand: rgba(208, 163, 60, 0.18);
-  --glass-stroke: rgba(255, 255, 255, 0.22);
+  /* Estados del cliente */
+  --hot: #e07850;
+  --warm: #d69a46;
+  --cold: #6fa0c4;
 
-  /* Profundidad del vidrio */
-  --glass-hi: inset 0 1px 0 rgba(255, 255, 255, 0.55);
-  --glass-lo: inset 0 -1px 0 rgba(0, 0, 0, 0.18);
-  --glass-glow: 0 18px 40px -14px rgba(0, 0, 0, 0.4);
+  /* Superficies translúcidas (gota de agua) */
+  --glass-bg: rgba(255, 255, 255, 0.035);
+  --glass-brand: rgba(198, 171, 120, 0.12);
+  --glass-stroke: rgba(255, 255, 255, 0.11);
+
+  /* Profundidad del vidrio (sobrio, poco brillo) */
+  --glass-hi: inset 0 1px 0 rgba(255, 255, 255, 0.26);
+  --glass-lo: inset 0 -1px 0 rgba(0, 0, 0, 0.32);
+  --glass-glow: 0 22px 48px -22px rgba(0, 0, 0, 0.75);
 
   /* Forma */
-  --radius-md: 0.8rem;
+  --radius-md: 0.85rem;
   --radius-xl: 1.1rem;
-  --radius-2xl: 1.5rem;
+  --radius-2xl: 1.4rem;
 
   /* Movimiento */
   --ease-ui: cubic-bezier(0.4, 0, 0.2, 1);
   --dur-ui: 0.2s;
 
   /* Tipografía */
-  --font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, sans-serif;
+  --font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, system-ui, sans-serif;
 }
 
 html {
   font-family: var(--font);
-  letter-spacing: -0.01em;
+  letter-spacing: -0.011em;
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
 }
 
 .glass {
-  background: var(--glass-bg);
-  -webkit-backdrop-filter: blur(18px) saturate(1.6);
-  backdrop-filter: blur(18px) saturate(1.6);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.07), rgba(255, 255, 255, 0) 44%), var(--glass-bg);
+  -webkit-backdrop-filter: blur(22px) saturate(1.45);
+  backdrop-filter: blur(22px) saturate(1.45);
   border: 1px solid var(--glass-stroke);
   border-radius: var(--radius-2xl);
   box-shadow: var(--glass-hi), var(--glass-lo), var(--glass-glow);
@@ -52,7 +61,7 @@ html {
 
 @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
   .glass {
-    background: rgba(14, 28, 36, 0.86);
+    background: rgba(10, 26, 19, 0.9);
   }
 }
 
@@ -63,25 +72,26 @@ html {
   overflow: hidden;
   pointer-events: none;
   background:
-    radial-gradient(60% 55% at 18% 20%, var(--brand-deep), transparent 60%),
-    radial-gradient(55% 45% at 82% 28%, var(--brand), transparent 55%),
-    radial-gradient(70% 60% at 50% 92%, #0b2330, transparent 62%),
-    #07141b;
+    radial-gradient(54% 48% at 18% 15%, var(--brand-deep), transparent 62%),
+    radial-gradient(30% 26% at 85% 18%, rgba(198, 171, 120, 0.15), transparent 64%),
+    radial-gradient(66% 58% at 50% 99%, #03110b, transparent 62%),
+    var(--bg-0);
 }
 
 .app-backdrop::before {
   content: "";
   position: absolute;
-  inset: -25%;
+  inset: -26%;
   background: inherit;
-  filter: blur(70px);
-  animation: backdrop-drift 26s var(--ease-ui) infinite alternate;
+  filter: blur(80px);
+  opacity: 0.62;
+  animation: backdrop-drift 32s var(--ease-ui) infinite alternate;
   will-change: transform;
 }
 
 @keyframes backdrop-drift {
   to {
-    transform: translate3d(5%, -4%, 0) scale(1.12);
+    transform: translate3d(4%, -3%, 0) scale(1.1);
   }
 }
 
