@@ -1,15 +1,14 @@
+import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { describe, expect, it } from 'vitest';
+import test from 'node:test';
 
 const html = readFileSync('index.html', 'utf8');
 
-describe('cache bust de navegación móvil', () => {
-  it('carga una versión nueva del shell principal después de la navegación inferior', () => {
-    expect(html).toContain('/dist/mvp-main.js?v=20260722-95');
-    expect(html).not.toContain('/dist/mvp-main.js?v=20260722-44');
-  });
+test('carga una versión nueva del shell principal después de la navegación inferior', () => {
+  assert.ok(html.includes('/dist/mvp-main.js?v=20260722-95'));
+  assert.equal(html.includes('/dist/mvp-main.js?v=20260722-44'), false);
+});
 
-  it('mantiene cargado el CSS de navegación inferior', () => {
-    expect(html).toContain('/src/mobile-bottom-nav.css?v=20260722-1');
-  });
+test('mantiene cargado el CSS de navegación inferior', () => {
+  assert.ok(html.includes('/src/mobile-bottom-nav.css?v=20260722-1'));
 });
