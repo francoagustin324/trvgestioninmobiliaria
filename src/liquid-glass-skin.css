@@ -99,14 +99,125 @@
    mvp.css, sidebar-brand.css, mvp-properties.css). Al cargarse ÚLTIMO, gana por orden de cascada
    incluso frente a los selectores descendentes .mvp-sidebar .nav-button / .mvp-lead-form input. */
 
-/* Fondo esmeralda de toda la app interna (capa final opaca; tapa el body claro). */
+/* Layout: barra superior de ancho completo arriba, menú lateral + contenido debajo.
+   Grid de 3 áreas. El fondo esmeralda cubre toda la app. */
 .premium-shell {
   color: var(--ink);
+  grid-template-columns: 248px minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-areas:
+    "topbar topbar"
+    "sidebar content";
+  height: 100vh;
+  min-height: 100vh;
+  overflow: hidden;
   background:
     radial-gradient(56% 48% at 12% 6%, var(--brand-deep), transparent 60%),
     radial-gradient(40% 34% at 92% 10%, rgba(198, 171, 120, 0.10), transparent 62%),
     radial-gradient(72% 60% at 50% 104%, #03110b, transparent 60%),
     var(--bg-0);
+}
+
+/* Barra superior: cruza toda la pantalla; marca a la izquierda (logo suelto, sin recuadro). */
+.app-topbar {
+  grid-area: topbar;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 11px 26px;
+  border-bottom: 1px solid var(--glass-stroke);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0) 72%), rgba(6, 20, 14, 0.62);
+  -webkit-backdrop-filter: blur(18px) saturate(1.35);
+  backdrop-filter: blur(18px) saturate(1.35);
+}
+.app-brand { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.app-brand-logo { width: 42px; height: 42px; flex: 0 0 auto; object-fit: contain; }
+.app-brand-copy { display: grid; gap: 1px; min-width: 0; }
+.app-brand-copy strong {
+  color: var(--ink);
+  font-size: 1.14rem;
+  font-weight: 850;
+  letter-spacing: -0.02em;
+  line-height: 1.12;
+}
+.app-brand-copy small {
+  color: var(--brand-bright);
+  font-size: 0.62rem;
+  font-weight: 850;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+.app-topbar-spacer { flex: 1 1 auto; }
+
+/* Cada área con su propio scroll; el menú ocupa toda la altura (ya no se corta). */
+.premium-sidebar {
+  grid-area: sidebar;
+  position: static;
+  height: auto;
+  overflow-y: auto;
+}
+.premium-content {
+  grid-area: content;
+  overflow-y: auto;
+}
+/* Saca el círculo decorativo raro del costado del menú. */
+.mvp-sidebar::after { display: none; }
+
+/* ===== Móvil: se desactiva el grid de escritorio y vuelve el flujo en bloque + riel/drawer
+   de mobile-layout-fix.css. La barra .app-topbar (nueva) recibe el trato móvil que antes
+   tenía .mvp-topbar. ===== */
+@media (max-width: 980px) {
+  .premium-shell {
+    display: block;
+    height: auto;
+    overflow: visible;
+  }
+  .premium-content { overflow: visible; }
+  /* El menú vuelve a ser cajón/riel fijo (lo maneja mobile-layout-fix); reseteo mis reglas de escritorio. */
+  .premium-sidebar {
+    position: fixed;
+    height: 100dvh;
+    overflow-y: auto;
+  }
+  .app-topbar {
+    position: sticky;
+    top: 0;
+    z-index: 60;
+    padding: 9px 12px;
+    gap: 10px;
+  }
+  .app-topbar .mobile-nav-trigger {
+    order: -1;
+    display: inline-flex !important;
+    align-items: center;
+    justify-content: center;
+    width: 42px;
+    min-width: 42px;
+    height: 42px;
+    padding: 0;
+    color: var(--ink);
+    border: 1px solid var(--glass-stroke);
+    background: rgba(255, 255, 255, 0.05);
+    border-radius: 12px;
+  }
+  .app-topbar .mobile-nav-trigger span { display: none; }
+  .app-topbar .mobile-nav-trigger::before { content: '\2630'; font-size: 1.15rem; line-height: 1; }
+  .app-topbar-spacer { display: none; }
+  .app-topbar #cloud-account {
+    flex: 0 0 auto;
+    width: auto;
+    margin-left: auto;
+  }
+  .app-topbar #cloud-account .mvp-account-menu { margin: 0; }
+}
+@media (max-width: 720px) {
+  /* En teléfono el menú es un riel permanente (80px), sin hamburguesa; corro la barra
+     para que la marca no quede tapada por el riel. */
+  .app-topbar .mobile-nav-trigger { display: none !important; }
+  .app-topbar { padding-left: calc(var(--pc-mobile-rail) + 12px); }
+  .app-brand-logo { width: 34px; height: 34px; }
+  .app-brand-copy strong { font-size: 1rem; }
+  .app-brand-copy small { font-size: 0.55rem; letter-spacing: 0.1em; }
 }
 
 /* El panel de módulo es solo un contenedor: transparente, las tarjetas internas dan el vidrio. */
@@ -126,7 +237,6 @@
   border-right: 1px solid var(--glass-stroke);
   box-shadow: var(--glass-lo);
 }
-.mvp-sidebar::after { border-color: rgba(198, 171, 120, 0.14); }
 .mvp-product-brand {
   border-color: var(--glass-stroke);
   background: linear-gradient(145deg, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0.03));

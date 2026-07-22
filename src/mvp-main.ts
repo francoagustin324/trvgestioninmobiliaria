@@ -37,20 +37,20 @@ const moduleIcons: Partial<Record<ModuleId, string>> = {
 function renderShell(): void {
   root.innerHTML = `<main class="premium-shell mvp-shell">
     <div class="sidebar-backdrop" data-mobile-nav-close hidden></div>
+    <header class="app-topbar">
+      <button type="button" class="mobile-nav-trigger" data-mobile-nav-toggle aria-controls="app-sidebar" aria-expanded="false"><span>Menú</span></button>
+      <div class="app-brand" aria-label="${PRODUCT_BRAND.name}">
+        <img class="app-brand-logo" src="${PRODUCT_BRAND.logo}" alt="">
+        <span class="app-brand-copy"><strong>${PRODUCT_BRAND.name}</strong><small>CRM inmobiliario</small></span>
+      </div>
+      <div class="app-topbar-spacer" aria-hidden="true"></div>
+      <div id="cloud-account"></div>
+    </header>
     <aside class="premium-sidebar mvp-sidebar" id="app-sidebar" aria-label="Navegación principal">
       <div class="sidebar-mobile-head"><span>Menú</span><button type="button" class="sidebar-close" data-mobile-nav-close aria-label="Cerrar menú">×</button></div>
-      <div class="mvp-product-brand" aria-label="${PRODUCT_BRAND.name}">
-        <span class="mvp-product-logo"><img src="${PRODUCT_BRAND.logo}" alt=""></span>
-        <span class="mvp-product-copy"><strong>${PRODUCT_BRAND.name}</strong><small>CRM inmobiliario</small></span>
-      </div>
       <nav>${modules.map(([id, label]) => `<button type="button" class="nav-button" data-module="${id}" title="${label}"><span class="nav-icon" aria-hidden="true">${moduleIcons[id] ?? ''}</span><span class="nav-label">${label}</span></button>`).join('')}</nav>
     </aside>
     <section class="premium-content mvp-content">
-      <header class="topbar mvp-topbar">
-        <button type="button" class="mobile-nav-trigger" data-mobile-nav-toggle aria-controls="app-sidebar" aria-expanded="false"><span>Menú</span></button>
-        <div class="mvp-topbar-spacer" aria-hidden="true"></div>
-        <div id="cloud-account"></div>
-      </header>
       <div id="notice" class="notice" hidden></div>
       <section class="module-panel" id="crm"></section>
       <section class="module-panel" id="whatsapp"></section>
