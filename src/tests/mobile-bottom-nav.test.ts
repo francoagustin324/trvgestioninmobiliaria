@@ -32,10 +32,11 @@ test('la navegación móvil contiene exactamente los cinco accesos principales',
 test('Configuración continúa en escritorio y se abre desde el menú del avatar', () => {
   assert.ok(models.includes("['configuracion', 'Configuración']"));
   assert.ok(main.includes(': modules;'));
+  assert.ok(main.includes("canAccessModule('configuracion')"));
   assert.ok(main.includes("settingsButton.dataset.module = 'configuracion'"));
   assert.ok(main.includes("settingsButton.textContent = 'Configuración'"));
   assert.ok(main.includes("settingsButton.dataset.accountSettings = ''"));
-  assert.ok(main.includes("logout.before(settingsButton)"));
+  assert.ok(main.includes('logout.before(settingsButton)'));
   assert.ok(main.includes("removeAttribute('open')"));
 });
 
@@ -55,7 +56,8 @@ test('cada cambio de módulo vuelve al inicio sin animación lenta', () => {
 test('en teléfono mantiene una fila, ancho seguro y espacio inferior suficiente', () => {
   assert.ok(css.includes('@media (max-width: 720px)'));
   assert.ok(css.includes('grid-template-columns: repeat(5, minmax(0, 1fr))'));
-  assert.ok(css.includes('max-width: calc(100vw - (var(--pc-mobile-nav-edge) * 2))'));
+  assert.ok(css.includes('right: var(--pc-mobile-nav-edge)'));
+  assert.ok(css.includes('left: var(--pc-mobile-nav-edge)'));
   assert.ok(css.includes('padding: 12px 14px calc(var(--pc-mobile-nav-height) + 40px + env(safe-area-inset-bottom))'));
   assert.ok(css.includes('padding: 7px 7px calc(7px + env(safe-area-inset-bottom))'));
   assert.ok(css.includes('overflow: hidden'));
