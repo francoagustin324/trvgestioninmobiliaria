@@ -100,6 +100,7 @@ function setMobileNavigation(open: boolean): void {
 }
 
 function ensureAccountSettingsAction(): void {
+  if (!canAccessModule('configuracion')) return;
   const menu = document.querySelector<HTMLElement>('.mvp-account-menu > div');
   const logout = menu?.querySelector<HTMLButtonElement>('[data-account-logout]');
   if (!menu || !logout || menu.querySelector('[data-account-settings]')) return;
