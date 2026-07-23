@@ -9,9 +9,11 @@ const css = readFileSync('src/mobile-bottom-nav.css', 'utf8');
 const packageJson = readFileSync('package.json', 'utf8');
 
 function mobileModuleIds(): string[] {
-  const block = main.match(/const mobileNavigationModules: ModuleId\[\] = \[([\s\S]*?)\];/);
-  assert.ok(block, 'Debe existir la lista explícita de módulos móviles');
-  return [...block[1].matchAll(/'([^']+)'/g)].map((match) => match[1]);
+  const source = main.match(/const mobileNavigationModules: ModuleId\[\] = \[([\s\S]*?)\];/)?.[1];
+  if (!source) throw new Error('Debe existir la lista explícita de módulos móviles');
+  return [...source.matchAll(/'([^']+)'/g)]
+    .map((match) => match[1])
+    .filter((id): id is string => Boolean(id));
 }
 
 test('carga el ajuste móvil después del skin visual principal', () => {
