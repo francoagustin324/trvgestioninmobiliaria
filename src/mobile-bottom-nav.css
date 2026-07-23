@@ -74,7 +74,6 @@
     grid-template-columns: repeat(5, minmax(0, 1fr));
     gap: 2px;
     width: auto;
-    max-width: calc(100vw - (var(--pc-mobile-nav-edge) * 2));
     min-height: var(--pc-mobile-nav-height);
     box-sizing: border-box;
     padding: 7px 7px calc(7px + env(safe-area-inset-bottom));
