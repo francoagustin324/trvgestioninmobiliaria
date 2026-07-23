@@ -111,6 +111,10 @@ function ensureAccountSettingsAction(): void {
   logout.before(settingsButton);
 }
 
+function closeAccountMenu(): void {
+  document.querySelector<HTMLDetailsElement>('.mvp-account-menu')?.removeAttribute('open');
+}
+
 function resetModuleScroll(): void {
   document.querySelector<HTMLElement>('.mvp-content')?.scrollTo({ top: 0, left: 0, behavior: 'auto' });
   window.scrollTo({ top: 0, left: 0, behavior: 'auto' });
@@ -180,6 +184,7 @@ function bindEvents(): void {
     const detail = (event as CustomEvent<{ message?: string }>).detail;
     if (detail?.message) showNotice(detail.message);
     renderAccountMenu();
+    ensureAccountSettingsAction();
   });
   document.addEventListener('click', (event) => {
     const target = event.target as HTMLElement;
@@ -187,6 +192,7 @@ function bindEvents(): void {
     if (target.closest('[data-mobile-nav-close]')) { setMobileNavigation(false); return; }
     const module = target.closest<HTMLElement>('[data-module]')?.dataset.module as ModuleId | undefined;
     if (module && canAccessModule(module)) {
+      closeAccountMenu();
       state.activeModule = module;
       render();
       setMobileNavigation(false);
