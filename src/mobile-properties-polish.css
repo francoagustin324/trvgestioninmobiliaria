@@ -1,0 +1,308 @@
+/* Propiedades móvil premium.
+   Capa exclusivamente visual: no modifica datos, fotos, fichas ni acciones. */
+
+@media (max-width: 720px) {
+  #propiedades.module-panel {
+    width: 100%;
+    min-width: 0;
+    overflow-x: clip;
+  }
+
+  #propiedades .mvp-page-heading {
+    align-items: start;
+    gap: 12px;
+    margin-bottom: 16px;
+  }
+
+  #propiedades .mvp-page-heading > div,
+  #propiedades .mvp-page-heading h1,
+  #propiedades .mvp-page-heading p {
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  #propiedades .mvp-page-heading h1 {
+    font-size: clamp(1.7rem, 6vw, 2rem);
+    line-height: 1.08;
+    overflow-wrap: anywhere;
+  }
+
+  #propiedades .mvp-page-heading p {
+    font-size: 0.92rem;
+    line-height: 1.45;
+  }
+
+  #propiedades .mvp-page-heading > button {
+    min-height: 46px;
+    flex: 0 0 auto;
+  }
+
+  #propiedades .mvp-property-flow {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    align-items: stretch;
+    justify-content: stretch;
+    gap: 6px;
+    width: 100%;
+    min-width: 0;
+    margin-bottom: 16px;
+    padding: 8px;
+    overflow: visible;
+    white-space: normal;
+  }
+
+  #propiedades .mvp-property-flow > span {
+    display: none;
+  }
+
+  #propiedades .mvp-property-flow strong {
+    display: grid;
+    min-width: 0;
+    min-height: 44px;
+    place-items: center;
+    padding: 8px 5px;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 11px;
+    font-size: 0;
+    line-height: 1.2;
+    text-align: center;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    background: rgba(255, 255, 255, 0.045);
+  }
+
+  #propiedades .mvp-property-flow strong::after {
+    color: inherit;
+    font-size: 0.73rem;
+    font-weight: 850;
+    line-height: 1.2;
+  }
+
+  #propiedades .mvp-property-flow strong:nth-of-type(1)::after { content: '1. Propiedad'; }
+  #propiedades .mvp-property-flow strong:nth-of-type(2)::after { content: '2. Fotos'; }
+  #propiedades .mvp-property-flow strong:nth-of-type(3)::after { content: '3. Publicar'; }
+
+  #propiedades .mvp-lead-toolbar {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: end;
+    gap: 10px 12px;
+    width: 100%;
+    min-width: 0;
+    margin-bottom: 14px;
+  }
+
+  #propiedades .mvp-lead-toolbar label,
+  #propiedades .mvp-lead-toolbar input {
+    width: 100%;
+    min-width: 0;
+  }
+
+  #propiedades .mvp-lead-toolbar input {
+    min-height: 46px;
+    text-overflow: ellipsis;
+  }
+
+  #propiedades .mvp-lead-toolbar > strong {
+    padding-bottom: 12px;
+    font-size: 0.8rem;
+    white-space: nowrap;
+  }
+
+  #propiedades .mvp-lead-list {
+    display: grid;
+    gap: 14px;
+    width: 100%;
+    min-width: 0;
+    padding-bottom: 12px;
+  }
+
+  #propiedades .mvp-property-card {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    align-items: start;
+    gap: 13px;
+    width: 100%;
+    min-width: 0;
+    padding: 14px;
+    overflow: hidden;
+    border-radius: 18px;
+  }
+
+  #propiedades .mvp-property-cover {
+    display: block;
+    width: 100%;
+    height: auto;
+    min-width: 0;
+    aspect-ratio: 16 / 9;
+    object-fit: cover;
+    border-radius: 14px;
+  }
+
+  #propiedades .mvp-property-cover-empty {
+    display: grid;
+    height: auto;
+    place-items: center;
+    padding: 12px;
+    text-align: center;
+  }
+
+  #propiedades .mvp-property-main {
+    width: 100%;
+    min-width: 0;
+  }
+
+  #propiedades .mvp-property-title {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: start;
+    gap: 8px 12px;
+    width: 100%;
+    min-width: 0;
+  }
+
+  #propiedades .mvp-property-title h3 {
+    min-width: 0;
+    margin: 0;
+    font-size: 1.1rem;
+    line-height: 1.25;
+    overflow-wrap: anywhere;
+  }
+
+  #propiedades .mvp-property-title > span {
+    display: block;
+    justify-self: end;
+    max-width: 100%;
+    padding: 6px 9px;
+    border-radius: 999px;
+    font-size: 0.8rem;
+    font-weight: 850;
+    line-height: 1.15;
+    text-align: right;
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+
+  #propiedades .mvp-property-main > p {
+    margin: 8px 0 0;
+    font-size: 0.9rem;
+    line-height: 1.45;
+    overflow-wrap: anywhere;
+  }
+
+  #propiedades .mvp-property-meta {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+    width: 100%;
+    min-width: 0;
+    margin-top: 11px;
+  }
+
+  #propiedades .mvp-property-meta span {
+    max-width: 100%;
+    padding: 6px 8px;
+    font-size: 0.68rem;
+    line-height: 1.2;
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+
+  #propiedades .mvp-property-card-actions {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 8px;
+    width: 100%;
+    min-width: 0;
+  }
+
+  #propiedades .mvp-property-card-actions button {
+    width: 100%;
+    min-width: 0;
+    min-height: 44px;
+    height: auto;
+    padding: 9px 8px;
+    border-radius: 11px;
+    font-size: 0.76rem;
+    font-weight: 820;
+    line-height: 1.2;
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+
+  #propiedades .mvp-property-card-actions [data-share-property-ficha] {
+    grid-column: 1 / -1;
+    order: 1;
+    min-height: 48px;
+    color: var(--brand-ink);
+    border-color: transparent;
+    background: linear-gradient(150deg, var(--brand-bright), var(--brand));
+    box-shadow: var(--glass-hi);
+  }
+
+  #propiedades .mvp-property-card-actions [data-open-property-ficha] {
+    order: 2;
+  }
+
+  #propiedades .mvp-property-card-actions [data-edit-property] {
+    order: 3;
+  }
+
+  #propiedades .mvp-property-card-actions .delete {
+    order: 4;
+    width: 100%;
+    min-width: 0;
+    font-size: 0;
+    color: #efaa92;
+    border-color: rgba(224, 120, 80, 0.22);
+    background: rgba(224, 120, 80, 0.08);
+  }
+
+  #propiedades .mvp-property-card-actions .delete::after {
+    content: 'Eliminar';
+    font-size: 0.74rem;
+    font-weight: 780;
+  }
+}
+
+@media (max-width: 480px) {
+  #propiedades .mvp-page-heading {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  #propiedades .mvp-page-heading > button {
+    width: 100%;
+  }
+
+  #propiedades .mvp-lead-toolbar {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  #propiedades .mvp-lead-toolbar > strong {
+    padding-bottom: 0;
+  }
+
+  #propiedades .mvp-property-title {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  #propiedades .mvp-property-title > span {
+    justify-self: start;
+    text-align: left;
+  }
+}
+
+@media (min-width: 600px) and (max-width: 720px) {
+  #propiedades .mvp-property-card {
+    grid-template-columns: minmax(220px, 0.9fr) minmax(0, 1.1fr);
+  }
+
+  #propiedades .mvp-property-cover {
+    align-self: stretch;
+  }
+
+  #propiedades .mvp-property-card-actions {
+    grid-column: 1 / -1;
+  }
+}
