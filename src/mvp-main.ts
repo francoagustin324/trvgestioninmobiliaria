@@ -36,17 +36,27 @@ const moduleIcons: Partial<Record<ModuleId, string>> = {
   configuracion: appIcons.config,
 };
 
+const mobileNavigationModules: ModuleId[] = [
+  'crm',
+  'whatsapp',
+  'agenda',
+  'propiedades',
+  'equipo',
+];
+
 const mobileModuleLabels: Partial<Record<ModuleId, string>> = {
   crm: 'Leads',
   whatsapp: 'Chats',
   agenda: 'Agenda',
   propiedades: 'Propiedades',
   equipo: 'Equipo',
-  configuracion: 'Ajustes',
 };
 
 function renderNavigationButtons(mobile = false): string {
-  return modules.map(([id, label]) => {
+  const navigationModules = mobile
+    ? modules.filter(([id]) => mobileNavigationModules.includes(id))
+    : modules;
+  return navigationModules.map(([id, label]) => {
     const visibleLabel = mobile ? (mobileModuleLabels[id] ?? label) : label;
     const mobileAttribute = mobile ? ' data-mobile-module' : '';
     return `<button type="button" class="nav-button" data-module="${id}"${mobileAttribute} title="${label}" aria-label="${label}"><span class="nav-icon" aria-hidden="true">${moduleIcons[id] ?? ''}</span><span class="nav-label">${visibleLabel}</span></button>`;
@@ -89,6 +99,28 @@ function setMobileNavigation(open: boolean): void {
   if (backdrop) backdrop.hidden = !open;
 }
 
+function ensureAccountSettingsAction(): void {
+  if (!canAccessModule('configuracion')) return;
+  const menu = document.querySelector<HTMLElement>('.mvp-account-menu > div');
+  const logout = menu?.querySelector<HTMLButtonElement>('[data-account-logout]');
+  if (!menu || !logout || menu.querySelector('[data-account-settings]')) return;
+  const settingsButton = document.createElement('button');
+  settingsButton.type = 'button';
+  settingsButton.dataset.accountSettings = '';
+  settingsButton.dataset.module = 'configuracion';
+  settingsButton.textContent = 'Configuración';
+  logout.before(settingsButton);
+}
+
+function closeAccountMenu(): void {
+  document.querySelector<HTMLDetailsElement>('.mvp-account-menu')?.removeAttribute('open');
+}
+
+function resetModuleScroll(): void {
+  document.querySelector<HTMLElement>('.mvp-content')?.scrollTo({ top: 0, left: 0, behavior: 'auto' });
+  window.scrollTo({ top: 0, left: 0, behavior: 'auto' });
+}
+
 function showNotice(message: string): void {
   const notice = document.querySelector<HTMLElement>('#notice');
   if (!notice) return;
@@ -115,6 +147,7 @@ function render(): void {
   renderMvpUsers(qs<HTMLElement>('#equipo'));
   renderSettings(qs<HTMLElement>('#configuracion'));
   renderAccountMenu();
+  ensureAccountSettingsAction();
   modules.forEach(([id]) => {
     const allowed = canAccessModule(id);
     const panel = qs<HTMLElement>(`#${id}`);
@@ -152,13 +185,21 @@ function bindEvents(): void {
     const detail = (event as CustomEvent<{ message?: string }>).detail;
     if (detail?.message) showNotice(detail.message);
     renderAccountMenu();
+    ensureAccountSettingsAction();
   });
   document.addEventListener('click', (event) => {
     const target = event.target as HTMLElement;
     if (target.closest('[data-mobile-nav-toggle]')) { setMobileNavigation(!document.body.classList.contains('mobile-nav-open')); return; }
     if (target.closest('[data-mobile-nav-close]')) { setMobileNavigation(false); return; }
     const module = target.closest<HTMLElement>('[data-module]')?.dataset.module as ModuleId | undefined;
-    if (module && canAccessModule(module)) { state.activeModule = module; render(); setMobileNavigation(false); return; }
+    if (module && canAccessModule(module)) {
+      closeAccountMenu();
+      state.activeModule = module;
+      render();
+      setMobileNavigation(false);
+      resetModuleScroll();
+      return;
+    }
     const editId = Number(target.closest<HTMLElement>('[data-edit-client]')?.dataset.editClient);
     if (editId) { state.activeModule = 'crm'; state.editingClientId = editId; state.openForms.client = true; render(); return; }
     if (target.closest('[data-cancel-client-edit]')) { state.editingClientId = null; state.openForms.client = false; render(); return; }

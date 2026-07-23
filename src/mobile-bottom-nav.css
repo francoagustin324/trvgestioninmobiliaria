@@ -9,6 +9,7 @@
 @media (max-width: 720px) {
   :root {
     --pc-mobile-nav-height: 76px;
+    --pc-mobile-nav-edge: 8px;
   }
 
   .premium-shell,
@@ -31,7 +32,7 @@
     width: 100% !important;
     max-width: none !important;
     margin: 0 !important;
-    padding: 12px 14px calc(var(--pc-mobile-nav-height) + 24px + env(safe-area-inset-bottom)) !important;
+    padding: 12px 14px calc(var(--pc-mobile-nav-height) + 40px + env(safe-area-inset-bottom)) !important;
     overflow: visible !important;
   }
 
@@ -66,15 +67,17 @@
   .mobile-bottom-nav {
     position: fixed;
     z-index: 110;
-    right: 8px;
-    bottom: 8px;
-    left: 8px;
+    right: var(--pc-mobile-nav-edge);
+    bottom: var(--pc-mobile-nav-edge);
+    left: var(--pc-mobile-nav-edge);
     display: grid;
-    grid-auto-flow: column;
-    grid-auto-columns: minmax(0, 1fr);
+    grid-template-columns: repeat(5, minmax(0, 1fr));
     gap: 2px;
-    padding: 7px 7px calc(7px + env(safe-area-inset-bottom));
+    width: auto;
     min-height: var(--pc-mobile-nav-height);
+    box-sizing: border-box;
+    padding: 7px 7px calc(7px + env(safe-area-inset-bottom));
+    overflow: hidden;
     border: 1px solid rgba(255, 255, 255, 0.13);
     border-radius: 22px;
     background: linear-gradient(180deg, rgba(255, 255, 255, 0.07), rgba(255, 255, 255, 0.02)), rgba(4, 18, 12, 0.94);
@@ -86,12 +89,14 @@
   .mobile-bottom-nav .nav-button {
     position: relative;
     display: grid;
+    width: 100%;
     min-width: 0;
     min-height: 58px;
     place-items: center;
     align-content: center;
     gap: 3px;
     padding: 6px 2px;
+    overflow: hidden;
     color: var(--ink-soft);
     border: 0;
     border-radius: 16px;
@@ -153,7 +158,7 @@
 
   .mobile-bottom-nav .nav-button:focus-visible {
     outline: 3px solid rgba(222, 197, 147, 0.72);
-    outline-offset: 2px;
+    outline-offset: -2px;
   }
 
   body.mobile-nav-open {
@@ -174,9 +179,7 @@
   }
 
   .mobile-bottom-nav {
-    right: 6px;
-    bottom: 6px;
-    left: 6px;
+    --pc-mobile-nav-edge: 6px;
     padding-right: 5px;
     padding-left: 5px;
   }
