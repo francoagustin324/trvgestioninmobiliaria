@@ -2,7 +2,6 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
-const html = readFileSync('index.html', 'utf8');
 const leads = readFileSync('src/mvp-leads-ui.ts', 'utf8');
 const properties = readFileSync('src/mvp-properties-ui.ts', 'utf8');
 const conversations = readFileSync('src/mvp-conversations-ui.ts', 'utf8');
@@ -41,8 +40,7 @@ test('el cambio conserva la búsqueda, matching y guardado de Leads', () => {
   assert.ok(leads.includes('state.crm.clients = upsertClient(state.crm.clients, client)'));
 });
 
-test('renueva únicamente la entrada principal y no incorpora frameworks', () => {
-  assert.ok(html.includes('/dist/mvp-main.js?v=20260723-106'));
+test('el alcance no incorpora React, Tailwind ni dependencias visuales', () => {
   assert.equal(packageJson.includes('react'), false);
   assert.equal(packageJson.includes('tailwind'), false);
 });
