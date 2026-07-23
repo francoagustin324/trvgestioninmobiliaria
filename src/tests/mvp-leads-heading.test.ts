@@ -37,7 +37,7 @@ test('las descripciones de los demás módulos permanecen disponibles', () => {
 test('el cambio conserva la búsqueda, matching y guardado de Leads', () => {
   assert.ok(leads.includes('function leadRows(): Client[]'));
   assert.ok(leads.includes('matchPropertiesForClient(client, properties)'));
-  assert.ok(leads.includes("form?.addEventListener('submit'"));
+  assert.ok(leads.includes("querySelector<HTMLFormElement>('#mvp-lead-form')?.addEventListener('submit'"));
   assert.ok(leads.includes('state.crm.clients = upsertClient(state.crm.clients, client)'));
 });
 
