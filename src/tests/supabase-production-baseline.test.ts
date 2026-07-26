@@ -216,6 +216,16 @@ test('el preflight comprueba catálogos y funciones técnicas necesarias', () =>
   ]);
 });
 
+test('no califica construcciones especiales como funciones de pg_catalog', () => {
+  for (const specialForm of ['coalesce', 'greatest', 'least', 'nullif'] as const) {
+    assert.doesNotMatch(
+      sql,
+      new RegExp(`\\bpg_catalog\\.${specialForm}\\b`, 'i'),
+      `Construcción especial calificada incorrectamente: pg_catalog.${specialForm}`,
+    );
+  }
+});
+
 test('ambas etapas son estrictamente de solo lectura y sin SQL dinámico', () => {
   assertReadOnly(preflightSql);
   assertReadOnly(inventorySql);
@@ -380,6 +390,125 @@ test('la documentación conserva alcance preliminar y sin correcciones', () => {
   assert.match(documentation, /Riesgos de drift/i);
   assert.match(documentation, /Objetos potencialmente no versionados/i);
   assert.match(documentation, /Comparación producción contra GitHub/i);
+});
+
+test('la ETAPA 1 ejecuta realmente en PostgreSQL 17 aislado', { timeout: 180_000 }, async (t) => {
+  if (process.env.GITHUB_ACTIONS !== 'true') {
+    t.skip('La validación efímera PostgreSQL 17 se ejecuta en GitHub Actions.');
+    return;
+  }
+
+  const { spawnSync } = await import('node:child_process');
+  const { randomUUID } = await import('node:crypto');
+  const containerName = `b02-preflight-${randomUUID().slice(0, 8)}`;
+
+  const started = spawnSync(
+    'docker',
+    [
+      'run',
+      '--detach',
+      '--rm',
+      '--name',
+      containerName,
+      '--env',
+      'POSTGRES_PASSWORD=postgres',
+      'postgres:17',
+    ],
+    { encoding: 'utf8', maxBuffer: 10 * 1024 * 1024 },
+  );
+
+  assert.equal(started.status, 0, started.stderr || started.stdout);
+
+  try {
+    let ready = false;
+    for (let attempt = 0; attempt < 60; attempt += 1) {
+      const readiness = spawnSync(
+        'docker',
+        ['exec', containerName, 'pg_isready', '-U', 'postgres', '-d', 'postgres'],
+        { encoding: 'utf8' },
+      );
+      if (readiness.status === 0) {
+        ready = true;
+        break;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 1_000));
+    }
+    assert.equal(ready, true, 'PostgreSQL 17 no quedó disponible dentro del plazo.');
+
+    const versionResult = spawnSync(
+      'docker',
+      [
+        'exec',
+        containerName,
+        'psql',
+        '-U',
+        'postgres',
+        '-d',
+        'postgres',
+        '-X',
+        '-A',
+        '-t',
+        '-c',
+        'show server_version;',
+      ],
+      { encoding: 'utf8' },
+    );
+    assert.equal(versionResult.status, 0, versionResult.stderr || versionResult.stdout);
+    const serverVersion = versionResult.stdout.trim();
+    assert.match(serverVersion, /^17(?:\.|$)/);
+
+    const execution = spawnSync(
+      'docker',
+      [
+        'exec',
+        '-i',
+        containerName,
+        'psql',
+        '-U',
+        'postgres',
+        '-d',
+        'postgres',
+        '-X',
+        '-A',
+        '-t',
+        '-v',
+        'ON_ERROR_STOP=1',
+      ],
+      {
+        encoding: 'utf8',
+        input: preflightSql,
+        maxBuffer: 10 * 1024 * 1024,
+      },
+    );
+
+    assert.equal(execution.status, 0, execution.stderr || execution.stdout);
+    const outputLines = execution.stdout
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter((line) => line.length > 0);
+    assert.ok(outputLines.length > 0, 'La ETAPA 1 no devolvió una fila.');
+
+    const rawJson = outputLines[outputLines.length - 1];
+    assert.ok(rawJson);
+    const result = JSON.parse(rawJson) as Record<string, unknown>;
+
+    assert.equal(result.read_only, true);
+    assert.equal(result.catalog_only, true);
+    assert.equal(typeof result.safe_to_run_inventory, 'boolean');
+    assert.ok(Array.isArray(result.blocking_findings));
+
+    console.log(
+      `B0.2 PostgreSQL 17 isolated preflight: ${JSON.stringify({
+        server_version: serverVersion,
+        read_only: result.read_only,
+        catalog_only: result.catalog_only,
+        safe_to_run_inventory: result.safe_to_run_inventory,
+        blocking_findings: result.blocking_findings,
+      })}`,
+    );
+  } finally {
+    spawnSync('docker', ['rm', '--force', containerName], { encoding: 'utf8' });
+  }
 });
 
 test('no existe una migración baseline ejecutable de B0.2', () => {
