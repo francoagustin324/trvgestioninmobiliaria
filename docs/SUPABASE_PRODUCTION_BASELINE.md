@@ -2,46 +2,94 @@
 
 ## Estado
 
-Este documento es **preliminar**. Describe el procedimiento de inventario y comparación necesario para construir posteriormente una baseline confiable del esquema real de Supabase producción.
+Este documento sigue siendo **preliminar**. B0.2-A prepara una auditoría de solo lectura para conocer el esquema real de Supabase producción antes de diseñar una baseline reproducible.
 
-Todavía no contiene resultados observados de producción y **no es una migración ejecutable**. Permanecerá preliminar hasta que Franco ejecute de forma manual el inventario de solo lectura y entregue el JSON real para su análisis.
+Todavía no contiene resultados observados, no es una migración ejecutable y no autoriza ninguna ejecución en Supabase. B0.2-A no crea una baseline ejecutable.
 
-## Objetivo de B0.2-A
+El PR #113 fue fusionado antes de esta revisión correctiva. Esa fusión únicamente incorporó artefactos al repositorio: **no constituye autorización para ejecutar el SQL**. El trabajo correctivo posterior debe permanecer en un PR nuevo y en modo Draft hasta una autorización independiente.
 
-B0.2-A prepara una auditoría integral, catalogal y estrictamente de solo lectura del proyecto Supabase de producción. Su finalidad es establecer una fuente verificable para reconstruir más adelante el esquema desde cero sin inferir estructuras, permisos o dependencias a partir de migraciones parciales.
+## Objetivo
 
-Esta etapa solamente agrega:
+B0.2-A debe producir metadata técnica suficiente para comparar producción contra GitHub sin leer información comercial o personal. La etapa no corrige drift, no crea objetos y no genera todavía una migración baseline.
 
-- el SQL de inventario fuera de `supabase/migrations`;
-- esta documentación preliminar;
-- pruebas estáticas que protegen el carácter de solo lectura y el alcance del inventario.
+El artefacto `supabase/audits/b0_2_production_inventory_readonly.sql` queda dividido en dos etapas independientes:
 
-No crea todavía una migración baseline, no corrige drift y no modifica ningún objeto de Supabase.
+1. **Etapa 1 — Preflight catalogal.**
+2. **Etapa 2 — Inventario completo.**
 
-## Estado conocido antes del inventario
+La Etapa 2 solo podrá ejecutarse cuando la Etapa 1 devuelva exactamente `safe_to_run_inventory: true`.
 
-Los únicos hechos aceptados antes de observar el JSON real son:
+## Etapa 1 — Preflight catalogal
 
-- B0.1 está cerrado;
-- el PR #111 fue fusionado y su migración fue aplicada manualmente en producción;
-- el postflight de B0.1 fue revisado;
-- las pruebas controladas de autorización finalizaron 12/12;
-- el PR #112 fue fusionado;
-- B0.1 no debe volver a ejecutarse;
-- el repositorio contiene migraciones incrementales que no demuestran por sí solas que una base vacía pueda reconstruirse de forma completa;
-- por ese motivo, la baseline futura debe derivarse del esquema real inventariado y luego compararse contra GitHub.
+El preflight:
 
-No se afirma todavía que una tabla, función, trigger, política, bucket o migración técnica exista o falte en producción. Esos resultados dependen exclusivamente del JSON real.
+- es estrictamente de solo lectura;
+- utiliza únicamente relaciones y funciones de `pg_catalog`;
+- no consulta `storage.buckets` ni `supabase_migrations.schema_migrations` directamente;
+- no consulta filas de `auth.users`;
+- no consulta leads, propiedades, conversaciones, organizaciones ni archivos;
+- devuelve una sola fila y una columna JSONB llamada `b0_2_production_inventory_preflight`;
+- incluye la clave booleana `safe_to_run_inventory`;
+- enumera requisitos y hallazgos bloqueantes.
 
-## Inventario preparado
+### Esquemas confirmados
 
-El archivo `supabase/audits/b0_2_production_inventory_readonly.sql` está diseñado para devolver exactamente una fila y una columna JSONB llamada `b0_2_production_inventory`.
+El preflight informa la existencia de:
 
-La consulta revisará únicamente metadatos estructurales y de autorización. No consulta registros comerciales, usuarios, archivos ni payloads.
+- `pg_catalog`;
+- `public`;
+- `private`;
+- `auth`;
+- `storage`;
+- `supabase_migrations`.
+
+La ausencia de un esquema observado no siempre bloquea el inventario. Solamente bloquean los objetos indispensables para que la segunda sentencia pueda analizarse y ejecutarse con seguridad.
+
+### Relaciones y columnas indispensables
+
+El preflight exige para habilitar la Etapa 2:
+
+- `storage.buckets`;
+- `supabase_migrations.schema_migrations`;
+- `storage.buckets.name`;
+- `storage.buckets.public`;
+- `storage.buckets.file_size_limit`;
+- `storage.buckets.allowed_mime_types`;
+- `supabase_migrations.schema_migrations.version`.
+
+También observa, sin convertir su ausencia en un bloqueo automático:
+
+- `storage.objects`;
+- `auth.users`.
+
+### Catálogos y funciones técnicas
+
+El preflight confirma las relaciones catalogales usadas por el inventario y funciones como:
+
+- `pg_catalog.acldefault`;
+- `pg_catalog.aclexplode`;
+- `pg_catalog.format_type`;
+- `pg_catalog.pg_get_expr`;
+- `pg_catalog.pg_get_constraintdef`;
+- `pg_catalog.pg_get_indexdef`;
+- `pg_catalog.pg_get_functiondef`;
+- `pg_catalog.pg_get_triggerdef`;
+- `pg_catalog.pg_describe_object`.
+
+### Regla de detención
+
+- `safe_to_run_inventory = false`: detenerse. La Etapa 2 no debe ejecutarse.
+- `safe_to_run_inventory = true`: la Etapa 2 queda técnicamente habilitada, pero todavía requiere autorización operativa separada.
+
+Un resultado `true` no significa que el esquema esté correcto. Solamente confirma que existen las dependencias mínimas para relevarlo.
+
+## Etapa 2 — Inventario completo
+
+La segunda sentencia vuelve a validar las dependencias mínimas y devuelve una sola fila con una columna JSONB llamada `b0_2_production_inventory`.
+
+Inventaría metadata de los siguientes grupos.
 
 ### Tablas principales
-
-Se revisarán:
 
 - `public.organizations`;
 - `public.organization_members`;
@@ -49,24 +97,22 @@ Se revisarán:
 - `public.propcontrol_records`;
 - `public.public_property_fichas`.
 
-Para cada objeto se relevarán, cuando corresponda:
+Para cada tabla releva:
 
-- existencia y tipo de relación;
+- existencia;
 - propietario;
-- columnas, posición, tipo, nulabilidad, default, identidad y generación;
-- claves primarias;
-- claves foráneas;
+- columnas, tipos, nulabilidad y defaults;
+- identidad y columnas generadas;
+- claves primarias y foráneas;
 - restricciones;
 - índices;
-- RLS habilitado y RLS forzado;
+- RLS habilitado y forzado;
 - políticas;
-- grants efectivos por rol.
+- grants.
 
-No se leerán filas de esas tablas.
+No lee filas de esas tablas.
 
 ### Funciones
-
-Se revisarán:
 
 - `private.is_active_org_member`;
 - `private.org_member_role`;
@@ -78,191 +124,166 @@ Se revisarán:
 - `public.handle_new_propcontrol_user`;
 - `public.protect_propcontrol_record_identity`.
 
-Para cada función y sobrecarga se relevarán:
+Para cada firma releva argumentos, retorno, lenguaje, volatilidad, seguridad, `search_path`, propietario, permisos `EXECUTE`, definición normalizada y dependencias catalogables. Ninguna función inspeccionada es ejecutada.
 
-- firma e identidad de argumentos;
-- argumentos declarados;
-- tipo de retorno;
-- lenguaje;
-- volatilidad;
-- `SECURITY DEFINER` o `SECURITY INVOKER`;
-- `search_path` configurado;
-- propietario;
-- permisos `EXECUTE`;
-- definición normalizada;
-- dependencias que PostgreSQL exponga en sus catálogos.
+### Protección de ACL
 
-El inventario obtiene definiciones mediante metadatos de PostgreSQL. No invoca ni ejecuta ninguna función inspeccionada.
+`table_grants` y `function_grants` no llaman `pg_catalog.acldefault` cuando el objeto o su `owner_oid` son nulos.
+
+La regla es explícita:
+
+- objeto ausente o propietario nulo → ACL nula y grants vacíos;
+- objeto existente sin ACL explícita → `acldefault` con propietario válido;
+- objeto con ACL explícita → se usa esa ACL.
+
+Esto permite inventariar objetos ausentes sin provocar una llamada inválida a `acldefault`.
 
 ### Triggers
 
-Se revisarán:
+Se revisan:
 
-- los triggers no internos de las cinco tablas principales;
-- el trigger `auth.users.on_propcontrol_user_created`;
-- la función vinculada;
-- momento de ejecución;
-- eventos;
-- nivel fila o sentencia;
+- triggers no internos de las tablas principales;
+- `auth.users.on_propcontrol_user_created` cuando exista;
+- función vinculada;
+- momento, eventos y nivel;
 - estado habilitado;
 - definición catalogal.
 
-La revisión de `auth.users` se limita a catálogos del esquema. No consulta filas de usuarios.
+No se consultan filas de `auth.users`.
 
 ### Storage
 
-Se revisará únicamente metadata de `storage.buckets`:
+Se releva únicamente metadata de buckets:
 
-- nombre técnico del bucket;
-- condición pública o privada;
+- nombre técnico;
+- público o privado;
 - límite de tamaño;
-- tipos MIME permitidos.
+- MIME permitidos.
 
-También se relevarán las políticas catalogadas sobre `storage.objects` para poder identificar su alcance estructural.
-
-No se consulta `storage.objects`, no se enumeran archivos y no se extraen nombres, rutas o propietarios de objetos almacenados.
+Las políticas de `storage.objects` se obtienen desde `pg_catalog`. No se consulta ni se enumera ningún archivo.
 
 ### Historial de migraciones
 
-Se revisará:
+Se releva:
 
-- existencia técnica de `supabase_migrations.schema_migrations`;
-- identificadores de versiones registrados;
-- comparación contra los identificadores de migraciones actualmente conocidos en GitHub;
-- clasificación preliminar del historial como presente, vacío, incompleto o ausente.
+- existencia ya confirmada por preflight;
+- versiones técnicas registradas;
+- versiones esperadas según GitHub;
+- versiones esperadas faltantes;
+- versiones no reconocidas;
+- estado `empty`, `incomplete` o `present`.
 
-La comparación inicial considera estos identificadores técnicos versionados:
+La presencia de una versión no demuestra igualdad byte a byte con el archivo actual.
 
-- `20260713`;
-- `20260715093000`;
-- `20260716103000`;
-- `20260716103100`;
-- `20260717113000`;
-- `20260717190000`;
-- `20260724190000`.
+### Objetos previstos
 
-La presencia de un identificador no demuestra por sí sola que el contenido aplicado sea idéntico al archivo actual de GitHub. Esa equivalencia deberá analizarse después del inventario real y, cuando sea necesario, mediante comparaciones estructurales adicionales.
-
-### Objetos previstos para fases posteriores
-
-Se confirmará existencia o ausencia de:
+Se confirma existencia o ausencia de:
 
 - `public.user_profiles`;
 - `public.organization_settings`;
 - bucket `profile-avatars`.
 
-Su ausencia no será corregida en B0.2-A. El inventario solamente la documentará.
+B0.2-A no los crea ni corrige.
 
-## Comparación entre producción y GitHub
+## Resultado JSON del inventario
 
-Después de recibir el JSON real se construirá una matriz de comparación con, como mínimo:
+El JSON completo incluye como mínimo:
 
-1. objeto observado en producción;
-2. definición o comportamiento estructural observado;
-3. archivo o migración de GitHub que pretende representarlo;
-4. coincidencia completa, coincidencia parcial, objeto no versionado o definición divergente;
-5. dependencia anterior necesaria para reconstruirlo;
-6. riesgo de seguridad o disponibilidad asociado;
+- `check`;
+- `read_only`;
+- `generated_at`;
+- `server_version`;
+- `preflight_revalidated`;
+- `schemas`;
+- `tables`;
+- `functions`;
+- `triggers`;
+- `rls`;
+- `policies`;
+- `grants`;
+- `storage_buckets`;
+- `migration_history`;
+- `expected_objects_missing`;
+- `warnings`;
+- `blocking_findings`.
+
+No debe incluir usuarios, emails, teléfonos, clientes, organizaciones reales, payloads, tokens, secretos, URLs privadas ni archivos.
+
+## Comparación producción contra GitHub
+
+Después de recibir resultados reales y revisados se construirá una matriz con:
+
+1. objeto observado;
+2. definición estructural observada;
+3. archivo o migración que pretende representarlo;
+4. coincidencia completa, parcial, divergente o no versionada;
+5. dependencias necesarias;
+6. riesgo de seguridad o disponibilidad;
 7. tratamiento propuesto para una baseline futura.
-
-La comparación deberá distinguir claramente:
-
-- objetos creados fuera de migraciones versionadas;
-- migraciones aplicadas manualmente sin registro técnico;
-- archivos presentes en GitHub pero posiblemente no aplicados;
-- objetos modificados después de su creación;
-- grants implícitos o heredados;
-- políticas permisivas y restrictivas combinadas;
-- funciones con sobrecargas o firmas divergentes;
-- dependencias en `auth`, `storage`, extensiones o esquemas administrados por Supabase.
 
 ## Riesgos de drift
 
-Una baseline incorrecta puede:
+Una baseline incorrecta puede omitir columnas, índices, restricciones, triggers o grants; alterar RLS; ampliar permisos; cambiar `SECURITY DEFINER` o `search_path`; y producir un staging que compile pero no preserve el aislamiento entre inmobiliarias.
 
-- omitir columnas, restricciones o índices necesarios;
-- recrear grants demasiado amplios;
-- alterar la combinación efectiva de políticas RLS;
-- perder triggers de identidad o auditoría;
-- cambiar `SECURITY DEFINER`, volatilidad o `search_path` de funciones;
-- asumir un historial de migraciones que producción no reconoce;
-- crear buckets o políticas con configuración distinta;
-- producir una base nueva que compile pero no conserve el aislamiento entre inmobiliarias;
-- impedir restauraciones, staging reproducible o alta segura de nuevos clientes SaaS.
-
-Por eso no se generará una migración baseline hasta revisar el inventario real y resolver cada hallazgo bloqueante.
+Por eso no se crea una baseline ejecutable hasta analizar el inventario real.
 
 ## Objetos potencialmente no versionados
 
-Antes de observar producción no se puede enumerar cuáles objetos están efectivamente sin versionar. B0.2-A parte de la posibilidad de que existan:
+Hasta observar producción solo pueden considerarse hipótesis:
 
-- tablas base creadas antes del historial actual;
-- funciones o triggers creados manualmente;
-- políticas RLS reemplazadas en SQL Editor;
-- grants que no aparecen completos en las migraciones actuales;
-- buckets y políticas de Storage aplicados en iteraciones distintas;
-- versiones registradas que no representen exactamente el estado final del objeto.
+- tablas base creadas manualmente;
+- funciones o triggers fuera de migraciones;
+- políticas reemplazadas en SQL Editor;
+- grants no reflejados completamente;
+- buckets configurados en momentos distintos;
+- historial técnico incompleto.
 
-El JSON real determinará cuáles de estas posibilidades son hechos y cuáles no aplican.
+No deben afirmarse como hechos antes del JSON real.
 
-## Procedimiento para completar la baseline
+## Procedimiento para completar B0.2
 
-La baseline se completará en etapas separadas:
+1. conservar el SQL fuera de `supabase/migrations`;
+2. revisar estáticamente la Etapa 1;
+3. obtener una autorización separada antes de cualquier ejecución;
+4. ejecutar únicamente el preflight;
+5. detenerse si `safe_to_run_inventory` es `false`;
+6. revisar el resultado y confirmar que no contiene datos sensibles;
+7. obtener otra autorización concreta para la Etapa 2;
+8. ejecutar el inventario completo solamente con preflight `true`;
+9. analizar el JSON real;
+10. comparar producción contra GitHub;
+11. diseñar la baseline en un trabajo futuro y separado;
+12. validarla exclusivamente en staging descartable.
 
-1. conservar el SQL de inventario como artefacto de auditoría, fuera de migraciones;
-2. obtener el JSON real de producción mediante una ejecución manual y controlada;
-3. verificar que el JSON no contenga datos personales ni secretos;
-4. revisar hallazgos bloqueantes, warnings y objetos ausentes;
-5. comparar cada objeto observado contra migraciones y código en GitHub;
-6. identificar el orden real de dependencias entre esquemas, tablas, funciones, triggers, RLS, grants y Storage;
-7. diseñar una baseline nueva para una base vacía, sin editar migraciones ya aplicadas;
-8. validar esa baseline únicamente en un proyecto de staging descartable;
-9. ejecutar pruebas positivas y negativas de autorización;
-10. documentar diferencias inevitables entre objetos administrados por Supabase y objetos propios de PropControl;
-11. abrir un trabajo separado para la eventual migración baseline ejecutable.
+## Alcance excluido
 
-Cada corrección posterior deberá tener alcance, pruebas, rollback y autorización independientes.
+Esta corrección no:
 
-## Regla de no corrección
-
-B0.2-A no corrige ningún resultado. Aunque el inventario futuro revele un trigger incorrecto, RLS deshabilitado, una función divergente, un grant excesivo o un historial incompleto, esta etapa se limitará a documentarlo.
-
-No se modificará `handle_new_propcontrol_user`, invitaciones, organización activa, usos de `LIMIT 1`, Storage, frontend, WhatsApp ni IA hasta analizar el JSON real y autorizar un trabajo separado.
-
-## Seguridad y privacidad
-
-El inventario está limitado a catálogos y metadata técnica. No debe incluir:
-
-- usuarios;
-- emails;
-- teléfonos;
-- identificadores personales;
-- nombres de clientes;
-- nombres de organizaciones;
-- leads;
-- propiedades;
-- conversaciones;
-- payloads;
-- tokens;
-- secretos;
-- URLs privadas;
-- archivos de Storage.
+- ejecuta SQL;
+- modifica Supabase;
+- modifica producción;
+- crea una migración baseline;
+- no corrige `handle_new_propcontrol_user`;
+- modifica invitaciones;
+- implementa organización activa;
+- toca `LIMIT 1`;
+- modifica RLS, Storage o frontend;
+- toca WhatsApp o IA;
+- avanza a B1.
 
 ## Rollback
 
-No aplica rollback de base de datos porque B0.2-A no modifica producción, no ejecuta SQL y no crea una migración ejecutable.
+No aplica rollback de base de datos porque esta etapa no modifica Supabase ni producción.
 
-El único rollback del repositorio, antes de una eventual fusión, consiste en cerrar el PR Draft o eliminar los tres archivos nuevos de su rama. Esto no afecta Supabase ni datos reales.
+El rollback del repositorio consiste en cerrar el PR correctivo Draft o revertir sus cambios antes de una eventual publicación autorizada.
 
-## Criterio de cierre de B0.2-A
+## Criterio de cierre
 
-Esta etapa podrá considerarse preparada cuando:
+B0.2-A continúa preliminar hasta que:
 
-- el SQL permanezca estrictamente de solo lectura;
-- las pruebas estáticas y la suite completa estén aprobadas;
-- el PR continúe en modo Draft;
-- se confirme que no hubo ejecución SQL ni cambios en Supabase;
-- el documento continúe marcado como preliminar;
-- Franco entregue posteriormente el JSON real para una fase de análisis separada.
-
-Hasta entonces, este documento no representa una baseline definitiva de producción.
+- el preflight y el inventario estén revisados;
+- TypeScript, build, suite y CI estén en `success`;
+- el PR correctivo permanezca en Draft;
+- no se haya ejecutado SQL;
+- no se haya modificado Supabase;
+- exista una autorización posterior y específica para cada ejecución.
