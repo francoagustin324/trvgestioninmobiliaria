@@ -190,7 +190,7 @@ requirements as (
     'catalog_function'::text,
     'pg_catalog.' || function_name,
     true,
-    pg_catalog.coalesce(exists, false),
+    coalesce(exists, false),
     pg_catalog.jsonb_build_object(
       'function', function_name,
       'minimum_arguments', minimum_arguments
@@ -199,11 +199,11 @@ requirements as (
 ),
 preflight_summary as (
   select
-    pg_catalog.coalesce(
+    coalesce(
       pg_catalog.bool_and(exists) filter (where required_for_inventory),
       false
     ) as safe_to_run_inventory,
-    pg_catalog.coalesce(
+    coalesce(
       pg_catalog.jsonb_agg(
         pg_catalog.jsonb_build_object(
           'category', category,
@@ -216,7 +216,7 @@ preflight_summary as (
       ),
       '[]'::jsonb
     ) as requirements,
-    pg_catalog.coalesce(
+    coalesce(
       pg_catalog.jsonb_agg(
         pg_catalog.jsonb_build_object(
           'category', category,
@@ -341,7 +341,7 @@ table_columns as (
   select
     table_info.schema_name,
     table_info.table_name,
-    pg_catalog.coalesce(
+    coalesce(
       pg_catalog.jsonb_agg(
         pg_catalog.jsonb_build_object(
           'position', attribute.attnum,
@@ -373,7 +373,7 @@ table_constraints as (
   select
     table_info.schema_name,
     table_info.table_name,
-    pg_catalog.coalesce(
+    coalesce(
       pg_catalog.jsonb_agg(
         pg_catalog.jsonb_build_object(
           'name', constraint_info.conname,
@@ -394,7 +394,7 @@ table_constraints as (
       ) filter (where constraint_info.oid is not null),
       '[]'::jsonb
     ) as constraints,
-    pg_catalog.coalesce(
+    coalesce(
       pg_catalog.jsonb_agg(
         pg_catalog.jsonb_build_object(
           'name', constraint_info.conname,
@@ -404,7 +404,7 @@ table_constraints as (
       ) filter (where constraint_info.contype = 'p'),
       '[]'::jsonb
     ) as primary_keys,
-    pg_catalog.coalesce(
+    coalesce(
       pg_catalog.jsonb_agg(
         pg_catalog.jsonb_build_object(
           'name', constraint_info.conname,
@@ -423,7 +423,7 @@ table_indexes as (
   select
     table_info.schema_name,
     table_info.table_name,
-    pg_catalog.coalesce(
+    coalesce(
       pg_catalog.jsonb_agg(
         pg_catalog.jsonb_build_object(
           'name', index_relation.relname,
@@ -448,13 +448,13 @@ table_policies as (
   select
     table_info.schema_name,
     table_info.table_name,
-    pg_catalog.coalesce(
+    coalesce(
       pg_catalog.jsonb_agg(
         pg_catalog.jsonb_build_object(
           'name', policy.polname,
           'command', policy.polcmd,
           'permissive', policy.polpermissive,
-          'roles', pg_catalog.coalesce(
+          'roles', coalesce(
             (
               select pg_catalog.jsonb_agg(role_info.rolname order by role_info.rolname)
               from pg_catalog.pg_roles as role_info
@@ -499,7 +499,7 @@ table_grants as (
   select
     acl_source.schema_name,
     acl_source.table_name,
-    pg_catalog.coalesce(
+    coalesce(
       pg_catalog.jsonb_agg(
         pg_catalog.jsonb_build_object(
           'grantee', case
@@ -526,7 +526,7 @@ table_grants as (
   group by acl_source.schema_name, acl_source.table_name
 ),
 tables_json as (
-  select pg_catalog.coalesce(
+  select coalesce(
     pg_catalog.jsonb_agg(
       pg_catalog.jsonb_build_object(
         'schema', table_info.schema_name,
@@ -534,8 +534,8 @@ tables_json as (
         'exists', table_info.exists,
         'relation_kind', table_info.relkind,
         'owner', table_info.owner_name,
-        'rls_enabled', pg_catalog.coalesce(table_info.relrowsecurity, false),
-        'rls_forced', pg_catalog.coalesce(table_info.relforcerowsecurity, false),
+        'rls_enabled', coalesce(table_info.relrowsecurity, false),
+        'rls_forced', coalesce(table_info.relforcerowsecurity, false),
         'columns', table_columns.columns,
         'primary_keys', table_constraints.primary_keys,
         'foreign_keys', table_constraints.foreign_keys,
@@ -622,7 +622,7 @@ function_dependencies as (
     function_info.schema_name,
     function_info.function_name,
     function_info.function_oid,
-    pg_catalog.coalesce(
+    coalesce(
       pg_catalog.jsonb_agg(
         distinct pg_catalog.pg_describe_object(
           dependency.refclassid,
@@ -662,7 +662,7 @@ function_grants as (
     acl_source.schema_name,
     acl_source.function_name,
     acl_source.function_oid,
-    pg_catalog.coalesce(
+    coalesce(
       pg_catalog.jsonb_agg(
         pg_catalog.jsonb_build_object(
           'grantee', case
@@ -692,7 +692,7 @@ function_grants as (
     acl_source.function_oid
 ),
 functions_json as (
-  select pg_catalog.coalesce(
+  select coalesce(
     pg_catalog.jsonb_agg(
       pg_catalog.jsonb_build_object(
         'schema', function_info.schema_name,
@@ -756,7 +756,7 @@ trigger_targets as (
     and relation.relname = 'users'
 ),
 trigger_inventory as (
-  select pg_catalog.coalesce(
+  select coalesce(
     pg_catalog.jsonb_agg(
       pg_catalog.jsonb_build_object(
         'schema', relation_namespace.nspname,
@@ -799,14 +799,14 @@ trigger_inventory as (
      or trigger.tgname = 'on_propcontrol_user_created'
 ),
 rls_inventory as (
-  select pg_catalog.coalesce(
+  select coalesce(
     pg_catalog.jsonb_agg(
       pg_catalog.jsonb_build_object(
         'schema', schema_name,
         'table', table_name,
         'exists', exists,
-        'enabled', pg_catalog.coalesce(relrowsecurity, false),
-        'forced', pg_catalog.coalesce(relforcerowsecurity, false)
+        'enabled', coalesce(relrowsecurity, false),
+        'forced', coalesce(relforcerowsecurity, false)
       )
       order by schema_name, table_name
     ),
@@ -815,7 +815,7 @@ rls_inventory as (
   from table_catalog
 ),
 policy_inventory as (
-  select pg_catalog.coalesce(
+  select coalesce(
     pg_catalog.jsonb_agg(
       pg_catalog.jsonb_build_object(
         'schema', namespace.nspname,
@@ -858,7 +858,7 @@ policy_inventory as (
 ),
 grants_inventory as (
   select pg_catalog.jsonb_build_object(
-    'tables', pg_catalog.coalesce(
+    'tables', coalesce(
       (
         select pg_catalog.jsonb_agg(
           pg_catalog.jsonb_build_object(
@@ -872,7 +872,7 @@ grants_inventory as (
       ),
       '[]'::jsonb
     ),
-    'functions', pg_catalog.coalesce(
+    'functions', coalesce(
       (
         select pg_catalog.jsonb_agg(
           pg_catalog.jsonb_build_object(
@@ -890,7 +890,7 @@ grants_inventory as (
   ) as value
 ),
 storage_buckets_inventory as (
-  select pg_catalog.coalesce(
+  select coalesce(
     pg_catalog.jsonb_agg(
       pg_catalog.jsonb_build_object(
         'name', bucket.name,
@@ -907,7 +907,7 @@ storage_buckets_inventory as (
   where gate.safe_to_run_inventory
 ),
 storage_objects_policies as (
-  select pg_catalog.coalesce(
+  select coalesce(
     pg_catalog.jsonb_agg(
       pg_catalog.jsonb_build_object(
         'name', policy.polname,
@@ -966,21 +966,21 @@ migration_history_inventory as (
       ) then 'incomplete'
       else 'present'
     end,
-    'registered_versions', pg_catalog.coalesce(
+    'registered_versions', coalesce(
       (
         select pg_catalog.jsonb_agg(version order by version)
         from registered_migration_versions
       ),
       '[]'::jsonb
     ),
-    'expected_versions', pg_catalog.coalesce(
+    'expected_versions', coalesce(
       (
         select pg_catalog.jsonb_agg(version order by version)
         from known_migration_versions
       ),
       '[]'::jsonb
     ),
-    'missing_expected_versions', pg_catalog.coalesce(
+    'missing_expected_versions', coalesce(
       (
         select pg_catalog.jsonb_agg(expected.version order by expected.version)
         from known_migration_versions as expected
@@ -992,7 +992,7 @@ migration_history_inventory as (
       ),
       '[]'::jsonb
     ),
-    'unrecognized_versions', pg_catalog.coalesce(
+    'unrecognized_versions', coalesce(
       (
         select pg_catalog.jsonb_agg(registered.version order by registered.version)
         from registered_migration_versions as registered
@@ -1049,7 +1049,7 @@ expected_objects as (
     )
 ),
 expected_objects_missing as (
-  select pg_catalog.coalesce(
+  select coalesce(
     pg_catalog.jsonb_agg(
       pg_catalog.jsonb_build_object(
         'type', object_type,
@@ -1062,7 +1062,7 @@ expected_objects_missing as (
   from expected_objects
 ),
 warning_inventory as (
-  select pg_catalog.coalesce(
+  select coalesce(
     pg_catalog.jsonb_agg(message order by message),
     '[]'::jsonb
   ) as value
@@ -1079,7 +1079,7 @@ warning_inventory as (
   ) as warnings
 ),
 blocking_inventory as (
-  select pg_catalog.coalesce(
+  select coalesce(
     pg_catalog.jsonb_agg(message order by message),
     '[]'::jsonb
   ) as value
@@ -1116,7 +1116,7 @@ final_inventory as (
     'server_version', pg_catalog.current_setting('server_version'),
     'preflight_revalidated', gate.safe_to_run_inventory,
     'schemas', (
-      select pg_catalog.coalesce(
+      select coalesce(
         pg_catalog.jsonb_agg(
           pg_catalog.jsonb_build_object(
             'name', schema_name,
