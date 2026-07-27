@@ -12,6 +12,7 @@ function valueOrCurrent(values: Record<string, string>, key: keyof Client, curre
   const supplied = values[String(key)];
   if (supplied !== undefined) return supplied.trim();
   const existing = current?.[key];
+  if (typeof existing === 'number') return String(existing);
   return typeof existing === 'string' ? existing : '';
 }
 
@@ -22,6 +23,11 @@ function temperatureValue(value: string): Temperature {
 function optional(value: string): string | undefined {
   const trimmed = value.trim();
   return trimmed || undefined;
+}
+
+function optionalNumber(value: string): number | undefined {
+  const number = Number(value.trim());
+  return Number.isFinite(number) && number > 0 ? number : undefined;
 }
 
 export function clientFromFormValues(id: number, values: Record<string, string>, current?: Client | null): Client {
@@ -45,6 +51,14 @@ export function clientFromFormValues(id: number, values: Record<string, string>,
     canMoveForward: optional(valueOrCurrent(values, 'canMoveForward', current ?? undefined)),
     objections: optional(valueOrCurrent(values, 'objections', current ?? undefined)),
     notes: optional(valueOrCurrent(values, 'notes', current ?? undefined)),
+    zones: optional(valueOrCurrent(values, 'zones', current ?? undefined)),
+    propertyType: optional(valueOrCurrent(values, 'propertyType', current ?? undefined)),
+    operation: optional(valueOrCurrent(values, 'operation', current ?? undefined)),
+    bedrooms: optionalNumber(valueOrCurrent(values, 'bedrooms', current ?? undefined)),
+    currency: optional(valueOrCurrent(values, 'currency', current ?? undefined)),
+    needsFinancing: optional(valueOrCurrent(values, 'needsFinancing', current ?? undefined)),
+    creditPossible: optional(valueOrCurrent(values, 'creditPossible', current ?? undefined)),
+    urgency: optional(valueOrCurrent(values, 'urgency', current ?? undefined)),
     assignedToId: current?.assignedToId,
     createdById: current?.createdById,
   };
