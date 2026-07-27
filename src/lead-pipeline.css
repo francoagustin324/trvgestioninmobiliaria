@@ -31,9 +31,17 @@
 .mvp-lead-critical span,.mvp-lead-summary span { display:block; margin-bottom:4px; color:#71828b; font-size:.62rem; font-weight:900; letter-spacing:.04em; text-transform:uppercase; }
 .mvp-lead-critical strong,.mvp-lead-summary strong { display:block; overflow-wrap:anywhere; color:#294754; font-size:.76rem; }
 .mvp-lead-summary { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:8px; }
+.mvp-lead-essential-summary { grid-template-columns:repeat(4,minmax(0,1fr)); }
 .mvp-qualification { display:flex; align-items:center; justify-content:space-between; gap:10px; padding:10px 12px; border-radius:10px; background:#edf4f7; }
+.mvp-qualification > div { display:grid; gap:3px; }
 .mvp-qualification strong { color:#244c60; font-size:.78rem; }
 .mvp-qualification small { color:#687c87; font-size:.68rem; text-align:right; }
+.mvp-qualification-updated { color:#6e7f88; font-size:.65rem; white-space:nowrap; }
+.mvp-qualification.state-calificado { background:#e3f3eb; }
+.mvp-qualification.state-calificado strong { color:#28604c; }
+.mvp-qualification.state-no-listo-todavia { background:#f8e9ec; }
+.mvp-qualification.state-no-listo-todavia strong { color:#7a3541; }
+.mvp-qualification.state-falta-presupuesto,.mvp-qualification.state-falta-forma-de-pago,.mvp-qualification.state-falta-confirmar-capacidad-de-avance { background:#fff0d7; }
 .mvp-lead-history { border-top:1px solid #e6edef; padding-top:9px; }
 .mvp-lead-history summary { color:#385766; font-size:.72rem; font-weight:900; cursor:pointer; }
 .mvp-lead-history-list { display:grid; gap:7px; margin-top:9px; }
@@ -49,7 +57,7 @@
 @media (max-width:900px) {
   .mvp-lead-filter-grid { grid-template-columns:1fr 1fr; }
   .mvp-lead-filter-grid label:first-child { grid-column:1/-1; }
-  .mvp-lead-summary { grid-template-columns:repeat(2,minmax(0,1fr)); }
+  .mvp-lead-summary,.mvp-lead-essential-summary { grid-template-columns:repeat(2,minmax(0,1fr)); }
   .mvp-lead-critical { grid-template-columns:repeat(2,minmax(0,1fr)); }
 }
 
@@ -66,9 +74,10 @@
   .mvp-lead-filter-toggles { display:grid; grid-template-columns:1fr; }
   .mvp-lead-card-main { grid-template-columns:1fr; }
   .mvp-lead-actions { justify-content:flex-end; }
-  .mvp-lead-critical,.mvp-lead-summary { grid-template-columns:1fr; }
+  .mvp-lead-critical,.mvp-lead-summary,.mvp-lead-essential-summary { grid-template-columns:1fr; }
   .mvp-qualification { align-items:flex-start; flex-direction:column; }
   .mvp-qualification small { text-align:left; }
+  .mvp-qualification-updated { white-space:normal; }
   .mvp-lead-history-list article { grid-template-columns:1fr; }
   .mvp-lead-history-list p { grid-column:1; }
   .mvp-stage-counters { margin-right:-2px; }
