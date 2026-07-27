@@ -10,7 +10,9 @@ import {
   type AgendaUrgency,
   type ReminderWithStatus,
 } from './agenda.js';
+import { completeClientFollowUp, reprogramClientFollowUp } from './lead-pipeline.js';
 import { saveData, state } from './store.js';
+import { addActivity, visibleClients, visibleReminders } from './team-access.js';
 import { escapeHtml, field, formValues, nextId } from './utils.js';
 
 const dateFormatter = new Intl.DateTimeFormat('es-AR', { day: '2-digit', month: 'short', year: 'numeric', timeZone: 'UTC' });
@@ -24,7 +26,7 @@ const sectionLabels: Record<AgendaUrgency, { eyebrow: string; title: string; emp
 let editingReminderId: number | null = null;
 
 function reminderRecords(): ReminderWithStatus[] {
-  return state.crm.reminders as ReminderWithStatus[];
+  return visibleReminders() as ReminderWithStatus[];
 }
 
 function formattedDate(value: string): string {
@@ -149,7 +151,7 @@ function bindRelatedPicker(container: HTMLElement): void {
   const list = picker?.querySelector<HTMLElement>('#agenda-related-options');
   if (!picker || !input || !list) return;
 
-  const options = agendaRelatedOptions(state.crm.clients);
+  const options = agendaRelatedOptions(visibleClients());
   const hide = (): void => {
     list.hidden = true;
     list.innerHTML = '';
@@ -187,8 +189,10 @@ function bindRelatedPicker(container: HTMLElement): void {
 
 export function renderAgenda(container: HTMLElement): void {
   const today = todayIsoDate();
-  const groups = groupAgendaItems(buildAgendaItems(state.crm.clients, state.crm.reminders, today));
-  const completed = completedReminders(state.crm.reminders);
+  const clients = visibleClients();
+  const reminders = visibleReminders();
+  const groups = groupAgendaItems(buildAgendaItems(clients, reminders, today));
+  const completed = completedReminders(reminders);
   const total = groups.overdue.length + groups.today.length + groups.upcoming.length;
   const editing = editingReminderId === null ? null : reminderRecords().find((reminder) => reminder.id === editingReminderId) ?? null;
 
@@ -241,7 +245,9 @@ export function renderAgenda(container: HTMLElement): void {
 
   container.querySelectorAll<HTMLButtonElement>('[data-edit-reminder]').forEach((button) => {
     button.addEventListener('click', () => {
-      editingReminderId = Number(button.dataset.editReminder);
+      const reminderId = Number(button.dataset.editReminder);
+      if (!reminderRecords().some((item) => item.id === reminderId)) return;
+      editingReminderId = reminderId;
       state.openForms.reminder = true;
       renderAgenda(container);
       focusReminderForm(container);
@@ -258,10 +264,12 @@ export function renderAgenda(container: HTMLElement): void {
     button.addEventListener('click', () => {
       const id = Number(button.dataset.id);
       if (button.dataset.completeAgenda === 'client') {
-        const client = state.crm.clients.find((item) => item.id === id);
+        const client = visibleClients().find((item) => item.id === id);
         if (!client) return;
-        client.nextFollowUp = undefined;
-        saveAndRender('Seguimiento de lead completado');
+        const result = completeClientFollowUp(client);
+        Object.assign(client, result.client);
+        addActivity(result.activity);
+        saveAndRender(`Seguimiento de lead completado: ${client.name}`);
         return;
       }
       const reminder = reminderRecords().find((item) => item.id === id);
@@ -278,9 +286,11 @@ export function renderAgenda(container: HTMLElement): void {
       const id = Number(form.dataset.reprogramId);
       const date = field(formValues(form), 'date');
       if (source === 'client') {
-        const client = state.crm.clients.find((item) => item.id === id);
+        const client = visibleClients().find((item) => item.id === id);
         if (!client) return;
-        client.nextFollowUp = date;
+        const result = reprogramClientFollowUp(client, date);
+        Object.assign(client, result.client);
+        addActivity(result.activity);
       } else {
         const reminder = reminderRecords().find((item) => item.id === id);
         if (!reminder) return;
