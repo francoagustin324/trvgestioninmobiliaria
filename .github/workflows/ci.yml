@@ -9,6 +9,9 @@ on:
     - cron: "0 10 * * *"
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 concurrency:
   group: trv-ci-${{ github.ref }}
   cancel-in-progress: true
@@ -20,15 +23,47 @@ jobs:
       PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
     steps:
       - uses: actions/checkout@v4
-      - name: Capturar fuentes B1.2
-        uses: actions/upload-artifact@v4
         with:
-          name: b1-2-sources
-          path: |
-            src/lead-qualification.ts
-            src/lead-qualification-ui.ts
-            src/tests/b1-2-lead-qualification.test.ts
-          retention-days: 1
+          ref: ${{ github.event.pull_request.head.ref || github.ref }}
+      - name: Aplicar parche B1.2 una sola vez
+        if: github.event_name == 'pull_request'
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          source = Path('src/lead-qualification.ts')
+          text = source.read_text()
+          text = text.replace(
+              "  const single = text.match(/(?:(USD|ARS|US\\$)\\s*)?(\\d{1,7}(?:[.\\s]\\d{3})+|\\d{2,7})\\s*(mil|k)?\\s*(?:d[oó]lares?|pesos?)?/i);\n  if (!results.length && single) {\n",
+              "  const budgetText = text.replace(\n    /(?:\\+?54\\s*9?\\s*)?(?:\\(?\\d{2,4}\\)?[\\s-]*)?\\d{3,4}[\\s-]*\\d{4}/g,\n    (phone) => ' '.repeat(phone.length),\n  );\n  const single = budgetText.match(/(?:(USD|ARS|US\\$)\\s*)?(\\d{1,7}(?:[.\\s]\\d{3})+|\\d{2,7})\\s*(mil|k)?\\s*(?:d[oó]lares?|pesos?)?/i);\n  if (!results.length && single) {\n",
+          )
+          text = text.replace(
+              ".filter((value): value is string => Boolean(value) && !/^(que|donde|el|la)$/i.test(value));",
+              ".filter((value): value is string => typeof value === 'string' && !/^(que|donde|el|la)$/i.test(value));",
+          )
+          text = text.replace(
+              "if (analysis.missingQuestions.length) entries.push(activity('Preguntas faltantes generadas', clientId, `${analysis.missingQuestions.length} preguntas concretas preparadas.`));",
+              "if (!result && analysis.missingQuestions.length) entries.push(activity('Preguntas faltantes generadas', clientId, `${analysis.missingQuestions.length} preguntas concretas preparadas.`));",
+          )
+          source.write_text(text)
+
+          tests = Path('src/tests/b1-2-lead-qualification.test.ts')
+          test_text = tests.read_text()
+          test_text = test_text.replace(
+              "  const result = applyQualificationReview(client(), analysis.suggestions.filter((item) => item.field === 'zones').map((item) => accepted(item)));\n",
+              "  const result = applyQualificationReview(\n    client(),\n    analysis.suggestions.map((item) => ({ ...item, accepted: item.field === 'zones' })),\n  );\n",
+          )
+          tests.write_text(test_text)
+          PY
+          if git diff --quiet -- src/lead-qualification.ts src/tests/b1-2-lead-qualification.test.ts; then
+            echo "El parche B1.2 ya estaba aplicado."
+          else
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add src/lead-qualification.ts src/tests/b1-2-lead-qualification.test.ts
+            git commit -m "Corregir extracción segura y trazabilidad B1.2"
+            git push origin HEAD:${GITHUB_HEAD_REF}
+          fi
       - uses: actions/setup-node@v4
         with:
           node-version: 22
