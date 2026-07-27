@@ -1,7 +1,311 @@
 -- PropControl · B0.2-A · Inventario preliminar de producción
--- Consulta catalogal de solo lectura. No ejecuta las funciones inspeccionadas.
+-- PostgreSQL 17 · estrictamente de solo lectura
+--
+-- IMPORTANTE:
+--   1. Ejecutar primero y por separado solamente la ETAPA 1.
+--   2. Ejecutar la ETAPA 2 únicamente cuando la ETAPA 1 devuelva
+--      safe_to_run_inventory = true.
+--   3. Este archivo no es una migración y no debe moverse a supabase/migrations.
 
+-- B0.2-A STAGE 1: PREFLIGHT BEGIN
 with
+required_schemas(schema_name, required_for_inventory) as (
+  values
+    ('pg_catalog'::text, true),
+    ('public'::text, false),
+    ('private'::text, false),
+    ('auth'::text, false),
+    ('storage'::text, true),
+    ('supabase_migrations'::text, true)
+),
+schema_status as (
+  select
+    expected.schema_name,
+    expected.required_for_inventory,
+    namespace.oid is not null as exists
+  from required_schemas as expected
+  left join pg_catalog.pg_namespace as namespace
+    on namespace.nspname = expected.schema_name
+),
+required_relations(schema_name, relation_name, required_for_inventory) as (
+  values
+    ('storage'::text, 'buckets'::text, true),
+    ('storage'::text, 'objects'::text, false),
+    ('supabase_migrations'::text, 'schema_migrations'::text, true),
+    ('auth'::text, 'users'::text, false)
+),
+relation_status as (
+  select
+    expected.schema_name,
+    expected.relation_name,
+    expected.required_for_inventory,
+    relation.oid as relation_oid,
+    relation.relkind,
+    relation.oid is not null
+      and relation.relkind in ('r', 'p', 'v', 'm', 'f') as exists
+  from required_relations as expected
+  left join pg_catalog.pg_namespace as namespace
+    on namespace.nspname = expected.schema_name
+  left join pg_catalog.pg_class as relation
+    on relation.relnamespace = namespace.oid
+   and relation.relname = expected.relation_name
+),
+required_columns(schema_name, relation_name, column_name, required_for_inventory) as (
+  values
+    ('storage'::text, 'buckets'::text, 'name'::text, true),
+    ('storage'::text, 'buckets'::text, 'public'::text, true),
+    ('storage'::text, 'buckets'::text, 'file_size_limit'::text, true),
+    ('storage'::text, 'buckets'::text, 'allowed_mime_types'::text, true),
+    ('supabase_migrations'::text, 'schema_migrations'::text, 'version'::text, true)
+),
+column_status as (
+  select
+    expected.schema_name,
+    expected.relation_name,
+    expected.column_name,
+    expected.required_for_inventory,
+    attribute.attnum,
+    attribute.attname is not null
+      and attribute.attnum > 0
+      and not attribute.attisdropped as exists
+  from required_columns as expected
+  left join pg_catalog.pg_namespace as namespace
+    on namespace.nspname = expected.schema_name
+  left join pg_catalog.pg_class as relation
+    on relation.relnamespace = namespace.oid
+   and relation.relname = expected.relation_name
+  left join pg_catalog.pg_attribute as attribute
+    on attribute.attrelid = relation.oid
+   and attribute.attname = expected.column_name
+),
+required_catalog_relations(relation_name) as (
+  values
+    ('pg_namespace'::text),
+    ('pg_class'::text),
+    ('pg_attribute'::text),
+    ('pg_attrdef'::text),
+    ('pg_constraint'::text),
+    ('pg_index'::text),
+    ('pg_policy'::text),
+    ('pg_proc'::text),
+    ('pg_trigger'::text),
+    ('pg_depend'::text),
+    ('pg_roles'::text),
+    ('pg_type'::text),
+    ('pg_language'::text)
+),
+catalog_relation_status as (
+  select
+    expected.relation_name,
+    relation.oid is not null as exists
+  from required_catalog_relations as expected
+  left join pg_catalog.pg_namespace as namespace
+    on namespace.nspname = 'pg_catalog'
+  left join pg_catalog.pg_class as relation
+    on relation.relnamespace = namespace.oid
+   and relation.relname = expected.relation_name
+   and relation.relkind in ('r', 'v')
+),
+required_catalog_functions(function_name, minimum_arguments) as (
+  values
+    ('acldefault'::text, 2),
+    ('aclexplode'::text, 1),
+    ('format_type'::text, 2),
+    ('pg_get_expr'::text, 2),
+    ('pg_get_constraintdef'::text, 1),
+    ('pg_get_indexdef'::text, 1),
+    ('pg_get_functiondef'::text, 1),
+    ('pg_get_function_arguments'::text, 1),
+    ('pg_get_function_identity_arguments'::text, 1),
+    ('pg_get_function_result'::text, 1),
+    ('pg_get_triggerdef'::text, 1),
+    ('pg_describe_object'::text, 3)
+),
+catalog_function_status as (
+  select
+    expected.function_name,
+    expected.minimum_arguments,
+    pg_catalog.bool_or(
+      function.oid is not null
+      and function.pronargs >= expected.minimum_arguments
+    ) as exists
+  from required_catalog_functions as expected
+  left join pg_catalog.pg_namespace as namespace
+    on namespace.nspname = 'pg_catalog'
+  left join pg_catalog.pg_proc as function
+    on function.pronamespace = namespace.oid
+   and function.proname = expected.function_name
+  group by expected.function_name, expected.minimum_arguments
+),
+requirements as (
+  select
+    'schema'::text as category,
+    schema_name as object_name,
+    required_for_inventory,
+    exists,
+    pg_catalog.jsonb_build_object('schema', schema_name) as details
+  from schema_status
+
+  union all
+
+  select
+    'relation'::text,
+    schema_name || '.' || relation_name,
+    required_for_inventory,
+    exists,
+    pg_catalog.jsonb_build_object(
+      'schema', schema_name,
+      'relation', relation_name,
+      'relkind', relkind
+    )
+  from relation_status
+
+  union all
+
+  select
+    'column'::text,
+    schema_name || '.' || relation_name || '.' || column_name,
+    required_for_inventory,
+    exists,
+    pg_catalog.jsonb_build_object(
+      'schema', schema_name,
+      'relation', relation_name,
+      'column', column_name
+    )
+  from column_status
+
+  union all
+
+  select
+    'catalog_relation'::text,
+    'pg_catalog.' || relation_name,
+    true,
+    exists,
+    pg_catalog.jsonb_build_object('relation', relation_name)
+  from catalog_relation_status
+
+  union all
+
+  select
+    'catalog_function'::text,
+    'pg_catalog.' || function_name,
+    true,
+    coalesce(exists, false),
+    pg_catalog.jsonb_build_object(
+      'function', function_name,
+      'minimum_arguments', minimum_arguments
+    )
+  from catalog_function_status
+),
+preflight_summary as (
+  select
+    coalesce(
+      pg_catalog.bool_and(exists) filter (where required_for_inventory),
+      false
+    ) as safe_to_run_inventory,
+    coalesce(
+      pg_catalog.jsonb_agg(
+        pg_catalog.jsonb_build_object(
+          'category', category,
+          'object', object_name,
+          'required_for_inventory', required_for_inventory,
+          'exists', exists,
+          'details', details
+        )
+        order by category, object_name
+      ),
+      '[]'::jsonb
+    ) as requirements,
+    coalesce(
+      pg_catalog.jsonb_agg(
+        pg_catalog.jsonb_build_object(
+          'category', category,
+          'object', object_name,
+          'reason', 'required object is absent'
+        )
+        order by category, object_name
+      ) filter (where required_for_inventory and not exists),
+      '[]'::jsonb
+    ) as blocking_findings
+  from requirements
+)
+select pg_catalog.jsonb_build_object(
+  'check', 'B0.2 production inventory preflight',
+  'read_only', true,
+  'catalog_only', true,
+  'generated_at', pg_catalog.clock_timestamp(),
+  'server_version', pg_catalog.current_setting('server_version'),
+  'safe_to_run_inventory', safe_to_run_inventory,
+  'requirements', requirements,
+  'blocking_findings', blocking_findings,
+  'next_step', case
+    when safe_to_run_inventory
+      then 'Stage 2 may be reviewed for a separately authorized execution.'
+    else 'Stop. Do not execute Stage 2.'
+  end
+) as b0_2_production_inventory_preflight
+from preflight_summary;
+-- B0.2-A STAGE 1: PREFLIGHT END
+
+-- B0.2-A STAGE 2: INVENTORY BEGIN
+-- EJECUTAR ESTA ETAPA SOLAMENTE SI LA ETAPA 1 DEVOLVIÓ:
+-- safe_to_run_inventory = true
+with
+inventory_gate as (
+  select
+    pg_catalog.to_regclass('storage.buckets') is not null
+    and pg_catalog.to_regclass('supabase_migrations.schema_migrations') is not null
+    and exists (
+      select 1
+      from pg_catalog.pg_namespace as namespace
+      where namespace.nspname = 'storage'
+    )
+    and exists (
+      select 1
+      from pg_catalog.pg_namespace as namespace
+      where namespace.nspname = 'supabase_migrations'
+    )
+    and not exists (
+      select 1
+      from (
+        values
+          ('storage'::text, 'buckets'::text, 'name'::text),
+          ('storage'::text, 'buckets'::text, 'public'::text),
+          ('storage'::text, 'buckets'::text, 'file_size_limit'::text),
+          ('storage'::text, 'buckets'::text, 'allowed_mime_types'::text),
+          ('supabase_migrations'::text, 'schema_migrations'::text, 'version'::text)
+      ) as expected(schema_name, relation_name, column_name)
+      where not exists (
+        select 1
+        from pg_catalog.pg_namespace as namespace
+        join pg_catalog.pg_class as relation
+          on relation.relnamespace = namespace.oid
+        join pg_catalog.pg_attribute as attribute
+          on attribute.attrelid = relation.oid
+         and attribute.attname = expected.column_name
+         and attribute.attnum > 0
+         and not attribute.attisdropped
+        where namespace.nspname = expected.schema_name
+          and relation.relname = expected.relation_name
+      )
+    ) as safe_to_run_inventory
+),
+target_schemas(schema_name) as (
+  values
+    ('public'::text),
+    ('private'::text),
+    ('auth'::text),
+    ('storage'::text),
+    ('supabase_migrations'::text)
+),
+schema_inventory as (
+  select
+    target.schema_name,
+    namespace.oid is not null as exists
+  from target_schemas as target
+  left join pg_catalog.pg_namespace as namespace
+    on namespace.nspname = target.schema_name
+),
 target_tables(schema_name, table_name) as (
   values
     ('public'::text, 'organizations'::text),
@@ -9,6 +313,252 @@ target_tables(schema_name, table_name) as (
     ('public'::text, 'fichas'::text),
     ('public'::text, 'propcontrol_records'::text),
     ('public'::text, 'public_property_fichas'::text)
+),
+table_catalog as (
+  select
+    target.schema_name,
+    target.table_name,
+    relation.oid as relation_oid,
+    relation.relkind,
+    relation.relowner as owner_oid,
+    case
+      when relation.relowner is null then null
+      else pg_catalog.pg_get_userbyid(relation.relowner)
+    end as owner_name,
+    relation.relrowsecurity,
+    relation.relforcerowsecurity,
+    relation.relacl,
+    relation.oid is not null as exists
+  from target_tables as target
+  left join pg_catalog.pg_namespace as namespace
+    on namespace.nspname = target.schema_name
+  left join pg_catalog.pg_class as relation
+    on relation.relnamespace = namespace.oid
+   and relation.relname = target.table_name
+   and relation.relkind in ('r', 'p')
+),
+table_columns as (
+  select
+    table_info.schema_name,
+    table_info.table_name,
+    coalesce(
+      pg_catalog.jsonb_agg(
+        pg_catalog.jsonb_build_object(
+          'position', attribute.attnum,
+          'name', attribute.attname,
+          'type', pg_catalog.format_type(attribute.atttypid, attribute.atttypmod),
+          'nullable', not attribute.attnotnull,
+          'default', case
+            when default_value.oid is null then null
+            else pg_catalog.pg_get_expr(default_value.adbin, default_value.adrelid)
+          end,
+          'identity', nullif(attribute.attidentity, ''),
+          'generated', nullif(attribute.attgenerated, '')
+        )
+        order by attribute.attnum
+      ) filter (where attribute.attnum is not null),
+      '[]'::jsonb
+    ) as columns
+  from table_catalog as table_info
+  left join pg_catalog.pg_attribute as attribute
+    on attribute.attrelid = table_info.relation_oid
+   and attribute.attnum > 0
+   and not attribute.attisdropped
+  left join pg_catalog.pg_attrdef as default_value
+    on default_value.adrelid = attribute.attrelid
+   and default_value.adnum = attribute.attnum
+  group by table_info.schema_name, table_info.table_name
+),
+table_constraints as (
+  select
+    table_info.schema_name,
+    table_info.table_name,
+    coalesce(
+      pg_catalog.jsonb_agg(
+        pg_catalog.jsonb_build_object(
+          'name', constraint_info.conname,
+          'type', case constraint_info.contype
+            when 'p' then 'primary_key'
+            when 'f' then 'foreign_key'
+            when 'u' then 'unique'
+            when 'c' then 'check'
+            when 'x' then 'exclusion'
+            else constraint_info.contype::text
+          end,
+          'definition', pg_catalog.pg_get_constraintdef(constraint_info.oid, true),
+          'validated', constraint_info.convalidated,
+          'deferrable', constraint_info.condeferrable,
+          'initially_deferred', constraint_info.condeferred
+        )
+        order by constraint_info.conname
+      ) filter (where constraint_info.oid is not null),
+      '[]'::jsonb
+    ) as constraints,
+    coalesce(
+      pg_catalog.jsonb_agg(
+        pg_catalog.jsonb_build_object(
+          'name', constraint_info.conname,
+          'definition', pg_catalog.pg_get_constraintdef(constraint_info.oid, true)
+        )
+        order by constraint_info.conname
+      ) filter (where constraint_info.contype = 'p'),
+      '[]'::jsonb
+    ) as primary_keys,
+    coalesce(
+      pg_catalog.jsonb_agg(
+        pg_catalog.jsonb_build_object(
+          'name', constraint_info.conname,
+          'definition', pg_catalog.pg_get_constraintdef(constraint_info.oid, true)
+        )
+        order by constraint_info.conname
+      ) filter (where constraint_info.contype = 'f'),
+      '[]'::jsonb
+    ) as foreign_keys
+  from table_catalog as table_info
+  left join pg_catalog.pg_constraint as constraint_info
+    on constraint_info.conrelid = table_info.relation_oid
+  group by table_info.schema_name, table_info.table_name
+),
+table_indexes as (
+  select
+    table_info.schema_name,
+    table_info.table_name,
+    coalesce(
+      pg_catalog.jsonb_agg(
+        pg_catalog.jsonb_build_object(
+          'name', index_relation.relname,
+          'unique', index_info.indisunique,
+          'primary', index_info.indisprimary,
+          'valid', index_info.indisvalid,
+          'ready', index_info.indisready,
+          'definition', pg_catalog.pg_get_indexdef(index_info.indexrelid)
+        )
+        order by index_relation.relname
+      ) filter (where index_info.indexrelid is not null),
+      '[]'::jsonb
+    ) as indexes
+  from table_catalog as table_info
+  left join pg_catalog.pg_index as index_info
+    on index_info.indrelid = table_info.relation_oid
+  left join pg_catalog.pg_class as index_relation
+    on index_relation.oid = index_info.indexrelid
+  group by table_info.schema_name, table_info.table_name
+),
+table_policies as (
+  select
+    table_info.schema_name,
+    table_info.table_name,
+    coalesce(
+      pg_catalog.jsonb_agg(
+        pg_catalog.jsonb_build_object(
+          'name', policy.polname,
+          'command', policy.polcmd,
+          'permissive', policy.polpermissive,
+          'roles', coalesce(
+            (
+              select pg_catalog.jsonb_agg(role_info.rolname order by role_info.rolname)
+              from pg_catalog.pg_roles as role_info
+              where role_info.oid = any(policy.polroles)
+            ),
+            '[]'::jsonb
+          ),
+          'using', case
+            when policy.polqual is null then null
+            else pg_catalog.pg_get_expr(policy.polqual, policy.polrelid)
+          end,
+          'with_check', case
+            when policy.polwithcheck is null then null
+            else pg_catalog.pg_get_expr(policy.polwithcheck, policy.polrelid)
+          end
+        )
+        order by policy.polname
+      ) filter (where policy.oid is not null),
+      '[]'::jsonb
+    ) as policies
+  from table_catalog as table_info
+  left join pg_catalog.pg_policy as policy
+    on policy.polrelid = table_info.relation_oid
+  group by table_info.schema_name, table_info.table_name
+),
+table_acl_source as (
+  select
+    table_info.schema_name,
+    table_info.table_name,
+    table_info.relation_oid,
+    table_info.owner_oid,
+    case
+      when table_info.relation_oid is null or table_info.owner_oid is null
+        then null::aclitem[]
+      when table_info.relacl is null
+        then pg_catalog.acldefault('r', table_info.owner_oid)
+      else table_info.relacl
+    end as effective_acl
+  from table_catalog as table_info
+),
+table_grants as (
+  select
+    acl_source.schema_name,
+    acl_source.table_name,
+    coalesce(
+      pg_catalog.jsonb_agg(
+        pg_catalog.jsonb_build_object(
+          'grantee', case
+            when grant_item.grantee = 0 then 'PUBLIC'
+            else grantee_role.rolname
+          end,
+          'grantor', grantor_role.rolname,
+          'privilege', grant_item.privilege_type,
+          'grantable', grant_item.is_grantable
+        )
+        order by
+          case when grant_item.grantee = 0 then 'PUBLIC' else grantee_role.rolname end,
+          grant_item.privilege_type
+      ) filter (where grant_item.privilege_type is not null),
+      '[]'::jsonb
+    ) as grants
+  from table_acl_source as acl_source
+  left join lateral pg_catalog.aclexplode(acl_source.effective_acl) as grant_item
+    on acl_source.effective_acl is not null
+  left join pg_catalog.pg_roles as grantee_role
+    on grantee_role.oid = grant_item.grantee
+  left join pg_catalog.pg_roles as grantor_role
+    on grantor_role.oid = grant_item.grantor
+  group by acl_source.schema_name, acl_source.table_name
+),
+tables_json as (
+  select coalesce(
+    pg_catalog.jsonb_agg(
+      pg_catalog.jsonb_build_object(
+        'schema', table_info.schema_name,
+        'name', table_info.table_name,
+        'exists', table_info.exists,
+        'relation_kind', table_info.relkind,
+        'owner', table_info.owner_name,
+        'rls_enabled', coalesce(table_info.relrowsecurity, false),
+        'rls_forced', coalesce(table_info.relforcerowsecurity, false),
+        'columns', table_columns.columns,
+        'primary_keys', table_constraints.primary_keys,
+        'foreign_keys', table_constraints.foreign_keys,
+        'constraints', table_constraints.constraints,
+        'indexes', table_indexes.indexes,
+        'policies', table_policies.policies,
+        'grants', table_grants.grants
+      )
+      order by table_info.schema_name, table_info.table_name
+    ),
+    '[]'::jsonb
+  ) as value
+  from table_catalog as table_info
+  join table_columns
+    using (schema_name, table_name)
+  join table_constraints
+    using (schema_name, table_name)
+  join table_indexes
+    using (schema_name, table_name)
+  join table_policies
+    using (schema_name, table_name)
+  join table_grants
+    using (schema_name, table_name)
 ),
 target_functions(schema_name, function_name) as (
   values
@@ -22,15 +572,369 @@ target_functions(schema_name, function_name) as (
     ('public'::text, 'handle_new_propcontrol_user'::text),
     ('public'::text, 'protect_propcontrol_record_identity'::text)
 ),
-schema_targets(schema_name) as (
-  values
-    ('public'::text),
-    ('private'::text),
-    ('auth'::text),
-    ('storage'::text),
-    ('supabase_migrations'::text)
+function_catalog as (
+  select
+    target.schema_name,
+    target.function_name,
+    function.oid as function_oid,
+    function.proowner as owner_oid,
+    function.proacl,
+    function.provolatile,
+    function.prosecdef,
+    function.proconfig,
+    language.lanname as language_name,
+    case
+      when function.proowner is null then null
+      else pg_catalog.pg_get_userbyid(function.proowner)
+    end as owner_name,
+    case
+      when function.oid is null then null
+      else pg_catalog.pg_get_function_identity_arguments(function.oid)
+    end as identity_arguments,
+    case
+      when function.oid is null then null
+      else pg_catalog.pg_get_function_arguments(function.oid)
+    end as arguments,
+    case
+      when function.oid is null then null
+      else pg_catalog.pg_get_function_result(function.oid)
+    end as return_type,
+    case
+      when function.oid is null then null
+      else pg_catalog.regexp_replace(
+        pg_catalog.pg_get_functiondef(function.oid),
+        '[[:space:]]+',
+        ' ',
+        'g'
+      )
+    end as normalized_definition
+  from target_functions as target
+  left join pg_catalog.pg_namespace as namespace
+    on namespace.nspname = target.schema_name
+  left join pg_catalog.pg_proc as function
+    on function.pronamespace = namespace.oid
+   and function.proname = target.function_name
+  left join pg_catalog.pg_language as language
+    on language.oid = function.prolang
 ),
-expected_migrations(version) as (
+function_dependencies as (
+  select
+    function_info.schema_name,
+    function_info.function_name,
+    function_info.function_oid,
+    coalesce(
+      pg_catalog.jsonb_agg(
+        distinct pg_catalog.pg_describe_object(
+          dependency.refclassid,
+          dependency.refobjid,
+          dependency.refobjsubid
+        )
+      ) filter (where dependency.refobjid is not null),
+      '[]'::jsonb
+    ) as dependencies
+  from function_catalog as function_info
+  left join pg_catalog.pg_depend as dependency
+    on dependency.classid = 'pg_catalog.pg_proc'::regclass
+   and dependency.objid = function_info.function_oid
+   and dependency.deptype in ('n', 'a', 'i')
+  group by
+    function_info.schema_name,
+    function_info.function_name,
+    function_info.function_oid
+),
+function_acl_source as (
+  select
+    function_info.schema_name,
+    function_info.function_name,
+    function_info.function_oid,
+    function_info.owner_oid,
+    case
+      when function_info.function_oid is null or function_info.owner_oid is null
+        then null::aclitem[]
+      when function_info.proacl is null
+        then pg_catalog.acldefault('f', function_info.owner_oid)
+      else function_info.proacl
+    end as effective_acl
+  from function_catalog as function_info
+),
+function_grants as (
+  select
+    acl_source.schema_name,
+    acl_source.function_name,
+    acl_source.function_oid,
+    coalesce(
+      pg_catalog.jsonb_agg(
+        pg_catalog.jsonb_build_object(
+          'grantee', case
+            when grant_item.grantee = 0 then 'PUBLIC'
+            else grantee_role.rolname
+          end,
+          'grantor', grantor_role.rolname,
+          'privilege', grant_item.privilege_type,
+          'grantable', grant_item.is_grantable
+        )
+        order by
+          case when grant_item.grantee = 0 then 'PUBLIC' else grantee_role.rolname end,
+          grant_item.privilege_type
+      ) filter (where grant_item.privilege_type is not null),
+      '[]'::jsonb
+    ) as execute_grants
+  from function_acl_source as acl_source
+  left join lateral pg_catalog.aclexplode(acl_source.effective_acl) as grant_item
+    on acl_source.effective_acl is not null
+  left join pg_catalog.pg_roles as grantee_role
+    on grantee_role.oid = grant_item.grantee
+  left join pg_catalog.pg_roles as grantor_role
+    on grantor_role.oid = grant_item.grantor
+  group by
+    acl_source.schema_name,
+    acl_source.function_name,
+    acl_source.function_oid
+),
+functions_json as (
+  select coalesce(
+    pg_catalog.jsonb_agg(
+      pg_catalog.jsonb_build_object(
+        'schema', function_info.schema_name,
+        'name', function_info.function_name,
+        'exists', function_info.function_oid is not null,
+        'signature', case
+          when function_info.function_oid is null then null
+          else function_info.schema_name || '.' || function_info.function_name
+            || '(' || function_info.identity_arguments || ')'
+        end,
+        'identity_arguments', function_info.identity_arguments,
+        'arguments', function_info.arguments,
+        'return_type', function_info.return_type,
+        'language', function_info.language_name,
+        'volatility', case function_info.provolatile
+          when 'i' then 'immutable'
+          when 's' then 'stable'
+          when 'v' then 'volatile'
+          else null
+        end,
+        'security', case
+          when function_info.function_oid is null then null
+          when function_info.prosecdef then 'definer'
+          else 'invoker'
+        end,
+        'search_path', function_info.proconfig,
+        'owner', function_info.owner_name,
+        'execute_grants', function_grants.execute_grants,
+        'normalized_definition', function_info.normalized_definition,
+        'dependencies', function_dependencies.dependencies
+      )
+      order by
+        function_info.schema_name,
+        function_info.function_name,
+        function_info.identity_arguments nulls first
+    ),
+    '[]'::jsonb
+  ) as value
+  from function_catalog as function_info
+  left join function_dependencies
+    on function_dependencies.schema_name = function_info.schema_name
+   and function_dependencies.function_name = function_info.function_name
+   and function_dependencies.function_oid is not distinct from function_info.function_oid
+  left join function_grants
+    on function_grants.schema_name = function_info.schema_name
+   and function_grants.function_name = function_info.function_name
+   and function_grants.function_oid is not distinct from function_info.function_oid
+),
+trigger_targets as (
+  select relation_oid
+  from table_catalog
+  where relation_oid is not null
+
+  union
+
+  select relation.oid
+  from pg_catalog.pg_namespace as namespace
+  join pg_catalog.pg_class as relation
+    on relation.relnamespace = namespace.oid
+  where namespace.nspname = 'auth'
+    and relation.relname = 'users'
+),
+trigger_inventory as (
+  select coalesce(
+    pg_catalog.jsonb_agg(
+      pg_catalog.jsonb_build_object(
+        'schema', relation_namespace.nspname,
+        'table', relation.relname,
+        'name', trigger.tgname,
+        'linked_function', function_namespace.nspname || '.' || function.proname,
+        'timing', case
+          when (trigger.tgtype & 2) <> 0 then 'before'
+          when (trigger.tgtype & 64) <> 0 then 'instead_of'
+          else 'after'
+        end,
+        'events', pg_catalog.jsonb_build_array(
+          case when (trigger.tgtype & 4) <> 0 then 'insert' end,
+          case when (trigger.tgtype & 8) <> 0 then 'delete' end,
+          case when (trigger.tgtype & 16) <> 0 then 'update' end,
+          case when (trigger.tgtype & 32) <> 0 then 'truncate' end
+        ),
+        'level', case when (trigger.tgtype & 1) <> 0 then 'row' else 'statement' end,
+        'enabled_state', trigger.tgenabled,
+        'definition', pg_catalog.pg_get_triggerdef(trigger.oid, true)
+      )
+      order by relation_namespace.nspname, relation.relname, trigger.tgname
+    ) filter (where trigger.oid is not null),
+    '[]'::jsonb
+  ) as value
+  from trigger_targets as target
+  join pg_catalog.pg_trigger as trigger
+    on trigger.tgrelid = target.relation_oid
+   and not trigger.tgisinternal
+  join pg_catalog.pg_class as relation
+    on relation.oid = trigger.tgrelid
+  join pg_catalog.pg_namespace as relation_namespace
+    on relation_namespace.oid = relation.relnamespace
+  join pg_catalog.pg_proc as function
+    on function.oid = trigger.tgfoid
+  join pg_catalog.pg_namespace as function_namespace
+    on function_namespace.oid = function.pronamespace
+  where relation_namespace.nspname <> 'auth'
+     or relation.relname <> 'users'
+     or trigger.tgname = 'on_propcontrol_user_created'
+),
+rls_inventory as (
+  select coalesce(
+    pg_catalog.jsonb_agg(
+      pg_catalog.jsonb_build_object(
+        'schema', schema_name,
+        'table', table_name,
+        'exists', exists,
+        'enabled', coalesce(relrowsecurity, false),
+        'forced', coalesce(relforcerowsecurity, false)
+      )
+      order by schema_name, table_name
+    ),
+    '[]'::jsonb
+  ) as value
+  from table_catalog
+),
+policy_inventory as (
+  select coalesce(
+    pg_catalog.jsonb_agg(
+      pg_catalog.jsonb_build_object(
+        'schema', namespace.nspname,
+        'table', relation.relname,
+        'name', policy.polname,
+        'command', policy.polcmd,
+        'permissive', policy.polpermissive,
+        'using', case
+          when policy.polqual is null then null
+          else pg_catalog.pg_get_expr(policy.polqual, policy.polrelid)
+        end,
+        'with_check', case
+          when policy.polwithcheck is null then null
+          else pg_catalog.pg_get_expr(policy.polwithcheck, policy.polrelid)
+        end
+      )
+      order by namespace.nspname, relation.relname, policy.polname
+    ) filter (where policy.oid is not null),
+    '[]'::jsonb
+  ) as value
+  from pg_catalog.pg_policy as policy
+  join pg_catalog.pg_class as relation
+    on relation.oid = policy.polrelid
+  join pg_catalog.pg_namespace as namespace
+    on namespace.oid = relation.relnamespace
+  where policy.polrelid in (
+    select relation_oid
+    from table_catalog
+    where relation_oid is not null
+
+    union
+
+    select relation.oid
+    from pg_catalog.pg_namespace as namespace_filter
+    join pg_catalog.pg_class as relation
+      on relation.relnamespace = namespace_filter.oid
+    where namespace_filter.nspname = 'storage'
+      and relation.relname = 'objects'
+  )
+),
+grants_inventory as (
+  select pg_catalog.jsonb_build_object(
+    'tables', coalesce(
+      (
+        select pg_catalog.jsonb_agg(
+          pg_catalog.jsonb_build_object(
+            'schema', schema_name,
+            'table', table_name,
+            'grants', grants
+          )
+          order by schema_name, table_name
+        )
+        from table_grants
+      ),
+      '[]'::jsonb
+    ),
+    'functions', coalesce(
+      (
+        select pg_catalog.jsonb_agg(
+          pg_catalog.jsonb_build_object(
+            'schema', schema_name,
+            'function', function_name,
+            'function_oid_present', function_oid is not null,
+            'execute_grants', execute_grants
+          )
+          order by schema_name, function_name, function_oid nulls first
+        )
+        from function_grants
+      ),
+      '[]'::jsonb
+    )
+  ) as value
+),
+storage_buckets_inventory as (
+  select coalesce(
+    pg_catalog.jsonb_agg(
+      pg_catalog.jsonb_build_object(
+        'name', bucket.name,
+        'public', bucket.public,
+        'file_size_limit', bucket.file_size_limit,
+        'allowed_mime_types', bucket.allowed_mime_types
+      )
+      order by bucket.name
+    ),
+    '[]'::jsonb
+  ) as value
+  from storage.buckets as bucket
+  cross join inventory_gate as gate
+  where gate.safe_to_run_inventory
+),
+storage_objects_policies as (
+  select coalesce(
+    pg_catalog.jsonb_agg(
+      pg_catalog.jsonb_build_object(
+        'name', policy.polname,
+        'command', policy.polcmd,
+        'permissive', policy.polpermissive,
+        'using', case
+          when policy.polqual is null then null
+          else pg_catalog.pg_get_expr(policy.polqual, policy.polrelid)
+        end,
+        'with_check', case
+          when policy.polwithcheck is null then null
+          else pg_catalog.pg_get_expr(policy.polwithcheck, policy.polrelid)
+        end
+      )
+      order by policy.polname
+    ) filter (where policy.oid is not null),
+    '[]'::jsonb
+  ) as value
+  from pg_catalog.pg_namespace as namespace
+  join pg_catalog.pg_class as relation
+    on relation.relnamespace = namespace.oid
+   and relation.relname = 'objects'
+  left join pg_catalog.pg_policy as policy
+    on policy.polrelid = relation.oid
+  where namespace.nspname = 'storage'
+),
+known_migration_versions(version) as (
   values
     ('20260713'::text),
     ('20260715093000'::text),
@@ -40,1039 +944,218 @@ expected_migrations(version) as (
     ('20260717190000'::text),
     ('20260724190000'::text)
 ),
-schema_rows as (
-  select
-    st.schema_name,
-    n.oid is not null as object_exists,
-    owner_role.rolname as owner_name
-  from schema_targets as st
-  left join pg_catalog.pg_namespace as n
-    on n.nspname = st.schema_name
-  left join pg_catalog.pg_roles as owner_role
-    on owner_role.oid = n.nspowner
-),
-schemas_inventory as (
-  select coalesce(
-    jsonb_agg(
-      jsonb_build_object(
-        'schema', schema_name,
-        'exists', object_exists,
-        'owner', owner_name
-      )
-      order by schema_name
-    ),
-    '[]'::jsonb
-  ) as value
-  from schema_rows
-),
-target_relations as (
-  select
-    tt.schema_name,
-    tt.table_name,
-    c.oid as object_oid,
-    c.relkind,
-    c.relowner as owner_oid,
-    owner_role.rolname as owner_name,
-    c.relrowsecurity,
-    c.relforcerowsecurity,
-    c.relacl
-  from target_tables as tt
-  left join pg_catalog.pg_namespace as n
-    on n.nspname = tt.schema_name
-  left join pg_catalog.pg_class as c
-    on c.relnamespace = n.oid
-   and c.relname = tt.table_name
-   and c.relkind in ('r', 'p', 'v', 'm', 'f')
-  left join pg_catalog.pg_roles as owner_role
-    on owner_role.oid = c.relowner
-),
-table_columns as (
-  select
-    tr.schema_name,
-    tr.table_name,
-    coalesce(
-      jsonb_agg(
-        jsonb_build_object(
-          'position', a.attnum,
-          'name', a.attname,
-          'type', pg_catalog.format_type(a.atttypid, a.atttypmod),
-          'nullable', not a.attnotnull,
-          'default', pg_catalog.pg_get_expr(ad.adbin, ad.adrelid),
-          'identity', nullif(a.attidentity, ''),
-          'generated', nullif(a.attgenerated, '')
-        )
-        order by a.attnum
-      ) filter (where a.attnum is not null),
-      '[]'::jsonb
-    ) as columns
-  from target_relations as tr
-  left join pg_catalog.pg_attribute as a
-    on a.attrelid = tr.object_oid
-   and a.attnum > 0
-   and not a.attisdropped
-  left join pg_catalog.pg_attrdef as ad
-    on ad.adrelid = a.attrelid
-   and ad.adnum = a.attnum
-  group by tr.schema_name, tr.table_name
-),
-table_constraints as (
-  select
-    tr.schema_name,
-    tr.table_name,
-    coalesce(
-      jsonb_agg(
-        jsonb_build_object(
-          'name', con.conname,
-          'type', case con.contype
-            when 'p' then 'PRIMARY KEY'
-            when 'f' then 'FOREIGN KEY'
-            when 'u' then 'UNIQUE'
-            when 'c' then 'CHECK'
-            when 'x' then 'EXCLUSION'
-            when 'n' then 'NOT NULL'
-            else con.contype::text
-          end,
-          'definition', pg_catalog.pg_get_constraintdef(con.oid, true),
-          'validated', con.convalidated,
-          'deferrable', con.condeferrable,
-          'initially_deferred', con.condeferred,
-          'referenced_table', case
-            when con.contype = 'f' then con.confrelid::pg_catalog.regclass::text
-            else null
-          end
-        )
-        order by con.contype, con.conname
-      ) filter (where con.oid is not null),
-      '[]'::jsonb
-    ) as constraints,
-    coalesce(
-      jsonb_agg(
-        jsonb_build_object(
-          'name', con.conname,
-          'definition', pg_catalog.pg_get_constraintdef(con.oid, true)
-        )
-        order by con.conname
-      ) filter (where con.contype = 'p'),
-      '[]'::jsonb
-    ) as primary_keys,
-    coalesce(
-      jsonb_agg(
-        jsonb_build_object(
-          'name', con.conname,
-          'definition', pg_catalog.pg_get_constraintdef(con.oid, true),
-          'referenced_table', con.confrelid::pg_catalog.regclass::text
-        )
-        order by con.conname
-      ) filter (where con.contype = 'f'),
-      '[]'::jsonb
-    ) as foreign_keys
-  from target_relations as tr
-  left join pg_catalog.pg_constraint as con
-    on con.conrelid = tr.object_oid
-  group by tr.schema_name, tr.table_name
-),
-table_indexes as (
-  select
-    tr.schema_name,
-    tr.table_name,
-    coalesce(
-      jsonb_agg(
-        jsonb_build_object(
-          'name', index_relation.relname,
-          'definition', pg_catalog.pg_get_indexdef(index_relation.oid),
-          'primary', index_metadata.indisprimary,
-          'unique', index_metadata.indisunique,
-          'valid', index_metadata.indisvalid,
-          'ready', index_metadata.indisready,
-          'live', index_metadata.indislive
-        )
-        order by index_relation.relname
-      ) filter (where index_relation.oid is not null),
-      '[]'::jsonb
-    ) as indexes
-  from target_relations as tr
-  left join pg_catalog.pg_index as index_metadata
-    on index_metadata.indrelid = tr.object_oid
-  left join pg_catalog.pg_class as index_relation
-    on index_relation.oid = index_metadata.indexrelid
-  group by tr.schema_name, tr.table_name
-),
-table_policies as (
-  select
-    tr.schema_name,
-    tr.table_name,
-    coalesce(
-      jsonb_agg(
-        jsonb_build_object(
-          'name', pol.polname,
-          'command', case pol.polcmd
-            when '*' then 'ALL'
-            when 'r' then 'SELECT'
-            when 'a' then 'INSERT'
-            when 'w' then 'UPDATE'
-            when 'd' then 'DELETE'
-            else pol.polcmd::text
-          end,
-          'permissive', pol.polpermissive,
-          'roles', coalesce(
-            (
-              select jsonb_agg(
-                case
-                  when role_item.role_oid = 0 then 'PUBLIC'
-                  else coalesce(policy_role.rolname, role_item.role_oid::text)
-                end
-                order by role_item.role_oid
-              )
-              from unnest(pol.polroles) as role_item(role_oid)
-              left join pg_catalog.pg_roles as policy_role
-                on policy_role.oid = role_item.role_oid
-            ),
-            '[]'::jsonb
-          ),
-          'using', pg_catalog.pg_get_expr(pol.polqual, pol.polrelid),
-          'with_check', pg_catalog.pg_get_expr(pol.polwithcheck, pol.polrelid)
-        )
-        order by pol.polname
-      ) filter (where pol.oid is not null),
-      '[]'::jsonb
-    ) as policies
-  from target_relations as tr
-  left join pg_catalog.pg_policy as pol
-    on pol.polrelid = tr.object_oid
-  group by tr.schema_name, tr.table_name
-),
-table_grants as (
-  select
-    tr.schema_name,
-    tr.table_name,
-    coalesce(
-      jsonb_agg(
-        jsonb_build_object(
-          'grantee', case
-            when acl.grantee = 0 then 'PUBLIC'
-            else coalesce(grantee_role.rolname, acl.grantee::text)
-          end,
-          'privilege', acl.privilege_type,
-          'grantable', acl.is_grantable,
-          'grantor', coalesce(grantor_role.rolname, acl.grantor::text)
-        )
-        order by
-          case
-            when acl.grantee = 0 then 'PUBLIC'
-            else coalesce(grantee_role.rolname, acl.grantee::text)
-          end,
-          acl.privilege_type
-      ) filter (where acl.grantee is not null),
-      '[]'::jsonb
-    ) as grants
-  from target_relations as tr
-  left join lateral pg_catalog.aclexplode(
-    coalesce(tr.relacl, pg_catalog.acldefault('r', tr.owner_oid))
-  ) as acl
-    on tr.object_oid is not null
-  left join pg_catalog.pg_roles as grantee_role
-    on grantee_role.oid = acl.grantee
-  left join pg_catalog.pg_roles as grantor_role
-    on grantor_role.oid = acl.grantor
-  group by tr.schema_name, tr.table_name
-),
-tables_inventory as (
-  select coalesce(
-    jsonb_agg(
-      jsonb_build_object(
-        'schema', tr.schema_name,
-        'table', tr.table_name,
-        'exists', tr.object_oid is not null,
-        'relation_kind', case tr.relkind
-          when 'r' then 'table'
-          when 'p' then 'partitioned_table'
-          when 'v' then 'view'
-          when 'm' then 'materialized_view'
-          when 'f' then 'foreign_table'
-          else null
-        end,
-        'owner', tr.owner_name,
-        'columns', tc.columns,
-        'primary_keys', tcon.primary_keys,
-        'foreign_keys', tcon.foreign_keys,
-        'constraints', tcon.constraints,
-        'indexes', ti.indexes,
-        'rls_enabled', coalesce(tr.relrowsecurity, false),
-        'rls_forced', coalesce(tr.relforcerowsecurity, false),
-        'policies', tp.policies,
-        'grants', tg.grants
-      )
-      order by tr.schema_name, tr.table_name
-    ),
-    '[]'::jsonb
-  ) as value
-  from target_relations as tr
-  join table_columns as tc
-    using (schema_name, table_name)
-  join table_constraints as tcon
-    using (schema_name, table_name)
-  join table_indexes as ti
-    using (schema_name, table_name)
-  join table_policies as tp
-    using (schema_name, table_name)
-  join table_grants as tg
-    using (schema_name, table_name)
-),
-rls_inventory as (
-  select coalesce(
-    jsonb_agg(
-      jsonb_build_object(
-        'schema', schema_name,
-        'table', table_name,
-        'exists', object_oid is not null,
-        'enabled', coalesce(relrowsecurity, false),
-        'forced', coalesce(relforcerowsecurity, false)
-      )
-      order by schema_name, table_name
-    ),
-    '[]'::jsonb
-  ) as value
-  from target_relations
-),
-main_policies_inventory as (
-  select coalesce(
-    jsonb_agg(
-      jsonb_build_object(
-        'schema', schema_name,
-        'table', table_name,
-        'policies', policies
-      )
-      order by schema_name, table_name
-    ),
-    '[]'::jsonb
-  ) as value
-  from table_policies
-),
-main_grants_inventory as (
-  select coalesce(
-    jsonb_agg(
-      jsonb_build_object(
-        'schema', schema_name,
-        'table', table_name,
-        'grants', grants
-      )
-      order by schema_name, table_name
-    ),
-    '[]'::jsonb
-  ) as value
-  from table_grants
-),
-function_rows as (
-  select
-    tf.schema_name,
-    tf.function_name,
-    p.oid as object_oid,
-    p.proowner as owner_oid,
-    owner_role.rolname as owner_name,
-    p.proacl,
-    p.prosecdef,
-    p.provolatile,
-    p.proconfig,
-    p.prolang,
-    language_row.lanname
-  from target_functions as tf
-  left join pg_catalog.pg_namespace as n
-    on n.nspname = tf.schema_name
-  left join pg_catalog.pg_proc as p
-    on p.pronamespace = n.oid
-   and p.proname = tf.function_name
-  left join pg_catalog.pg_roles as owner_role
-    on owner_role.oid = p.proowner
-  left join pg_catalog.pg_language as language_row
-    on language_row.oid = p.prolang
-),
-function_dependencies as (
-  select
-    fr.object_oid,
-    coalesce(
-      jsonb_agg(
-        jsonb_build_object(
-          'dependency_type', case dependency.deptype
-            when 'n' then 'normal'
-            when 'a' then 'automatic'
-            when 'i' then 'internal'
-            when 'e' then 'extension'
-            when 'p' then 'pinned'
-            else dependency.deptype::text
-          end,
-          'referenced_object', case
-            when dependency.refclassid = 'pg_catalog.pg_class'::pg_catalog.regclass then
-              pg_catalog.quote_ident(class_namespace.nspname)
-              || '.'
-              || pg_catalog.quote_ident(class_object.relname)
-            when dependency.refclassid = 'pg_catalog.pg_proc'::pg_catalog.regclass then
-              pg_catalog.quote_ident(proc_namespace.nspname)
-              || '.'
-              || pg_catalog.quote_ident(proc_object.proname)
-              || '('
-              || pg_catalog.pg_get_function_identity_arguments(proc_object.oid)
-              || ')'
-            when dependency.refclassid = 'pg_catalog.pg_type'::pg_catalog.regclass then
-              pg_catalog.quote_ident(type_namespace.nspname)
-              || '.'
-              || pg_catalog.quote_ident(type_object.typname)
-            when dependency.refclassid = 'pg_catalog.pg_namespace'::pg_catalog.regclass then
-              pg_catalog.quote_ident(namespace_object.nspname)
-            when dependency.refclassid = 'pg_catalog.pg_extension'::pg_catalog.regclass then
-              extension_object.extname
-            when dependency.refclassid = 'pg_catalog.pg_language'::pg_catalog.regclass then
-              language_object.lanname
-            else dependency.refclassid::pg_catalog.regclass::text
-              || ':'
-              || dependency.refobjid::text
-          end
-        )
-        order by dependency.refclassid, dependency.refobjid, dependency.refobjsubid
-      ) filter (where dependency.objid is not null),
-      '[]'::jsonb
-    ) as dependencies
-  from function_rows as fr
-  left join pg_catalog.pg_depend as dependency
-    on dependency.classid = 'pg_catalog.pg_proc'::pg_catalog.regclass
-   and dependency.objid = fr.object_oid
-  left join pg_catalog.pg_class as class_object
-    on dependency.refclassid = 'pg_catalog.pg_class'::pg_catalog.regclass
-   and class_object.oid = dependency.refobjid
-  left join pg_catalog.pg_namespace as class_namespace
-    on class_namespace.oid = class_object.relnamespace
-  left join pg_catalog.pg_proc as proc_object
-    on dependency.refclassid = 'pg_catalog.pg_proc'::pg_catalog.regclass
-   and proc_object.oid = dependency.refobjid
-  left join pg_catalog.pg_namespace as proc_namespace
-    on proc_namespace.oid = proc_object.pronamespace
-  left join pg_catalog.pg_type as type_object
-    on dependency.refclassid = 'pg_catalog.pg_type'::pg_catalog.regclass
-   and type_object.oid = dependency.refobjid
-  left join pg_catalog.pg_namespace as type_namespace
-    on type_namespace.oid = type_object.typnamespace
-  left join pg_catalog.pg_namespace as namespace_object
-    on dependency.refclassid = 'pg_catalog.pg_namespace'::pg_catalog.regclass
-   and namespace_object.oid = dependency.refobjid
-  left join pg_catalog.pg_extension as extension_object
-    on dependency.refclassid = 'pg_catalog.pg_extension'::pg_catalog.regclass
-   and extension_object.oid = dependency.refobjid
-  left join pg_catalog.pg_language as language_object
-    on dependency.refclassid = 'pg_catalog.pg_language'::pg_catalog.regclass
-   and language_object.oid = dependency.refobjid
-  group by fr.object_oid
-),
-function_grants as (
-  select
-    fr.object_oid,
-    coalesce(
-      jsonb_agg(
-        jsonb_build_object(
-          'grantee', case
-            when acl.grantee = 0 then 'PUBLIC'
-            else coalesce(grantee_role.rolname, acl.grantee::text)
-          end,
-          'privilege', acl.privilege_type,
-          'grantable', acl.is_grantable,
-          'grantor', coalesce(grantor_role.rolname, acl.grantor::text)
-        )
-        order by
-          case
-            when acl.grantee = 0 then 'PUBLIC'
-            else coalesce(grantee_role.rolname, acl.grantee::text)
-          end,
-          acl.privilege_type
-      ) filter (where acl.grantee is not null),
-      '[]'::jsonb
-    ) as grants
-  from function_rows as fr
-  left join lateral pg_catalog.aclexplode(
-    coalesce(fr.proacl, pg_catalog.acldefault('f', fr.owner_oid))
-  ) as acl
-    on fr.object_oid is not null
-  left join pg_catalog.pg_roles as grantee_role
-    on grantee_role.oid = acl.grantee
-  left join pg_catalog.pg_roles as grantor_role
-    on grantor_role.oid = acl.grantor
-  group by fr.object_oid
-),
-functions_inventory as (
-  select coalesce(
-    jsonb_agg(
-      jsonb_build_object(
-        'schema', target.schema_name,
-        'function', target.function_name,
-        'exists', exists (
-          select 1
-          from function_rows as found
-          where found.schema_name = target.schema_name
-            and found.function_name = target.function_name
-            and found.object_oid is not null
-        ),
-        'overloads', coalesce(
-          (
-            select jsonb_agg(
-              jsonb_build_object(
-                'signature',
-                  pg_catalog.quote_ident(target.schema_name)
-                  || '.'
-                  || pg_catalog.quote_ident(target.function_name)
-                  || '('
-                  || pg_catalog.pg_get_function_identity_arguments(found.object_oid)
-                  || ')',
-                'arguments', pg_catalog.pg_get_function_arguments(found.object_oid),
-                'return_type', pg_catalog.pg_get_function_result(found.object_oid),
-                'language', found.lanname,
-                'volatility', case found.provolatile
-                  when 'i' then 'immutable'
-                  when 's' then 'stable'
-                  when 'v' then 'volatile'
-                  else found.provolatile::text
-                end,
-                'security', case
-                  when found.prosecdef then 'DEFINER'
-                  else 'INVOKER'
-                end,
-                'search_path', (
-                  select replace(config_item, 'search_path=', '')
-                  from unnest(found.proconfig) as config_item
-                  where config_item like 'search_path=%'
-                  limit 1
-                ),
-                'owner', found.owner_name,
-                'execute_grants', grants.grants,
-                'definition', pg_catalog.regexp_replace(
-                  pg_catalog.pg_get_functiondef(found.object_oid),
-                  E'[\\n\\r\\t ]+',
-                  ' ',
-                  'g'
-                ),
-                'dependencies', dependencies.dependencies
-              )
-              order by pg_catalog.pg_get_function_identity_arguments(found.object_oid)
-            )
-            from function_rows as found
-            left join function_grants as grants
-              on grants.object_oid = found.object_oid
-            left join function_dependencies as dependencies
-              on dependencies.object_oid = found.object_oid
-            where found.schema_name = target.schema_name
-              and found.function_name = target.function_name
-              and found.object_oid is not null
-          ),
-          '[]'::jsonb
-        )
-      )
-      order by target.schema_name, target.function_name
-    ),
-    '[]'::jsonb
-  ) as value
-  from target_functions as target
-),
-function_grants_inventory as (
-  select coalesce(
-    jsonb_agg(
-      jsonb_build_object(
-        'signature',
-          pg_catalog.quote_ident(fr.schema_name)
-          || '.'
-          || pg_catalog.quote_ident(fr.function_name)
-          || '('
-          || pg_catalog.pg_get_function_identity_arguments(fr.object_oid)
-          || ')',
-        'grants', fg.grants
-      )
-      order by fr.schema_name, fr.function_name,
-        pg_catalog.pg_get_function_identity_arguments(fr.object_oid)
-    ) filter (where fr.object_oid is not null),
-    '[]'::jsonb
-  ) as value
-  from function_rows as fr
-  left join function_grants as fg
-    on fg.object_oid = fr.object_oid
-),
-main_trigger_rows as (
-  select
-    table_namespace.nspname as schema_name,
-    table_object.relname as table_name,
-    trigger_object.tgname as trigger_name,
-    case
-      when (trigger_object.tgtype & 64) = 64 then 'INSTEAD OF'
-      when (trigger_object.tgtype & 2) = 2 then 'BEFORE'
-      else 'AFTER'
-    end as timing,
-    to_jsonb(
-      array_remove(
-        array[
-          case when (trigger_object.tgtype & 4) = 4 then 'INSERT' end,
-          case when (trigger_object.tgtype & 16) = 16 then 'UPDATE' end,
-          case when (trigger_object.tgtype & 8) = 8 then 'DELETE' end,
-          case when (trigger_object.tgtype & 32) = 32 then 'TRUNCATE' end
-        ]::text[],
-        null
-      )
-    ) as events,
-    case
-      when (trigger_object.tgtype & 1) = 1 then 'ROW'
-      else 'STATEMENT'
-    end as level,
-    case trigger_object.tgenabled
-      when 'O' then 'origin'
-      when 'D' then 'disabled'
-      when 'R' then 'replica'
-      when 'A' then 'always'
-      else trigger_object.tgenabled::text
-    end as enabled_state,
-    pg_catalog.quote_ident(function_namespace.nspname)
-      || '.'
-      || pg_catalog.quote_ident(function_object.proname)
-      || '('
-      || pg_catalog.pg_get_function_identity_arguments(function_object.oid)
-      || ')' as linked_function,
-    pg_catalog.pg_get_triggerdef(trigger_object.oid, true) as definition
-  from target_relations as relation_target
-  join pg_catalog.pg_class as table_object
-    on table_object.oid = relation_target.object_oid
-  join pg_catalog.pg_namespace as table_namespace
-    on table_namespace.oid = table_object.relnamespace
-  join pg_catalog.pg_trigger as trigger_object
-    on trigger_object.tgrelid = table_object.oid
-   and not trigger_object.tgisinternal
-  join pg_catalog.pg_proc as function_object
-    on function_object.oid = trigger_object.tgfoid
-  join pg_catalog.pg_namespace as function_namespace
-    on function_namespace.oid = function_object.pronamespace
-),
-main_triggers_inventory as (
-  select coalesce(
-    jsonb_agg(
-      jsonb_build_object(
-        'schema', schema_name,
-        'table', table_name,
-        'trigger', trigger_name,
-        'timing', timing,
-        'events', events,
-        'level', level,
-        'enabled', enabled_state,
-        'function', linked_function,
-        'definition', definition
-      )
-      order by schema_name, table_name, trigger_name
-    ),
-    '[]'::jsonb
-  ) as value
-  from main_trigger_rows
-),
-auth_trigger_rows as (
-  select
-    trigger_object.tgname as trigger_name,
-    case
-      when (trigger_object.tgtype & 64) = 64 then 'INSTEAD OF'
-      when (trigger_object.tgtype & 2) = 2 then 'BEFORE'
-      else 'AFTER'
-    end as timing,
-    to_jsonb(
-      array_remove(
-        array[
-          case when (trigger_object.tgtype & 4) = 4 then 'INSERT' end,
-          case when (trigger_object.tgtype & 16) = 16 then 'UPDATE' end,
-          case when (trigger_object.tgtype & 8) = 8 then 'DELETE' end,
-          case when (trigger_object.tgtype & 32) = 32 then 'TRUNCATE' end
-        ]::text[],
-        null
-      )
-    ) as events,
-    case
-      when (trigger_object.tgtype & 1) = 1 then 'ROW'
-      else 'STATEMENT'
-    end as level,
-    case trigger_object.tgenabled
-      when 'O' then 'origin'
-      when 'D' then 'disabled'
-      when 'R' then 'replica'
-      when 'A' then 'always'
-      else trigger_object.tgenabled::text
-    end as enabled_state,
-    pg_catalog.quote_ident(function_namespace.nspname)
-      || '.'
-      || pg_catalog.quote_ident(function_object.proname)
-      || '('
-      || pg_catalog.pg_get_function_identity_arguments(function_object.oid)
-      || ')' as linked_function,
-    pg_catalog.pg_get_triggerdef(trigger_object.oid, true) as definition
-  from pg_catalog.pg_namespace as table_namespace
-  join pg_catalog.pg_class as table_object
-    on table_object.relnamespace = table_namespace.oid
-   and table_object.relname = 'users'
-   and table_object.relkind in ('r', 'p')
-  join pg_catalog.pg_trigger as trigger_object
-    on trigger_object.tgrelid = table_object.oid
-   and trigger_object.tgname = 'on_propcontrol_user_created'
-   and not trigger_object.tgisinternal
-  join pg_catalog.pg_proc as function_object
-    on function_object.oid = trigger_object.tgfoid
-  join pg_catalog.pg_namespace as function_namespace
-    on function_namespace.oid = function_object.pronamespace
-  where table_namespace.nspname = 'auth'
-),
-auth_trigger_inventory as (
-  select jsonb_build_object(
-    'schema', 'auth',
-    'table', 'users',
-    'trigger', 'on_propcontrol_user_created',
-    'exists', exists (select 1 from auth_trigger_rows),
-    'definitions', coalesce(
-      (
-        select jsonb_agg(
-          jsonb_build_object(
-            'timing', timing,
-            'events', events,
-            'level', level,
-            'enabled', enabled_state,
-            'function', linked_function,
-            'definition', definition
-          )
-          order by trigger_name
-        )
-        from auth_trigger_rows
-      ),
-      '[]'::jsonb
-    )
-  ) as value
-),
-storage_bucket_rows as (
-  select
-    bucket.name,
-    bucket.public,
-    bucket.file_size_limit,
-    bucket.allowed_mime_types
-  from storage.buckets as bucket
-),
-storage_buckets_inventory as (
-  select coalesce(
-    jsonb_agg(
-      jsonb_build_object(
-        'name', name,
-        'public', public,
-        'file_size_limit', file_size_limit,
-        'allowed_mime_types', to_jsonb(allowed_mime_types)
-      )
-      order by name
-    ),
-    '[]'::jsonb
-  ) as value
-  from storage_bucket_rows
-),
-storage_policy_rows as (
-  select
-    policy_object.polname as policy_name,
-    case policy_object.polcmd
-      when '*' then 'ALL'
-      when 'r' then 'SELECT'
-      when 'a' then 'INSERT'
-      when 'w' then 'UPDATE'
-      when 'd' then 'DELETE'
-      else policy_object.polcmd::text
-    end as command_name,
-    policy_object.polpermissive as permissive,
-    coalesce(
-      (
-        select jsonb_agg(
-          case
-            when role_item.role_oid = 0 then 'PUBLIC'
-            else coalesce(policy_role.rolname, role_item.role_oid::text)
-          end
-          order by role_item.role_oid
-        )
-        from unnest(policy_object.polroles) as role_item(role_oid)
-        left join pg_catalog.pg_roles as policy_role
-          on policy_role.oid = role_item.role_oid
-      ),
-      '[]'::jsonb
-    ) as roles,
-    pg_catalog.pg_get_expr(
-      policy_object.polqual,
-      policy_object.polrelid
-    ) as using_expression,
-    pg_catalog.pg_get_expr(
-      policy_object.polwithcheck,
-      policy_object.polrelid
-    ) as check_expression
-  from pg_catalog.pg_namespace as storage_namespace
-  join pg_catalog.pg_class as storage_objects
-    on storage_objects.relnamespace = storage_namespace.oid
-   and storage_objects.relname = 'objects'
-   and storage_objects.relkind in ('r', 'p')
-  join pg_catalog.pg_policy as policy_object
-    on policy_object.polrelid = storage_objects.oid
-  where storage_namespace.nspname = 'storage'
-),
-storage_policies_inventory as (
-  select coalesce(
-    jsonb_agg(
-      jsonb_build_object(
-        'name', policy_name,
-        'command', command_name,
-        'permissive', permissive,
-        'roles', roles,
-        'using', using_expression,
-        'with_check', check_expression
-      )
-      order by policy_name
-    ),
-    '[]'::jsonb
-  ) as value
-  from storage_policy_rows
-),
-registered_migrations as (
+registered_migration_versions as (
   select migration.version::text as version
   from supabase_migrations.schema_migrations as migration
+  cross join inventory_gate as gate
+  where gate.safe_to_run_inventory
 ),
-migration_comparison as (
-  select
-    to_regclass('supabase_migrations.schema_migrations') is not null
-      as relation_exists,
-    (select count(*) from registered_migrations) as registered_count,
-    coalesce(
-      (
-        select jsonb_agg(version order by version)
-        from registered_migrations
-      ),
-      '[]'::jsonb
-    ) as registered_versions,
-    coalesce(
-      (
-        select jsonb_agg(expected.version order by expected.version)
-        from expected_migrations as expected
+migration_history_inventory as (
+  select pg_catalog.jsonb_build_object(
+    'exists', true,
+    'status', case
+      when not exists (select 1 from registered_migration_versions) then 'empty'
+      when exists (
+        select 1
+        from known_migration_versions as expected
         where not exists (
           select 1
-          from registered_migrations as registered
+          from registered_migration_versions as registered
+          where registered.version = expected.version
+        )
+      ) then 'incomplete'
+      else 'present'
+    end,
+    'registered_versions', coalesce(
+      (
+        select pg_catalog.jsonb_agg(version order by version)
+        from registered_migration_versions
+      ),
+      '[]'::jsonb
+    ),
+    'expected_versions', coalesce(
+      (
+        select pg_catalog.jsonb_agg(version order by version)
+        from known_migration_versions
+      ),
+      '[]'::jsonb
+    ),
+    'missing_expected_versions', coalesce(
+      (
+        select pg_catalog.jsonb_agg(expected.version order by expected.version)
+        from known_migration_versions as expected
+        where not exists (
+          select 1
+          from registered_migration_versions as registered
           where registered.version = expected.version
         )
       ),
       '[]'::jsonb
-    ) as missing_expected_versions,
-    coalesce(
+    ),
+    'unrecognized_versions', coalesce(
       (
-        select jsonb_agg(registered.version order by registered.version)
-        from registered_migrations as registered
+        select pg_catalog.jsonb_agg(registered.version order by registered.version)
+        from registered_migration_versions as registered
         where not exists (
           select 1
-          from expected_migrations as expected
+          from known_migration_versions as expected
           where expected.version = registered.version
         )
       ),
       '[]'::jsonb
-    ) as unrecognized_versions
-),
-migration_inventory as (
-  select jsonb_build_object(
-    'relation', 'supabase_migrations.schema_migrations',
-    'exists', relation_exists,
-    'status', case
-      when not relation_exists then 'absent'
-      when registered_count = 0 then 'empty'
-      when jsonb_array_length(missing_expected_versions) > 0 then 'incomplete'
-      else 'present'
-    end,
-    'registered_versions', registered_versions,
-    'expected_github_versions', (
-      select coalesce(
-        jsonb_agg(version order by version),
-        '[]'::jsonb
-      )
-      from expected_migrations
-    ),
-    'missing_expected_versions', missing_expected_versions,
-    'unrecognized_versions', unrecognized_versions
+    )
   ) as value
-  from migration_comparison
 ),
-expected_objects_status as (
-  select *
-  from (
-    values
-      (
-        'table'::text,
-        'public.user_profiles'::text,
-        to_regclass('public.user_profiles') is not null
-      ),
-      (
-        'table'::text,
-        'public.organization_settings'::text,
-        to_regclass('public.organization_settings') is not null
-      ),
-      (
-        'storage_bucket'::text,
-        'profile-avatars'::text,
-        exists (
-          select 1
-          from storage_bucket_rows
-          where name = 'profile-avatars'
-        )
-      )
-  ) as expected(object_type, object_name, object_exists)
+expected_objects as (
+  select
+    'table'::text as object_type,
+    'public.user_profiles'::text as object_name,
+    exists (
+      select 1
+      from pg_catalog.pg_namespace as namespace
+      join pg_catalog.pg_class as relation
+        on relation.relnamespace = namespace.oid
+      where namespace.nspname = 'public'
+        and relation.relname = 'user_profiles'
+        and relation.relkind in ('r', 'p')
+    ) as exists
+
+  union all
+
+  select
+    'table'::text,
+    'public.organization_settings'::text,
+    exists (
+      select 1
+      from pg_catalog.pg_namespace as namespace
+      join pg_catalog.pg_class as relation
+        on relation.relnamespace = namespace.oid
+      where namespace.nspname = 'public'
+        and relation.relname = 'organization_settings'
+        and relation.relkind in ('r', 'p')
+    )
+
+  union all
+
+  select
+    'bucket'::text,
+    'profile-avatars'::text,
+    exists (
+      select 1
+      from storage.buckets as bucket
+      cross join inventory_gate as gate
+      where gate.safe_to_run_inventory
+        and bucket.name = 'profile-avatars'
+    )
 ),
-expected_objects_inventory as (
+expected_objects_missing as (
   select coalesce(
-    jsonb_agg(
-      jsonb_build_object(
+    pg_catalog.jsonb_agg(
+      pg_catalog.jsonb_build_object(
         'type', object_type,
-        'object', object_name,
-        'exists', object_exists,
-        'missing', not object_exists
+        'name', object_name
       )
       order by object_type, object_name
-    ),
+    ) filter (where not exists),
     '[]'::jsonb
   ) as value
-  from expected_objects_status
+  from expected_objects
 ),
-warning_candidates(message) as (
-  select 'Uno o más objetos de tabla requeridos no existen o no son tablas físicas.'
-  where exists (
-    select 1
-    from target_relations
-    where object_oid is null
-       or relkind not in ('r', 'p')
-  )
-  union all
-  select 'Una o más funciones requeridas no existen en producción.'
-  where exists (
-    select 1
-    from target_functions as target
-    where not exists (
-      select 1
-      from function_rows as found
-      where found.schema_name = target.schema_name
-        and found.function_name = target.function_name
-        and found.object_oid is not null
-    )
-  )
-  union all
-  select 'El trigger auth.users.on_propcontrol_user_created no fue encontrado.'
-  where not exists (select 1 from auth_trigger_rows)
-  union all
-  select 'Una o más tablas principales tienen RLS deshabilitado.'
-  where exists (
-    select 1
-    from target_relations
-    where object_oid is not null
-      and relkind in ('r', 'p')
-      and not relrowsecurity
-  )
-  union all
-  select 'Una o más funciones SECURITY DEFINER no declaran search_path explícito.'
-  where exists (
-    select 1
-    from function_rows
-    where object_oid is not null
-      and prosecdef
-      and not exists (
-        select 1
-        from unnest(proconfig) as config_item
-        where config_item like 'search_path=%'
-      )
-  )
-  union all
-  select 'El historial técnico de migraciones no coincide completamente con las versiones esperadas en GitHub.'
-  from migration_comparison
-  where not relation_exists
-     or registered_count = 0
-     or jsonb_array_length(missing_expected_versions) > 0
-     or jsonb_array_length(unrecognized_versions) > 0
-  union all
-  select 'Uno o más objetos previstos para fases posteriores todavía están ausentes.'
-  where exists (
-    select 1
-    from expected_objects_status
-    where not object_exists
-  )
-),
-warnings_inventory as (
+warning_inventory as (
   select coalesce(
-    jsonb_agg(message order by message),
+    pg_catalog.jsonb_agg(message order by message),
     '[]'::jsonb
   ) as value
-  from warning_candidates
-),
-blocking_candidates(message) as (
-  select 'Faltan tablas principales o existe un objeto con tipo incompatible.'
-  where exists (
-    select 1
-    from target_relations
-    where object_oid is null
-       or relkind not in ('r', 'p')
-  )
-  union all
-  select 'Faltan funciones requeridas para reconstruir el esquema.'
-  where exists (
-    select 1
-    from target_functions as target
-    where not exists (
-      select 1
-      from function_rows as found
-      where found.schema_name = target.schema_name
-        and found.function_name = target.function_name
-        and found.object_oid is not null
-    )
-  )
-  union all
-  select 'Falta el trigger de alta de usuarios de PropControl.'
-  where not exists (select 1 from auth_trigger_rows)
-  union all
-  select 'Hay tablas principales existentes con RLS deshabilitado.'
-  where exists (
-    select 1
-    from target_relations
-    where object_oid is not null
-      and relkind in ('r', 'p')
-      and not relrowsecurity
-  )
-  union all
-  select 'El historial de migraciones está ausente, vacío o incompleto.'
-  from migration_comparison
-  where not relation_exists
-     or registered_count = 0
-     or jsonb_array_length(missing_expected_versions) > 0
+  from (
+    select 'Expected later-phase object is absent: ' || object_name as message
+    from expected_objects
+    where not exists
+
+    union all
+
+    select 'Migration history is not complete relative to known GitHub identifiers.'
+    from migration_history_inventory
+    where value ->> 'status' in ('empty', 'incomplete')
+  ) as warnings
 ),
 blocking_inventory as (
   select coalesce(
-    jsonb_agg(message order by message),
+    pg_catalog.jsonb_agg(message order by message),
     '[]'::jsonb
   ) as value
-  from blocking_candidates
+  from (
+    select 'Stage 2 preflight revalidation failed.' as message
+    from inventory_gate
+    where not safe_to_run_inventory
+
+    union all
+
+    select 'Required table is absent: ' || schema_name || '.' || table_name
+    from table_catalog
+    where not exists
+
+    union all
+
+    select 'RLS is disabled on existing table: ' || schema_name || '.' || table_name
+    from table_catalog
+    where exists and not relrowsecurity
+
+    union all
+
+    select 'Required function is absent: ' || schema_name || '.' || function_name
+    from function_catalog
+    group by schema_name, function_name
+    having pg_catalog.bool_and(function_oid is null)
+  ) as findings
 ),
 final_inventory as (
-  select jsonb_build_object(
+  select pg_catalog.jsonb_build_object(
     'check', 'B0.2 production schema inventory',
     'read_only', true,
     'generated_at', pg_catalog.clock_timestamp(),
     'server_version', pg_catalog.current_setting('server_version'),
-    'schemas', (select value from schemas_inventory),
-    'tables', (select value from tables_inventory),
-    'functions', (select value from functions_inventory),
-    'triggers', jsonb_build_object(
-      'main_tables', (select value from main_triggers_inventory),
-      'auth_user_trigger', (select value from auth_trigger_inventory)
+    'preflight_revalidated', gate.safe_to_run_inventory,
+    'schemas', (
+      select coalesce(
+        pg_catalog.jsonb_agg(
+          pg_catalog.jsonb_build_object(
+            'name', schema_name,
+            'exists', exists
+          )
+          order by schema_name
+        ),
+        '[]'::jsonb
+      )
+      from schema_inventory
     ),
-    'rls', (select value from rls_inventory),
-    'policies', jsonb_build_object(
-      'main_tables', (select value from main_policies_inventory),
-      'storage_objects', (select value from storage_policies_inventory)
-    ),
-    'grants', jsonb_build_object(
-      'tables', (select value from main_grants_inventory),
-      'functions', (select value from function_grants_inventory)
-    ),
-    'storage_buckets', jsonb_build_object(
-      'metadata', (select value from storage_buckets_inventory),
-      'storage_objects_policies', (select value from storage_policies_inventory)
-    ),
-    'migration_history', (select value from migration_inventory),
-    'expected_objects_missing', (select value from expected_objects_inventory),
-    'warnings', (select value from warnings_inventory),
-    'blocking_findings', (select value from blocking_inventory)
+    'tables', tables_json.value,
+    'functions', functions_json.value,
+    'triggers', trigger_inventory.value,
+    'rls', rls_inventory.value,
+    'policies', policy_inventory.value,
+    'grants', grants_inventory.value,
+    'storage_buckets', storage_buckets_inventory.value,
+    'storage_objects_policies', storage_objects_policies.value,
+    'migration_history', migration_history_inventory.value,
+    'expected_objects_missing', expected_objects_missing.value,
+    'warnings', warning_inventory.value,
+    'blocking_findings', blocking_inventory.value
   ) as b0_2_production_inventory
+  from inventory_gate as gate
+  cross join tables_json
+  cross join functions_json
+  cross join trigger_inventory
+  cross join rls_inventory
+  cross join policy_inventory
+  cross join grants_inventory
+  cross join storage_buckets_inventory
+  cross join storage_objects_policies
+  cross join migration_history_inventory
+  cross join expected_objects_missing
+  cross join warning_inventory
+  cross join blocking_inventory
+  where gate.safe_to_run_inventory
 )
 select b0_2_production_inventory
 from final_inventory;
+-- B0.2-A STAGE 2: INVENTORY END
