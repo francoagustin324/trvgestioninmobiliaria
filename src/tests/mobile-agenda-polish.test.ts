@@ -68,9 +68,11 @@ test('conserva Completar, Más acciones, apertura, edición y reprogramación', 
   assert.ok(css.includes('min-height: 44px'));
 });
 
-test('mantiene cálculos, filtros y orden de Agenda sin modificaciones visuales', () => {
-  assert.ok(ui.includes('groupAgendaItems(buildAgendaItems(state.crm.clients, state.crm.reminders, today))'));
-  assert.ok(ui.includes('completedReminders(state.crm.reminders)'));
+test('mantiene cálculos, filtros visibles y orden de Agenda', () => {
+  assert.ok(ui.includes('const clients = visibleClients()'));
+  assert.ok(ui.includes('const reminders = visibleReminders()'));
+  assert.ok(ui.includes('groupAgendaItems(buildAgendaItems(clients, reminders, today))'));
+  assert.ok(ui.includes('completedReminders(reminders)'));
   assert.ok(ui.includes('groups.overdue.length + groups.today.length + groups.upcoming.length'));
   assert.ok(ui.includes('daysBetweenIsoDates(today, item.date)'));
   assert.ok(agendaLogic.includes('export function buildAgendaItems'));
@@ -80,14 +82,16 @@ test('mantiene cálculos, filtros y orden de Agenda sin modificaciones visuales'
   assert.equal(css.includes('#whatsapp'), false);
 });
 
-test('conserva exactamente la lógica de completar y reprogramar', () => {
+test('completar y reprogramar usan las reglas comerciales sin duplicar Reminder', () => {
   assert.ok(ui.includes("querySelectorAll<HTMLButtonElement>('[data-complete-agenda]')"));
-  assert.ok(ui.includes('client.nextFollowUp = undefined'));
+  assert.ok(ui.includes('completeClientFollowUp(client)'));
+  assert.ok(ui.includes('addActivity(result.activity)'));
   assert.ok(ui.includes('reminder.completedAt = new Date().toISOString()'));
   assert.ok(ui.includes("querySelectorAll<HTMLFormElement>('[data-reprogram-source]')"));
-  assert.ok(ui.includes('client.nextFollowUp = date'));
+  assert.ok(ui.includes('reprogramClientFollowUp(client, date)'));
   assert.ok(ui.includes('reminder.date = date'));
   assert.ok(ui.includes("saveAndRender('Seguimiento reprogramado')"));
+  assert.equal(ui.includes('state.crm.reminders.push'), true);
 });
 
 test('respeta navegación, safe area, escritorio y stack técnico', () => {

@@ -4,6 +4,7 @@ import test from 'node:test';
 
 const leadUi = readFileSync('src/mvp-leads-ui.ts', 'utf8');
 const matchingCss = readFileSync('src/mvp-matching.css', 'utf8');
+const pipelineCss = readFileSync('src/lead-pipeline.css', 'utf8');
 const html = readFileSync('index.html', 'utf8');
 
 test('Leads utiliza el motor existente y muestra hasta tres propiedades compatibles', () => {
@@ -15,7 +16,8 @@ test('Leads utiliza el motor existente y muestra hasta tres propiedades compatib
 });
 
 test('el acceso a una coincidencia respeta propiedades visibles y abre el módulo existente', () => {
-  assert.ok(leadUi.includes("import { visibleProperties } from './team-access.js'"));
+  assert.match(leadUi, /from '\.\/team-access\.js'/);
+  assert.ok(leadUi.includes('visibleProperties()'));
   assert.ok(leadUi.includes('visibleProperties().some((property) => property.id === propertyId)'));
   assert.ok(leadUi.includes("state.activeModule = 'propiedades'"));
   assert.ok(leadUi.includes('state.editingPropertyId = propertyId'));
@@ -23,9 +25,11 @@ test('el acceso a una coincidencia respeta propiedades visibles y abre el módul
   assert.ok(!leadUi.includes("state.activeModule = 'matching'"));
 });
 
-test('el matching tiene presentación responsive y recurso versionado', () => {
+test('el matching tiene presentación responsive y recursos versionados', () => {
   assert.ok(matchingCss.includes('.mvp-lead-card-with-matches'));
   assert.ok(matchingCss.includes('.mvp-match-score.alta'));
   assert.ok(matchingCss.includes('@media (max-width:640px)'));
+  assert.ok(pipelineCss.includes('.mvp-lead-card.mvp-lead-card-with-matches'));
+  assert.ok(pipelineCss.includes('@media (max-width:430px)'));
   assert.ok(html.includes('/src/mvp-matching.css?v=20260719-43'));
 });

@@ -7,6 +7,7 @@ export const FICHA_LEGAL = AGENCY_BRAND.publicLegal;
 export const LOGO_PATH = PRODUCT_BRAND.logo;
 
 export type Temperature = 'Caliente' | 'Tibio' | 'Frío';
+export type CommercialStage = 'Nuevo' | 'Contactado' | 'Calificado' | 'Visita coordinada' | 'Negociación' | 'Reservado' | 'Ganado' | 'Perdido';
 export type ModuleId = 'inicio' | 'crm' | 'propiedades' | 'red' | 'fichas' | 'whatsapp' | 'agenda' | 'equipo' | 'reportes' | 'configuracion';
 export type FichaMode = 'manual' | 'property' | 'external';
 export type PhotoEnhancement = 'none' | 'soft';
@@ -54,8 +55,8 @@ export interface ActivityEntry {
 
 export interface Client {
   id: number; name: string; phone: string; email?: string; interest: string; status: string;
-  temperature: Temperature; pipeline: string; lastContact?: string; nextFollowUp?: string;
-  budget?: string; paymentMethod?: string; purchaseTimeframe?: string; purpose?: string;
+  temperature: Temperature; pipeline: CommercialStage | string; lastContact?: string; nextFollowUp?: string;
+  nextAction?: string; budget?: string; paymentMethod?: string; purchaseTimeframe?: string; purpose?: string;
   knowsArea?: string; canMoveForward?: string; objections?: string; notes?: string;
   assignedToId?: number; createdById?: number;
 }
@@ -211,7 +212,8 @@ export const initialData: CrmData = {
   clients: [{
     id: 1, name: 'Lucía Martín', phone: '351 555-0101', email: 'lucia@email.com',
     interest: 'Departamento de 2 dormitorios en Nueva Córdoba', status: 'Lead', temperature: 'Caliente',
-    pipeline: 'Visita posible', lastContact: '2026-07-06', nextFollowUp: '2026-07-09', budget: 'USD 90.000',
+    pipeline: 'Visita coordinada', lastContact: '2026-07-06', nextFollowUp: '2026-07-09',
+    nextAction: 'Confirmar disponibilidad y coordinar visita', budget: 'USD 90.000',
     paymentMethod: 'Contado', purchaseTimeframe: '0-3 meses', purpose: 'Vivir', knowsArea: 'Sí',
     canMoveForward: 'Sí', objections: 'Busca balcón y buena luz natural', notes: 'Revisar opciones antes de coordinar visita.',
     assignedToId: 1, createdById: 1,

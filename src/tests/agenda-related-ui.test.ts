@@ -6,8 +6,9 @@ const ui = readFileSync('src/agenda-ui.ts', 'utf8');
 const css = readFileSync('src/agenda.css', 'utf8');
 const html = readFileSync('index.html', 'utf8');
 
-test('el formulario usa un selector buscable únicamente de leads', () => {
-  assert.ok(ui.includes('agendaRelatedOptions(state.crm.clients)'));
+test('el formulario usa un selector buscable únicamente de leads visibles', () => {
+  assert.ok(ui.includes('agendaRelatedOptions(visibleClients())'));
+  assert.ok(ui.includes("import { addActivity, visibleClients, visibleReminders } from './team-access.js'"));
   assert.ok(!ui.includes('state.crm.properties'));
   assert.ok(ui.includes('filterAgendaRelatedOptions(options, input.value)'));
   assert.ok(ui.includes('<label for="agenda-related-input">Lead</label>'));

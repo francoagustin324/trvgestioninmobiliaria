@@ -1,3 +1,4 @@
+import { isTerminalClient } from './lead-pipeline.js';
 import type { Client, Property } from './models.js';
 
 export type MatchLevel = 'Alta' | 'Buena' | 'Posible';
@@ -11,7 +12,6 @@ export interface PropertyMatch {
   warnings: string[];
 }
 
-const terminalPipelines = new Set(['cerrado', 'perdido']);
 const availableStatuses = new Set(['activa', 'disponible']);
 
 const typeAliases: Record<string, string[]> = {
@@ -138,13 +138,22 @@ function isEligibleProperty(property: Property): boolean {
 }
 
 function isEligibleClient(client: Client): boolean {
-  return !terminalPipelines.has(normalizeText(client.pipeline)) && normalizeText(client.status) !== 'cerrado';
+  return !isTerminalClient(client);
 }
 
 export function evaluatePropertyMatch(client: Client, property: Property): PropertyMatch | null {
   if (!isEligibleClient(client) || !isEligibleProperty(property)) return null;
 
-  const clientText = normalizeText([client.interest, client.objections, client.notes].join(' '));
+  const clientText = normalizeText([
+    client.interest,
+    client.paymentMethod,
+    client.purchaseTimeframe,
+    client.purpose,
+    client.knowsArea,
+    client.canMoveForward,
+    client.objections,
+    client.notes,
+  ].join(' '));
   const propertyText = normalizeText([property.title, property.address, property.features, property.notes].join(' '));
   const reasons: string[] = [];
   const warnings: string[] = [];
