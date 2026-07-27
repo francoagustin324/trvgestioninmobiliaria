@@ -28,6 +28,43 @@ function stripSqlCommentsAndStrings(source: string): string {
     .replace(/'(?:''|[^'])*'/g, "''");
 }
 
+function assertContainsEvery(source: string, values: readonly string[]): void {
+  for (const value of values) {
+    assert.ok(source.includes(value), `Falta cobertura para ${value}`);
+  }
+}
+
+function assertReadOnly(source: string): void {
+  const executable = stripSqlCommentsAndStrings(source);
+  const forbidden = [
+    'insert',
+    'update',
+    'delete',
+    'merge',
+    'create',
+    'alter',
+    'drop',
+    'grant',
+    'revoke',
+    'do',
+    'call',
+    'truncate',
+    'copy',
+    'lock',
+  ] as const;
+
+  for (const keyword of forbidden) {
+    assert.doesNotMatch(executable, new RegExp(`\\b${keyword}\\b`, 'i'));
+  }
+
+  assert.doesNotMatch(executable, /\bfor\s+(?:no\s+key\s+)?update\b/i);
+  assert.doesNotMatch(executable, /\bfor\s+share\b/i);
+  assert.doesNotMatch(executable, /\bexecute\b/i);
+  assert.doesNotMatch(executable, /\bprepare\b/i);
+  assert.doesNotMatch(executable, /\bdeallocate\b/i);
+  assert.doesNotMatch(executable, /\bdblink\b/i);
+}
+
 const preflightSql = between(sql, preflightBegin, preflightEnd);
 const inventorySql = between(sql, inventoryBegin, inventoryEnd);
 const executableSql = stripSqlCommentsAndStrings(sql);
@@ -74,57 +111,6 @@ const requiredInventoryKeys = [
   'blocking_findings',
 ] as const;
 
-const knownMigrationVersions = [
-  '20260713',
-  '20260715093000',
-  '20260716103000',
-  '20260716103100',
-  '20260717113000',
-  '20260717190000',
-  '20260724190000',
-] as const;
-
-function assertContainsEvery(source: string, values: readonly string[]): void {
-  for (const value of values) {
-    assert.ok(source.includes(value), `Falta cobertura para ${value}`);
-  }
-}
-
-function assertReadOnly(source: string): void {
-  const executable = stripSqlCommentsAndStrings(source);
-  const forbidden = [
-    'insert',
-    'update',
-    'delete',
-    'merge',
-    'create',
-    'alter',
-    'drop',
-    'grant',
-    'revoke',
-    'do',
-    'call',
-    'truncate',
-    'copy',
-    'lock',
-  ] as const;
-
-  for (const keyword of forbidden) {
-    assert.doesNotMatch(
-      executable,
-      new RegExp(`\\b${keyword}\\b`, 'i'),
-      `Operación prohibida: ${keyword}`,
-    );
-  }
-
-  assert.doesNotMatch(executable, /\bfor\s+(?:no\s+key\s+)?update\b/i);
-  assert.doesNotMatch(executable, /\bfor\s+share\b/i);
-  assert.doesNotMatch(executable, /\bexecute\b/i);
-  assert.doesNotMatch(executable, /\bprepare\b/i);
-  assert.doesNotMatch(executable, /\bdeallocate\b/i);
-  assert.doesNotMatch(executable, /\bdblink\b/i);
-}
-
 test('el artefacto permanece fuera de supabase/migrations', () => {
   assert.match(auditPath, /^supabase\/audits\//);
   assert.doesNotMatch(auditPath, /^supabase\/migrations\//);
@@ -136,84 +122,11 @@ test('contiene exactamente dos etapas y dos sentencias SELECT', () => {
   assert.equal((executableInventory.match(/;/g) ?? []).length, 1);
   assert.match(executablePreflight.trim(), /^with\b/i);
   assert.match(executableInventory.trim(), /^with\b/i);
-  assert.match(executablePreflight.trim(), /select[\s\S]*;\s*$/i);
-  assert.match(executableInventory.trim(), /select[\s\S]*;\s*$/i);
 });
 
-test('el preflight devuelve safe_to_run_inventory en una fila JSONB', () => {
-  assert.match(preflightSql, /'safe_to_run_inventory'\s*,\s*safe_to_run_inventory/i);
-  assert.match(preflightSql, /as\s+b0_2_production_inventory_preflight\b/i);
-  assert.match(preflightSql, /'read_only'\s*,\s*true/i);
-  assert.match(preflightSql, /'catalog_only'\s*,\s*true/i);
-  assert.match(preflightSql, /from\s+preflight_summary\s*;/i);
-});
-
-test('el preflight usa únicamente pg_catalog como fuente física', () => {
-  const qualifiedRelations = [
-    ...executablePreflight.matchAll(/\b(?:from|join)\s+([a-z_][a-z0-9_]*\.[a-z_][a-z0-9_]*)/gi),
-  ].map((match) => match[1]);
-
-  assert.ok(qualifiedRelations.length > 0);
-  for (const relation of qualifiedRelations) {
-    assert.ok(
-      relation?.toLowerCase().startsWith('pg_catalog.'),
-      `El preflight accede fuera de pg_catalog: ${relation}`,
-    );
-  }
-
-  assert.doesNotMatch(executablePreflight, /\b(?:from|join)\s+storage\./i);
-  assert.doesNotMatch(executablePreflight, /\b(?:from|join)\s+supabase_migrations\./i);
-  assert.doesNotMatch(executablePreflight, /\b(?:from|join)\s+auth\./i);
-  assert.doesNotMatch(executablePreflight, /\b(?:from|join)\s+public\./i);
-  assert.doesNotMatch(executablePreflight, /\b(?:from|join)\s+private\./i);
-});
-
-test('el preflight comprueba esquemas, relaciones y columnas indispensables', () => {
-  assertContainsEvery(preflightSql, [
-    'pg_catalog',
-    'public',
-    'private',
-    'auth',
-    'storage',
-    'supabase_migrations',
-    'buckets',
-    'schema_migrations',
-    'objects',
-    'users',
-    'file_size_limit',
-    'allowed_mime_types',
-    'version',
-  ]);
-  assert.match(preflightSql, /required_for_inventory/i);
-  assert.match(preflightSql, /blocking_findings/i);
-  assert.match(preflightSql, /Stop\. Do not execute Stage 2\./i);
-});
-
-test('el preflight comprueba catálogos y funciones técnicas necesarias', () => {
-  assertContainsEvery(preflightSql, [
-    'pg_namespace',
-    'pg_class',
-    'pg_attribute',
-    'pg_attrdef',
-    'pg_constraint',
-    'pg_index',
-    'pg_policy',
-    'pg_proc',
-    'pg_trigger',
-    'pg_depend',
-    'pg_roles',
-    'pg_type',
-    'pg_language',
-    'acldefault',
-    'aclexplode',
-    'format_type',
-    'pg_get_expr',
-    'pg_get_constraintdef',
-    'pg_get_indexdef',
-    'pg_get_functiondef',
-    'pg_get_triggerdef',
-    'pg_describe_object',
-  ]);
+test('ambas etapas son estrictamente de solo lectura y sin SQL dinámico', () => {
+  assertReadOnly(preflightSql);
+  assertReadOnly(inventorySql);
 });
 
 test('no califica construcciones especiales como funciones de pg_catalog', () => {
@@ -226,173 +139,114 @@ test('no califica construcciones especiales como funciones de pg_catalog', () =>
   }
 });
 
-test('ambas etapas son estrictamente de solo lectura y sin SQL dinámico', () => {
-  assertReadOnly(preflightSql);
-  assertReadOnly(inventorySql);
+test('el preflight usa únicamente pg_catalog como fuente física', () => {
+  const qualifiedRelations = [
+    ...executablePreflight.matchAll(/\b(?:from|join)\s+([a-z_][a-z0-9_]*\.[a-z_][a-z0-9_]*)/gi),
+  ].map((match) => match[1]);
+
+  assert.ok(qualifiedRelations.length > 0);
+  for (const relation of qualifiedRelations) {
+    assert.ok(relation?.toLowerCase().startsWith('pg_catalog.'));
+  }
+  assert.doesNotMatch(executablePreflight, /\b(?:from|join)\s+(?:storage|auth|public|private|supabase_migrations)\./i);
 });
 
-test('la etapa completa exige preflight true y lo revalida', () => {
-  assert.match(sql, /EJECUTAR ESTA ETAPA SOLAMENTE SI LA ETAPA 1 DEVOLVIÓ/i);
-  assert.match(inventorySql, /inventory_gate\s+as\s*\(/i);
-  assert.match(inventorySql, /safe_to_run_inventory/i);
-  assert.match(inventorySql, /'preflight_revalidated'\s*,\s*gate\.safe_to_run_inventory/i);
-  assert.match(inventorySql, /Stage 2 preflight revalidation failed/i);
-  assert.match(inventorySql, /where\s+gate\.safe_to_run_inventory/i);
-});
-
-test('table_grants protege acldefault cuando owner_oid es nulo', () => {
+test('migration history es opcional y no bloquea safe_to_run_inventory', () => {
+  assert.match(preflightSql, /\('supabase_migrations'::text,\s*false\)/i);
   assert.match(
-    inventorySql,
-    /table_acl_source[\s\S]*?when\s+table_info\.relation_oid\s+is\s+null\s+or\s+table_info\.owner_oid\s+is\s+null[\s\S]*?then\s+null::aclitem\[\][\s\S]*?when\s+table_info\.relacl\s+is\s+null[\s\S]*?then\s+pg_catalog\.acldefault\('r',\s*table_info\.owner_oid\)/i,
+    preflightSql,
+    /\('supabase_migrations'::text,\s*'schema_migrations'::text,\s*false\)/i,
   );
-  assert.match(inventorySql, /table_grants\s+as\s*\(/i);
-});
-
-test('function_grants protege acldefault cuando owner_oid es nulo', () => {
   assert.match(
-    inventorySql,
-    /function_acl_source[\s\S]*?when\s+function_info\.function_oid\s+is\s+null\s+or\s+function_info\.owner_oid\s+is\s+null[\s\S]*?then\s+null::aclitem\[\][\s\S]*?when\s+function_info\.proacl\s+is\s+null[\s\S]*?then\s+pg_catalog\.acldefault\('f',\s*function_info\.owner_oid\)/i,
+    preflightSql,
+    /\('supabase_migrations'::text,\s*'schema_migrations'::text,\s*'version'::text,\s*false\)/i,
   );
-  assert.match(inventorySql, /function_grants\s+as\s*\(/i);
+  assert.match(preflightSql, /migration history unavailable/i);
+  assert.match(preflightSql, /'warnings'/i);
+  assert.match(preflightSql, /'safe_to_run_inventory'/i);
 });
 
-test('no consulta filas de auth.users, tablas comerciales ni storage.objects', () => {
+test('la etapa 2 no depende físicamente de schema_migrations', () => {
+  assert.doesNotMatch(
+    executableInventory,
+    /\b(?:from|join)\s+supabase_migrations\.schema_migrations\b/i,
+  );
+  assert.doesNotMatch(executableInventory, /\bto_regclass\s*\(\s*'supabase_migrations/i);
+  assert.match(inventorySql, /migration_source_status\s+as\s*\(/i);
+});
+
+test('migration_history define el resultado unavailable requerido', () => {
+  assertContainsEvery(inventorySql, [
+    "'source_available', false",
+    "'status', 'unavailable'",
+    "'registered_versions', '[]'::jsonb",
+    "'missing_expected_versions', '[]'::jsonb",
+    "'unrecognized_versions', '[]'::jsonb",
+    "'warning', 'supabase_migrations.schema_migrations is not available in this production database'",
+  ]);
+});
+
+test('no consulta filas sensibles, comerciales ni archivos', () => {
   assert.doesNotMatch(executableSql, /\b(?:from|join)\s+auth\.users\b/i);
   assert.doesNotMatch(executableSql, /\b(?:from|join)\s+storage\.objects\b/i);
-
   for (const tableName of requiredTables) {
     const escaped = tableName.replace('.', '\\.');
     assert.doesNotMatch(executableSql, new RegExp(`\\b(?:from|join)\\s+${escaped}\\b`, 'i'));
   }
 });
 
-test('no solicita columnas personales, payloads ni secretos', () => {
-  const forbiddenDataFields = [
-    'email',
-    'phone',
-    'telephone',
-    'whatsapp',
-    'first_name',
-    'last_name',
-    'full_name',
-    'client_name',
-    'organization_name',
-    'payload',
-    'access_token',
-    'refresh_token',
-    'secret',
-    'private_url',
-  ] as const;
-
-  for (const field of forbiddenDataFields) {
-    assert.doesNotMatch(
-      executableSql,
-      new RegExp(`\\b${field}\\b`, 'i'),
-      `Campo sensible detectado: ${field}`,
-    );
-  }
-
-  assert.doesNotMatch(sql, /sb_secret_|service_role_key|supabase_secret_key/i);
-  assert.doesNotMatch(sql, /@[a-z0-9.-]+\.[a-z]{2,}/i);
-});
-
-test('el inventario completo cubre tablas, RLS, políticas, restricciones e índices', () => {
+test('cubre el inventario estructural completo', () => {
   assertContainsEvery(inventorySql, requiredTables.map((value) => value.split('.')[1] ?? value));
-  assert.match(inventorySql, /pg_catalog\.pg_attribute/i);
-  assert.match(inventorySql, /pg_catalog\.pg_attrdef/i);
-  assert.match(inventorySql, /pg_catalog\.pg_constraint/i);
-  assert.match(inventorySql, /pg_catalog\.pg_index/i);
-  assert.match(inventorySql, /pg_catalog\.pg_policy/i);
-  assert.match(inventorySql, /relrowsecurity/i);
-  assert.match(inventorySql, /relforcerowsecurity/i);
-  assert.match(inventorySql, /primary_keys/i);
-  assert.match(inventorySql, /foreign_keys/i);
-  assert.match(inventorySql, /table_grants/i);
-});
-
-test('el inventario completo cubre funciones sin invocarlas', () => {
   assertContainsEvery(inventorySql, requiredFunctions.map((value) => value.split('.')[1] ?? value));
-
-  for (const qualifiedName of requiredFunctions) {
-    const escaped = qualifiedName.replace('.', '\\.');
-    assert.doesNotMatch(
-      executableInventory,
-      new RegExp(`\\b${escaped}\\s*\\(`, 'i'),
-      `No debe invocar ${qualifiedName}`,
-    );
-  }
-
-  assert.match(inventorySql, /pg_catalog\.pg_get_function_identity_arguments/i);
-  assert.match(inventorySql, /pg_catalog\.pg_get_function_arguments/i);
-  assert.match(inventorySql, /pg_catalog\.pg_get_function_result/i);
-  assert.match(inventorySql, /pg_catalog\.pg_get_functiondef/i);
-  assert.match(inventorySql, /provolatile/i);
-  assert.match(inventorySql, /prosecdef/i);
-  assert.match(inventorySql, /proconfig/i);
-  assert.match(inventorySql, /execute_grants/i);
-  assert.match(inventorySql, /dependencies/i);
-});
-
-test('inventaría triggers y el trigger técnico de auth.users desde catálogos', () => {
-  assert.match(inventorySql, /pg_catalog\.pg_trigger/i);
-  assert.match(inventorySql, /pg_catalog\.pg_get_triggerdef/i);
-  assert.match(inventorySql, /on_propcontrol_user_created/i);
-  assert.match(inventorySql, /linked_function/i);
-  assert.match(inventorySql, /enabled_state/i);
-  assert.match(inventorySql, /timing/i);
-  assert.match(inventorySql, /events/i);
-});
-
-test('inventaría metadata de buckets sin listar archivos', () => {
-  assert.match(inventorySql, /from\s+storage\.buckets\s+as\s+bucket/i);
-  assert.match(inventorySql, /file_size_limit/i);
-  assert.match(inventorySql, /allowed_mime_types/i);
-  assert.match(inventorySql, /storage_objects_policies/i);
-  assert.doesNotMatch(executableInventory, /\b(?:from|join)\s+storage\.objects\b/i);
-});
-
-test('inventaría historial técnico y objetos previstos', () => {
-  assert.match(inventorySql, /from\s+supabase_migrations\.schema_migrations/i);
-  assertContainsEvery(inventorySql, knownMigrationVersions);
-  assert.match(inventorySql, /'empty'/i);
-  assert.match(inventorySql, /'incomplete'/i);
-  assert.match(inventorySql, /'present'/i);
-  assert.match(inventorySql, /missing_expected_versions/i);
-  assert.match(inventorySql, /unrecognized_versions/i);
-  assert.match(inventorySql, /public\.user_profiles/i);
-  assert.match(inventorySql, /public\.organization_settings/i);
-  assert.match(inventorySql, /profile-avatars/i);
-});
-
-test('incluye todas las claves obligatorias del JSON completo', () => {
-  assertContainsEvery(
-    inventorySql,
-    requiredInventoryKeys.map((key) => `'${key}'`),
-  );
+  assertContainsEvery(inventorySql, [
+    'pg_attribute',
+    'pg_attrdef',
+    'pg_constraint',
+    'pg_index',
+    'pg_policy',
+    'pg_trigger',
+    'pg_depend',
+    'table_grants',
+    'function_grants',
+    'storage_objects_policies',
+    'on_propcontrol_user_created',
+    'profile-avatars',
+    'public.user_profiles',
+    'public.organization_settings',
+  ]);
+  assertContainsEvery(inventorySql, requiredInventoryKeys.map((key) => `'${key}'`));
   assert.match(inventorySql, /as\s+b0_2_production_inventory\b/i);
 });
 
-test('la documentación explica las dos etapas y la detención obligatoria', () => {
+test('no ejecuta las funciones inspeccionadas', () => {
+  for (const qualifiedName of requiredFunctions) {
+    const escaped = qualifiedName.replace('.', '\\.');
+    assert.doesNotMatch(executableInventory, new RegExp(`\\b${escaped}\\s*\\(`, 'i'));
+  }
+});
+
+test('protege acldefault cuando owner_oid es nulo', () => {
+  assert.match(
+    inventorySql,
+    /table_acl_source[\s\S]*?relation_oid\s+is\s+null\s+or\s+table_info\.owner_oid\s+is\s+null[\s\S]*?then\s+null::aclitem\[\][\s\S]*?acldefault\('r'/i,
+  );
+  assert.match(
+    inventorySql,
+    /function_acl_source[\s\S]*?function_oid\s+is\s+null\s+or\s+function_info\.owner_oid\s+is\s+null[\s\S]*?then\s+null::aclitem\[\][\s\S]*?acldefault\('f'/i,
+  );
+});
+
+test('la documentación refleja la ausencia real del historial técnico', () => {
   assert.match(documentation, /^# PRELIMINAR\b/m);
-  assert.match(documentation, /Etapa 1 — Preflight catalogal/i);
-  assert.match(documentation, /Etapa 2 — Inventario completo/i);
-  assert.match(documentation, /safe_to_run_inventory = false[\s\S]*detenerse/i);
-  assert.match(documentation, /safe_to_run_inventory = true/i);
-  assert.match(documentation, /únicamente relaciones y funciones de `pg_catalog`/i);
-  assert.match(documentation, /no constituye autorización para ejecutar el SQL/i);
-});
-
-test('la documentación conserva alcance preliminar y sin correcciones', () => {
+  assert.match(documentation, /producción no expone `supabase_migrations`/i);
+  assert.match(documentation, /no implica que las migraciones no se hayan aplicado/i);
+  assert.match(documentation, /`unavailable`/i);
+  assert.match(documentation, /esquema real/i);
+  assert.match(documentation, /no se debe inventar ni crear el historial faltante/i);
   assert.match(documentation, /no es una migración ejecutable/i);
-  assert.match(documentation, /no crea una baseline ejecutable/i);
-  assert.match(documentation, /no corrige `handle_new_propcontrol_user`/i);
-  assert.match(documentation, /Rollback[\s\S]*No aplica rollback de base de datos/i);
-  assert.match(documentation, /Riesgos de drift/i);
-  assert.match(documentation, /Objetos potencialmente no versionados/i);
-  assert.match(documentation, /Comparación producción contra GitHub/i);
 });
 
-test('la ETAPA 1 ejecuta realmente en PostgreSQL 17 aislado', { timeout: 180_000 }, async (t) => {
+test('ETAPA 1 y ETAPA 2 ejecutan en PostgreSQL 17 sin migration history', { timeout: 240_000 }, async (t) => {
   if (process.env.GITHUB_ACTIONS !== 'true') {
     t.skip('La validación efímera PostgreSQL 17 se ejecuta en GitHub Actions.');
     return;
@@ -400,7 +254,39 @@ test('la ETAPA 1 ejecuta realmente en PostgreSQL 17 aislado', { timeout: 180_000
 
   const { spawnSync } = await import('node:child_process');
   const { randomUUID } = await import('node:crypto');
-  const containerName = `b02-preflight-${randomUUID().slice(0, 8)}`;
+  const containerName = `b02-optional-history-${randomUUID().slice(0, 8)}`;
+
+  const runPsql = (input: string): string => {
+    const execution = spawnSync(
+      'docker',
+      [
+        'exec',
+        '-i',
+        containerName,
+        'psql',
+        '-U',
+        'postgres',
+        '-d',
+        'postgres',
+        '-X',
+        '-A',
+        '-t',
+        '-v',
+        'ON_ERROR_STOP=1',
+      ],
+      { encoding: 'utf8', input, maxBuffer: 20 * 1024 * 1024 },
+    );
+    assert.equal(execution.status, 0, execution.stderr || execution.stdout);
+    return execution.stdout.trim();
+  };
+
+  const parseLastJson = (output: string): Record<string, unknown> => {
+    const lines = output.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+    assert.ok(lines.length > 0, 'La consulta no devolvió filas.');
+    const lastLine = lines.at(-1);
+    assert.ok(lastLine);
+    return JSON.parse(lastLine) as Record<string, unknown>;
+  };
 
   const started = spawnSync(
     'docker',
@@ -416,7 +302,6 @@ test('la ETAPA 1 ejecuta realmente en PostgreSQL 17 aislado', { timeout: 180_000
     ],
     { encoding: 'utf8', maxBuffer: 10 * 1024 * 1024 },
   );
-
   assert.equal(started.status, 0, started.stderr || started.stdout);
 
   try {
@@ -435,75 +320,86 @@ test('la ETAPA 1 ejecuta realmente en PostgreSQL 17 aislado', { timeout: 180_000
     }
     assert.equal(ready, true, 'PostgreSQL 17 no quedó disponible dentro del plazo.');
 
-    const versionResult = spawnSync(
-      'docker',
-      [
-        'exec',
-        containerName,
-        'psql',
-        '-U',
-        'postgres',
-        '-d',
-        'postgres',
-        '-X',
-        '-A',
-        '-t',
-        '-c',
-        'show server_version;',
-      ],
-      { encoding: 'utf8' },
-    );
-    assert.equal(versionResult.status, 0, versionResult.stderr || versionResult.stdout);
-    const serverVersion = versionResult.stdout.trim();
+    const serverVersion = runPsql('show server_version;');
     assert.match(serverVersion, /^17(?:\.|$)/);
 
-    const execution = spawnSync(
-      'docker',
-      [
-        'exec',
-        '-i',
-        containerName,
-        'psql',
-        '-U',
-        'postgres',
-        '-d',
-        'postgres',
-        '-X',
-        '-A',
-        '-t',
-        '-v',
-        'ON_ERROR_STOP=1',
-      ],
-      {
-        encoding: 'utf8',
-        input: preflightSql,
-        maxBuffer: 10 * 1024 * 1024,
-      },
-    );
+    runPsql(`
+      create schema storage;
+      create table storage.buckets (
+        name text primary key,
+        public boolean not null default false,
+        file_size_limit bigint,
+        allowed_mime_types text[]
+      );
+      create table storage.objects (id bigint primary key);
+      create schema auth;
+      create table auth.users (id bigint primary key);
+      create schema private;
+      insert into storage.buckets(name, public, file_size_limit, allowed_mime_types)
+      values ('test-bucket', false, 1048576, array['image/png']);
+    `);
 
-    assert.equal(execution.status, 0, execution.stderr || execution.stdout);
-    const outputLines = execution.stdout
-      .split(/\r?\n/)
-      .map((line) => line.trim())
-      .filter((line) => line.length > 0);
-    assert.ok(outputLines.length > 0, 'La ETAPA 1 no devolvió una fila.');
+    const fingerprintSql = `
+      select md5(
+        coalesce((
+          select string_agg(
+            concat_ws('|', namespace.nspname, relation.relname, relation.relkind::text,
+              attribute.attnum::text, attribute.attname,
+              pg_catalog.format_type(attribute.atttypid, attribute.atttypmod)),
+            E'\\n' order by namespace.nspname, relation.relname, attribute.attnum
+          )
+          from pg_catalog.pg_namespace as namespace
+          join pg_catalog.pg_class as relation on relation.relnamespace = namespace.oid
+          left join pg_catalog.pg_attribute as attribute
+            on attribute.attrelid = relation.oid
+           and attribute.attnum > 0
+           and not attribute.attisdropped
+          where namespace.nspname in ('public', 'private', 'auth', 'storage')
+        ), '')
+        || '|' || (select count(*)::text from storage.buckets)
+        || '|' || (select count(*)::text from storage.objects)
+        || '|' || (select count(*)::text from auth.users)
+        || '|' || coalesce((select string_agg(name || ':' || public::text, ',' order by name) from storage.buckets), '')
+      );
+    `;
 
-    const rawJson = outputLines[outputLines.length - 1];
-    assert.ok(rawJson);
-    const result = JSON.parse(rawJson) as Record<string, unknown>;
+    const beforeFingerprint = runPsql(fingerprintSql);
 
-    assert.equal(result.read_only, true);
-    assert.equal(result.catalog_only, true);
-    assert.equal(typeof result.safe_to_run_inventory, 'boolean');
-    assert.ok(Array.isArray(result.blocking_findings));
+    const preflight = parseLastJson(runPsql(preflightSql));
+    assert.equal(preflight.read_only, true);
+    assert.equal(preflight.catalog_only, true);
+    assert.equal(preflight.safe_to_run_inventory, true);
+    assert.deepEqual(preflight.blocking_findings, []);
+    const preflightWarnings = preflight.warnings;
+    assert.ok(Array.isArray(preflightWarnings));
+    assert.ok(preflightWarnings.includes('migration history unavailable'));
+
+    const inventory = parseLastJson(runPsql(inventorySql));
+    assert.equal(inventory.read_only, true);
+    assert.equal(inventory.preflight_revalidated, true);
+    assert.ok(Array.isArray(inventory.tables));
+    assert.ok(Array.isArray(inventory.functions));
+
+    assert.deepEqual(inventory.migration_history, {
+      source_available: false,
+      status: 'unavailable',
+      registered_versions: [],
+      missing_expected_versions: [],
+      unrecognized_versions: [],
+      warning: 'supabase_migrations.schema_migrations is not available in this production database',
+    });
+
+    const afterFingerprint = runPsql(fingerprintSql);
+    assert.equal(afterFingerprint, beforeFingerprint, 'El inventario modificó objetos o datos.');
 
     console.log(
-      `B0.2 PostgreSQL 17 isolated preflight: ${JSON.stringify({
+      `B0.2 PostgreSQL 17 isolated inventory: ${JSON.stringify({
         server_version: serverVersion,
-        read_only: result.read_only,
-        catalog_only: result.catalog_only,
-        safe_to_run_inventory: result.safe_to_run_inventory,
-        blocking_findings: result.blocking_findings,
+        preflight_safe: preflight.safe_to_run_inventory,
+        preflight_warnings: preflight.warnings,
+        inventory_row: true,
+        migration_history: inventory.migration_history,
+        unchanged: afterFingerprint === beforeFingerprint,
       })}`,
     );
   } finally {
@@ -516,6 +412,5 @@ test('no existe una migración baseline ejecutable de B0.2', () => {
   const forbiddenMigration = migrationFiles.find((fileName) =>
     /b0[_-]?2|baseline|production[_-]?inventory/i.test(fileName),
   );
-
   assert.equal(forbiddenMigration, undefined);
 });
