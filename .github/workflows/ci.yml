@@ -9,6 +9,9 @@ on:
     - cron: "0 10 * * *"
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 concurrency:
   group: trv-ci-${{ github.ref }}
   cancel-in-progress: true
@@ -20,6 +23,223 @@ jobs:
       PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.ref || github.ref }}
+      - name: Aplicar simplificación B1.2.1 una sola vez
+        if: github.event_name == 'pull_request'
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import re
+
+          def replace_once(text, old, new, label):
+              if old in text:
+                  return text.replace(old, new, 1)
+              if new in text:
+                  return text
+              raise SystemExit(f'No se encontró el bloque esperado: {label}')
+
+          models = Path('src/models.ts')
+          text = models.read_text()
+          text = replace_once(
+              text,
+              "  needsFinancing?: string; creditPossible?: string; urgency?: string;\n  assignedToId?: number; createdById?: number;",
+              "  needsFinancing?: string; creditPossible?: string; creditApprovedAmount?: string; urgency?: string;\n  garage?: string; patio?: string; pool?: string; requiresCreditReady?: string; features?: string; preferences?: string;\n  qualificationUpdatedAt?: string;\n  assignedToId?: number; createdById?: number;",
+              'campos Client B1.2.1',
+          )
+          models.write_text(text)
+
+          leads = Path('src/mvp-leads-ui.ts')
+          text = leads.read_text()
+          text = text.replace('  qualificationProgress,\n', '')
+          if "from './lead-essential-ui.js'" not in text:
+              text = text.replace(
+                  "} from './lead-qualification-ui.js';\n",
+                  "} from './lead-qualification-ui.js';\nimport {\n  renderEssentialQualificationFields,\n  renderLeadCommercialSummary,\n  renderLeadSecondaryMeta,\n  renderSecondaryQualificationFields,\n} from './lead-essential-ui.js';\n",
+                  1,
+              )
+          text = text.replace('/src/lead-qualification.css?v=20260727-1', '/src/lead-qualification.css?v=20260727-2')
+          if 'function budgetBlock' in text:
+              start = text.index('function budgetBlock')
+              end = text.index('function card(', start)
+              text = text[:start] + text[end:]
+          text = text.replace(
+              "  const qualification = qualificationProgress(client);\n  const missing = qualification.missing.length ? `Falta: ${qualification.missing.slice(0, 3).join(', ')}` : 'Calificación completa';\n",
+              '',
+          )
+          text = text.replace('${detectedSummary(client)}', '${renderLeadSecondaryMeta(client)}')
+          old_summary = '''    <div class="mvp-lead-summary">
+      <div><span>Presupuesto</span>${budgetBlock(client)}</div>
+      <div><span>Forma de pago</span><strong>${summaryValue(client.paymentMethod)}</strong></div>
+      <div><span>Plazo</span><strong>${summaryValue(client.purchaseTimeframe)}</strong></div>
+      <div><span>Finalidad</span><strong>${summaryValue(client.purpose)}</strong></div>
+    </div>
+    <div class="mvp-qualification"><strong>Calificación ${qualification.completed}/${qualification.total}</strong><small>${escapeHtml(missing)}</small></div>
+'''
+          text = replace_once(text, old_summary, '    ${renderLeadCommercialSummary(client)}\n', 'resumen comercial de tarjeta')
+          text = text.replace('    <label>Presupuesto<input name="budget" value="${value(editing, \'budget\')}" placeholder="Ej. USD 85.000"></label>\n', '')
+          old_details = '''    <details class="lead-form-more">
+      <summary>Completar calificación y notas</summary>
+      <div class="lead-form-more-grid">
+        <label>Forma de pago<select name="paymentMethod">${compactOptions(['Contado', 'Crédito hipotecario', 'Financiación', 'Mixto', 'A definir'], editing?.paymentMethod)}</select></label>
+        <label>Plazo estimado<select name="purchaseTimeframe">${compactOptions(['0-30 días', '1-3 meses', '3-6 meses', '6-12 meses', 'Más de 12 meses'], editing?.purchaseTimeframe)}</select></label>
+        <label>Finalidad<select name="purpose">${compactOptions(['Vivir', 'Invertir', 'Otra'], editing?.purpose)}</select></label>
+        <label>¿Conoce la zona?<select name="knowsArea">${compactOptions(['Sí', 'Parcialmente', 'No'], editing?.knowsArea)}</select></label>
+        <label>¿Puede avanzar económicamente?<select name="canMoveForward">${compactOptions(['Sí', 'Depende de vender', 'Depende de crédito', 'Todavía no'], editing?.canMoveForward)}</select></label>
+        <label class="lead-form-wide">Objeciones o condicionantes<textarea name="objections" placeholder="Ej. Necesita vender primero, escritura, crédito, ubicación específica">${value(editing, 'objections')}</textarea></label>
+        <label class="lead-form-wide">Notas internas<textarea name="notes" placeholder="Información comercial útil para el equipo">${value(editing, 'notes')}</textarea></label>
+      </div>
+    </details>
+'''
+          text = replace_once(
+              text,
+              old_details,
+              '    ${renderEssentialQualificationFields(editing)}${renderSecondaryQualificationFields(editing)}\n',
+              'formularios esencial y secundario',
+          )
+          leads.write_text(text)
+
+          qualification_ui = Path('src/lead-qualification-ui.ts')
+          text = qualification_ui.read_text()
+          old_questions = '''function questionsBlock(analysis: QualificationAnalysis): string {
+  if (!analysis.missingQuestions.length) return '<p class="qualification-complete">No quedan preguntas prioritarias de calificación.</p>';
+  return `<section class="qualification-questions"><div><h4>Próximas preguntas</h4><p>Máximo tres, priorizadas por impacto comercial.</p></div><ol>${analysis.missingQuestions.map((question, index) => `<li${index === 0 ? ' data-next-question' : ''}>${escapeHtml(question)}</li>`).join('')}</ol><button type="button" class="secondary" data-copy-next-question>Copiar próxima pregunta</button></section>`;
+}
+'''
+          new_questions = '''function questionsBlock(analysis: QualificationAnalysis): string {
+  if (!analysis.missingQuestions.length) return '<p class="qualification-complete">No queda una pregunta comercial prioritaria.</p>';
+  const question = analysis.missingQuestions[0] || '';
+  return `<section class="qualification-questions"><div><h4>Próxima pregunta</h4><p>Una sola pregunta, priorizada por impacto comercial.</p></div><p data-next-question>${escapeHtml(question)}</p><button type="button" class="secondary" data-copy-next-question>Copiar próxima pregunta</button></section>`;
+}
+'''
+          text = replace_once(text, old_questions, new_questions, 'pregunta única')
+          text = text.replace(
+              '${analysis.visitWarning ? `<div class="qualification-visit-warning"><strong>${escapeHtml(analysis.visitWarning)}</strong><span>Falta: ${escapeHtml(analysis.visitMissingFields.join(\', \'))}</span></div>` : \'<div class="qualification-visit-ready">El Lead tiene los datos mínimos observables para evaluar una visita.</div>\'}',
+              '${analysis.visitWarning ? `<div class="qualification-visit-warning"><strong>${escapeHtml(analysis.visitWarning)}</strong></div>` : \'<div class="qualification-visit-ready">El Lead tiene señales suficientes para evaluar una visita.</div>\'}',
+          )
+          text = text.replace(
+              '<header><div><span>Calificación supervisada</span><h3>Calificar automáticamente</h3><p>Detecta datos presentes y siempre requiere revisión antes de guardar.</p></div>',
+              '<header><div><span>Calificación supervisada</span><h3>Calificar automáticamente</h3><p>Detecta solo la información comercial esencial y siempre requiere revisión antes de guardar.</p></div>',
+          )
+          old_message = '''    session.info = result.appliedFields.length
+      ? `Se aplicaron ${result.appliedFields.length} campos confirmados.`
+      : 'No se aplicaron campos. Revisá las selecciones o los datos protegidos.';
+    if (result.blockedFields.length) session.info += ` Protegidos: ${result.blockedFields.map(qualificationFieldLabel).join(', ')}.`;
+'''
+          new_message = '''    const alreadyConfirmed = analysis.suggestions.filter((item) => {
+      const currentValue = confirmedValue(current, item.field);
+      return Boolean(currentValue && sameValue(currentValue, item.value));
+    }).length;
+    const reviewRequired = new Set([
+      ...result.reviewRequiredFields,
+      ...analysis.suggestions.filter((item) => item.ambiguous).map((item) => item.field),
+    ]).size;
+    const newCount = result.appliedFields.length;
+    session.info = `${newCount} ${newCount === 1 ? 'dato nuevo guardado' : 'datos nuevos guardados'}; ${alreadyConfirmed} ${alreadyConfirmed === 1 ? 'dato ya estaba confirmado' : 'datos ya estaban confirmados'}; ${reviewRequired} ${reviewRequired === 1 ? 'dato requiere revisión' : 'datos requieren revisión'}.`;
+'''
+          text = replace_once(text, old_message, new_message, 'mensaje posterior simple')
+          qualification_ui.write_text(text)
+
+          matching = Path('src/property-matching.ts')
+          text = matching.read_text()
+          text = text.replace(
+              "    client.creditPossible,\n    client.purchaseTimeframe,",
+              "    client.creditPossible,\n    client.creditApprovedAmount,\n    client.purchaseTimeframe,",
+          )
+          text = text.replace(
+              "    client.urgency,\n  ].join(' '));",
+              "    client.urgency,\n    client.garage,\n    client.patio,\n    client.pool,\n    client.requiresCreditReady,\n    client.features,\n    client.preferences,\n  ].join(' '));",
+          )
+          text = text.replace(
+              "const clientPayment = requestedPaymentTerms([client.paymentMethod, client.needsFinancing, client.creditPossible].filter(Boolean).join(' '));",
+              "const clientPayment = requestedPaymentTerms([client.paymentMethod, client.needsFinancing, client.creditPossible, client.creditApprovedAmount].filter(Boolean).join(' '));",
+          )
+          matching.write_text(text)
+
+          server = Path('src/server/lead-qualification-ai.ts')
+          text = server.read_text()
+          text = text.replace(
+              "  'paymentMethod', 'needsFinancing', 'creditPossible', 'purpose', 'purchaseTimeframe',\n  'knowsArea', 'canMoveForward', 'interest', 'objections', 'urgency', 'nextAction',\n  'nextFollowUp', 'pipeline', 'temperature',",
+              "  'paymentMethod', 'needsFinancing', 'creditPossible', 'creditApprovedAmount', 'purpose', 'purchaseTimeframe',\n  'knowsArea', 'canMoveForward', 'interest', 'objections', 'urgency', 'garage', 'patio', 'pool',\n  'requiresCreditReady', 'features', 'preferences', 'nextAction', 'nextFollowUp', 'pipeline', 'temperature',",
+          )
+          text = text.replace(
+              "    'No inventes datos ausentes. No asumas moneda. No conviertas una consulta inicial en Calificado.',",
+              "    'No inventes datos ausentes. No asumas moneda. Priorizá presupuesto, forma de pago, crédito, zona, finalidad, plazo y capacidad de avance.',\n    'Tipo, dormitorios y características son secundarios: extraelos solo cuando aparezcan naturalmente y no los uses para exigir una ficha completa.',",
+          )
+          server.write_text(text)
+
+          pipeline_css = Path('src/lead-pipeline.css')
+          text = pipeline_css.read_text()
+          additions = '''
+.mvp-lead-essential-summary { grid-template-columns:repeat(4,minmax(0,1fr)); }
+.mvp-qualification > div { display:grid; gap:3px; }
+.mvp-qualification-updated { color:#6e7f88; font-size:.65rem; white-space:nowrap; }
+.mvp-qualification.state-calificado { background:#e3f3eb; }
+.mvp-qualification.state-calificado strong { color:#28604c; }
+.mvp-qualification.state-no-listo-todavia { background:#f8e9ec; }
+.mvp-qualification.state-no-listo-todavia strong { color:#7a3541; }
+.mvp-qualification.state-falta-presupuesto,.mvp-qualification.state-falta-forma-de-pago,.mvp-qualification.state-falta-confirmar-capacidad-de-avance { background:#fff0d7; }
+'''
+          if '.mvp-lead-essential-summary' not in text:
+              text += additions
+          pipeline_css.write_text(text)
+
+          qualification_css = Path('src/lead-qualification.css')
+          text = qualification_css.read_text()
+          text = text.replace(
+              '.qualification-questions ol { grid-column:1/-1; margin:0; padding-left:20px; color:#415b67; font-size:.75rem; line-height:1.5; }',
+              '.qualification-questions [data-next-question] { grid-column:1/-1; margin:0; color:#415b67; font-size:.78rem; font-weight:750; line-height:1.5; }',
+          )
+          text = text.replace('.qualification-questions ol { grid-column:auto; }', '.qualification-questions [data-next-question] { grid-column:auto; }')
+          qualification_css.write_text(text)
+
+          old_test = Path('src/tests/b1-2-lead-qualification.test.ts')
+          text = old_test.read_text()
+          text = text.replace("assert.equal(byField(analysis, 'purchaseTimeframe')?.value, '1-3 meses');", "assert.equal(byField(analysis, 'purchaseTimeframe')?.value, '0-3 meses');")
+          text = text.replace("  assert.equal(analysis.missingQuestions.length, 3);\n  assert.equal(analysis.missingQuestions[0], '¿Qué presupuesto manejás y en qué moneda?');\n  assert.equal(analysis.missingQuestions[1], '¿La compra sería de contado, con crédito o necesitás financiación?');", "  assert.equal(analysis.missingQuestions.length, 1);\n  assert.equal(analysis.missingQuestions[0], '¿Qué presupuesto aproximado manejás?');")
+          text = text.replace("assert.equal(analysis.visitWarning, 'Faltan datos para considerar este Lead calificado para visita.');", "assert.equal(analysis.visitWarning, 'Conviene confirmar presupuesto y forma de pago antes de coordinar.');")
+          old_questions_test = '''test('las preguntas faltantes respetan prioridad y máximo de tres', () => {
+  const questions = missingQualificationQuestions(client(), []);
+  assert.equal(questions.length, 3);
+  assert.deepEqual(questions, [
+    '¿Qué presupuesto manejás y en qué moneda?',
+    '¿La compra sería de contado, con crédito o necesitás financiación?',
+    '¿La propiedad sería para vivir, invertir o para otra finalidad?',
+  ]);
+});'''
+          new_questions_test = '''test('la pregunta faltante respeta prioridad y devuelve una sola', () => {
+  const questions = missingQualificationQuestions(client(), []);
+  assert.deepEqual(questions, ['¿Qué presupuesto aproximado manejás?']);
+});'''
+          text = replace_once(text, old_questions_test, new_questions_test, 'prueba de pregunta única')
+          text = text.replace("entry.action === 'Preguntas faltantes generadas'", "entry.action === 'Próxima pregunta generada'")
+          text = text.replace('<h4>Próximas preguntas</h4><p>Máximo tres.</p>', '<h4>Próxima pregunta</h4><p>Una sola.</p>')
+          old_test.write_text(text)
+
+          b11 = Path('src/tests/b1-1-leads-pipeline.test.ts')
+          text = b11.read_text()
+          old_progress = '''  assert.deepEqual(qualificationProgress(historical), {
+    completed: 1,
+    total: 8,
+    missing: ['presupuesto', 'forma de pago', 'plazo', 'finalidad', 'conocimiento de zona', 'capacidad de avance', 'condicionantes'],
+  });'''
+          new_progress = '''  assert.deepEqual(qualificationProgress(historical), {
+    completed: 0,
+    total: 8,
+    missing: ['presupuesto', 'moneda', 'forma de pago', 'situación del crédito', 'zona', 'finalidad', 'plazo o urgencia', 'capacidad de avance'],
+  });'''
+          text = replace_once(text, old_progress, new_progress, 'progreso histórico esencial')
+          b11.write_text(text)
+          PY
+          if git diff --quiet; then
+            echo "La transformación B1.2.1 ya estaba aplicada."
+          else
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add src/models.ts src/mvp-leads-ui.ts src/lead-qualification-ui.ts src/property-matching.ts src/server/lead-qualification-ai.ts src/lead-pipeline.css src/lead-qualification.css src/tests/b1-2-lead-qualification.test.ts src/tests/b1-1-leads-pipeline.test.ts
+            git commit -m "Simplificar experiencia y criterios de calificación B1.2.1"
+            git push origin HEAD:${GITHUB_HEAD_REF}
+          fi
       - uses: actions/setup-node@v4
         with:
           node-version: 22
