@@ -12,16 +12,16 @@ const packageJson = readFileSync('package.json', 'utf8').toLowerCase();
 
 const redundantSubtitle = 'Nombre, WhatsApp, interés, presupuesto y propiedades compatibles.';
 
-test('Leads conserva título y botón sin renderizar el subtítulo redundante', () => {
+test('Leads conserva título, botón y una introducción comercial útil', () => {
   assert.ok(leads.includes('<h1>Leads</h1>'));
   assert.ok(leads.includes('data-toggle="client-form">Nuevo lead</button>'));
   assert.equal(leads.includes(redundantSubtitle), false);
-  assert.equal(leads.includes('<h1>Leads</h1><p>'), false);
+  assert.ok(leads.includes('Calificá, definí la próxima acción y avanzá cada oportunidad sin duplicar seguimientos.'));
 });
 
-test('Leads conserva la etiqueta y el placeholder actual del buscador', () => {
+test('Leads amplía la búsqueda a la calificación comercial', () => {
   assert.ok(leads.includes('<span>Buscar</span>'));
-  assert.ok(leads.includes('placeholder="Nombre, WhatsApp, interés o presupuesto"'));
+  assert.ok(leads.includes('placeholder="Nombre, WhatsApp, interés, presupuesto o calificación"'));
   assert.ok(leads.includes('id="mvp-lead-search"'));
 });
 
@@ -33,8 +33,9 @@ test('las descripciones de los demás módulos permanecen disponibles', () => {
   assert.ok(settings.includes('Tu perfil, los datos de la inmobiliaria y las preferencias de la app.'));
 });
 
-test('el cambio conserva la búsqueda, matching y guardado de Leads', () => {
+test('el cambio conserva búsqueda, matching, visibilidad y guardado de Leads', () => {
   assert.ok(leads.includes('function leadRows(): Client[]'));
+  assert.ok(leads.includes('visibleClients()'));
   assert.ok(leads.includes('matchPropertiesForClient(client, properties)'));
   assert.ok(leads.includes("querySelector<HTMLFormElement>('#mvp-lead-form')?.addEventListener('submit'"));
   assert.ok(leads.includes('state.crm.clients = upsertClient(state.crm.clients, client)'));
