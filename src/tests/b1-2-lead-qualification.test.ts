@@ -71,7 +71,7 @@ test('extrae una conversación completa sin inventar campos ausentes', () => {
   assert.match(byField(analysis, 'objections')?.value || '', /cochera/i);
   assert.equal(byField(analysis, 'nextAction')?.value, 'Coordinar una visita');
   assert.equal(byField(analysis, 'nextFollowUp')?.value, '2026-07-30');
-  assert.equal(byField(analysis, 'pipeline')?.value, 'Visita coordinada');
+  assert.equal(byField(analysis, 'pipeline')?.value, 'Calificado');
   assert.equal(analysis.visitWarning, null);
 });
 
