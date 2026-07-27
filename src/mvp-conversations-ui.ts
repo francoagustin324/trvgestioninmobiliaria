@@ -74,7 +74,7 @@ function conversationDetail(conversation: WhatsAppConversation | null): string {
   return `<section class="mvp-conversation-detail">
     <header class="mvp-chat-header">
       <div><h2>${escapeHtml(client?.name || conversation.phone)}</h2><p>${escapeHtml(conversation.phone)}</p></div>
-      <div class="mvp-chat-header-actions">${client ? `<button type="button" class="secondary" data-qualify-conversation-client="${client.id}" data-conversation-id="${conversation.id}">Calificar este lead</button>` : ''}<a href="https://wa.me/${digits}" target="_blank" rel="noopener noreferrer">Abrir WhatsApp</a></div>
+      <div class="mvp-chat-header-actions">${client ? `<button type="button" class="secondary" data-qualify-conversation-client="${client.id}" data-conversation-id="${conversation.id}">Calificar Lead</button>` : ''}<a href="https://wa.me/${digits}" target="_blank" rel="noopener noreferrer">Abrir WhatsApp</a></div>
     </header>
     <div class="mvp-chat-lead-data">
       <div><span>Interés</span><strong>${escapeHtml(client?.interest || 'Sin información')}</strong></div>
