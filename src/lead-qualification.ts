@@ -246,7 +246,11 @@ function budgetSuggestions(text: string): QualificationSuggestion[] {
   const delivery = text.match(/\bentrega(?:\s+de)?\s+(?:(USD|ARS|US\$)\s*)?(\d{1,7}(?:[.\s]\d{3})*|\d{2,3})\s*(mil|k)?[^\n.]{0,50}\b(?:cuotas?|financi)/i);
   if (delivery) {
     const localCurrency = delivery[1]?.toUpperCase().replace('US$', 'USD') || currency?.value;
-    const amount = parseAmountToken(delivery[2] ?? '', Boolean(delivery[3]) || Boolean(localCurrency && Number(delivery[2]) < 1000));
+    const deliveryRaw = delivery[2] ?? '';
+    const amount = parseAmountToken(
+      deliveryRaw,
+      Boolean(delivery[3]) || Boolean(localCurrency && !/[.\s,]/.test(deliveryRaw) && Number(deliveryRaw) < 1000),
+    );
     if (amount) {
       const evidence = sentenceEvidence(text, delivery.index ?? 0);
       results.push(suggestion(
@@ -279,7 +283,7 @@ function budgetSuggestions(text: string): QualificationSuggestion[] {
 
   const budgetText = text.replace(
     /(?:\+?54\s*9?\s*)?(?:\(?\d{2,4}\)?[\s-]*)?\d{3,4}[\s-]*\d{4}/g,
-    (phone) => ' '.repeat(phone.length),
+    (phone) => phone.replace(/\D/g, '').length >= 10 ? ' '.repeat(phone.length) : phone,
   );
   const single = budgetText.match(/(?:(USD|ARS|US\$)\s*)?(\d{1,7}(?:[.\s]\d{3})+|\d{2,7})\s*(mil|k)?\s*(?:d[oó]lares?|pesos?)?/i);
   if (!results.length && single) {
@@ -288,7 +292,10 @@ function budgetSuggestions(text: string): QualificationSuggestion[] {
     const raw = single[2] ?? '';
     const compact = raw.replace(/[.\s]/g, '');
     const bareLargeNumber = !localCurrency && !single[3] && /^\d{7,}$/.test(compact);
-    const amount = parseAmountToken(raw, Boolean(single[3]) || Boolean(localCurrency && Number(raw) >= 10 && Number(raw) < 1000));
+    const amount = parseAmountToken(
+      raw,
+      Boolean(single[3]) || Boolean(localCurrency && !/[.\s,]/.test(raw) && Number(raw) >= 10 && Number(raw) < 1000),
+    );
     if (amount && amount >= 1000) {
       const evidence = sentenceEvidence(text, single.index ?? 0);
       results.push(suggestion(
@@ -311,7 +318,7 @@ function budgetSuggestions(text: string): QualificationSuggestion[] {
 }
 
 function extractName(text: string): QualificationSuggestion | null {
-  const match = text.match(/\b(?:me llamo|mi nombre es)\s+([A-ZÁÉÍÓÚÑ][a-záéíóúñ]+(?:\s+[A-ZÁÉÍÓÚÑ][a-záéíóúñ]+){0,2})/);
+  const match = text.match(/\b(?:me llamo|mi nombre es)\s+([A-ZÁÉÍÓÚÑ][a-záéíóúñ]+(?:\s+[A-ZÁÉÍÓÚÑ][a-záéíóúñ]+){0,2})/i);
   if (!match?.[1]) return null;
   return suggestion('name', match[1], 'Alta', sentenceEvidence(text, match.index ?? 0));
 }
@@ -654,6 +661,7 @@ export function confirmedValue(client: Client, field: QualificationField): strin
 }
 
 export function suggestionBlockedByConfirmedValue(client: Client, suggestionItem: QualificationSuggestion): boolean {
+  if (suggestionItem.field === 'pipeline' || suggestionItem.field === 'temperature') return false;
   const current = confirmedValue(client, suggestionItem.field);
   if (!current || equivalent(current, suggestionItem.value)) return false;
   return suggestionItem.confidence !== 'Alta' || Boolean(suggestionItem.ambiguous);
@@ -697,7 +705,6 @@ export function applyQualificationReview(
   }
 
   if (appliedFields.includes('pipeline')) next = applyCommercialStage(next, String(next.pipeline));
-  else next = applyCommercialStage(next, commercialStage(next));
   return { client: next, appliedFields, rejectedFields, blockedFields };
 }
 

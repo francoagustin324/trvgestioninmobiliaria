@@ -1,4 +1,5 @@
 .lead-qualification-panel { display:grid; gap:16px; margin-top:16px; padding:18px; border:1px solid #d7e2e7; border-radius:15px; background:#f8fafb; }
+.lead-qualification-panel button { min-height:44px; }
 .lead-qualification-panel > header { display:flex; align-items:flex-start; justify-content:space-between; gap:16px; }
 .lead-qualification-panel header span { color:#7a6a35; font-size:.67rem; font-weight:900; letter-spacing:.09em; text-transform:uppercase; }
 .lead-qualification-panel h3,.lead-qualification-panel p { margin:0; }
@@ -73,7 +74,8 @@
   .mvp-chat-header-actions button,.mvp-chat-header-actions a,.mvp-auto-qualify-button { width:100%; min-height:44px; justify-content:center; text-align:center; }
 }
 @media (max-width:430px) {
-  .lead-qualification-panel > header { flex-direction:column; }
+  .lead-qualification-panel button { min-height:44px; }
+.lead-qualification-panel > header { flex-direction:column; }
   .lead-qualification-panel > header button { width:100%; min-height:42px; }
   .lead-qualification-suggestion-head { align-items:flex-start; }
   .lead-qualification-suggestion-head label { min-width:100%; }

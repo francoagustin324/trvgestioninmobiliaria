@@ -255,7 +255,10 @@ test('activityLog registra trazabilidad sin duplicar la conversación completa',
     client(),
     analysis.suggestions.map((item) => ({ ...item, accepted: item.field === 'zones' })),
   );
-  const activities = qualificationActivities(7, analysis, result);
+  const activities = [
+    ...qualificationActivities(7, analysis),
+    ...qualificationActivities(7, analysis, result).slice(1),
+  ];
   assert.ok(activities.some((entry) => entry.action === 'Calificación analizada'));
   assert.ok(activities.some((entry) => entry.action === 'Sugerencias aplicadas'));
   assert.ok(activities.some((entry) => entry.action === 'Campos descartados'));
