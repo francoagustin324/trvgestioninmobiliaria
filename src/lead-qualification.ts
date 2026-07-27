@@ -39,7 +39,7 @@ function creditStatusSuggestion(text: string): QualificationSuggestion | null {
     ['Preaprobado', /\b(?:cr[eé]dito(?: hipotecario)?\s+)?pre-?aprobado\b/i],
     ['Aprobado', /\b(?:cr[eé]dito(?: hipotecario)? aprobado|me aprobaron el cr[eé]dito|ya est[aá] aprobado)\b/i],
     ['En trámite', /\b(?:cr[eé]dito en tr[aá]mite|lo estoy tramitando|present[eé] los papeles|en evaluaci[oó]n bancaria)\b/i],
-    ['Todavía no iniciado', /\b(?:todav[ií]a no (?:inici[eé]|tramit[eé])|a[uú]n no (?:inici[eé]|tramit[eé])|no empec[eé] el cr[eé]dito|cr[eé]dito no iniciado)\b/i],
+    ['Todavía no iniciado', /(?:todav[ií]a no (?:inici[eé]|tramit[eé])|a[uú]n no (?:inici[eé]|tramit[eé])|no empec[eé] el cr[eé]dito|cr[eé]dito no iniciado)/i],
   ];
   for (const [value, pattern] of patterns) {
     const match = text.match(pattern);
