@@ -6,6 +6,7 @@ import { importProperty } from './server/import-service.js';
 import { storeExtensionImport, takeExtensionImport } from './server/extension-import-store.js';
 import { handleWhatsAppWebhook, WebhookDeduplicator } from './server/whatsapp-webhook.js';
 import { handleTeamManagement } from './server/team-management.js';
+import { handleLeadQualificationAi, leadQualificationAiConfigured } from './server/lead-qualification-ai.js';
 import { clientIp, staticCacheControl } from './server/request-helpers.js';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
@@ -20,6 +21,14 @@ const cloudConfigured = Boolean(supabaseUrl && supabasePublishableKey);
 const invitationsConfigured = Boolean(cloudConfigured && supabaseSecretKey);
 const whatsappWebhookVerifyToken = (process.env.WHATSAPP_WEBHOOK_VERIFY_TOKEN || '').trim();
 const metaAppSecret = (process.env.META_APP_SECRET || '').trim();
+const leadQualificationAiOptions = {
+  supabaseUrl,
+  publishableKey: supabasePublishableKey,
+  endpoint: (process.env.LEAD_QUALIFICATION_AI_ENDPOINT || '').trim(),
+  apiKey: (process.env.LEAD_QUALIFICATION_AI_KEY || '').trim(),
+  model: (process.env.LEAD_QUALIFICATION_AI_MODEL || '').trim(),
+};
+const leadQualificationAiEnabled = leadQualificationAiConfigured(leadQualificationAiOptions);
 const whatsappWebhookDeduplicator = new WebhookDeduplicator();
 const contentTypes: Record<string, string> = {
   '.html': 'text/html; charset=utf-8',
@@ -176,8 +185,16 @@ const server = createServer(async (request, response) => {
   });
   if (teamHandled) return;
 
+  const qualificationHandled = await handleLeadQualificationAi(request, response, leadQualificationAiOptions);
+  if (qualificationHandled) return;
+
   if (request.method === 'GET' && pathname === '/health') {
-    sendJson(response, 200, { ok: true, cloudConfigured, invitationsConfigured });
+    sendJson(response, 200, {
+      ok: true,
+      cloudConfigured,
+      invitationsConfigured,
+      leadQualificationAiConfigured: leadQualificationAiEnabled,
+    });
     return;
   }
 
@@ -189,8 +206,13 @@ const server = createServer(async (request, response) => {
         publishableKey: supabasePublishableKey,
         invitationsConfigured,
         publicUrl: publicFichaUrl || undefined,
+        leadQualificationAiConfigured: leadQualificationAiEnabled,
       }
-      : { configured: false, invitationsConfigured: false });
+      : {
+        configured: false,
+        invitationsConfigured: false,
+        leadQualificationAiConfigured: false,
+      });
     return;
   }
 
@@ -266,5 +288,5 @@ const server = createServer(async (request, response) => {
 });
 
 server.listen(port, host, () => {
-  console.log(`PropControl listo en http://${host}:${port} · nube ${cloudConfigured ? 'configurada' : 'pendiente'} · invitaciones ${invitationsConfigured ? 'configuradas' : 'pendientes'}`);
+  console.log(`PropControl listo en http://${host}:${port} · nube ${cloudConfigured ? 'configurada' : 'pendiente'} · invitaciones ${invitationsConfigured ? 'configuradas' : 'pendientes'} · calificación inteligente ${leadQualificationAiEnabled ? 'disponible' : 'determinística'}`);
 });
