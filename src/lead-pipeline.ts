@@ -11,6 +11,14 @@ export const COMMERCIAL_STAGES: CommercialStage[] = [
   'Perdido',
 ];
 
+export type CommercialQualificationState =
+  | 'Información inicial'
+  | 'Falta presupuesto'
+  | 'Falta forma de pago'
+  | 'Falta confirmar capacidad de avance'
+  | 'Calificado'
+  | 'No listo todavía';
+
 export interface LeadFilters {
   search: string;
   stage: CommercialStage | 'Todas';
@@ -25,6 +33,12 @@ export interface QualificationProgress {
   missing: string[];
 }
 
+export interface CommercialQualificationSummary extends QualificationProgress {
+  state: CommercialQualificationState;
+  slug: string;
+  detail: string;
+}
+
 const TERMINAL_STAGES = new Set<CommercialStage>(['Ganado', 'Perdido']);
 const STYLE_ID = 'propcontrol-lead-pipeline-styles';
 
@@ -33,7 +47,7 @@ function installStyles(): void {
   const link = document.createElement('link');
   link.id = STYLE_ID;
   link.rel = 'stylesheet';
-  link.href = '/src/lead-pipeline.css?v=20260727-1';
+  link.href = '/src/lead-pipeline.css?v=20260727-2';
   document.head.append(link);
 }
 
@@ -45,6 +59,33 @@ function normalizedText(value: unknown): string {
     .replace(/[\u0300-\u036f]/g, '')
     .toLowerCase()
     .trim();
+}
+
+function present(value: unknown): boolean {
+  return Boolean(String(value ?? '').trim());
+}
+
+function budgetHasCurrency(client: Client): boolean {
+  return present(client.currency)
+    || /\b(?:USD|ARS|EUR|US\$|d[oó]lares?|pesos?)\b/i.test(client.budget || '');
+}
+
+function paymentUsesMortgageCredit(client: Client): boolean {
+  return normalizedText(client.paymentMethod).includes('credito hipotecario')
+    || normalizedText(client.canMoveForward).includes('depende del credito');
+}
+
+function progressedCreditStatus(client: Client): boolean {
+  const status = normalizedText(client.creditPossible);
+  if (!paymentUsesMortgageCredit(client)) return true;
+  return ['en tramite', 'preaprobado', 'aprobado'].includes(status);
+}
+
+function reasonableAdvance(client: Client): boolean {
+  const value = normalizedText(client.canMoveForward);
+  if (value === 'si') return true;
+  if (value === 'depende del credito') return progressedCreditStatus(client);
+  return false;
 }
 
 export function localIsoDate(value = new Date()): string {
@@ -96,25 +137,66 @@ export function applyCommercialStage(client: Client, requestedStage: string | un
   };
 }
 
-const qualificationFields: Array<{ key: keyof Client; label: string }> = [
-  { key: 'interest', label: 'interés' },
-  { key: 'budget', label: 'presupuesto' },
-  { key: 'paymentMethod', label: 'forma de pago' },
-  { key: 'purchaseTimeframe', label: 'plazo' },
-  { key: 'purpose', label: 'finalidad' },
-  { key: 'knowsArea', label: 'conocimiento de zona' },
-  { key: 'canMoveForward', label: 'capacidad de avance' },
-  { key: 'objections', label: 'condicionantes' },
+const essentialQualificationFields: Array<{ label: string; complete: (client: Client) => boolean }> = [
+  { label: 'presupuesto', complete: (client) => present(client.budget) },
+  { label: 'moneda', complete: budgetHasCurrency },
+  { label: 'forma de pago', complete: (client) => present(client.paymentMethod) },
+  { label: 'situación del crédito', complete: (client) => !paymentUsesMortgageCredit(client) || present(client.creditPossible) },
+  { label: 'zona', complete: (client) => present(client.zones) },
+  { label: 'finalidad', complete: (client) => present(client.purpose) },
+  { label: 'plazo o urgencia', complete: (client) => present(client.purchaseTimeframe) || present(client.urgency) },
+  { label: 'capacidad de avance', complete: (client) => present(client.canMoveForward) && normalizedText(client.canMoveForward) !== 'no confirmado' },
 ];
 
 export function qualificationProgress(client: Client): QualificationProgress {
-  const missing = qualificationFields
-    .filter(({ key }) => !String(client[key] ?? '').trim())
+  const missing = essentialQualificationFields
+    .filter(({ complete }) => !complete(client))
     .map(({ label }) => label);
   return {
-    completed: qualificationFields.length - missing.length,
-    total: qualificationFields.length,
+    completed: essentialQualificationFields.length - missing.length,
+    total: essentialQualificationFields.length,
     missing,
+  };
+}
+
+export function commercialQualificationState(client: Client): CommercialQualificationSummary {
+  const progress = qualificationProgress(client);
+  const advance = normalizedText(client.canMoveForward);
+  const creditStatus = normalizedText(client.creditPossible);
+  let state: CommercialQualificationState;
+  let detail: string;
+
+  if (advance === 'todavia no' || advance === 'depende de vender' || (paymentUsesMortgageCredit(client) && creditStatus === 'todavia no iniciado')) {
+    state = 'No listo todavía';
+    detail = 'Conviene mantener seguimiento sin forzar una visita.';
+  } else if (!present(client.budget) || !budgetHasCurrency(client)) {
+    state = 'Falta presupuesto';
+    detail = 'Confirmá un rango aproximado y su moneda.';
+  } else if (!present(client.paymentMethod)) {
+    state = 'Falta forma de pago';
+    detail = 'Definí si compra de contado, con crédito o financiación.';
+  } else if (!present(client.canMoveForward) || advance === 'no confirmado') {
+    state = 'Falta confirmar capacidad de avance';
+    detail = 'Falta saber si hoy podría avanzar ante una opción adecuada.';
+  } else if (
+    present(client.zones)
+    && present(client.purpose)
+    && (present(client.purchaseTimeframe) || present(client.urgency))
+    && reasonableAdvance(client)
+    && progressedCreditStatus(client)
+  ) {
+    state = 'Calificado';
+    detail = 'Tiene señales comerciales suficientes para avanzar.';
+  } else {
+    state = 'Información inicial';
+    detail = 'Completá solo los datos que definen si existe una oportunidad real.';
+  }
+
+  return {
+    ...progress,
+    state,
+    slug: normalizedText(state).replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, ''),
+    detail,
   };
 }
 
@@ -125,11 +207,23 @@ export function clientSearchText(client: Client): string {
     client.email,
     client.interest,
     client.budget,
+    client.currency,
     client.paymentMethod,
+    client.creditPossible,
+    client.creditApprovedAmount,
     client.purchaseTimeframe,
     client.purpose,
+    client.zones,
     client.knowsArea,
     client.canMoveForward,
+    client.propertyType,
+    client.bedrooms,
+    client.garage,
+    client.patio,
+    client.pool,
+    client.requiresCreditReady,
+    client.features,
+    client.preferences,
     client.objections,
     client.notes,
     client.nextAction,
