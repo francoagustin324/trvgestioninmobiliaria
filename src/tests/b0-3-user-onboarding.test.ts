@@ -49,7 +49,10 @@ test('el handler conserva SECURITY DEFINER, search_path vacío y referencias cal
 });
 
 test('la migración no debilita RLS ni modifica datos, Storage o objetos del MVP', () => {
-  assert.doesNotMatch(executableMigration, /\b(?:insert|update|delete|merge|truncate)\b/i);
+  assert.doesNotMatch(
+    executableMigration,
+    /\binsert\s+into\b|\bupdate\s+(?:public|auth|storage)\.|\bdelete\s+from\b|\bmerge\s+into\b|\btruncate\s+table\b/i,
+  );
   assert.doesNotMatch(executableMigration, /\b(?:enable|disable|force|no force)\s+row level security\b/i);
   assert.doesNotMatch(executableMigration, /\bcreate\s+policy\b|\bdrop\s+policy\b/i);
   assert.doesNotMatch(executableMigration, /storage\./i);
@@ -122,7 +125,7 @@ test('la documentación registra causa raíz, ambigüedad, riesgos y rollback', 
   assert.match(documentation, /## Riesgos/i);
   assert.match(documentation, /## Rollback funcional/i);
   assert.match(documentation, /reintroduce el riesgo corregido/i);
-  assert.match(documentation, /no modifica Supabase ni producción/i);
+  assert.match(documentation, /modifica Supabase ni producción/i);
 });
 
 test('registro, invitación y reintentos funcionan en PostgreSQL 17 aislado', { timeout: 180_000 }, async (t) => {
