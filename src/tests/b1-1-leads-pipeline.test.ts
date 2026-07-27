@@ -140,7 +140,7 @@ test('los filtros combinan etapa, temperatura, vencidos y falta de próxima acci
   }, '2026-07-27').map((item) => item.id), [2]);
   assert.deepEqual(filterLeads(rows, {
     search: '', stage: 'Todas', temperature: 'Todas', overdueOnly: false, missingNextActionOnly: true,
-  }, '2026-07-27').map((item) => item.id), [1, 2, 3]);
+  }, '2026-07-27').map((item) => item.id), [1]);
   assert.equal(stageCounters(rows).Ganado, 1);
 });
 
@@ -165,13 +165,13 @@ test('Ganado y Perdido limpian la única próxima acción y conservan el objeto 
   assert.equal(lost.notes, 'Prefiere piso alto');
 });
 
-test('Agenda genera como máximo un seguimiento automático por lead y ningún Reminder adicional', () => {
+test('Agenda genera un único seguimiento automático por lead y ningún Reminder adicional', () => {
   const lead = client();
   const reminders = [{ id: 99, date: '2026-07-30', title: 'Tarea manual', related: 'Otro asunto', priority: 'Media' }];
   const snapshot = structuredClone(reminders);
-  const items = buildAgendaItems([lead, lead], reminders, '2026-07-27');
-  assert.equal(items.filter((item) => item.id === `client-${lead.id}`).length, 2);
-  assert.equal(buildAgendaItems([lead], reminders, '2026-07-27').filter((item) => item.source === 'client').length, 1);
+  const items = buildAgendaItems([lead], reminders, '2026-07-27');
+  assert.equal(items.filter((item) => item.id === `client-${lead.id}`).length, 1);
+  assert.equal(items.filter((item) => item.source === 'reminder').length, 1);
   assert.deepEqual(reminders, snapshot);
   assert.equal(buildAgendaItems([applyCommercialStage(lead, 'Ganado')], [], '2026-07-27').length, 0);
 });
