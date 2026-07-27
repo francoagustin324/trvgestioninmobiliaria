@@ -144,7 +144,7 @@ export function filterLeads(clients: Client[], filters: LeadFilters, today = loc
     if (filters.stage !== 'Todas' && stage !== filters.stage) return false;
     if (filters.temperature !== 'Todas' && client.temperature !== filters.temperature) return false;
     if (filters.overdueOnly && (!client.nextFollowUp || client.nextFollowUp >= today || isTerminalClient(client))) return false;
-    if (filters.missingNextActionOnly && client.nextAction?.trim() && client.nextFollowUp) return false;
+    if (filters.missingNextActionOnly && (isTerminalClient(client) || (client.nextAction?.trim() && client.nextFollowUp))) return false;
     return !query || clientSearchText(client).includes(query);
   });
 }
