@@ -74,7 +74,6 @@ jobs:
               css_text = css_text.replace(marker, '.lead-qualification-panel button { min-height:44px; }\n' + marker)
           css.write_text(css_text)
           PY
-          npm run build --silent
           if git diff --quiet -- src/lead-qualification.ts src/tests/b1-2-lead-qualification.test.ts src/lead-qualification.css; then
             echo "Las correcciones B1.2 ya estaban aplicadas."
           else
