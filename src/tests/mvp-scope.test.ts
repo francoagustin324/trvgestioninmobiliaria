@@ -81,17 +81,31 @@ test('la cuenta usa icono genérico y no repite la inicial de TRV', () => {
   assert.equal(source.includes('const initials'), false);
 });
 
-test('el formulario visible del lead se limita a cuatro datos comerciales', () => {
+test('el formulario de lead muestra lo crítico y despliega la calificación extendida', () => {
   const source = readFileSync('src/mvp-leads-ui.ts', 'utf8');
-  for (const label of ['Nombre', 'Número de WhatsApp', 'Lugar o propiedad de interés', 'Presupuesto']) {
-    assert.ok(source.includes(label), label);
-  }
-  for (const hiddenField of ['Forma de pago', 'Plazo de compra', 'Motivo de compra', 'Objeciones', 'Observaciones']) {
-    assert.equal(source.includes(hiddenField), false, hiddenField);
-  }
+  for (const label of [
+    'Nombre',
+    'Número de WhatsApp',
+    'Lugar o propiedad de interés',
+    'Presupuesto',
+    'Etapa comercial',
+    'Próxima acción',
+    'Fecha del próximo seguimiento',
+  ]) assert.ok(source.includes(label), label);
+  assert.ok(source.includes('<details class="lead-form-more">'));
+  assert.ok(source.includes('Completar calificación y notas'));
+  for (const extendedField of [
+    'Forma de pago',
+    'Plazo estimado',
+    'Finalidad',
+    '¿Conoce la zona?',
+    '¿Puede avanzar económicamente?',
+    'Objeciones o condicionantes',
+    'Notas internas',
+  ]) assert.ok(source.includes(extendedField), extendedField);
 });
 
-test('editar cuatro campos no elimina la calificación interna existente', () => {
+test('editar campos parciales no elimina la calificación interna existente', () => {
   const current: Client = {
     id: 7,
     name: 'Nombre anterior',
@@ -108,6 +122,8 @@ test('editar cuatro campos no elimina la calificación interna existente', () =>
     canMoveForward: 'Sí',
     objections: 'Necesita cochera',
     notes: 'Dato interno',
+    nextAction: 'Confirmar fondos',
+    nextFollowUp: '2026-07-31',
     assignedToId: 3,
     createdById: 1,
   };
@@ -122,6 +138,8 @@ test('editar cuatro campos no elimina la calificación interna existente', () =>
   assert.equal(updated.paymentMethod, 'Contado');
   assert.equal(updated.pipeline, 'Calificado');
   assert.equal(updated.notes, 'Dato interno');
+  assert.equal(updated.nextAction, 'Confirmar fondos');
+  assert.equal(updated.nextFollowUp, '2026-07-31');
   assert.equal(updated.assignedToId, 3);
 });
 
