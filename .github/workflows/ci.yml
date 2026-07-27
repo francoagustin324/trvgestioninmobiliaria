@@ -9,9 +9,6 @@ on:
     - cron: "0 10 * * *"
   workflow_dispatch:
 
-permissions:
-  contents: write
-
 concurrency:
   group: trv-ci-${{ github.ref }}
   cancel-in-progress: true
@@ -23,66 +20,6 @@ jobs:
       PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
     steps:
       - uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event.pull_request.head.ref || github.ref }}
-      - name: Aplicar correcciones B1.2 una sola vez
-        if: github.event_name == 'pull_request'
-        run: |
-          python - <<'PY'
-          from pathlib import Path
-
-          source = Path('src/lead-qualification.ts')
-          text = source.read_text()
-          text = text.replace(
-              "const amount = parseAmountToken(delivery[2] ?? '', Boolean(delivery[3]) || Boolean(localCurrency && Number(delivery[2]) < 1000));",
-              "const deliveryRaw = delivery[2] ?? '';\n    const amount = parseAmountToken(\n      deliveryRaw,\n      Boolean(delivery[3]) || Boolean(localCurrency && !/[.\\s,]/.test(deliveryRaw) && Number(deliveryRaw) < 1000),\n    );",
-          )
-          text = text.replace(
-              "(phone) => ' '.repeat(phone.length),",
-              "(phone) => phone.replace(/\\D/g, '').length >= 10 ? ' '.repeat(phone.length) : phone,",
-          )
-          text = text.replace(
-              "const amount = parseAmountToken(raw, Boolean(single[3]) || Boolean(localCurrency && Number(raw) >= 10 && Number(raw) < 1000));",
-              "const amount = parseAmountToken(\n      raw,\n      Boolean(single[3]) || Boolean(localCurrency && !/[.\\s,]/.test(raw) && Number(raw) >= 10 && Number(raw) < 1000),\n    );",
-          )
-          text = text.replace(
-              "const match = text.match(/\\b(?:me llamo|mi nombre es)\\s+([A-ZÁÉÍÓÚÑ][a-záéíóúñ]+(?:\\s+[A-ZÁÉÍÓÚÑ][a-záéíóúñ]+){0,2})/);",
-              "const match = text.match(/\\b(?:me llamo|mi nombre es)\\s+([A-ZÁÉÍÓÚÑ][a-záéíóúñ]+(?:\\s+[A-ZÁÉÍÓÚÑ][a-záéíóúñ]+){0,2})/i);",
-          )
-          text = text.replace(
-              "export function suggestionBlockedByConfirmedValue(client: Client, suggestionItem: QualificationSuggestion): boolean {\n  const current = confirmedValue(client, suggestionItem.field);",
-              "export function suggestionBlockedByConfirmedValue(client: Client, suggestionItem: QualificationSuggestion): boolean {\n  if (suggestionItem.field === 'pipeline' || suggestionItem.field === 'temperature') return false;\n  const current = confirmedValue(client, suggestionItem.field);",
-          )
-          text = text.replace(
-              "  if (appliedFields.includes('pipeline')) next = applyCommercialStage(next, String(next.pipeline));\n  else next = applyCommercialStage(next, commercialStage(next));",
-              "  if (appliedFields.includes('pipeline')) next = applyCommercialStage(next, String(next.pipeline));",
-          )
-          source.write_text(text)
-
-          tests = Path('src/tests/b1-2-lead-qualification.test.ts')
-          test_text = tests.read_text()
-          test_text = test_text.replace(
-              "  const activities = qualificationActivities(7, analysis, result);\n",
-              "  const activities = [\n    ...qualificationActivities(7, analysis),\n    ...qualificationActivities(7, analysis, result).slice(1),\n  ];\n",
-          )
-          tests.write_text(test_text)
-
-          css = Path('src/lead-qualification.css')
-          css_text = css.read_text()
-          marker = '.lead-qualification-panel > header {'
-          if '.lead-qualification-panel button { min-height:44px; }' not in css_text:
-              css_text = css_text.replace(marker, '.lead-qualification-panel button { min-height:44px; }\n' + marker)
-          css.write_text(css_text)
-          PY
-          if git diff --quiet -- src/lead-qualification.ts src/tests/b1-2-lead-qualification.test.ts src/lead-qualification.css; then
-            echo "Las correcciones B1.2 ya estaban aplicadas."
-          else
-            git config user.name "github-actions[bot]"
-            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git add src/lead-qualification.ts src/tests/b1-2-lead-qualification.test.ts src/lead-qualification.css
-            git commit -m "Corregir aplicación supervisada y presupuesto B1.2"
-            git push origin HEAD:${GITHUB_HEAD_REF}
-          fi
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -104,4 +41,16 @@ jobs:
           path: build.log
           retention-days: 1
       - name: Ejecutar pruebas
-        run: npm test --silent
+        run: |
+          set +e
+          npm test --silent > test.log 2>&1
+          code=$?
+          cat test.log
+          exit $code
+      - name: Guardar diagnóstico de pruebas B1.2
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: b1-2-test-diagnostics-2
+          path: test.log
+          retention-days: 1
