@@ -1,3 +1,4 @@
+import { commercialStage, isTerminalClient } from './lead-pipeline.js';
 import type { Client, Reminder } from './models.js';
 
 export type AgendaUrgency = 'overdue' | 'today' | 'upcoming';
@@ -74,12 +75,19 @@ export function daysBetweenIsoDates(from: string, to: string): number {
 
 export function agendaRelatedOptions(clients: Client[]): AgendaRelatedOption[] {
   return clients
+    .filter((client) => !isTerminalClient(client))
     .map<AgendaRelatedOption>((client) => ({
       key: `lead-${client.id}`,
       value: client.name,
       type: 'Lead',
       detail: [client.interest, client.phone].filter(Boolean).join(' · '),
-      searchable: normalizedSearch([client.name, client.interest, client.phone, client.budget].filter(Boolean).join(' ')),
+      searchable: normalizedSearch([
+        client.name,
+        client.interest,
+        client.phone,
+        client.budget,
+        client.nextAction,
+      ].filter(Boolean).join(' ')),
     }))
     .sort((left, right) => left.value.localeCompare(right.value, 'es', { sensitivity: 'base' }));
 }
@@ -102,13 +110,9 @@ export function filterAgendaRelatedOptions(
     .slice(0, limit);
 }
 
-function terminalClient(client: Client): boolean {
-  return client.status === 'Cerrado' || client.pipeline === 'Cerrado' || client.pipeline === 'Perdido';
-}
-
 export function buildAgendaItems(clients: Client[], reminders: Reminder[], today = todayIsoDate()): AgendaItem[] {
   const clientItems = clients.flatMap<AgendaItem>((client) => {
-    if (terminalClient(client) || !isValidIsoDate(client.nextFollowUp)) return [];
+    if (isTerminalClient(client) || !isValidIsoDate(client.nextFollowUp)) return [];
     const budget = client.budget?.trim();
     return [{
       id: `client-${client.id}`,
@@ -117,8 +121,8 @@ export function buildAgendaItems(clients: Client[], reminders: Reminder[], today
       date: client.nextFollowUp,
       urgency: agendaUrgency(client.nextFollowUp, today),
       title: client.name,
-      detail: client.interest,
-      secondary: [client.phone, budget].filter(Boolean).join(' · '),
+      detail: client.nextAction?.trim() || client.interest,
+      secondary: [commercialStage(client), client.phone, budget].filter(Boolean).join(' · '),
       priority: clientPriority[client.temperature],
     }];
   });
