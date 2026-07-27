@@ -10,6 +10,11 @@ import {
   stageCounters,
   type LeadFilters,
 } from './lead-pipeline.js';
+import {
+  bindLeadQualificationPanel,
+  renderLeadQualificationPanel,
+  requestLeadQualification,
+} from './lead-qualification-ui.js';
 import type { ActivityEntry, Client, CommercialStage, Temperature } from './models.js';
 import { findDuplicateClient, formatPhone, isPlausiblePhone } from './phone-normalizer.js';
 import { matchPropertiesForClient, type PropertyMatch } from './property-matching.js';
@@ -17,6 +22,15 @@ import { saveData, state } from './store.js';
 import { addActivity, memberName, visibleClients, visibleProperties } from './team-access.js';
 import { escapeHtml, formValues, nextId } from './utils.js';
 import { appIcons } from './icons.js';
+
+const qualificationStyleId = 'propcontrol-lead-qualification-styles';
+if (typeof document !== 'undefined' && !document.getElementById(qualificationStyleId)) {
+  const link = document.createElement('link');
+  link.id = qualificationStyleId;
+  link.rel = 'stylesheet';
+  link.href = '/src/lead-qualification.css?v=20260727-1';
+  document.head.append(link);
+}
 
 let filters: LeadFilters = {
   search: '',
@@ -33,9 +47,16 @@ const activityFormatter = new Intl.DateTimeFormat('es-AR', {
   hour: '2-digit',
   minute: '2-digit',
 });
+const dateFormatter = new Intl.DateTimeFormat('es-AR', {
+  day: '2-digit',
+  month: '2-digit',
+  year: 'numeric',
+  timeZone: 'UTC',
+});
 
 function value(client: Client | null, key: keyof Client): string {
   const current = client?.[key];
+  if (typeof current === 'number') return escapeHtml(String(current));
   return escapeHtml(typeof current === 'string' ? current : '');
 }
 
@@ -108,6 +129,32 @@ function summaryValue(valueText: string | undefined, fallback = 'Sin definir'): 
   return escapeHtml(valueText?.trim() || fallback);
 }
 
+function formattedLeadDate(valueText: string | undefined): string {
+  if (!valueText) return 'Sin fecha';
+  const date = new Date(`${valueText}T12:00:00Z`);
+  return Number.isNaN(date.getTime()) ? valueText : dateFormatter.format(date);
+}
+
+function budgetBlock(client: Client): string {
+  const budget = client.budget?.trim();
+  if (!budget) return '<strong>Sin definir</strong>';
+  const explicitCurrency = /\b(?:USD|ARS|US\$|d[oó]lares?|pesos?)\b/i.test(budget);
+  const text = explicitCurrency || !client.currency ? budget : `${client.currency} ${budget}`;
+  const warning = explicitCurrency || client.currency ? '' : '<small class="qualification-budget-warning">Moneda sin confirmar</small>';
+  return `<strong>${escapeHtml(text)}</strong>${warning}`;
+}
+
+function detectedSummary(client: Client): string {
+  const values = [
+    client.zones ? `Zona: ${client.zones}` : '',
+    client.propertyType ? `Tipo: ${client.propertyType}` : '',
+    client.bedrooms ? `${client.bedrooms} dormitorios` : '',
+    client.needsFinancing ? `Financiación: ${client.needsFinancing}` : '',
+    client.creditPossible ? `Crédito: ${client.creditPossible}` : '',
+  ].filter(Boolean);
+  return values.length ? `<div class="mvp-property-meta">${values.map((item) => `<span>${escapeHtml(item)}</span>`).join('')}</div>` : '';
+}
+
 function card(client: Client): string {
   const digits = client.phone.replace(/\D/g, '');
   const stage = commercialStage(client);
@@ -119,22 +166,24 @@ function card(client: Client): string {
       <div class="mvp-lead-main-copy">
         <div class="mvp-lead-title-line">${tempIcon(client.temperature)}<h3>${escapeHtml(client.name)}</h3><span class="mvp-stage-badge${terminal ? ' terminal' : ''}">${escapeHtml(stage)}</span></div>
         <p>${client.interest ? `Busca ${escapeHtml(client.interest)}` : 'Sin interés definido'}</p>
+        ${detectedSummary(client)}
         <div class="mvp-lead-contact"><a class="mvp-contact-btn wa" href="https://wa.me/${digits}" target="_blank" rel="noopener noreferrer" title="WhatsApp · ${escapeHtml(formatPhone(client.phone))}" aria-label="Enviar WhatsApp">${appIcons.whatsapp}</a><a class="mvp-contact-btn call" href="tel:+${digits}" title="Llamar · ${escapeHtml(formatPhone(client.phone))}" aria-label="Llamar">${appIcons.phone}</a>${client.email ? `<a class="mvp-contact-btn mail" href="mailto:${escapeHtml(client.email)}" title="${escapeHtml(client.email)}" aria-label="Enviar email">${appIcons.mail}</a>` : `<span class="mvp-contact-btn mail" data-disabled title="Sin email cargado" aria-label="Sin email cargado">${appIcons.mail}</span>`}</div>
       </div>
-      <div class="mvp-lead-actions"><button type="button" class="secondary mvp-icon-btn" data-edit-client="${client.id}" aria-controls="mvp-lead-form" title="Editar" aria-label="Editar ${escapeHtml(client.name)}">${appIcons.edit}</button><button type="button" class="delete mvp-icon-btn" data-delete="clients" data-id="${client.id}" title="Eliminar" aria-label="Eliminar ${escapeHtml(client.name)}">×</button></div>
+      <div class="mvp-lead-actions"><button type="button" class="secondary mvp-auto-qualify-button" data-auto-qualify-client="${client.id}">Calificar automáticamente</button><button type="button" class="secondary mvp-icon-btn" data-edit-client="${client.id}" aria-controls="mvp-lead-form" title="Editar" aria-label="Editar ${escapeHtml(client.name)}">${appIcons.edit}</button><button type="button" class="delete mvp-icon-btn" data-delete="clients" data-id="${client.id}" title="Eliminar" aria-label="Eliminar ${escapeHtml(client.name)}">×</button></div>
     </div>
     <div class="mvp-lead-critical">
       <div><span>Próxima acción</span><strong>${terminal ? 'Operación cerrada' : summaryValue(client.nextAction, 'Sin próxima acción')}</strong></div>
-      <div><span>Fecha</span><strong>${terminal ? '—' : summaryValue(client.nextFollowUp, 'Sin fecha')}</strong></div>
+      <div><span>Fecha</span><strong>${terminal ? '—' : escapeHtml(formattedLeadDate(client.nextFollowUp))}</strong></div>
       <div><span>Responsable</span><strong>${escapeHtml(memberName(client.assignedToId))}</strong></div>
     </div>
     <div class="mvp-lead-summary">
-      <div><span>Presupuesto</span><strong>${summaryValue(client.budget)}</strong></div>
+      <div><span>Presupuesto</span>${budgetBlock(client)}</div>
       <div><span>Forma de pago</span><strong>${summaryValue(client.paymentMethod)}</strong></div>
       <div><span>Plazo</span><strong>${summaryValue(client.purchaseTimeframe)}</strong></div>
       <div><span>Finalidad</span><strong>${summaryValue(client.purpose)}</strong></div>
     </div>
     <div class="mvp-qualification"><strong>Calificación ${qualification.completed}/${qualification.total}</strong><small>${escapeHtml(missing)}</small></div>
+    ${renderLeadQualificationPanel(client)}
     ${historyBlock(client)}
     ${matchesForLead(client)}
   </article>`;
@@ -161,6 +210,14 @@ function bindLeadCardActions(container: HTMLElement): void {
       focusLeadForm(container);
     });
   });
+  container.querySelectorAll<HTMLButtonElement>('[data-auto-qualify-client]').forEach((button) => {
+    button.addEventListener('click', (event) => {
+      event.stopPropagation();
+      const clientId = Number(button.dataset.autoQualifyClient);
+      if (!clientId || !visibleClients().some((client) => client.id === clientId)) return;
+      requestLeadQualification(clientId);
+    });
+  });
   container.querySelectorAll<HTMLButtonElement>('[data-open-match-property]').forEach((button) => {
     button.addEventListener('click', (event) => {
       event.stopPropagation();
@@ -173,6 +230,7 @@ function bindLeadCardActions(container: HTMLElement): void {
       window.requestAnimationFrame(() => document.querySelector('#mvp-property-form')?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
     });
   });
+  visibleClients().forEach((client) => bindLeadQualificationPanel(container, client, () => renderMvpLeads(container)));
 }
 
 function updateLeadResults(container: HTMLElement): void {
@@ -231,7 +289,7 @@ function filterPanel(): string {
       <label><span>Etapa</span><select id="mvp-lead-stage-filter"><option value="Todas">Todas</option>${COMMERCIAL_STAGES.map((stage) => `<option value="${stage}"${selected(filters.stage, stage)}>${stage}</option>`).join('')}</select></label>
       <label><span>Temperatura</span><select id="mvp-lead-temperature-filter"><option value="Todas">Todas</option>${(['Caliente', 'Tibio', 'Frío'] as Temperature[]).map((temperature) => `<option value="${temperature}"${selected(filters.temperature, temperature)}>${temperature}</option>`).join('')}</select></label>
     </div>
-    <div class="mvp-lead-filter-toggles"><label><input id="mvp-lead-overdue-filter" type="checkbox"${filters.overdueOnly ? ' checked' : ''}>Seguimiento vencido</label><label><input id="mvp-lead-missing-action-filter" type="checkbox"${filters.missingNextActionOnly ? ' checked' : ''}>Sin próxima acción completa</label></div>
+    <div class="mvp-lead-filter-toggles"><label><input id="mvp-lead-overdue-filter" type="checkbox"${filters.overdueOnly ? ' checked' : ''}>Solo seguimientos vencidos</label><label><input id="mvp-lead-missing-action-filter" type="checkbox"${filters.missingNextActionOnly ? ' checked' : ''}>Sin acción o fecha de seguimiento</label></div>
     <div class="mvp-stage-counters" aria-label="Contadores por etapa"><button type="button" class="mvp-stage-counter${filters.stage === 'Todas' ? ' active' : ''}" data-stage-quick="Todas">Todos <b>${visible.length}</b></button>${COMMERCIAL_STAGES.map((stage) => `<button type="button" class="mvp-stage-counter${filters.stage === stage ? ' active' : ''}" data-stage-quick="${stage}">${stage} <b>${counters[stage]}</b></button>`).join('')}</div>
     <strong id="mvp-lead-count">${leadRows().length} de ${visible.length} leads</strong>
   </div>`;
