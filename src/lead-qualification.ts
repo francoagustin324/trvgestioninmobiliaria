@@ -277,7 +277,11 @@ function budgetSuggestions(text: string): QualificationSuggestion[] {
     }
   }
 
-  const single = text.match(/(?:(USD|ARS|US\$)\s*)?(\d{1,7}(?:[.\s]\d{3})+|\d{2,7})\s*(mil|k)?\s*(?:d[oó]lares?|pesos?)?/i);
+  const budgetText = text.replace(
+    /(?:\+?54\s*9?\s*)?(?:\(?\d{2,4}\)?[\s-]*)?\d{3,4}[\s-]*\d{4}/g,
+    (phone) => ' '.repeat(phone.length),
+  );
+  const single = budgetText.match(/(?:(USD|ARS|US\$)\s*)?(\d{1,7}(?:[.\s]\d{3})+|\d{2,7})\s*(mil|k)?\s*(?:d[oó]lares?|pesos?)?/i);
   if (!results.length && single) {
     const localCurrency = single[1]?.toUpperCase().replace('US$', 'USD')
       || (/d[oó]lares?/i.test(single[0]) ? 'USD' : /pesos?/i.test(single[0]) ? 'ARS' : currency?.value);
@@ -325,7 +329,7 @@ function extractZones(text: string): QualificationSuggestion | null {
   const found = zoneNames.filter((zone) => normalizedText.includes(normalize(zone)));
   const explicit = [...text.matchAll(/\b(?:zona|barrio|por)\s+([A-ZÁÉÍÓÚÑ][\wáéíóúñ.-]+(?:\s+[A-ZÁÉÍÓÚÑ][\wáéíóúñ.-]+){0,2})/g)]
     .map((match) => match[1]?.trim())
-    .filter((value): value is string => Boolean(value) && !/^(que|donde|el|la)$/i.test(value));
+    .filter((value): value is string => typeof value === 'string' && !/^(que|donde|el|la)$/i.test(value));
   const zones = [...new Set([...found, ...explicit])].slice(0, 4);
   if (!zones.length) return null;
   const firstIndex = Math.max(0, Math.min(...zones.map((zone) => normalizedText.indexOf(normalize(zone))).filter((value) => value >= 0)));
@@ -716,7 +720,7 @@ export function qualificationActivities(
     const discarded = [...new Set([...result.rejectedFields, ...result.blockedFields])];
     if (discarded.length) entries.push(activity('Campos descartados', clientId, discarded.map((field) => FIELD_LABELS[field]).join(', ')));
   }
-  if (analysis.missingQuestions.length) entries.push(activity('Preguntas faltantes generadas', clientId, `${analysis.missingQuestions.length} preguntas concretas preparadas.`));
+  if (!result && analysis.missingQuestions.length) entries.push(activity('Preguntas faltantes generadas', clientId, `${analysis.missingQuestions.length} preguntas concretas preparadas.`));
   return entries;
 }
 

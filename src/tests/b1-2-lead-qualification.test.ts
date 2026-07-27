@@ -251,7 +251,10 @@ test('la fuente conversación usa clientId y únicamente mensajes entrantes o tr
 
 test('activityLog registra trazabilidad sin duplicar la conversación completa', () => {
   const analysis = analyzeLeadQualification(client(), 'Busco departamento en Docta con USD 120.000.', 'conversation');
-  const result = applyQualificationReview(client(), analysis.suggestions.filter((item) => item.field === 'zones').map((item) => accepted(item)));
+  const result = applyQualificationReview(
+    client(),
+    analysis.suggestions.map((item) => ({ ...item, accepted: item.field === 'zones' })),
+  );
   const activities = qualificationActivities(7, analysis, result);
   assert.ok(activities.some((entry) => entry.action === 'Calificación analizada'));
   assert.ok(activities.some((entry) => entry.action === 'Sugerencias aplicadas'));
