@@ -59,6 +59,8 @@
 .lead-qualification-actions { display:flex; align-items:center; gap:12px; }
 .mvp-auto-qualify-button { min-height:40px; padding:8px 12px; color:#294f61; background:#edf4f7; }
 .qualification-budget-warning { display:block; margin-top:3px; color:#8a5a21; font-size:.65rem; font-weight:750; }
+.mvp-chat-header-actions { display:flex; align-items:center; gap:10px; }
+.mvp-chat-header-actions button { min-height:40px; }
 @media (max-width:720px) {
   .lead-qualification-panel { padding:14px; }
   .lead-qualification-source,.qualification-recommendations { grid-template-columns:1fr; }
@@ -67,6 +69,8 @@
   .lead-qualification-analyze button,.lead-qualification-actions button { width:100%; }
   .qualification-questions { grid-template-columns:1fr; }
   .qualification-questions ol { grid-column:auto; }
+  .mvp-chat-header-actions { align-items:stretch; flex-direction:column; }
+  .mvp-chat-header-actions button,.mvp-chat-header-actions a,.mvp-auto-qualify-button { width:100%; min-height:44px; justify-content:center; text-align:center; }
 }
 @media (max-width:430px) {
   .lead-qualification-panel > header { flex-direction:column; }
