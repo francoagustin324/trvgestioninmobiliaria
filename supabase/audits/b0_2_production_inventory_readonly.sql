@@ -5,7 +5,8 @@
 --   1. Ejecutar primero y por separado solamente la ETAPA 1.
 --   2. Ejecutar la ETAPA 2 únicamente cuando la ETAPA 1 devuelva
 --      safe_to_run_inventory = true.
---   3. Este archivo no es una migración y no debe moverse a supabase/migrations.
+--   3. La ausencia de supabase_migrations no bloquea el inventario estructural.
+--   4. Este archivo no es una migración y no debe moverse a supabase/migrations.
 
 -- B0.2-A STAGE 1: PREFLIGHT BEGIN
 with
@@ -16,7 +17,7 @@ required_schemas(schema_name, required_for_inventory) as (
     ('private'::text, false),
     ('auth'::text, false),
     ('storage'::text, true),
-    ('supabase_migrations'::text, true)
+    ('supabase_migrations'::text, false)
 ),
 schema_status as (
   select
@@ -31,7 +32,7 @@ required_relations(schema_name, relation_name, required_for_inventory) as (
   values
     ('storage'::text, 'buckets'::text, true),
     ('storage'::text, 'objects'::text, false),
-    ('supabase_migrations'::text, 'schema_migrations'::text, true),
+    ('supabase_migrations'::text, 'schema_migrations'::text, false),
     ('auth'::text, 'users'::text, false)
 ),
 relation_status as (
@@ -56,7 +57,7 @@ required_columns(schema_name, relation_name, column_name, required_for_inventory
     ('storage'::text, 'buckets'::text, 'public'::text, true),
     ('storage'::text, 'buckets'::text, 'file_size_limit'::text, true),
     ('storage'::text, 'buckets'::text, 'allowed_mime_types'::text, true),
-    ('supabase_migrations'::text, 'schema_migrations'::text, 'version'::text, true)
+    ('supabase_migrations'::text, 'schema_migrations'::text, 'version'::text, false)
 ),
 column_status as (
   select
@@ -64,7 +65,6 @@ column_status as (
     expected.relation_name,
     expected.column_name,
     expected.required_for_inventory,
-    attribute.attnum,
     attribute.attname is not null
       and attribute.attnum > 0
       and not attribute.attisdropped as exists
@@ -91,7 +91,6 @@ required_catalog_relations(relation_name) as (
     ('pg_trigger'::text),
     ('pg_depend'::text),
     ('pg_roles'::text),
-    ('pg_type'::text),
     ('pg_language'::text)
 ),
 catalog_relation_status as (
@@ -126,15 +125,15 @@ catalog_function_status as (
     expected.function_name,
     expected.minimum_arguments,
     pg_catalog.bool_or(
-      function.oid is not null
-      and function.pronargs >= expected.minimum_arguments
+      function_info.oid is not null
+      and function_info.pronargs >= expected.minimum_arguments
     ) as exists
   from required_catalog_functions as expected
   left join pg_catalog.pg_namespace as namespace
     on namespace.nspname = 'pg_catalog'
-  left join pg_catalog.pg_proc as function
-    on function.pronamespace = namespace.oid
-   and function.proname = expected.function_name
+  left join pg_catalog.pg_proc as function_info
+    on function_info.pronamespace = namespace.oid
+   and function_info.proname = expected.function_name
   group by expected.function_name, expected.minimum_arguments
 ),
 requirements as (
@@ -197,6 +196,30 @@ requirements as (
     )
   from catalog_function_status
 ),
+migration_source_status as (
+  select
+    exists (
+      select 1
+      from schema_status
+      where schema_name = 'supabase_migrations'
+        and exists
+    )
+    and exists (
+      select 1
+      from relation_status
+      where schema_name = 'supabase_migrations'
+        and relation_name = 'schema_migrations'
+        and exists
+    )
+    and exists (
+      select 1
+      from column_status
+      where schema_name = 'supabase_migrations'
+        and relation_name = 'schema_migrations'
+        and column_name = 'version'
+        and exists
+    ) as source_available
+),
 preflight_summary as (
   select
     coalesce(
@@ -235,16 +258,21 @@ select pg_catalog.jsonb_build_object(
   'catalog_only', true,
   'generated_at', pg_catalog.clock_timestamp(),
   'server_version', pg_catalog.current_setting('server_version'),
-  'safe_to_run_inventory', safe_to_run_inventory,
-  'requirements', requirements,
-  'blocking_findings', blocking_findings,
+  'safe_to_run_inventory', summary.safe_to_run_inventory,
+  'requirements', summary.requirements,
+  'warnings', case
+    when migration.source_available then '[]'::jsonb
+    else pg_catalog.jsonb_build_array('migration history unavailable')
+  end,
+  'blocking_findings', summary.blocking_findings,
   'next_step', case
-    when safe_to_run_inventory
+    when summary.safe_to_run_inventory
       then 'Stage 2 may be reviewed for a separately authorized execution.'
     else 'Stop. Do not execute Stage 2.'
   end
 ) as b0_2_production_inventory_preflight
-from preflight_summary;
+from preflight_summary as summary
+cross join migration_source_status as migration;
 -- B0.2-A STAGE 1: PREFLIGHT END
 
 -- B0.2-A STAGE 2: INVENTORY BEGIN
@@ -253,40 +281,36 @@ from preflight_summary;
 with
 inventory_gate as (
   select
-    pg_catalog.to_regclass('storage.buckets') is not null
-    and pg_catalog.to_regclass('supabase_migrations.schema_migrations') is not null
-    and exists (
+    exists (
       select 1
       from pg_catalog.pg_namespace as namespace
+      join pg_catalog.pg_class as relation
+        on relation.relnamespace = namespace.oid
+       and relation.relname = 'buckets'
+       and relation.relkind in ('r', 'p', 'v', 'm', 'f')
       where namespace.nspname = 'storage'
-    )
-    and exists (
-      select 1
-      from pg_catalog.pg_namespace as namespace
-      where namespace.nspname = 'supabase_migrations'
     )
     and not exists (
       select 1
       from (
         values
-          ('storage'::text, 'buckets'::text, 'name'::text),
-          ('storage'::text, 'buckets'::text, 'public'::text),
-          ('storage'::text, 'buckets'::text, 'file_size_limit'::text),
-          ('storage'::text, 'buckets'::text, 'allowed_mime_types'::text),
-          ('supabase_migrations'::text, 'schema_migrations'::text, 'version'::text)
-      ) as expected(schema_name, relation_name, column_name)
+          ('name'::text),
+          ('public'::text),
+          ('file_size_limit'::text),
+          ('allowed_mime_types'::text)
+      ) as expected(column_name)
       where not exists (
         select 1
         from pg_catalog.pg_namespace as namespace
         join pg_catalog.pg_class as relation
           on relation.relnamespace = namespace.oid
+         and relation.relname = 'buckets'
         join pg_catalog.pg_attribute as attribute
           on attribute.attrelid = relation.oid
          and attribute.attname = expected.column_name
          and attribute.attnum > 0
          and not attribute.attisdropped
-        where namespace.nspname = expected.schema_name
-          and relation.relname = expected.relation_name
+        where namespace.nspname = 'storage'
       )
     ) as safe_to_run_inventory
 ),
@@ -399,8 +423,7 @@ table_constraints as (
         pg_catalog.jsonb_build_object(
           'name', constraint_info.conname,
           'definition', pg_catalog.pg_get_constraintdef(constraint_info.oid, true)
-        )
-        order by constraint_info.conname
+        ) order by constraint_info.conname
       ) filter (where constraint_info.contype = 'p'),
       '[]'::jsonb
     ) as primary_keys,
@@ -409,8 +432,7 @@ table_constraints as (
         pg_catalog.jsonb_build_object(
           'name', constraint_info.conname,
           'definition', pg_catalog.pg_get_constraintdef(constraint_info.oid, true)
-        )
-        order by constraint_info.conname
+        ) order by constraint_info.conname
       ) filter (where constraint_info.contype = 'f'),
       '[]'::jsonb
     ) as foreign_keys
@@ -432,8 +454,7 @@ table_indexes as (
           'valid', index_info.indisvalid,
           'ready', index_info.indisready,
           'definition', pg_catalog.pg_get_indexdef(index_info.indexrelid)
-        )
-        order by index_relation.relname
+        ) order by index_relation.relname
       ) filter (where index_info.indexrelid is not null),
       '[]'::jsonb
     ) as indexes
@@ -470,8 +491,7 @@ table_policies as (
             when policy.polwithcheck is null then null
             else pg_catalog.pg_get_expr(policy.polwithcheck, policy.polrelid)
           end
-        )
-        order by policy.polname
+        ) order by policy.polname
       ) filter (where policy.oid is not null),
       '[]'::jsonb
     ) as policies
@@ -509,8 +529,7 @@ table_grants as (
           'grantor', grantor_role.rolname,
           'privilege', grant_item.privilege_type,
           'grantable', grant_item.is_grantable
-        )
-        order by
+        ) order by
           case when grant_item.grantee = 0 then 'PUBLIC' else grantee_role.rolname end,
           grant_item.privilege_type
       ) filter (where grant_item.privilege_type is not null),
@@ -543,22 +562,16 @@ tables_json as (
         'indexes', table_indexes.indexes,
         'policies', table_policies.policies,
         'grants', table_grants.grants
-      )
-      order by table_info.schema_name, table_info.table_name
+      ) order by table_info.schema_name, table_info.table_name
     ),
     '[]'::jsonb
   ) as value
   from table_catalog as table_info
-  join table_columns
-    using (schema_name, table_name)
-  join table_constraints
-    using (schema_name, table_name)
-  join table_indexes
-    using (schema_name, table_name)
-  join table_policies
-    using (schema_name, table_name)
-  join table_grants
-    using (schema_name, table_name)
+  join table_columns using (schema_name, table_name)
+  join table_constraints using (schema_name, table_name)
+  join table_indexes using (schema_name, table_name)
+  join table_policies using (schema_name, table_name)
+  join table_grants using (schema_name, table_name)
 ),
 target_functions(schema_name, function_name) as (
   values
@@ -576,33 +589,33 @@ function_catalog as (
   select
     target.schema_name,
     target.function_name,
-    function.oid as function_oid,
-    function.proowner as owner_oid,
-    function.proacl,
-    function.provolatile,
-    function.prosecdef,
-    function.proconfig,
+    function_info.oid as function_oid,
+    function_info.proowner as owner_oid,
+    function_info.proacl,
+    function_info.provolatile,
+    function_info.prosecdef,
+    function_info.proconfig,
     language.lanname as language_name,
     case
-      when function.proowner is null then null
-      else pg_catalog.pg_get_userbyid(function.proowner)
+      when function_info.proowner is null then null
+      else pg_catalog.pg_get_userbyid(function_info.proowner)
     end as owner_name,
     case
-      when function.oid is null then null
-      else pg_catalog.pg_get_function_identity_arguments(function.oid)
+      when function_info.oid is null then null
+      else pg_catalog.pg_get_function_identity_arguments(function_info.oid)
     end as identity_arguments,
     case
-      when function.oid is null then null
-      else pg_catalog.pg_get_function_arguments(function.oid)
+      when function_info.oid is null then null
+      else pg_catalog.pg_get_function_arguments(function_info.oid)
     end as arguments,
     case
-      when function.oid is null then null
-      else pg_catalog.pg_get_function_result(function.oid)
+      when function_info.oid is null then null
+      else pg_catalog.pg_get_function_result(function_info.oid)
     end as return_type,
     case
-      when function.oid is null then null
+      when function_info.oid is null then null
       else pg_catalog.regexp_replace(
-        pg_catalog.pg_get_functiondef(function.oid),
+        pg_catalog.pg_get_functiondef(function_info.oid),
         '[[:space:]]+',
         ' ',
         'g'
@@ -611,11 +624,11 @@ function_catalog as (
   from target_functions as target
   left join pg_catalog.pg_namespace as namespace
     on namespace.nspname = target.schema_name
-  left join pg_catalog.pg_proc as function
-    on function.pronamespace = namespace.oid
-   and function.proname = target.function_name
+  left join pg_catalog.pg_proc as function_info
+    on function_info.pronamespace = namespace.oid
+   and function_info.proname = target.function_name
   left join pg_catalog.pg_language as language
-    on language.oid = function.prolang
+    on language.oid = function_info.prolang
 ),
 function_dependencies as (
   select
@@ -672,8 +685,7 @@ function_grants as (
           'grantor', grantor_role.rolname,
           'privilege', grant_item.privilege_type,
           'grantable', grant_item.is_grantable
-        )
-        order by
+        ) order by
           case when grant_item.grantee = 0 then 'PUBLIC' else grantee_role.rolname end,
           grant_item.privilege_type
       ) filter (where grant_item.privilege_type is not null),
@@ -723,8 +735,7 @@ functions_json as (
         'execute_grants', function_grants.execute_grants,
         'normalized_definition', function_info.normalized_definition,
         'dependencies', function_dependencies.dependencies
-      )
-      order by
+      ) order by
         function_info.schema_name,
         function_info.function_name,
         function_info.identity_arguments nulls first
@@ -761,42 +772,41 @@ trigger_inventory as (
       pg_catalog.jsonb_build_object(
         'schema', relation_namespace.nspname,
         'table', relation.relname,
-        'name', trigger.tgname,
-        'linked_function', function_namespace.nspname || '.' || function.proname,
+        'name', trigger_info.tgname,
+        'linked_function', function_namespace.nspname || '.' || function_info.proname,
         'timing', case
-          when (trigger.tgtype & 2) <> 0 then 'before'
-          when (trigger.tgtype & 64) <> 0 then 'instead_of'
+          when (trigger_info.tgtype & 2) <> 0 then 'before'
+          when (trigger_info.tgtype & 64) <> 0 then 'instead_of'
           else 'after'
         end,
         'events', pg_catalog.jsonb_build_array(
-          case when (trigger.tgtype & 4) <> 0 then 'insert' end,
-          case when (trigger.tgtype & 8) <> 0 then 'delete' end,
-          case when (trigger.tgtype & 16) <> 0 then 'update' end,
-          case when (trigger.tgtype & 32) <> 0 then 'truncate' end
+          case when (trigger_info.tgtype & 4) <> 0 then 'insert' end,
+          case when (trigger_info.tgtype & 8) <> 0 then 'delete' end,
+          case when (trigger_info.tgtype & 16) <> 0 then 'update' end,
+          case when (trigger_info.tgtype & 32) <> 0 then 'truncate' end
         ),
-        'level', case when (trigger.tgtype & 1) <> 0 then 'row' else 'statement' end,
-        'enabled_state', trigger.tgenabled,
-        'definition', pg_catalog.pg_get_triggerdef(trigger.oid, true)
-      )
-      order by relation_namespace.nspname, relation.relname, trigger.tgname
-    ) filter (where trigger.oid is not null),
+        'level', case when (trigger_info.tgtype & 1) <> 0 then 'row' else 'statement' end,
+        'enabled_state', trigger_info.tgenabled,
+        'definition', pg_catalog.pg_get_triggerdef(trigger_info.oid, true)
+      ) order by relation_namespace.nspname, relation.relname, trigger_info.tgname
+    ) filter (where trigger_info.oid is not null),
     '[]'::jsonb
   ) as value
   from trigger_targets as target
-  join pg_catalog.pg_trigger as trigger
-    on trigger.tgrelid = target.relation_oid
-   and not trigger.tgisinternal
+  join pg_catalog.pg_trigger as trigger_info
+    on trigger_info.tgrelid = target.relation_oid
+   and not trigger_info.tgisinternal
   join pg_catalog.pg_class as relation
-    on relation.oid = trigger.tgrelid
+    on relation.oid = trigger_info.tgrelid
   join pg_catalog.pg_namespace as relation_namespace
     on relation_namespace.oid = relation.relnamespace
-  join pg_catalog.pg_proc as function
-    on function.oid = trigger.tgfoid
+  join pg_catalog.pg_proc as function_info
+    on function_info.oid = trigger_info.tgfoid
   join pg_catalog.pg_namespace as function_namespace
-    on function_namespace.oid = function.pronamespace
+    on function_namespace.oid = function_info.pronamespace
   where relation_namespace.nspname <> 'auth'
      or relation.relname <> 'users'
-     or trigger.tgname = 'on_propcontrol_user_created'
+     or trigger_info.tgname = 'on_propcontrol_user_created'
 ),
 rls_inventory as (
   select coalesce(
@@ -807,8 +817,7 @@ rls_inventory as (
         'exists', exists,
         'enabled', coalesce(relrowsecurity, false),
         'forced', coalesce(relforcerowsecurity, false)
-      )
-      order by schema_name, table_name
+      ) order by schema_name, table_name
     ),
     '[]'::jsonb
   ) as value
@@ -831,8 +840,7 @@ policy_inventory as (
           when policy.polwithcheck is null then null
           else pg_catalog.pg_get_expr(policy.polwithcheck, policy.polrelid)
         end
-      )
-      order by namespace.nspname, relation.relname, policy.polname
+      ) order by namespace.nspname, relation.relname, policy.polname
     ) filter (where policy.oid is not null),
     '[]'::jsonb
   ) as value
@@ -865,8 +873,7 @@ grants_inventory as (
             'schema', schema_name,
             'table', table_name,
             'grants', grants
-          )
-          order by schema_name, table_name
+          ) order by schema_name, table_name
         )
         from table_grants
       ),
@@ -880,8 +887,7 @@ grants_inventory as (
             'function', function_name,
             'function_oid_present', function_oid is not null,
             'execute_grants', execute_grants
-          )
-          order by schema_name, function_name, function_oid nulls first
+          ) order by schema_name, function_name, function_oid nulls first
         )
         from function_grants
       ),
@@ -897,8 +903,7 @@ storage_buckets_inventory as (
         'public', bucket.public,
         'file_size_limit', bucket.file_size_limit,
         'allowed_mime_types', bucket.allowed_mime_types
-      )
-      order by bucket.name
+      ) order by bucket.name
     ),
     '[]'::jsonb
   ) as value
@@ -921,8 +926,7 @@ storage_objects_policies as (
           when policy.polwithcheck is null then null
           else pg_catalog.pg_get_expr(policy.polwithcheck, policy.polrelid)
         end
-      )
-      order by policy.polname
+      ) order by policy.polname
     ) filter (where policy.oid is not null),
     '[]'::jsonb
   ) as value
@@ -934,77 +938,43 @@ storage_objects_policies as (
     on policy.polrelid = relation.oid
   where namespace.nspname = 'storage'
 ),
-known_migration_versions(version) as (
-  values
-    ('20260713'::text),
-    ('20260715093000'::text),
-    ('20260716103000'::text),
-    ('20260716103100'::text),
-    ('20260717113000'::text),
-    ('20260717190000'::text),
-    ('20260724190000'::text)
-),
-registered_migration_versions as (
-  select migration.version::text as version
-  from supabase_migrations.schema_migrations as migration
-  cross join inventory_gate as gate
-  where gate.safe_to_run_inventory
+migration_source_status as (
+  select
+    exists (
+      select 1
+      from pg_catalog.pg_namespace as namespace
+      join pg_catalog.pg_class as relation
+        on relation.relnamespace = namespace.oid
+       and relation.relname = 'schema_migrations'
+       and relation.relkind in ('r', 'p', 'v', 'm', 'f')
+      join pg_catalog.pg_attribute as attribute
+        on attribute.attrelid = relation.oid
+       and attribute.attname = 'version'
+       and attribute.attnum > 0
+       and not attribute.attisdropped
+      where namespace.nspname = 'supabase_migrations'
+    ) as source_available
 ),
 migration_history_inventory as (
-  select pg_catalog.jsonb_build_object(
-    'exists', true,
-    'status', case
-      when not exists (select 1 from registered_migration_versions) then 'empty'
-      when exists (
-        select 1
-        from known_migration_versions as expected
-        where not exists (
-          select 1
-          from registered_migration_versions as registered
-          where registered.version = expected.version
-        )
-      ) then 'incomplete'
-      else 'present'
-    end,
-    'registered_versions', coalesce(
-      (
-        select pg_catalog.jsonb_agg(version order by version)
-        from registered_migration_versions
-      ),
-      '[]'::jsonb
-    ),
-    'expected_versions', coalesce(
-      (
-        select pg_catalog.jsonb_agg(version order by version)
-        from known_migration_versions
-      ),
-      '[]'::jsonb
-    ),
-    'missing_expected_versions', coalesce(
-      (
-        select pg_catalog.jsonb_agg(expected.version order by expected.version)
-        from known_migration_versions as expected
-        where not exists (
-          select 1
-          from registered_migration_versions as registered
-          where registered.version = expected.version
-        )
-      ),
-      '[]'::jsonb
-    ),
-    'unrecognized_versions', coalesce(
-      (
-        select pg_catalog.jsonb_agg(registered.version order by registered.version)
-        from registered_migration_versions as registered
-        where not exists (
-          select 1
-          from known_migration_versions as expected
-          where expected.version = registered.version
-        )
-      ),
-      '[]'::jsonb
+  select case
+    when source_available then pg_catalog.jsonb_build_object(
+      'source_available', true,
+      'status', 'available_not_read',
+      'registered_versions', '[]'::jsonb,
+      'missing_expected_versions', '[]'::jsonb,
+      'unrecognized_versions', '[]'::jsonb,
+      'warning', 'supabase_migrations.schema_migrations exists but row data is not read by this static inventory'
     )
-  ) as value
+    else pg_catalog.jsonb_build_object(
+      'source_available', false,
+      'status', 'unavailable',
+      'registered_versions', '[]'::jsonb,
+      'missing_expected_versions', '[]'::jsonb,
+      'unrecognized_versions', '[]'::jsonb,
+      'warning', 'supabase_migrations.schema_migrations is not available in this production database'
+    )
+  end as value
+  from migration_source_status
 ),
 expected_objects as (
   select
@@ -1054,8 +1024,7 @@ expected_objects_missing as (
       pg_catalog.jsonb_build_object(
         'type', object_type,
         'name', object_name
-      )
-      order by object_type, object_name
+      ) order by object_type, object_name
     ) filter (where not exists),
     '[]'::jsonb
   ) as value
@@ -1073,9 +1042,9 @@ warning_inventory as (
 
     union all
 
-    select 'Migration history is not complete relative to known GitHub identifiers.'
-    from migration_history_inventory
-    where value ->> 'status' in ('empty', 'incomplete')
+    select 'migration history unavailable'
+    from migration_source_status
+    where not source_available
   ) as warnings
 ),
 blocking_inventory as (
@@ -1121,8 +1090,7 @@ final_inventory as (
           pg_catalog.jsonb_build_object(
             'name', schema_name,
             'exists', exists
-          )
-          order by schema_name
+          ) order by schema_name
         ),
         '[]'::jsonb
       )
