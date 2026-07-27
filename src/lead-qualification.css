@@ -1,0 +1,77 @@
+.lead-qualification-panel { display:grid; gap:16px; margin-top:16px; padding:18px; border:1px solid #d7e2e7; border-radius:15px; background:#f8fafb; }
+.lead-qualification-panel > header { display:flex; align-items:flex-start; justify-content:space-between; gap:16px; }
+.lead-qualification-panel header span { color:#7a6a35; font-size:.67rem; font-weight:900; letter-spacing:.09em; text-transform:uppercase; }
+.lead-qualification-panel h3,.lead-qualification-panel p { margin:0; }
+.lead-qualification-panel h3 { margin-top:3px; color:#17384a; font-size:1.08rem; }
+.lead-qualification-panel header p { margin-top:4px; color:#687b86; font-size:.76rem; }
+.lead-qualification-source { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; }
+.lead-qualification-source label { display:grid; gap:6px; color:#48606d; font-size:.72rem; font-weight:850; }
+.lead-qualification-source select,.lead-qualification-source textarea { width:100%; min-width:0; border:1px solid #cbd8de; border-radius:10px; background:#fff; }
+.lead-qualification-source select { min-height:44px; }
+.lead-qualification-source textarea { min-height:132px; resize:vertical; line-height:1.45; }
+.qualification-textarea { grid-column:1/-1; }
+.qualification-source-summary { display:grid; align-content:center; gap:4px; min-height:72px; padding:12px; border:1px dashed #cbd8de; border-radius:10px; color:#536b77; background:#fff; }
+.qualification-source-summary strong { font-size:.76rem; }
+.qualification-source-summary span { font-size:.68rem; }
+.lead-qualification-analyze { display:flex; align-items:center; gap:12px; }
+.lead-qualification-analyze button,.lead-qualification-actions button { min-height:44px; }
+.lead-qualification-analyze small,.lead-qualification-actions small { color:#6f8089; font-size:.68rem; line-height:1.4; }
+.qualification-info,.qualification-empty,.qualification-complete { padding:12px; border-radius:10px; color:#45606d; background:#edf4f7; }
+.qualification-empty { display:grid; gap:4px; }
+.qualification-empty span { font-size:.72rem; }
+.lead-qualification-review { display:grid; gap:14px; }
+.qualification-legend { display:flex; flex-wrap:wrap; gap:7px; }
+.qualification-legend span,.qualification-state { padding:4px 7px; border-radius:999px; font-size:.62rem; font-weight:900; }
+.qualification-legend .confirmado,.qualification-state.confirmado { color:#28604c; background:#dff2e9; }
+.qualification-legend .sugerido,.qualification-state.sugerido { color:#28546a; background:#e3f0f6; }
+.qualification-legend .faltante { color:#775c18; background:#f8efce; }
+.qualification-legend .ambiguo,.qualification-state.ambiguo { color:#854c25; background:#f9e7d9; }
+.qualification-recommendations { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; }
+.qualification-recommendations > div { display:grid; gap:3px; padding:12px; border:1px solid #dbe5e9; border-radius:11px; background:#fff; }
+.qualification-recommendations span { color:#71838d; font-size:.64rem; font-weight:850; text-transform:uppercase; }
+.qualification-recommendations strong { color:#203f4f; }
+.qualification-recommendations small { color:#697b85; line-height:1.35; }
+.qualification-visit-warning,.qualification-visit-ready { display:grid; gap:3px; padding:12px; border-radius:10px; }
+.qualification-visit-warning { color:#704716; background:#fff0d7; }
+.qualification-visit-ready { color:#28604c; background:#e3f3eb; }
+.qualification-visit-warning span { font-size:.7rem; }
+.lead-qualification-suggestions { display:grid; gap:9px; }
+.lead-qualification-suggestion { display:grid; gap:8px; padding:12px; border:1px solid #dbe4e8; border-radius:11px; background:#fff; }
+.lead-qualification-suggestion.blocked { background:#f7f8f8; }
+.lead-qualification-suggestion-head { display:flex; flex-wrap:wrap; align-items:center; gap:7px; }
+.lead-qualification-suggestion-head label { display:flex; flex:1; align-items:center; gap:7px; min-width:180px; color:#294958; font-size:.76rem; font-weight:900; }
+.lead-qualification-suggestion-head input[type="checkbox"],.qualification-overwrite input,.qualification-terminal-confirm input { width:18px; height:18px; }
+.qualification-confidence { padding:4px 7px; border-radius:999px; font-size:.61rem; font-weight:850; }
+.qualification-confidence.high { color:#28604c; background:#e2f2ea; }
+.qualification-confidence.medium { color:#705b1b; background:#f5efd7; }
+.qualification-confidence.low { color:#7d4825; background:#f8e6d9; }
+.qualification-current { color:#627681; }
+.lead-qualification-suggestion > input { min-height:42px; border:1px solid #cbd8de; border-radius:9px; background:#fff; }
+.lead-qualification-suggestion blockquote { margin:0; padding:9px 11px; border-left:3px solid #9fb7c3; color:#5f737e; background:#f5f8f9; font-size:.7rem; line-height:1.4; }
+.qualification-warning,.qualification-protected { color:#865022; font-size:.69rem; }
+.qualification-overwrite,.qualification-terminal-confirm { display:flex; align-items:center; gap:7px; color:#546b76; font-size:.7rem; font-weight:800; }
+.qualification-questions { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:12px; padding:13px; border:1px solid #dbe4e8; border-radius:11px; background:#fff; }
+.qualification-questions h4,.qualification-questions p { margin:0; }
+.qualification-questions h4 { color:#244554; }
+.qualification-questions p { margin-top:3px; color:#71828b; font-size:.68rem; }
+.qualification-questions ol { grid-column:1/-1; margin:0; padding-left:20px; color:#415b67; font-size:.75rem; line-height:1.5; }
+.qualification-questions button { min-height:42px; justify-self:start; }
+.lead-qualification-actions { display:flex; align-items:center; gap:12px; }
+.mvp-auto-qualify-button { min-height:40px; padding:8px 12px; color:#294f61; background:#edf4f7; }
+.qualification-budget-warning { display:block; margin-top:3px; color:#8a5a21; font-size:.65rem; font-weight:750; }
+@media (max-width:720px) {
+  .lead-qualification-panel { padding:14px; }
+  .lead-qualification-source,.qualification-recommendations { grid-template-columns:1fr; }
+  .qualification-textarea { grid-column:auto; }
+  .lead-qualification-analyze,.lead-qualification-actions { align-items:stretch; flex-direction:column; }
+  .lead-qualification-analyze button,.lead-qualification-actions button { width:100%; }
+  .qualification-questions { grid-template-columns:1fr; }
+  .qualification-questions ol { grid-column:auto; }
+}
+@media (max-width:430px) {
+  .lead-qualification-panel > header { flex-direction:column; }
+  .lead-qualification-panel > header button { width:100%; min-height:42px; }
+  .lead-qualification-suggestion-head { align-items:flex-start; }
+  .lead-qualification-suggestion-head label { min-width:100%; }
+  .qualification-state,.qualification-confidence { white-space:nowrap; }
+}
