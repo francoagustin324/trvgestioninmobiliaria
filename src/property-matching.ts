@@ -16,7 +16,7 @@ const availableStatuses = new Set(['activa', 'disponible']);
 
 const typeAliases: Record<string, string[]> = {
   Departamento: ['departamento', 'depto', 'dpto'],
-  Casa: ['casa', 'duplex', 'chalet'],
+  Casa: ['casa', 'duplex', 'dúplex', 'chalet'],
   Terreno: ['terreno', 'lote'],
   Comercial: ['comercial', 'local', 'oficina'],
 };
@@ -153,6 +153,7 @@ export function evaluatePropertyMatch(client: Client, property: Property): Prope
     client.paymentMethod,
     client.needsFinancing,
     client.creditPossible,
+    client.creditApprovedAmount,
     client.purchaseTimeframe,
     client.purpose,
     client.knowsArea,
@@ -160,6 +161,12 @@ export function evaluatePropertyMatch(client: Client, property: Property): Prope
     client.objections,
     client.notes,
     client.urgency,
+    client.garage,
+    client.patio,
+    client.pool,
+    client.requiresCreditReady,
+    client.features,
+    client.preferences,
   ].join(' '));
   const propertyText = normalizeText([property.title, property.address, property.features, property.notes].join(' '));
   const reasons: string[] = [];
@@ -218,7 +225,12 @@ export function evaluatePropertyMatch(client: Client, property: Property): Prope
     reasons.push(`Coinciden: ${matchingFeatures.join(', ')}`);
   }
 
-  const clientPayment = requestedPaymentTerms([client.paymentMethod, client.needsFinancing, client.creditPossible].filter(Boolean).join(' '));
+  const clientPayment = requestedPaymentTerms([
+    client.paymentMethod,
+    client.needsFinancing,
+    client.creditPossible,
+    client.creditApprovedAmount,
+  ].filter(Boolean).join(' '));
   const propertyPayment = requestedPaymentTerms(property.paymentMethod);
   if (clientPayment.length && propertyPayment.length) {
     const common = clientPayment.filter((term) => propertyPayment.includes(term));
