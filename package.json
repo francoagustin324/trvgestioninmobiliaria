@@ -7,7 +7,7 @@
   "scripts": {
     "build": "tsc && node scripts/build-extension-zip.mjs",
     "start": "node dist/server.js",
-    "test": "npm run build && node --test dist/tests/*.test.js"
+    "test": "npm run build && node --test --test-concurrency=1 dist/tests/*.test.js"
   },
   "dependencies": {
     "playwright": "1.61.0"
