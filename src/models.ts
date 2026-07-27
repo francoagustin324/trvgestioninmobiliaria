@@ -58,6 +58,8 @@ export interface Client {
   temperature: Temperature; pipeline: CommercialStage | string; lastContact?: string; nextFollowUp?: string;
   nextAction?: string; budget?: string; paymentMethod?: string; purchaseTimeframe?: string; purpose?: string;
   knowsArea?: string; canMoveForward?: string; objections?: string; notes?: string;
+  zones?: string; propertyType?: string; operation?: string; bedrooms?: number; currency?: string;
+  needsFinancing?: string; creditPossible?: string; urgency?: string;
   assignedToId?: number; createdById?: number;
 }
 
@@ -216,6 +218,7 @@ export const initialData: CrmData = {
     nextAction: 'Confirmar disponibilidad y coordinar visita', budget: 'USD 90.000',
     paymentMethod: 'Contado', purchaseTimeframe: '0-3 meses', purpose: 'Vivir', knowsArea: 'Sí',
     canMoveForward: 'Sí', objections: 'Busca balcón y buena luz natural', notes: 'Revisar opciones antes de coordinar visita.',
+    zones: 'Nueva Córdoba', propertyType: 'Departamento', operation: 'Compra', bedrooms: 2, currency: 'USD',
     assignedToId: 1, createdById: 1,
   }],
   contacts: [{
