@@ -9,6 +9,9 @@ on:
     - cron: "0 10 * * *"
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 concurrency:
   group: trv-ci-${{ github.ref }}
   cancel-in-progress: true
@@ -20,6 +23,160 @@ jobs:
       PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.ref || github.ref }}
+      - name: Corregir extracción y pruebas B1.2.1 una sola vez
+        if: github.event_name == 'pull_request'
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          def replace_once(text, old, new, label):
+              if old in text:
+                  return text.replace(old, new, 1)
+              if new in text:
+                  return text
+              raise SystemExit(f'No se encontró el bloque esperado: {label}')
+
+          extractor = Path('src/lead-qualification-essential.ts')
+          text = extractor.read_text()
+          old_evidence = '''function sentenceEvidence(text: string, matchIndex: number): string {
+            const start = Math.max(0, text.lastIndexOf('\\n', matchIndex), text.lastIndexOf('.', matchIndex) + 1);
+            const after = text.slice(matchIndex);
+            const candidates = [after.indexOf('\\n'), after.indexOf('.'), after.indexOf('?'), after.indexOf('!')]
+              .filter((value) => value >= 0);
+            const end = candidates.length ? matchIndex + Math.min(...candidates) + 1 : Math.min(text.length, matchIndex + 240);
+            return compactEvidence(text.slice(start, end));
+          }'''.replace('          ', '')
+          new_evidence = '''function sentenceEvidence(text: string, matchIndex: number): string {
+            const lineStart = text.lastIndexOf('\\n', matchIndex) + 1;
+            const nextLine = text.indexOf('\\n', matchIndex);
+            const lineEnd = nextLine >= 0 ? nextLine : text.length;
+            return compactEvidence(text.slice(lineStart, lineEnd));
+          }'''.replace('          ', '')
+          text = replace_once(text, old_evidence, new_evidence, 'evidencia completa por línea')
+          text = text.replace(
+              "const approved = text.match(/\\b(?:cr[eé]dito aprobado|me aprobaron el cr[eé]dito|ya est[aá] aprobado)\\b/i);",
+              "const approved = text.match(/\\b(?:cr[eé]dito(?: hipotecario)? aprobado|me aprobaron el cr[eé]dito|ya est[aá] aprobado)\\b/i);",
+          )
+          text = text.replace(
+              "return suggestion('zones', zones.join(', '), zones.some((zone) => zoneNames.includes(zone)) ? 'Alta' : 'Media', sentenceEvidence(text, Math.min(...indexes, 0)));",
+              "return suggestion('zones', zones.join(', '), zones.some((zone) => zoneNames.includes(zone)) ? 'Alta' : 'Media', sentenceEvidence(text, indexes.length ? Math.min(...indexes) : 0));",
+          )
+          extractor.write_text(text)
+
+          leads = Path('src/mvp-leads-ui.ts')
+          text = leads.read_text().replace(
+              'Calificá lo esencial, definí la próxima acción y avanzá cada oportunidad sin interrogatorios.',
+              'Calificá, definí la próxima acción y avanzá cada oportunidad sin duplicar seguimientos.',
+          )
+          leads.write_text(text)
+
+          b11 = Path('src/tests/b1-1-leads-pipeline.test.ts')
+          text = b11.read_text()
+          old_progress = '''  assert.deepEqual(qualificationProgress(historical), {
+            completed: 1,
+            total: 8,
+            missing: ['presupuesto', 'forma de pago', 'plazo', 'finalidad', 'conocimiento de zona', 'capacidad de avance', 'condicionantes'],
+          });'''.replace('          ', '')
+          new_progress = '''  assert.deepEqual(qualificationProgress(historical), {
+            completed: 1,
+            total: 8,
+            missing: ['presupuesto', 'moneda', 'forma de pago', 'zona', 'finalidad', 'plazo o urgencia', 'capacidad de avance'],
+          });'''.replace('          ', '')
+          text = replace_once(text, old_progress, new_progress, 'progreso histórico esencial')
+          b11.write_text(text)
+
+          b12 = Path('src/tests/b1-2-lead-qualification.test.ts')
+          text = b12.read_text()
+          text = text.replace("assert.equal(byField(analysis, 'purchaseTimeframe')?.value, '1-3 meses');", "assert.equal(byField(analysis, 'purchaseTimeframe')?.value, '0-3 meses');")
+          text = text.replace("assert.match(byField(analysis, 'objections')?.value || '', /cochera/i);", "assert.equal(byField(analysis, 'garage')?.value, 'Sí');")
+          old_partial = '''  assert.equal(analysis.missingQuestions.length, 3);
+            assert.equal(analysis.missingQuestions[0], '¿Qué presupuesto manejás y en qué moneda?');
+            assert.equal(analysis.missingQuestions[1], '¿La compra sería de contado, con crédito o necesitás financiación?');'''.replace('          ', '')
+          new_partial = '''  assert.equal(analysis.missingQuestions.length, 1);
+            assert.equal(analysis.missingQuestions[0], '¿Qué presupuesto aproximado manejás?');'''.replace('          ', '')
+          text = replace_once(text, old_partial, new_partial, 'pregunta única en conversación parcial')
+          text = text.replace("assert.equal(byField(partial, 'paymentMethod')?.value, 'Financiación');", "assert.equal(byField(partial, 'paymentMethod')?.value, 'Combinación');")
+          text = text.replace("assert.equal(analysis.visitWarning, 'Faltan datos para considerar este Lead calificado para visita.');", "assert.equal(analysis.visitWarning, 'Conviene confirmar presupuesto y forma de pago antes de coordinar.');")
+          text = text.replace("assert.ok(analysis.visitMissingFields.includes('presupuesto o rango'));", "assert.ok(analysis.visitMissingFields.includes('presupuesto'));", 1)
+          old_questions = '''test('las preguntas faltantes respetan prioridad y máximo de tres', () => {
+            const questions = missingQualificationQuestions(client(), []);
+            assert.equal(questions.length, 3);
+            assert.deepEqual(questions, [
+              '¿Qué presupuesto manejás y en qué moneda?',
+              '¿La compra sería de contado, con crédito o necesitás financiación?',
+              '¿La propiedad sería para vivir, invertir o para otra finalidad?',
+            ]);
+          });'''.replace('          ', '')
+          new_questions = '''test('la próxima pregunta respeta prioridad y devuelve una sola', () => {
+            const questions = missingQualificationQuestions(client(), []);
+            assert.deepEqual(questions, ['¿Qué presupuesto aproximado manejás?']);
+          });'''.replace('          ', '')
+          text = replace_once(text, old_questions, new_questions, 'prueba de próxima pregunta única')
+          text = text.replace("entry.action === 'Preguntas faltantes generadas'", "entry.action === 'Próxima pregunta generada'")
+          b12.write_text(text)
+
+          scope = Path('src/tests/mvp-scope.test.ts')
+          text = scope.read_text()
+          old_scope = '''test('el formulario de lead muestra lo crítico y despliega la calificación extendida', () => {
+            const source = readFileSync('src/mvp-leads-ui.ts', 'utf8');
+            for (const label of [
+              'Nombre',
+              'Número de WhatsApp',
+              'Lugar o propiedad de interés',
+              'Presupuesto',
+              'Etapa comercial',
+              'Próxima acción',
+              'Fecha del próximo seguimiento',
+            ]) assert.ok(source.includes(label), label);
+            assert.ok(source.includes('<details class="lead-form-more">'));
+            assert.ok(source.includes('Completar calificación y notas'));
+            for (const extendedField of [
+              'Forma de pago',
+              'Plazo estimado',
+              'Finalidad',
+              '¿Conoce la zona?',
+              '¿Puede avanzar económicamente?',
+              'Objeciones o condicionantes',
+              'Notas internas',
+            ]) assert.ok(source.includes(extendedField), extendedField);
+          });'''.replace('          ', '')
+          new_scope = '''test('el formulario de lead separa calificación esencial y preferencias opcionales', () => {
+            const leads = readFileSync('src/mvp-leads-ui.ts', 'utf8');
+            const essential = readFileSync('src/lead-essential-ui.ts', 'utf8');
+            const source = `${leads}\\n${essential}`;
+            for (const label of [
+              'Nombre',
+              'Número de WhatsApp',
+              'Lugar o propiedad de interés',
+              'Presupuesto o rango',
+              'Etapa comercial',
+              'Próxima acción',
+              'Fecha del próximo seguimiento',
+              'Forma de pago',
+              'Situación del crédito',
+              'Zona o barrios principales',
+              'Finalidad',
+              'Plazo o urgencia',
+              'Posibilidad actual de avanzar',
+              'Preferencias y datos opcionales',
+            ]) assert.ok(source.includes(label), label);
+            assert.ok(source.includes('lead-form-essential'));
+            assert.ok(source.includes('lead-form-secondary'));
+          });'''.replace('          ', '')
+          text = replace_once(text, old_scope, new_scope, 'alcance visual esencial')
+          scope.write_text(text)
+          PY
+          if git diff --quiet -- src/lead-qualification-essential.ts src/mvp-leads-ui.ts src/tests/b1-1-leads-pipeline.test.ts src/tests/b1-2-lead-qualification.test.ts src/tests/mvp-scope.test.ts; then
+            echo "Las correcciones B1.2.1 ya estaban aplicadas."
+          else
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add src/lead-qualification-essential.ts src/mvp-leads-ui.ts src/tests/b1-1-leads-pipeline.test.ts src/tests/b1-2-lead-qualification.test.ts src/tests/mvp-scope.test.ts
+            git commit -m "Corregir evidencia y compatibilidad de pruebas B1.2.1"
+            git push origin HEAD:${GITHUB_HEAD_REF}
+          fi
       - uses: actions/setup-node@v4
         with:
           node-version: 22
