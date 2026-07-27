@@ -1,5 +1,6 @@
+import { requestLeadQualification } from './lead-qualification-ui.js';
 import type { ConversationMessage, WhatsAppConversation } from './models.js';
-import { visibleConversations } from './team-access.js';
+import { visibleClients, visibleConversations } from './team-access.js';
 import { state } from './store.js';
 import { escapeHtml } from './utils.js';
 import { renderMessageTemplates } from './message-templates-ui.js';
@@ -14,7 +15,7 @@ const timeFormatter = new Intl.DateTimeFormat('es-AR', {
 });
 
 function conversationClient(conversation: WhatsAppConversation) {
-  return state.crm.clients.find((client) => client.id === conversation.clientId) ?? null;
+  return visibleClients().find((client) => client.id === conversation.clientId) ?? null;
 }
 
 function lastMessage(conversation: WhatsAppConversation): ConversationMessage | undefined {
@@ -73,7 +74,7 @@ function conversationDetail(conversation: WhatsAppConversation | null): string {
   return `<section class="mvp-conversation-detail">
     <header class="mvp-chat-header">
       <div><h2>${escapeHtml(client?.name || conversation.phone)}</h2><p>${escapeHtml(conversation.phone)}</p></div>
-      <a href="https://wa.me/${digits}" target="_blank" rel="noopener noreferrer">Abrir WhatsApp</a>
+      <div class="mvp-chat-header-actions">${client ? `<button type="button" class="secondary" data-qualify-conversation-client="${client.id}" data-conversation-id="${conversation.id}">Calificar este lead</button>` : ''}<a href="https://wa.me/${digits}" target="_blank" rel="noopener noreferrer">Abrir WhatsApp</a></div>
     </header>
     <div class="mvp-chat-lead-data">
       <div><span>Interés</span><strong>${escapeHtml(client?.interest || 'Sin información')}</strong></div>
@@ -111,6 +112,14 @@ function renderInbox(container: HTMLElement): void {
     state.selectedConversationId = Number(button.dataset.selectConversation);
     renderMvpConversations(container.closest<HTMLElement>('#whatsapp') ?? container);
   }));
+  container.querySelector<HTMLButtonElement>('[data-qualify-conversation-client]')?.addEventListener('click', (event) => {
+    const button = event.currentTarget as HTMLButtonElement;
+    const clientId = Number(button.dataset.qualifyConversationClient);
+    const conversationId = Number(button.dataset.conversationId);
+    if (!visibleClients().some((client) => client.id === clientId)) return;
+    state.activeModule = 'crm';
+    requestLeadQualification(clientId, conversationId);
+  });
 }
 
 export function renderMvpConversations(container: HTMLElement): void {
