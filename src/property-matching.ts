@@ -146,20 +146,27 @@ export function evaluatePropertyMatch(client: Client, property: Property): Prope
 
   const clientText = normalizeText([
     client.interest,
+    client.zones,
+    client.propertyType,
+    client.operation,
+    client.bedrooms ? `${client.bedrooms} dormitorios` : '',
     client.paymentMethod,
+    client.needsFinancing,
+    client.creditPossible,
     client.purchaseTimeframe,
     client.purpose,
     client.knowsArea,
     client.canMoveForward,
     client.objections,
     client.notes,
+    client.urgency,
   ].join(' '));
   const propertyText = normalizeText([property.title, property.address, property.features, property.notes].join(' '));
   const reasons: string[] = [];
   const warnings: string[] = [];
   let score = 0;
 
-  const budget = parseUsdBudget(client.budget);
+  const budget = parseUsdBudget([client.currency, client.budget].filter(Boolean).join(' '));
   if (budget) {
     const ratio = property.price / budget;
     if (ratio <= 1) {
@@ -175,7 +182,7 @@ export function evaluatePropertyMatch(client: Client, property: Property): Prope
     warnings.push('Falta confirmar presupuesto');
   }
 
-  const desiredType = requestedType(clientText);
+  const desiredType = requestedType(client.propertyType || clientText);
   const offeredType = canonicalPropertyType(property);
   if (desiredType && offeredType && desiredType !== offeredType) return null;
   if (desiredType && offeredType === desiredType) {
@@ -189,7 +196,7 @@ export function evaluatePropertyMatch(client: Client, property: Property): Prope
     reasons.push(`Zona: ${property.address.split(',')[0]?.trim() ?? property.address}`);
   }
 
-  const desiredBedrooms = extractBedrooms(clientText);
+  const desiredBedrooms = client.bedrooms ?? extractBedrooms(clientText);
   const offeredBedrooms = property.bedrooms ?? extractBedrooms(propertyText);
   if (desiredBedrooms && offeredBedrooms) {
     if (offeredBedrooms === desiredBedrooms) {
@@ -211,7 +218,7 @@ export function evaluatePropertyMatch(client: Client, property: Property): Prope
     reasons.push(`Coinciden: ${matchingFeatures.join(', ')}`);
   }
 
-  const clientPayment = requestedPaymentTerms(client.paymentMethod);
+  const clientPayment = requestedPaymentTerms([client.paymentMethod, client.needsFinancing, client.creditPossible].filter(Boolean).join(' '));
   const propertyPayment = requestedPaymentTerms(property.paymentMethod);
   if (clientPayment.length && propertyPayment.length) {
     const common = clientPayment.filter((term) => propertyPayment.includes(term));
