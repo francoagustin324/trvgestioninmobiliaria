@@ -29,6 +29,11 @@ function completeEvidence(text: string, suggestion: QualificationSuggestion): st
   return suggestion.evidence;
 }
 
+function evidenceLine(text: string, matchText: string): string {
+  return text.split(/\r?\n/).find((line) => line.includes(matchText))?.trim().slice(0, 240)
+    || matchText.slice(0, 240);
+}
+
 function creditStatusSuggestion(text: string): QualificationSuggestion | null {
   const patterns: Array<[string, RegExp]> = [
     ['Preaprobado', /\b(?:cr[eé]dito(?: hipotecario)?\s+)?pre-?aprobado\b/i],
@@ -39,7 +44,6 @@ function creditStatusSuggestion(text: string): QualificationSuggestion | null {
   for (const [value, pattern] of patterns) {
     const match = text.match(pattern);
     if (!match) continue;
-    const line = text.split(/\r?\n/).find((candidate) => candidate.includes(match[0]))?.trim() || match[0];
     return {
       id: `creditPossible-${value}-${match.index ?? 0}`,
       field: 'creditPossible',
@@ -47,10 +51,42 @@ function creditStatusSuggestion(text: string): QualificationSuggestion | null {
       value,
       confidence: 'Alta',
       confidenceScore: 92,
-      evidence: line.slice(0, 240),
+      evidence: evidenceLine(text, match[0]),
     };
   }
   return null;
+}
+
+function parseApprovedAmount(raw: string, suffix?: string): number | null {
+  const compact = raw.replace(/\s/g, '');
+  let amount: number;
+  if (/^\d{1,3}(?:\.\d{3})+$/.test(compact)) amount = Number(compact.replace(/\./g, ''));
+  else if (/^\d{1,3}(?:,\d{3})+$/.test(compact)) amount = Number(compact.replace(/,/g, ''));
+  else amount = Number(compact.replace(',', '.'));
+  if (/^(?:mil|k)$/i.test(suffix || '')) amount *= 1000;
+  return Number.isFinite(amount) && amount > 0 ? amount : null;
+}
+
+function creditApprovedAmountSuggestion(text: string): QualificationSuggestion | null {
+  const match = text.match(
+    /\b(?:cr[eé]dito(?: hipotecario)? aprobado|me aprobaron(?: el)? cr[eé]dito|monto aprobado)(?:\s+(?:por|de|hasta))?\s*(?:(USD|ARS|US\$)\s*)?(\d{1,7}(?:[.\s]\d{3})*|\d{2,3})\s*(mil|k)?/i,
+  );
+  if (!match?.[2]) return null;
+  const amount = parseApprovedAmount(match[2], match[3]);
+  if (!amount) return null;
+  const currency = match[1]?.toUpperCase().replace('US$', 'USD');
+  const value = `${currency ? `${currency} ` : ''}${new Intl.NumberFormat('es-AR', { maximumFractionDigits: 0 }).format(amount)}`;
+  return {
+    id: `creditApprovedAmount-${match.index ?? 0}`,
+    field: 'creditApprovedAmount',
+    label: 'Monto aprobado',
+    value,
+    confidence: currency ? 'Alta' : 'Media',
+    confidenceScore: currency ? 92 : 72,
+    evidence: evidenceLine(text, match[0]),
+    ambiguous: !currency,
+    warning: currency ? undefined : 'Falta confirmar la moneda del monto aprobado.',
+  };
 }
 
 const CLIENT_FIELDS: Partial<Record<QualificationField, keyof Client>> = {
@@ -123,6 +159,10 @@ export function analyzeLeadQualification(
   if (!suggestions.some((item) => item.field === 'creditPossible')) {
     const creditStatus = creditStatusSuggestion(filteredText);
     if (creditStatus) suggestions.push(creditStatus);
+  }
+  if (!suggestions.some((item) => item.field === 'creditApprovedAmount')) {
+    const approvedAmount = creditApprovedAmountSuggestion(filteredText);
+    if (approvedAmount) suggestions.push(approvedAmount);
   }
   suggestions = reconcilePipeline(client, suggestions);
   const missingQuestions = essential.missingQualificationQuestions(client, suggestions);
