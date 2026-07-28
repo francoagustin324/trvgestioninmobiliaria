@@ -179,13 +179,6 @@
     width: 100%;
     min-width: 0;
   }
-
-  @supports (height: 100dvh) {
-    body:has(input:focus, textarea:focus, select:focus) .mobile-bottom-nav {
-      position: sticky;
-      bottom: 0;
-    }
-  }
 }
 
 @media (max-width: 390px) {
