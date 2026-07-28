@@ -4,7 +4,9 @@ import {
   commercialStage,
   COMMERCIAL_STAGES,
   filterLeads,
+  completeClientFollowUp,
   isTerminalClient,
+  reprogramClientFollowUp,
   localIsoDate,
   stageCounters,
   type LeadFilters,
@@ -21,6 +23,7 @@ import {
   renderSecondaryQualificationFields,
 } from './lead-essential-ui.js';
 import type { ActivityEntry, Client, CommercialStage, Temperature } from './models.js';
+import { followUpDisplay, primaryLeadAlert, readableResponsible, relativeCommercialDate, sortLeads, type LeadSort } from './lead-list-priority.js';
 import { findDuplicateClient, formatPhone, isPlausiblePhone } from './phone-normalizer.js';
 import { matchPropertiesForClient, type PropertyMatch } from './property-matching.js';
 import { saveData, state } from './store.js';
@@ -28,12 +31,18 @@ import { addActivity, memberName, visibleClients, visibleProperties } from './te
 import { escapeHtml, formValues, nextId } from './utils.js';
 import { appIcons } from './icons.js';
 
-let filters: LeadFilters = {
+type ExtendedLeadFilters = LeadFilters & { assignedTo: number | 'Todos'; order: LeadSort };
+
+let expandedClientId: number | null = null;
+
+let filters: ExtendedLeadFilters = {
   search: '',
   stage: 'Todas',
   temperature: 'Todas',
   overdueOnly: false,
   missingNextActionOnly: false,
+  assignedTo: 'Todos',
+  order: 'priority',
 };
 
 const priceFormatter = new Intl.NumberFormat('es-AR');
@@ -61,7 +70,9 @@ function selected(current: string | undefined, expected: string): string {
 }
 
 function leadRows(): Client[] {
-  return filterLeads(visibleClients(), filters);
+  const filtered = filterLeads(visibleClients(), filters)
+    .filter((client) => filters.assignedTo === 'Todos' || client.assignedToId === filters.assignedTo);
+  return sortLeads(filtered, filters.order);
 }
 
 function matchRow(match: PropertyMatch): string {
@@ -131,30 +142,44 @@ function formattedLeadDate(valueText: string | undefined): string {
   return Number.isNaN(date.getTime()) ? valueText : dateFormatter.format(date);
 }
 
+function expandedDetails(client: Client): string {
+  const updated = client.qualificationUpdatedAt ? new Date(client.qualificationUpdatedAt) : null;
+  const updatedText = updated && !Number.isNaN(updated.getTime()) ? activityFormatter.format(updated) : 'Sin fecha registrada';
+  const responsible = readableResponsible(client, state.crm.teamMembers, state.crm.settings.profileName, state.crm.settings.profileEmail);
+  const optional = [
+    ['Zona', client.zones], ['Finalidad', client.purpose], ['Puede avanzar', client.canMoveForward],
+    ['Conoce la zona', client.knowsArea], ['Crédito', client.creditPossible], ['Monto aprobado', client.creditApprovedAmount],
+    ['Preferencias', client.preferences], ['Características', client.features], ['Objeciones', client.objections], ['Notas', client.notes],
+  ].filter(([, item]) => String(item || '').trim());
+  return `<div class="compact-lead-expanded" data-lead-expanded="${client.id}"${expandedClientId === client.id ? '' : ' hidden'}>
+    ${renderLeadSecondaryMeta(client)}
+    <div class="compact-detail-grid">${optional.map(([label, item]) => `<div><span>${escapeHtml(String(label))}</span><strong>${escapeHtml(String(item))}</strong></div>`).join('') || '<p>Sin información adicional cargada.</p>'}<div><span>Responsable</span><strong>${escapeHtml(responsible)}</strong></div><div><span>Última actualización</span><strong>${escapeHtml(updatedText)}</strong></div></div>
+    ${renderLeadCommercialSummary(client)}
+    ${historyBlock(client)}
+    ${matchesForLead(client)}
+    <p class="mvp-match-empty">Evolución futura: las propiedades compatibles podrán marcarse como Enviar, Ya enviada, Le interesó, No le interesó o Quiere visita sin improvisar persistencia en esta fase.</p>
+  </div>`;
+}
+
 function card(client: Client): string {
   const digits = client.phone.replace(/\D/g, '');
   const stage = commercialStage(client);
   const terminal = isTerminalClient(client);
-  return `<article class="mvp-lead-card mvp-lead-card-with-matches${terminal ? ' terminal' : ''}">
-    <div class="mvp-lead-card-main">
-      <div class="mvp-lead-main-copy">
-        <div class="mvp-lead-title-line">${tempIcon(client.temperature)}<h3>${escapeHtml(client.name)}</h3><span class="mvp-stage-badge${terminal ? ' terminal' : ''}">${escapeHtml(stage)}</span></div>
-        <p>${client.interest ? `Busca ${escapeHtml(client.interest)}` : 'Sin interés definido'}</p>
-        ${renderLeadSecondaryMeta(client)}
-        <div class="mvp-lead-contact"><a class="mvp-contact-btn wa" href="https://wa.me/${digits}" target="_blank" rel="noopener noreferrer" title="WhatsApp · ${escapeHtml(formatPhone(client.phone))}" aria-label="Enviar WhatsApp">${appIcons.whatsapp}</a><a class="mvp-contact-btn call" href="tel:+${digits}" title="Llamar · ${escapeHtml(formatPhone(client.phone))}" aria-label="Llamar">${appIcons.phone}</a>${client.email ? `<a class="mvp-contact-btn mail" href="mailto:${escapeHtml(client.email)}" title="${escapeHtml(client.email)}" aria-label="Enviar email">${appIcons.mail}</a>` : `<span class="mvp-contact-btn mail" data-disabled title="Sin email cargado" aria-label="Sin email cargado">${appIcons.mail}</span>`}</div>
-      </div>
-      <div class="mvp-lead-primary-action"><button type="button" class="secondary mvp-auto-qualify-button" data-auto-qualify-client="${client.id}">Calificar automáticamente</button></div>
-      <div class="mvp-lead-actions mvp-lead-secondary-actions"><button type="button" class="secondary mvp-icon-btn" data-edit-client="${client.id}" aria-controls="mvp-lead-form" title="Editar" aria-label="Editar ${escapeHtml(client.name)}">${appIcons.edit}</button><button type="button" class="delete mvp-icon-btn" data-delete="clients" data-id="${client.id}" title="Eliminar" aria-label="Eliminar ${escapeHtml(client.name)}">×</button></div>
-    </div>
-    <div class="mvp-lead-critical">
-      <div><span>Próxima acción</span><strong>${terminal ? 'Operación cerrada' : summaryValue(client.nextAction, 'Sin próxima acción')}</strong></div>
-      <div><span>Fecha</span><strong>${terminal ? '—' : escapeHtml(formattedLeadDate(client.nextFollowUp))}</strong></div>
-      <div><span>Responsable</span><strong>${escapeHtml(memberName(client.assignedToId))}</strong></div>
-    </div>
-    ${renderLeadCommercialSummary(client)}
+  const alert = primaryLeadAlert(client);
+  const followUp = followUpDisplay(client);
+  const payment = client.creditPossible?.trim() && client.paymentMethod?.includes('Crédito')
+    ? `${client.paymentMethod} · ${client.creditPossible}` : client.paymentMethod?.trim() || client.creditPossible?.trim() || 'No confirmado';
+  const urgency = [client.purchaseTimeframe, client.urgency].filter(Boolean).join(' · ') || 'No confirmado';
+  return `<article class="mvp-lead-card compact-lead-card${terminal ? ' terminal' : ''}" data-client-id="${client.id}">
+    <div class="compact-lead-head"><div class="compact-lead-identity"><div class="mvp-lead-title-line">${tempIcon(client.temperature)}<h3>${escapeHtml(client.name)}</h3></div><span class="mvp-stage-badge${terminal ? ' terminal' : ''}">${escapeHtml(stage)}</span></div><span class="compact-lead-alert ${alert.kind}">${escapeHtml(alert.label)}</span></div>
+    <p class="compact-lead-interest">${client.interest ? escapeHtml(client.interest) : 'Sin búsqueda definida'}</p>
+    <div class="compact-lead-facts"><div><span>Presupuesto</span><strong>${summaryValue(client.budget, 'No confirmado')}</strong></div><div><span>Pago / crédito</span><strong>${escapeHtml(payment)}</strong></div><div><span>Plazo / urgencia</span><strong>${escapeHtml(urgency)}</strong></div></div>
+    ${terminal ? '' : `<div class="compact-followup"><div><span>Próxima acción</span><strong>${escapeHtml(followUp.action)}</strong></div><strong class="compact-followup-time">${escapeHtml(followUp.date)}</strong></div>`}
+    <div class="compact-lead-actions"><a class="mvp-contact-btn wa" href="https://wa.me/${digits}" target="_blank" rel="noopener noreferrer" title="WhatsApp · ${escapeHtml(formatPhone(client.phone))}" aria-label="Enviar WhatsApp">${appIcons.whatsapp}</a><a class="mvp-contact-btn call" href="tel:+${digits}" title="Llamar · ${escapeHtml(formatPhone(client.phone))}" aria-label="Llamar">${appIcons.phone}</a>${client.email ? `<a class="mvp-contact-btn mail" href="mailto:${escapeHtml(client.email)}" title="${escapeHtml(client.email)}" aria-label="Enviar email">${appIcons.mail}</a>` : '<span class="mvp-contact-btn mail" data-disabled aria-label="Sin email cargado">' + appIcons.mail + '</span>'}<button type="button" class="secondary mvp-auto-qualify-button" data-auto-qualify-client="${client.id}">Calificar automáticamente</button><div class="compact-lead-secondary"><button type="button" class="secondary mvp-icon-btn" data-edit-client="${client.id}" title="Editar" aria-label="Editar ${escapeHtml(client.name)}">${appIcons.edit}</button><button type="button" class="delete mvp-icon-btn" data-delete="clients" data-id="${client.id}" title="Eliminar" aria-label="Eliminar ${escapeHtml(client.name)}">×</button></div></div>
+    ${!terminal && followUp.pending ? `<details class="compact-followup-menu"><summary>Gestionar seguimiento</summary><div class="compact-followup-controls"><button type="button" class="secondary" data-complete-followup="${client.id}">Completar seguimiento</button><label>Nueva fecha<input type="date" data-reprogram-date="${client.id}" value="${escapeHtml(client.nextFollowUp || '')}"></label><button type="button" class="secondary" data-reprogram-followup="${client.id}">Reprogramar</button></div></details>` : ''}
+    <button type="button" class="secondary compact-lead-toggle" data-toggle-lead-details="${client.id}">${expandedClientId === client.id ? 'Ocultar ficha' : 'Ver ficha completa'}</button>
+    ${expandedDetails(client)}
     ${renderLeadQualificationPanel(client)}
-    ${historyBlock(client)}
-    ${matchesForLead(client)}
   </article>`;
 }
 
@@ -168,6 +193,39 @@ function focusLeadForm(container: HTMLElement): void {
 }
 
 function bindLeadCardActions(container: HTMLElement): void {
+  container.querySelectorAll<HTMLButtonElement>('[data-toggle-lead-details]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const clientId = Number(button.dataset.toggleLeadDetails);
+      expandedClientId = expandedClientId === clientId ? null : clientId;
+      renderMvpLeads(container);
+      if (expandedClientId) window.requestAnimationFrame(() => container.querySelector(`[data-client-id="${expandedClientId}"]`)?.scrollIntoView({ block: 'nearest' }));
+    });
+  });
+  container.querySelectorAll<HTMLButtonElement>('[data-complete-followup]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const clientId = Number(button.dataset.completeFollowup);
+      const client = visibleClients().find((item) => item.id === clientId);
+      if (!client) return;
+      const completed = completeClientFollowUp(client);
+      state.crm.clients = upsertClient(state.crm.clients, completed.client);
+      addActivity(completed.activity);
+      saveData(`Seguimiento completado: ${client.name}`);
+      renderMvpLeads(container);
+    });
+  });
+  container.querySelectorAll<HTMLButtonElement>('[data-reprogram-followup]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const clientId = Number(button.dataset.reprogramFollowup);
+      const client = visibleClients().find((item) => item.id === clientId);
+      const input = container.querySelector<HTMLInputElement>(`[data-reprogram-date="${clientId}"]`);
+      if (!client || !input?.value) return;
+      const reprogrammed = reprogramClientFollowUp(client, input.value);
+      state.crm.clients = upsertClient(state.crm.clients, reprogrammed.client);
+      addActivity(reprogrammed.activity);
+      saveData(`Seguimiento reprogramado: ${client.name}`);
+      renderMvpLeads(container);
+    });
+  });
   container.querySelectorAll<HTMLButtonElement>('[data-edit-client]').forEach((button) => {
     button.addEventListener('click', (event) => {
       event.stopPropagation();
@@ -240,6 +298,8 @@ function activeSecondaryFilters(): string[] {
   if (filters.temperature !== 'Todas') active.push(`Temperatura: ${filters.temperature}`);
   if (filters.overdueOnly) active.push('Vencidos');
   if (filters.missingNextActionOnly) active.push('Sin próxima acción');
+  if (filters.assignedTo !== 'Todos') active.push(`Responsable: ${readableResponsible({ assignedToId: filters.assignedTo } as Client, state.crm.teamMembers, state.crm.settings.profileName, state.crm.settings.profileEmail)}`);
+  if (filters.order !== 'priority') active.push(`Orden: ${filters.order}`);
   return active;
 }
 
@@ -249,24 +309,42 @@ function filterPanel(): string {
   const active = activeSecondaryFilters();
   const mobile = typeof window !== 'undefined' && window.matchMedia('(max-width: 520px)').matches;
   const open = !mobile || active.length > 0;
+  const members = state.crm.teamMembers.filter((member) => member.status === 'Activo');
   return `<div class="mvp-lead-filter-panel">
-    <div class="mvp-lead-filter-primary">
-      <label class="mvp-lead-search-field"><span>Buscar</span><input id="mvp-lead-search" type="search" value="${escapeHtml(filters.search)}" placeholder="Nombre, WhatsApp o interés"></label>
-      <strong id="mvp-lead-count">${leadRows().length} de ${visible.length} leads</strong>
-    </div>
-    <details class="mvp-lead-more-filters"${open ? ' open' : ''}>
-      <summary><span>Más filtros</span><small>${escapeHtml(active.length ? active.join(' · ') : 'Etapa, temperatura y seguimiento')}</small></summary>
-      <div class="mvp-lead-filter-grid">
-        <label><span>Etapa</span><select id="mvp-lead-stage-filter"><option value="Todas">Todas</option>${COMMERCIAL_STAGES.map((stage) => `<option value="${stage}"${selected(filters.stage, stage)}>${stage}</option>`).join('')}</select></label>
-        <label><span>Temperatura</span><select id="mvp-lead-temperature-filter"><option value="Todas">Todas</option>${(['Caliente', 'Tibio', 'Frío'] as Temperature[]).map((temperature) => `<option value="${temperature}"${selected(filters.temperature, temperature)}>${temperature}</option>`).join('')}</select></label>
-      </div>
-      <div class="mvp-lead-filter-toggles"><label><input id="mvp-lead-overdue-filter" type="checkbox"${filters.overdueOnly ? ' checked' : ''}>Seguimientos vencidos</label><label><input id="mvp-lead-missing-action-filter" type="checkbox"${filters.missingNextActionOnly ? ' checked' : ''}>Sin próxima acción completa</label></div>
-    </details>
+    <div class="mvp-lead-filter-primary"><label class="mvp-lead-search-field"><span>Buscar</span><input id="mvp-lead-search" type="search" value="${escapeHtml(filters.search)}" placeholder="Nombre, WhatsApp o interés"></label><strong id="mvp-lead-count">${leadRows().length} de ${visible.length} leads</strong></div>
+    ${active.length ? `<div class="mvp-filter-active-summary"><b>${active.length} filtros activos</b><span>${escapeHtml(active.join(' · '))}</span><button type="button" class="secondary mvp-filter-clear" data-clear-lead-filters>Limpiar</button></div>` : ''}
+    <details class="mvp-lead-more-filters"${open ? ' open' : ''}><summary><span>Más filtros</span><small>${escapeHtml(active.length ? active.join(' · ') : 'Etapa, temperatura, responsable y orden')}</small></summary><div class="mvp-lead-filter-grid">
+      <label><span>Etapa</span><select id="mvp-lead-stage-filter"><option value="Todas">Todas</option>${COMMERCIAL_STAGES.map((stage) => `<option value="${stage}"${selected(filters.stage, stage)}>${stage}</option>`).join('')}</select></label>
+      <label><span>Temperatura</span><select id="mvp-lead-temperature-filter"><option value="Todas">Todas</option>${(['Caliente', 'Tibio', 'Frío'] as Temperature[]).map((temperature) => `<option value="${temperature}"${selected(filters.temperature, temperature)}>${temperature}</option>`).join('')}</select></label>
+      ${members.length > 1 ? `<label><span>Responsable</span><select id="mvp-lead-assigned-filter"><option value="Todos">Todos</option>${members.map((member) => `<option value="${member.id}"${filters.assignedTo === member.id ? ' selected' : ''}>${escapeHtml(member.name || member.email)}</option>`).join('')}</select></label>` : ''}
+      <label><span>Ordenar por</span><select id="mvp-lead-order" class="mvp-result-order"><option value="priority"${selected(filters.order, 'priority')}>Prioridad</option><option value="followup"${selected(filters.order, 'followup')}>Seguimiento</option><option value="recent"${selected(filters.order, 'recent')}>Más recientes</option><option value="name"${selected(filters.order, 'name')}>Nombre</option></select></label>
+    </div><div class="mvp-lead-filter-toggles"><label><input id="mvp-lead-overdue-filter" type="checkbox"${filters.overdueOnly ? ' checked' : ''}>Seguimientos vencidos</label><label><input id="mvp-lead-missing-action-filter" type="checkbox"${filters.missingNextActionOnly ? ' checked' : ''}>Sin próxima acción completa</label></div></details>
     <div class="mvp-stage-counters" aria-label="Contadores por etapa"><button type="button" class="mvp-stage-counter${filters.stage === 'Todas' ? ' active' : ''}" data-stage-quick="Todas">Todos <b>${visible.length}</b></button>${COMMERCIAL_STAGES.map((stage) => `<button type="button" class="mvp-stage-counter${filters.stage === stage ? ' active' : ''}" data-stage-quick="${stage}">${stage} <b>${counters[stage]}</b></button>`).join('')}</div>
   </div>`;
 }
 
 function bindFilters(container: HTMLElement): void {
+  container.querySelector<HTMLSelectElement>('#mvp-lead-assigned-filter')?.addEventListener('change', (event) => {
+    const value = (event.currentTarget as HTMLSelectElement).value;
+    filters.assignedTo = value === 'Todos' ? 'Todos' : Number(value);
+    renderMvpLeads(container);
+  });
+  container.querySelector<HTMLSelectElement>('#mvp-lead-order')?.addEventListener('change', (event) => {
+    filters.order = (event.currentTarget as HTMLSelectElement).value as LeadSort;
+    renderMvpLeads(container);
+  });
+  container.querySelector<HTMLButtonElement>('[data-clear-lead-filters]')?.addEventListener('click', () => {
+    filters = { search: '', stage: 'Todas', temperature: 'Todas', overdueOnly: false, missingNextActionOnly: false, assignedTo: 'Todos', order: 'priority' };
+    renderMvpLeads(container);
+  });
+  const pipeline = container.querySelector<HTMLElement>('.mvp-stage-counters');
+  const updatePipelineEdges = (): void => {
+    if (!pipeline) return;
+    pipeline.classList.toggle('can-scroll-left', pipeline.scrollLeft > 2);
+    pipeline.classList.toggle('can-scroll-right', pipeline.scrollLeft + pipeline.clientWidth < pipeline.scrollWidth - 2);
+  };
+  pipeline?.addEventListener('scroll', updatePipelineEdges, { passive: true });
+  updatePipelineEdges();
   container.querySelector<HTMLInputElement>('#mvp-lead-search')?.addEventListener('input', (event) => {
     filters.search = (event.currentTarget as HTMLInputElement).value;
     updateLeadResults(container);
@@ -291,6 +369,7 @@ function bindFilters(container: HTMLElement): void {
     button.addEventListener('click', () => {
       filters.stage = button.dataset.stageQuick as LeadFilters['stage'];
       renderMvpLeads(container);
+      window.requestAnimationFrame(() => container.querySelector<HTMLElement>('.mvp-stage-counter.active')?.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' }));
     });
   });
 }
@@ -298,6 +377,7 @@ function bindFilters(container: HTMLElement): void {
 export function renderMvpLeads(container: HTMLElement): void {
   const editing = visibleClients().find((client) => client.id === state.editingClientId) ?? null;
   const leads = leadRows();
+  if (expandedClientId && !leads.some((client) => client.id === expandedClientId)) expandedClientId = null;
   container.innerHTML = `<div class="mvp-page-heading"><div><h1>Leads</h1><p>Calificá lo esencial, definí la próxima acción y avanzá cada oportunidad sin interrogatorios.</p></div><button type="button" data-toggle="client-form">Nuevo lead</button></div>${leadForm(editing)}${filterPanel()}<div id="mvp-lead-results" class="mvp-lead-list">${leads.map(card).join('') || '<p class="empty-state">No hay leads para mostrar con estos filtros.</p>'}</div>`;
 
   bindFilters(container);
@@ -350,7 +430,8 @@ export function renderMvpLeads(container: HTMLElement): void {
 }
 
 export function resetLeadFiltersForTests(): void {
-  filters = { search: '', stage: 'Todas', temperature: 'Todas', overdueOnly: false, missingNextActionOnly: false };
+  filters = { search: '', stage: 'Todas', temperature: 'Todas', overdueOnly: false, missingNextActionOnly: false, assignedTo: 'Todos', order: 'priority' };
+  expandedClientId = null;
 }
 
 export function overdueReferenceDateForTests(): string {
