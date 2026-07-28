@@ -30,17 +30,16 @@ jobs:
           python - <<'PY'
           from pathlib import Path
           path = Path('src/tests/b1-2-2-mobile-leads-real-app.test.ts')
-          text = path.read_text()
-          old = """  await textarea.focus();
-          await textarea.evaluate((element) => element.scrollIntoView({ block: 'center', behavior: 'auto' }));
-          await page.waitForTimeout(50);
-          """
-          new = """  await textarea.focus();
-          await page.waitForTimeout(550);
-          """
-          if old not in text:
-              raise SystemExit('No se encontró el bloque exacto de foco.')
-          path.write_text(text.replace(old, new, 1))
+          lines = path.read_text().splitlines()
+          matches = [i for i, line in enumerate(lines) if 'element.scrollIntoView' in line and 'textarea.evaluate' in line]
+          if len(matches) != 1:
+              raise SystemExit(f'Cantidad inesperada de scrollIntoView del textarea: {len(matches)}')
+          index = matches[0]
+          if index + 1 >= len(lines) or 'page.waitForTimeout(50)' not in lines[index + 1]:
+              raise SystemExit('La espera esperada no sigue a scrollIntoView.')
+          indent = lines[index][:len(lines[index]) - len(lines[index].lstrip())]
+          lines[index:index + 2] = [f'{indent}await page.waitForTimeout(550);']
+          path.write_text('\n'.join(lines) + '\n')
           PY
           git config user.name "PropControl CI"
           git config user.email "actions@users.noreply.github.com"
