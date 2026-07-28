@@ -418,10 +418,24 @@ async function assertFollowUpActions(page: Page): Promise<void> {
   const completeButton = updatedCard.locator('[data-complete-client-follow-up]');
   const hitTarget = await completeButton.evaluate((button) => {
     const rect = button.getBoundingClientRect();
-    const target = document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2);
-    return target === button || button.contains(target);
+    const x = rect.left + rect.width / 2;
+    const y = rect.top + rect.height / 2;
+    const target = document.elementFromPoint(x, y) as HTMLElement | null;
+    const nav = document.querySelector<HTMLElement>('.mobile-bottom-nav');
+    const navRect = nav?.getBoundingClientRect();
+    return {
+      valid: target === button || button.contains(target),
+      button: { left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom },
+      point: { x, y },
+      targetTag: target?.tagName || '',
+      targetClass: target?.className || '',
+      targetText: target?.textContent?.trim().slice(0, 80) || '',
+      nav: navRect ? { left: navRect.left, top: navRect.top, right: navRect.right, bottom: navRect.bottom } : null,
+      menuZ: getComputedStyle(button.closest<HTMLElement>('.mvp-lead-followup-menu')!).zIndex,
+      popoverZ: getComputedStyle(button.closest<HTMLElement>('.mvp-lead-followup-popover')!).zIndex,
+    };
   });
-  assert.equal(hitTarget, true, 'El botón Completar seguimiento está cubierto por otra capa.');
+  assert.equal(hitTarget.valid, true, `El botón Completar seguimiento está cubierto: ${JSON.stringify(hitTarget)}`);
   await completeButton.click();
   await page.waitForFunction(() => {
     const cards = [...document.querySelectorAll<HTMLElement>('#crm .mvp-lead-compact-card')];
