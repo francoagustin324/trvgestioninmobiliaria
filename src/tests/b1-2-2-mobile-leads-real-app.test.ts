@@ -437,15 +437,26 @@ async function openAndAnalyzePanel(page: Page, width: number): Promise<void> {
   assert.ok(applyVisible.buttonBottom <= applyVisible.navTop - 2, `Aplicar calificación queda tapado en ${width}px.`);
 
   await textarea.focus();
-  await textarea.evaluate((element) => element.scrollIntoView({ block: 'center' }));
-  const focused = await page.evaluate(() => {
-    const element = document.activeElement as HTMLElement | null;
+  await textarea.evaluate((element) => element.scrollIntoView({ block: 'center', behavior: 'auto' }));
+  await page.waitForTimeout(50);
+  const focused = await textarea.evaluate((element) => {
     const nav = document.querySelector<HTMLElement>('.mobile-bottom-nav');
-    const rect = element?.getBoundingClientRect();
+    const rect = element.getBoundingClientRect();
     const navRect = nav && getComputedStyle(nav).display !== 'none' ? nav.getBoundingClientRect() : null;
-    return { top: rect?.top ?? -1, bottom: rect?.bottom ?? -1, navTop: navRect?.top ?? Infinity };
+    return {
+      active: document.activeElement === element,
+      top: rect.top,
+      bottom: rect.bottom,
+      height: rect.height,
+      navTop: navRect?.top ?? Infinity,
+      scrollMarginBottom: getComputedStyle(element).scrollMarginBottom,
+    };
   });
-  assert.ok(focused.top >= -1 && focused.bottom <= focused.navTop - 2, `Campo enfocado queda tapado en ${width}px.`);
+  assert.equal(focused.active, true, `El textarea no conservó foco en ${width}px: ${JSON.stringify(focused)}`);
+  assert.ok(
+    focused.top >= -1 && focused.bottom <= focused.navTop - 2,
+    `Campo enfocado queda tapado en ${width}px: ${JSON.stringify(focused)}`,
+  );
 }
 
 async function assertBottomNavigationClearance(page: Page, width: number): Promise<void> {
