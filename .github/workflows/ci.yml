@@ -117,3 +117,6 @@ jobs:
           path: artifacts/b1-2-2-mobile-leads/*.png
           if-no-files-found: ignore
           retention-days: 7
+      - name: Confirmar parche técnico
+        if: always()
+        run: echo "B1.2.2 scroller patch attempted"
