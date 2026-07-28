@@ -33,6 +33,7 @@
 .mvp-lead-primary-action { grid-area:primary; display:flex; min-width:0; }
 .mvp-lead-primary-action .mvp-auto-qualify-button { min-height:44px; }
 .mvp-lead-secondary-actions { grid-area:secondary; align-self:start; }
+.mvp-lead-secondary-actions .mvp-icon-btn { width:44px; min-width:44px; height:44px; min-height:44px; }
 .mvp-lead-title-line { display:flex; min-width:0; max-width:100%; flex-wrap:wrap; align-items:center; gap:8px; }
 .mvp-lead-title-line h3 { min-width:0; max-width:100%; margin:0; word-break:normal; overflow-wrap:break-word; hyphens:none; }
 .mvp-stage-badge { display:inline-flex; min-height:28px; align-items:center; padding:5px 9px; border-radius:999px; color:#1d4d64; background:#e8f2f6; font-size:.68rem; font-weight:900; white-space:nowrap; }
