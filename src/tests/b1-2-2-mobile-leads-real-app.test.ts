@@ -608,7 +608,7 @@ async function assertBottomNavigationClearance(page: Page, width: number): Promi
   assert.ok(result.lastBottom <= result.navTop - 8, `La navegación tapa la última tarjeta en ${width}px: ${JSON.stringify(result)}`);
 }
 
-async function captureScreenshots(page: Page, viewport: { width: number; height: number }): Promise<void> {
+async function captureLeadsScreenshot(page: Page, viewport: { width: number; height: number }): Promise<void> {
   if (!screenshotWidths.has(viewport.width)) return;
   mkdirSync(artifactDirectory, { recursive: true });
   await page.evaluate(() => window.scrollTo({ top: 0, behavior: 'instant' }));
@@ -617,6 +617,10 @@ async function captureScreenshots(page: Page, viewport: { width: number; height:
     fullPage: false,
     scale: 'css',
   });
+}
+
+async function capturePanelScreenshot(page: Page, viewport: { width: number; height: number }): Promise<void> {
+  if (!screenshotWidths.has(viewport.width)) return;
   const panel = page.locator('#crm .lead-qualification-panel').first();
   await panel.scrollIntoViewIfNeeded();
   await page.screenshot({
@@ -660,8 +664,9 @@ test('B1.2.2 valida Leads con DOM real, CSS real y navegación real en todos los
         await page.locator('#crm .mvp-lead-matches').first().evaluate((details: HTMLDetailsElement) => { details.open = true; });
         const history = page.locator('#crm .mvp-lead-history').last();
         if (await history.count()) await history.evaluate((details: HTMLDetailsElement) => { details.open = true; });
+        await captureLeadsScreenshot(page, viewport);
         await openAndAnalyzePanel(page, viewport.width);
-        await captureScreenshots(page, viewport);
+        await capturePanelScreenshot(page, viewport);
         await assertBottomNavigationClearance(page, viewport.width);
       } finally {
         await page.close();
