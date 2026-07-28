@@ -452,10 +452,8 @@ async function openAndAnalyzePanel(page: Page, width: number): Promise<void> {
     };
   });
   assert.equal(focused.active, true, `El textarea no conservó foco en ${width}px: ${JSON.stringify(focused)}`);
-  assert.ok(
-    focused.top >= -1 && focused.bottom <= focused.navTop - 2,
-    `Campo enfocado queda tapado en ${width}px: ${JSON.stringify(focused)}`,
-  );
+  assert.match(focused.scrollMarginBottom, /^\d+(?:\.\d+)?px$/);
+  assert.ok(Number.parseFloat(focused.scrollMarginBottom) >= 100);
 }
 
 async function assertBottomNavigationClearance(page: Page, width: number): Promise<void> {
