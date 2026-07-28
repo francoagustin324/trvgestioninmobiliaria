@@ -14,6 +14,14 @@
   justify-self: end;
 }
 
+#crm .mvp-lead-followup-menu[open] {
+  z-index: 130;
+}
+
+#crm .mvp-lead-followup-menu[open] > .mvp-lead-followup-popover {
+  z-index: 131;
+}
+
 #crm .mvp-lead-followup-menu:not([open]) > .mvp-lead-followup-popover,
 #crm .mvp-lead-full-sheet:not([open]) > .mvp-lead-full-content {
   display: none;
