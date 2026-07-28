@@ -70,6 +70,11 @@ replace(
 )
 replace(
     'src/tests/b1-2-3-compact-leads-real-app.test.ts',
+    "  await updatedCard.locator('[data-complete-client-follow-up]').click();\n  await page.waitForTimeout(100);\n  const completedCard = page.locator('#crm .mvp-lead-compact-card').filter({ hasText: 'Seguimiento muy vencido' });\n  assert.match(await completedCard.locator('.mvp-lead-next-action').innerText(), /Sin próxima acción/);",
+    "  await updatedCard.locator('[data-complete-client-follow-up]').click();\n  await page.waitForFunction(() => {\n    const cards = [...document.querySelectorAll<HTMLElement>('#crm .mvp-lead-compact-card')];\n    const card = cards.find((item) => item.textContent?.includes('Seguimiento muy vencido'));\n    return card?.querySelector('.mvp-lead-next-action')?.textContent?.includes('Sin próxima acción') === true;\n  });\n  const completedCard = page.locator('#crm .mvp-lead-compact-card').filter({ hasText: 'Seguimiento muy vencido' });\n  assert.match(await completedCard.locator('.mvp-lead-next-action').innerText(), /Sin próxima acción/);",
+)
+replace(
+    'src/tests/b1-2-3-compact-leads-real-app.test.ts',
     "    assert.ok(fullLeadHeight >= 320 && fullLeadHeight <= 450, `Tarjeta cerrada fuera de 320-450px: ${fullLeadHeight}`);",
     "    assert.ok(fullLeadHeight >= 320 && fullLeadHeight <= 450, `Tarjeta cerrada fuera de 320-450px: ${fullLeadHeight}`);\n    console.log(`B1.2.3 altura tarjeta cerrada 390: ${fullLeadHeight.toFixed(2)}px`);",
 )
