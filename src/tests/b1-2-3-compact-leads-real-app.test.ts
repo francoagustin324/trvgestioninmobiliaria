@@ -369,6 +369,7 @@ async function assertSingleExpandedAndPersistent(page: Page): Promise<void> {
   await sheets.nth(0).locator(':scope > summary').click();
   assert.equal(await page.locator('#crm .mvp-lead-full-sheet[open]').count(), 1);
   await sheets.nth(1).locator(':scope > summary').click();
+  await page.waitForFunction(() => document.querySelectorAll('#crm .mvp-lead-full-sheet[open]').length === 1);
   assert.equal(await page.locator('#crm .mvp-lead-full-sheet[open]').count(), 1);
   const selectedClient = await page.locator('#crm .mvp-lead-full-sheet[open]').getAttribute('data-lead-full-sheet');
   await page.locator('#crm .mvp-lead-more-filters').evaluate((details: HTMLDetailsElement) => { details.open = true; });
