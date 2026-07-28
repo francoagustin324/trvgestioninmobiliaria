@@ -52,7 +52,7 @@ test('mantiene y ordena las acciones funcionales sin cambiar su lógica', () => 
   assert.ok(css.includes('grid-column: 1 / -1'));
   assert.ok(css.includes("content: 'Eliminar'"));
   assert.ok(main.includes("window.confirm('¿Eliminar este registro?"));
-  assert.ok(main.includes("removeItem(collection, id)"));
+  assert.ok(main.includes('removeItem(collection, id)'));
 });
 
 test('conserva estados de fotos, ficha, operación, estado e interno responsable', () => {
@@ -63,7 +63,8 @@ test('conserva estados de fotos, ficha, operación, estado e interno responsable
 
 test('reutiliza el espacio inferior global y safe area sin duplicarlo', () => {
   assert.ok(shellCss.includes('env(safe-area-inset-bottom)'));
-  assert.ok(shellCss.includes('var(--pc-mobile-nav-height) + 40px'));
+  assert.ok(shellCss.includes('--pc-mobile-nav-clearance'));
+  assert.ok(shellCss.includes('padding: 12px 14px var(--pc-mobile-nav-clearance)'));
   assert.ok(css.includes('padding-bottom: 12px'));
   assert.equal(css.includes('--pc-mobile-nav-height'), false);
 });

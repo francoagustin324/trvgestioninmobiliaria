@@ -28,15 +28,6 @@ import { addActivity, memberName, visibleClients, visibleProperties } from './te
 import { escapeHtml, formValues, nextId } from './utils.js';
 import { appIcons } from './icons.js';
 
-const qualificationStyleId = 'propcontrol-lead-qualification-styles';
-if (typeof document !== 'undefined' && !document.getElementById(qualificationStyleId)) {
-  const link = document.createElement('link');
-  link.id = qualificationStyleId;
-  link.rel = 'stylesheet';
-  link.href = '/src/lead-qualification.css?v=20260727-2';
-  document.head.append(link);
-}
-
 let filters: LeadFilters = {
   search: '',
   stage: 'Todas',
@@ -152,7 +143,8 @@ function card(client: Client): string {
         ${renderLeadSecondaryMeta(client)}
         <div class="mvp-lead-contact"><a class="mvp-contact-btn wa" href="https://wa.me/${digits}" target="_blank" rel="noopener noreferrer" title="WhatsApp · ${escapeHtml(formatPhone(client.phone))}" aria-label="Enviar WhatsApp">${appIcons.whatsapp}</a><a class="mvp-contact-btn call" href="tel:+${digits}" title="Llamar · ${escapeHtml(formatPhone(client.phone))}" aria-label="Llamar">${appIcons.phone}</a>${client.email ? `<a class="mvp-contact-btn mail" href="mailto:${escapeHtml(client.email)}" title="${escapeHtml(client.email)}" aria-label="Enviar email">${appIcons.mail}</a>` : `<span class="mvp-contact-btn mail" data-disabled title="Sin email cargado" aria-label="Sin email cargado">${appIcons.mail}</span>`}</div>
       </div>
-      <div class="mvp-lead-actions"><button type="button" class="secondary mvp-auto-qualify-button" data-auto-qualify-client="${client.id}">Calificar automáticamente</button><button type="button" class="secondary mvp-icon-btn" data-edit-client="${client.id}" aria-controls="mvp-lead-form" title="Editar" aria-label="Editar ${escapeHtml(client.name)}">${appIcons.edit}</button><button type="button" class="delete mvp-icon-btn" data-delete="clients" data-id="${client.id}" title="Eliminar" aria-label="Eliminar ${escapeHtml(client.name)}">×</button></div>
+      <div class="mvp-lead-primary-action"><button type="button" class="secondary mvp-auto-qualify-button" data-auto-qualify-client="${client.id}">Calificar automáticamente</button></div>
+      <div class="mvp-lead-actions mvp-lead-secondary-actions"><button type="button" class="secondary mvp-icon-btn" data-edit-client="${client.id}" aria-controls="mvp-lead-form" title="Editar" aria-label="Editar ${escapeHtml(client.name)}">${appIcons.edit}</button><button type="button" class="delete mvp-icon-btn" data-delete="clients" data-id="${client.id}" title="Eliminar" aria-label="Eliminar ${escapeHtml(client.name)}">×</button></div>
     </div>
     <div class="mvp-lead-critical">
       <div><span>Próxima acción</span><strong>${terminal ? 'Operación cerrada' : summaryValue(client.nextAction, 'Sin próxima acción')}</strong></div>
@@ -242,18 +234,35 @@ function leadForm(editing: Client | null): string {
   </form>`;
 }
 
+function activeSecondaryFilters(): string[] {
+  const active: string[] = [];
+  if (filters.stage !== 'Todas') active.push(`Etapa: ${filters.stage}`);
+  if (filters.temperature !== 'Todas') active.push(`Temperatura: ${filters.temperature}`);
+  if (filters.overdueOnly) active.push('Vencidos');
+  if (filters.missingNextActionOnly) active.push('Sin próxima acción');
+  return active;
+}
+
 function filterPanel(): string {
   const visible = visibleClients();
   const counters = stageCounters(visible);
+  const active = activeSecondaryFilters();
+  const mobile = typeof window !== 'undefined' && window.matchMedia('(max-width: 520px)').matches;
+  const open = !mobile || active.length > 0;
   return `<div class="mvp-lead-filter-panel">
-    <div class="mvp-lead-filter-grid">
-      <label><span>Buscar</span><input id="mvp-lead-search" type="search" value="${escapeHtml(filters.search)}" placeholder="Nombre, WhatsApp, interés, presupuesto o calificación"></label>
-      <label><span>Etapa</span><select id="mvp-lead-stage-filter"><option value="Todas">Todas</option>${COMMERCIAL_STAGES.map((stage) => `<option value="${stage}"${selected(filters.stage, stage)}>${stage}</option>`).join('')}</select></label>
-      <label><span>Temperatura</span><select id="mvp-lead-temperature-filter"><option value="Todas">Todas</option>${(['Caliente', 'Tibio', 'Frío'] as Temperature[]).map((temperature) => `<option value="${temperature}"${selected(filters.temperature, temperature)}>${temperature}</option>`).join('')}</select></label>
+    <div class="mvp-lead-filter-primary">
+      <label class="mvp-lead-search-field"><span>Buscar</span><input id="mvp-lead-search" type="search" value="${escapeHtml(filters.search)}" placeholder="Nombre, WhatsApp o interés"></label>
+      <strong id="mvp-lead-count">${leadRows().length} de ${visible.length} leads</strong>
     </div>
-    <div class="mvp-lead-filter-toggles"><label><input id="mvp-lead-overdue-filter" type="checkbox"${filters.overdueOnly ? ' checked' : ''}>Solo seguimientos vencidos</label><label><input id="mvp-lead-missing-action-filter" type="checkbox"${filters.missingNextActionOnly ? ' checked' : ''}>Sin acción o fecha de seguimiento</label></div>
+    <details class="mvp-lead-more-filters"${open ? ' open' : ''}>
+      <summary><span>Más filtros</span><small>${escapeHtml(active.length ? active.join(' · ') : 'Etapa, temperatura y seguimiento')}</small></summary>
+      <div class="mvp-lead-filter-grid">
+        <label><span>Etapa</span><select id="mvp-lead-stage-filter"><option value="Todas">Todas</option>${COMMERCIAL_STAGES.map((stage) => `<option value="${stage}"${selected(filters.stage, stage)}>${stage}</option>`).join('')}</select></label>
+        <label><span>Temperatura</span><select id="mvp-lead-temperature-filter"><option value="Todas">Todas</option>${(['Caliente', 'Tibio', 'Frío'] as Temperature[]).map((temperature) => `<option value="${temperature}"${selected(filters.temperature, temperature)}>${temperature}</option>`).join('')}</select></label>
+      </div>
+      <div class="mvp-lead-filter-toggles"><label><input id="mvp-lead-overdue-filter" type="checkbox"${filters.overdueOnly ? ' checked' : ''}>Seguimientos vencidos</label><label><input id="mvp-lead-missing-action-filter" type="checkbox"${filters.missingNextActionOnly ? ' checked' : ''}>Sin próxima acción completa</label></div>
+    </details>
     <div class="mvp-stage-counters" aria-label="Contadores por etapa"><button type="button" class="mvp-stage-counter${filters.stage === 'Todas' ? ' active' : ''}" data-stage-quick="Todas">Todos <b>${visible.length}</b></button>${COMMERCIAL_STAGES.map((stage) => `<button type="button" class="mvp-stage-counter${filters.stage === stage ? ' active' : ''}" data-stage-quick="${stage}">${stage} <b>${counters[stage]}</b></button>`).join('')}</div>
-    <strong id="mvp-lead-count">${leadRows().length} de ${visible.length} leads</strong>
   </div>`;
 }
 

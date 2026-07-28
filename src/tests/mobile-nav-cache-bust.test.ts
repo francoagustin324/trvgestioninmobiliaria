@@ -14,6 +14,7 @@ test('carga una versión nueva y coordinada del shell móvil', () => {
   assert.equal(html.includes('/dist/mvp-main.js?v=20260722-96'), false);
 });
 
-test('mantiene cargado el CSS de navegación inferior con versión nueva', () => {
-  assert.ok(html.includes('/src/mobile-bottom-nav.css?v=20260723-2'));
+test('mantiene cargado el CSS de navegación inferior con versión B1.2.2', () => {
+  assert.ok(html.includes('/src/mobile-bottom-nav.css?v=20260728-1'));
+  assert.ok(html.includes('/src/mobile-leads-polish.css?v=20260728-1'));
 });

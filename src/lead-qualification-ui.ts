@@ -170,6 +170,56 @@ export function closeLeadQualification(): void {
   openClientId = null;
 }
 
+function mobileNavigationTop(): number {
+  const navigation = document.querySelector<HTMLElement>('.mobile-bottom-nav');
+  if (!navigation || getComputedStyle(navigation).display === 'none') return window.innerHeight;
+  return navigation.getBoundingClientRect().top;
+}
+
+function moveScrollableAncestors(control: HTMLElement, desiredTop: number): void {
+  let ancestor = control.parentElement;
+  while (ancestor) {
+    const rect = control.getBoundingClientRect();
+    const bottomBoundary = mobileNavigationTop() - 12;
+    if (rect.top >= 76 && rect.bottom <= bottomBoundary) return;
+    const before = ancestor.scrollTop;
+    const maximum = Math.max(0, ancestor.scrollHeight - ancestor.clientHeight);
+    if (before !== 0 || maximum > 0) {
+      const delta = rect.top - desiredTop;
+      const next = Math.max(0, Math.min(maximum, before + delta));
+      if (next !== before) ancestor.scrollTop = next;
+    }
+    ancestor = ancestor.parentElement;
+  }
+}
+
+function adjustMobileControl(control: HTMLElement): void {
+  if (!control.isConnected) return;
+  const topBoundary = 76;
+  const bottomBoundary = mobileNavigationTop() - 12;
+  let rect = control.getBoundingClientRect();
+  if (rect.top >= topBoundary && rect.bottom <= bottomBoundary) return;
+  const availableHeight = Math.max(120, bottomBoundary - topBoundary);
+  const desiredTop = topBoundary + Math.max(0, (availableHeight - rect.height) / 2);
+  const delta = rect.top - desiredTop;
+  moveScrollableAncestors(control, desiredTop);
+  rect = control.getBoundingClientRect();
+  if (rect.top < topBoundary || rect.bottom > bottomBoundary) {
+    window.scrollBy({ top: rect.top - desiredTop, behavior: 'auto' });
+  }
+}
+
+function keepMobileControlVisible(control: HTMLElement): void {
+  if (typeof window === 'undefined' || !window.matchMedia('(max-width: 720px)').matches) return;
+  const startedAt = performance.now();
+  const enforceVisibility = (): void => {
+    if (!control.isConnected || document.activeElement !== control) return;
+    adjustMobileControl(control);
+    if (performance.now() - startedAt < 480) window.requestAnimationFrame(enforceVisibility);
+  };
+  enforceVisibility();
+}
+
 export function renderLeadQualificationPanel(client: Client): string {
   if (!isLeadQualificationOpen(client.id)) return '';
   const session = sessionFor(client.id);
@@ -251,6 +301,9 @@ export function bindLeadQualificationPanel(
   if (!panel) return;
   const session = sessionFor(client.id);
 
+  panel.querySelectorAll<HTMLElement>('input, textarea, select, button').forEach((control) => {
+    control.addEventListener('focus', () => keepMobileControlVisible(control));
+  });
   panel.querySelector<HTMLButtonElement>('[data-close-qualification]')?.addEventListener('click', () => {
     closeLeadQualification();
     rerender();

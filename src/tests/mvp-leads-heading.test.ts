@@ -19,10 +19,11 @@ test('Leads conserva título, botón y una introducción comercial útil', () =>
   assert.ok(leads.includes('Calificá lo esencial, definí la próxima acción y avanzá cada oportunidad sin interrogatorios.'));
 });
 
-test('Leads amplía la búsqueda a la calificación comercial', () => {
+test('Leads mantiene búsqueda comercial con placeholder móvil legible', () => {
   assert.ok(leads.includes('<span>Buscar</span>'));
-  assert.ok(leads.includes('placeholder="Nombre, WhatsApp, interés, presupuesto o calificación"'));
+  assert.ok(leads.includes('placeholder="Nombre, WhatsApp o interés"'));
   assert.ok(leads.includes('id="mvp-lead-search"'));
+  assert.ok(leads.includes('filterLeads(visibleClients(), filters)'));
 });
 
 test('las descripciones de los demás módulos permanecen disponibles', () => {

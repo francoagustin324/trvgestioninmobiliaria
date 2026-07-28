@@ -20,7 +20,7 @@
 .mvp-match-score.alta { color:#166347; background:#e8f7ef; }
 .mvp-match-score.buena { color:#285267; background:#edf4f7; }
 .mvp-match-score.posible { color:#7b5819; background:#fff1d8; }
-.mvp-match-actions button { min-height:34px; padding:7px 10px; font-size:.72rem; }
+.mvp-match-actions button { min-height:44px; padding:9px 11px; font-size:.72rem; }
 .mvp-match-empty { margin-top:4px!important; padding-top:10px; border-top:1px solid #e3eaee; color:#71818a!important; font-size:.72rem; }
 @media (max-width:640px) {
   .mvp-lead-card-main { align-items:flex-start; flex-direction:column; }
