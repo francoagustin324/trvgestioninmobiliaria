@@ -26,11 +26,12 @@ jobs:
           python scripts/b1-2-3-zindex-fix.py
           python scripts/b1-2-3-popover-fix.py
           python scripts/b1-2-3-align-b122.py
+          python scripts/b1-2-3-auto-button-wrap.py
           git config user.name "PropControl CI"
           git config user.email "actions@users.noreply.github.com"
           git add src/mvp-leads-ui.ts src/lead-list-compact.css src/tests/b1-2-3-compact-leads-real-app.test.ts src/tests/b1-2-2-mobile-leads-real-app.test.ts
           if ! git diff --cached --quiet; then
-            git commit -m "Alinear validaciones responsive con disclosure"
+            git commit -m "Evitar truncado del botón automático"
             git push origin HEAD:agent/b1-2-3-compact-prioritized-leads
           fi
       - uses: actions/setup-node@v4
