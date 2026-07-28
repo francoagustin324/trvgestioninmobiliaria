@@ -8,18 +8,20 @@
   display: grid;
   width: 100%;
   gap: 7px;
+  z-index: 130;
 }
 
 #crm .mvp-lead-followup-menu[open] > summary {
   justify-self: end;
 }
 
-#crm .mvp-lead-followup-menu[open] {
-  z-index: 130;
-}
-
 #crm .mvp-lead-followup-menu[open] > .mvp-lead-followup-popover {
   z-index: 131;
+}
+
+#crm .mvp-lead-compact-card :is(button, a, summary, input, select):focus-visible {
+  outline: 3px solid #dec593;
+  outline-offset: 2px;
 }
 
 #crm .mvp-lead-followup-menu:not([open]) > .mvp-lead-followup-popover,
@@ -257,32 +259,15 @@
   }
 }
 
-@media (max-width: 340px) {
-  #crm .mvp-lead-compact-header {
-    grid-template-columns: 1fr;
-  }
-
-  #crm .mvp-lead-compact-facts {
-    grid-template-columns: repeat(2,minmax(0,1fr));
-  }
-
-  #crm .mvp-lead-compact-facts > div:last-child {
-    grid-column: 1 / -1;
-  }
-
-  #crm .mvp-lead-full-grid {
-    grid-template-columns: 1fr;
-  }
-
+@media (max-width: 380px) {
   #crm .mvp-lead-quick-actions .mvp-auto-qualify-button {
     width: 100%;
     flex-basis: 100%;
   }
 }
 
-@media (max-width: 380px) {
-  #crm .mvp-lead-quick-actions .mvp-auto-qualify-button {
-    width: 100%;
-    flex-basis: 100%;
+@media (max-width: 340px) {
+  #crm .mvp-lead-full-grid {
+    grid-template-columns: 1fr;
   }
 }
