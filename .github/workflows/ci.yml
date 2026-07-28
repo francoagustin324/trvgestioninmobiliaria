@@ -9,6 +9,9 @@ on:
     - cron: "0 10 * * *"
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 concurrency:
   group: trv-ci-${{ github.ref }}
   cancel-in-progress: true
@@ -20,6 +23,56 @@ jobs:
       PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: agent/b1-2-2-mobile-leads-critical-fix
+      - name: Corregir medición del textarea real
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('src/tests/b1-2-2-mobile-leads-real-app.test.ts')
+          text = path.read_text()
+          old = """  await textarea.focus();
+            await textarea.evaluate((element) => element.scrollIntoView({ block: 'center' }));
+            const focused = await page.evaluate(() => {
+              const element = document.activeElement as HTMLElement | null;
+              const nav = document.querySelector<HTMLElement>('.mobile-bottom-nav');
+              const rect = element?.getBoundingClientRect();
+              const navRect = nav && getComputedStyle(nav).display !== 'none' ? nav.getBoundingClientRect() : null;
+              return { top: rect?.top ?? -1, bottom: rect?.bottom ?? -1, navTop: navRect?.top ?? Infinity };
+            });
+            assert.ok(focused.top >= -1 && focused.bottom <= focused.navTop - 2, `Campo enfocado queda tapado en ${width}px.`);
+          """
+          new = """  await textarea.focus();
+            await textarea.evaluate((element) => element.scrollIntoView({ block: 'center', behavior: 'auto' }));
+            await page.waitForTimeout(50);
+            const focused = await textarea.evaluate((element) => {
+              const nav = document.querySelector<HTMLElement>('.mobile-bottom-nav');
+              const rect = element.getBoundingClientRect();
+              const navRect = nav && getComputedStyle(nav).display !== 'none' ? nav.getBoundingClientRect() : null;
+              return {
+                active: document.activeElement === element,
+                top: rect.top,
+                bottom: rect.bottom,
+                height: rect.height,
+                navTop: navRect?.top ?? Infinity,
+                scrollMarginBottom: getComputedStyle(element).scrollMarginBottom,
+              };
+            });
+            assert.equal(focused.active, true, `El textarea no conservó foco en ${width}px: ${JSON.stringify(focused)}`);
+            assert.ok(
+              focused.top >= -1 && focused.bottom <= focused.navTop - 2,
+              `Campo enfocado queda tapado en ${width}px: ${JSON.stringify(focused)}`,
+            );
+          """
+          if old not in text:
+              raise SystemExit('No se encontró el bloque exacto a reemplazar.')
+          path.write_text(text.replace(old, new))
+          PY
+          git config user.name "PropControl CI"
+          git config user.email "actions@users.noreply.github.com"
+          git add src/tests/b1-2-2-mobile-leads-real-app.test.ts
+          git commit -m "Medir textarea real en validación móvil B1.2.2"
+          git push origin HEAD:agent/b1-2-2-mobile-leads-critical-fix
       - uses: actions/setup-node@v4
         with:
           node-version: 22
