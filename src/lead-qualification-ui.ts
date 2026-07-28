@@ -207,8 +207,13 @@ function adjustMobileControl(control: HTMLElement): void {
 
 function keepMobileControlVisible(control: HTMLElement): void {
   if (typeof window === 'undefined' || !window.matchMedia('(max-width: 720px)').matches) return;
-  adjustMobileControl(control);
-  window.requestAnimationFrame(() => adjustMobileControl(control));
+  const startedAt = performance.now();
+  const enforceVisibility = (): void => {
+    if (!control.isConnected || document.activeElement !== control) return;
+    adjustMobileControl(control);
+    if (performance.now() - startedAt < 480) window.requestAnimationFrame(enforceVisibility);
+  };
+  enforceVisibility();
 }
 
 export function renderLeadQualificationPanel(client: Client): string {
