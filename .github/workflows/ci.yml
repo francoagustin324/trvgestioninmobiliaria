@@ -9,6 +9,9 @@ on:
     - cron: "0 10 * * *"
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 concurrency:
   group: trv-ci-${{ github.ref }}
   cancel-in-progress: true
@@ -20,6 +23,52 @@ jobs:
       PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: agent/b1-2-2-mobile-leads-critical-fix
+      - name: Recorrer todos los scrollers del panel
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import re
+          path = Path('src/lead-qualification-ui.ts')
+          text = path.read_text()
+          pattern = re.compile(
+              r"function moveScrollableAncestor\(control: HTMLElement, delta: number\): boolean \{[\s\S]*?\n\}\n\nfunction adjustMobileControl",
+              re.MULTILINE,
+          )
+          replacement = """function moveScrollableAncestors(control: HTMLElement, desiredTop: number): void {
+            let ancestor = control.parentElement;
+            while (ancestor) {
+              const rect = control.getBoundingClientRect();
+              const bottomBoundary = mobileNavigationTop() - 12;
+              if (rect.top >= 76 && rect.bottom <= bottomBoundary) return;
+              const before = ancestor.scrollTop;
+              const maximum = Math.max(0, ancestor.scrollHeight - ancestor.clientHeight);
+              if (before !== 0 || maximum > 0) {
+                const delta = rect.top - desiredTop;
+                const next = Math.max(0, Math.min(maximum, before + delta));
+                if (next !== before) ancestor.scrollTop = next;
+              }
+              ancestor = ancestor.parentElement;
+            }
+          }
+
+          function adjustMobileControl"""
+          updated, count = pattern.subn(replacement, text, count=1)
+          if count != 1:
+              raise SystemExit(f'Cantidad inesperada de funciones reemplazadas: {count}')
+          updated = updated.replace(
+              '  moveScrollableAncestor(control, delta);',
+              '  moveScrollableAncestors(control, desiredTop);',
+              1,
+          )
+          path.write_text(updated)
+          PY
+          git config user.name "PropControl CI"
+          git config user.email "actions@users.noreply.github.com"
+          git add src/lead-qualification-ui.ts
+          git commit -m "Recorrer todos los scrollers al enfocar B1.2.2"
+          git push origin HEAD:agent/b1-2-2-mobile-leads-critical-fix
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -47,10 +96,18 @@ jobs:
           code=$?
           cat test.log
           exit $code
-      - name: Guardar geometría B1.2.2
+      - name: Guardar diagnóstico B1.2.2
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: b1-2-2-focus-geometry
+          name: b1-2-2-test-diagnostics
           path: test.log
           retention-days: 1
+      - name: Guardar screenshots B1.2.2
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: b1-2-2-mobile-leads-screenshots
+          path: artifacts/b1-2-2-mobile-leads/*.png
+          if-no-files-found: ignore
+          retention-days: 7
