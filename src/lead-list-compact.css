@@ -31,8 +31,8 @@
   }
 
   #crm .mvp-lead-compact-card {
-    gap: 10px !important;
-    padding: 14px;
+    gap: 7px !important;
+    padding: 12px;
   }
 
   #crm .mvp-lead-compact-header {
@@ -178,21 +178,9 @@
 }
 
 @media (max-width: 520px) {
-  #crm .mvp-lead-compact-header {
-    grid-template-columns: 1fr;
-  }
-
   #crm .mvp-lead-alert {
     min-height: 32px;
     justify-self: start;
-  }
-
-  #crm .mvp-lead-compact-facts {
-    grid-template-columns: repeat(2,minmax(0,1fr));
-  }
-
-  #crm .mvp-lead-compact-facts > div:last-child {
-    grid-column: 1 / -1;
   }
 
   #crm .mvp-lead-next-action {
