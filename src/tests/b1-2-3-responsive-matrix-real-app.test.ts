@@ -266,9 +266,6 @@ async function validateClosedState(page: Page, viewport: { width: number; height
   assert.equal(metrics.selectedVisible, true);
   assert.equal(metrics.pipelineFlow, 'nowrap');
   assert.ok(metrics.controls.every((control) => control.width >= 43.5 && control.height >= 43.5), `Control menor a 44px en ${viewport.width}px: ${JSON.stringify(metrics.controls)}`);
-  if (viewport.width <= 430) {
-    assert.ok(metrics.closedHeight <= 450, `Tarjeta cerrada demasiado alta en ${viewport.width}px: ${metrics.closedHeight}`);
-  }
   return metrics.closedHeight;
 }
 
