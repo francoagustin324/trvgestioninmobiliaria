@@ -1,5 +1,10 @@
 /* B1.2.3 — Responsive exclusivo de la lista compacta de Leads. */
 
+#crm .mvp-lead-followup-menu:not([open]) > .mvp-lead-followup-popover,
+#crm .mvp-lead-full-sheet:not([open]) > .mvp-lead-full-content {
+  display: none;
+}
+
 @media (max-width: 720px) {
   #crm .mvp-lead-active-filters {
     gap: 8px;
