@@ -54,6 +54,11 @@ replace(
     "    const controls = [...document.querySelectorAll<HTMLElement>('#crm .mvp-lead-compact-card button, #crm .mvp-lead-compact-card a.mvp-contact-btn, #crm .mvp-lead-full-sheet > summary, #crm .mvp-lead-followup-menu > summary')]\n      .filter((control) => control.getClientRects().length > 0);",
 )
 replace(
+    'src/tests/b1-2-3-compact-leads-real-app.test.ts',
+    "  await sheets.nth(0).locator('summary').click();\n  assert.equal(await page.locator('#crm .mvp-lead-full-sheet[open]').count(), 1);\n  await sheets.nth(1).locator('summary').click();",
+    "  await sheets.nth(0).locator(':scope > summary').click();\n  assert.equal(await page.locator('#crm .mvp-lead-full-sheet[open]').count(), 1);\n  await sheets.nth(1).locator(':scope > summary').click();",
+)
+replace(
     'src/lead-list-compact.css',
     "  #crm .mvp-lead-quick-actions .mvp-auto-qualify-button {\n    width: 100%;\n    flex-basis: 100%;\n  }",
     "  #crm .mvp-lead-quick-actions .mvp-auto-qualify-button {\n    min-width: 0;\n    width: auto;\n    flex: 1 1 160px;\n  }",
