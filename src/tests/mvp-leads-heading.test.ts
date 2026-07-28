@@ -16,7 +16,7 @@ test('Leads conserva título, botón y una introducción comercial útil', () =>
   assert.ok(leads.includes('<h1>Leads</h1>'));
   assert.ok(leads.includes('data-toggle="client-form">Nuevo lead</button>'));
   assert.equal(leads.includes(redundantSubtitle), false);
-  assert.ok(leads.includes('Calificá lo esencial, definí la próxima acción y avanzá cada oportunidad sin interrogatorios.'));
+  assert.ok(leads.includes('Priorizá a quién contactar, resolvé la próxima acción y abrí la ficha completa solo cuando haga falta.'));
 });
 
 test('Leads mantiene búsqueda comercial con placeholder móvil legible', () => {
