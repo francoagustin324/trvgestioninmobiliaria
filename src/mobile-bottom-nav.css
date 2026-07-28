@@ -10,6 +10,7 @@
   :root {
     --pc-mobile-nav-height: 76px;
     --pc-mobile-nav-edge: 8px;
+    --pc-mobile-nav-clearance: calc(var(--pc-mobile-nav-height) + var(--pc-mobile-nav-edge) + 56px + env(safe-area-inset-bottom));
   }
 
   .premium-shell,
@@ -32,8 +33,17 @@
     width: 100% !important;
     max-width: none !important;
     margin: 0 !important;
-    padding: 12px 14px calc(var(--pc-mobile-nav-height) + 40px + env(safe-area-inset-bottom)) !important;
+    padding: 12px 14px var(--pc-mobile-nav-clearance) !important;
     overflow: visible !important;
+    scroll-padding-bottom: var(--pc-mobile-nav-clearance);
+  }
+
+  .module-panel,
+  .mvp-lead-card,
+  .lead-qualification-panel,
+  .mvp-lead-matches,
+  .mvp-lead-history {
+    scroll-margin-bottom: var(--pc-mobile-nav-clearance);
   }
 
   .app-topbar {
@@ -168,6 +178,13 @@
   .module-panel:not(#inicio) {
     width: 100%;
     min-width: 0;
+  }
+
+  @supports (height: 100dvh) {
+    body:has(input:focus, textarea:focus, select:focus) .mobile-bottom-nav {
+      position: sticky;
+      bottom: 0;
+    }
   }
 }
 
