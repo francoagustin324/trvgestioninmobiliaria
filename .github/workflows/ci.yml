@@ -25,6 +25,14 @@ jobs:
           ref: agent/b1-2-3-leads-compact-priority
       - name: Aplicar B1.2.3
         run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('scripts/b1-2-3-apply.py')
+          text = path.read_text()
+          text = text.replace('text = re.sub(r"function card\\(client: Client\\): string \\{.*?\\n\\}", card, text, count=1, flags=re.S)', 'text = re.sub(r"function card\\(client: Client\\): string \\{.*?\\n\\}", lambda _match: card, text, count=1, flags=re.S)')
+          text = text.replace('text = re.sub(r"function filterPanel\\(\\): string \\{.*?\\n\\}", panel, text, count=1, flags=re.S)', 'text = re.sub(r"function filterPanel\\(\\): string \\{.*?\\n\\}", lambda _match: panel, text, count=1, flags=re.S)')
+          path.write_text(text)
+          PY
           python scripts/b1-2-3-apply.py
           git config user.name "PropControl CI"
           git config user.email "actions@users.noreply.github.com"
