@@ -65,6 +65,7 @@
 .mvp-lead-history-list p { grid-column:1/-1; min-width:0; margin:0; color:#60747f; font-size:.72rem; word-break:normal; overflow-wrap:break-word; }
 .mvp-lead-history-list time { color:#819098; font-size:.64rem; }
 .mvp-lead-contact { display:flex; gap:7px; margin-top:10px; }
+.mvp-lead-contact .mvp-contact-btn { width:44px; min-width:44px; height:44px; min-height:44px; }
 .mvp-lead-actions { display:flex; align-items:center; gap:7px; }
 .mvp-lead-card.terminal { opacity:.88; }
 .mvp-lead-card .mvp-lead-matches { margin-top:0; }
