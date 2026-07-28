@@ -81,28 +81,28 @@ test('la cuenta usa icono genérico y no repite la inicial de TRV', () => {
   assert.equal(source.includes('const initials'), false);
 });
 
-test('el formulario de lead muestra lo crítico y despliega la calificación extendida', () => {
-  const source = readFileSync('src/mvp-leads-ui.ts', 'utf8');
+test('el formulario de lead separa calificación esencial y preferencias opcionales', () => {
+  const leads = readFileSync('src/mvp-leads-ui.ts', 'utf8');
+  const essential = readFileSync('src/lead-essential-ui.ts', 'utf8');
+  const source = `${leads}\n${essential}`;
   for (const label of [
     'Nombre',
     'Número de WhatsApp',
     'Lugar o propiedad de interés',
-    'Presupuesto',
+    'Presupuesto o rango',
     'Etapa comercial',
     'Próxima acción',
     'Fecha del próximo seguimiento',
-  ]) assert.ok(source.includes(label), label);
-  assert.ok(source.includes('<details class="lead-form-more">'));
-  assert.ok(source.includes('Completar calificación y notas'));
-  for (const extendedField of [
     'Forma de pago',
-    'Plazo estimado',
+    'Situación del crédito',
+    'Zona o barrios principales',
     'Finalidad',
-    '¿Conoce la zona?',
-    '¿Puede avanzar económicamente?',
-    'Objeciones o condicionantes',
-    'Notas internas',
-  ]) assert.ok(source.includes(extendedField), extendedField);
+    'Plazo o urgencia',
+    'Posibilidad actual de avanzar',
+    'Preferencias y datos opcionales',
+  ]) assert.ok(source.includes(label), label);
+  assert.ok(source.includes('lead-form-essential'));
+  assert.ok(source.includes('lead-form-secondary'));
 });
 
 test('editar campos parciales no elimina la calificación interna existente', () => {

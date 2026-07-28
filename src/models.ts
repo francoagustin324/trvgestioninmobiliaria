@@ -59,7 +59,9 @@ export interface Client {
   nextAction?: string; budget?: string; paymentMethod?: string; purchaseTimeframe?: string; purpose?: string;
   knowsArea?: string; canMoveForward?: string; objections?: string; notes?: string;
   zones?: string; propertyType?: string; operation?: string; bedrooms?: number; currency?: string;
-  needsFinancing?: string; creditPossible?: string; urgency?: string;
+  needsFinancing?: string; creditPossible?: string; creditApprovedAmount?: string; urgency?: string;
+  garage?: string; patio?: string; pool?: string; requiresCreditReady?: string; features?: string; preferences?: string;
+  qualificationUpdatedAt?: string;
   assignedToId?: number; createdById?: number;
 }
 

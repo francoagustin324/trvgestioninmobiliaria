@@ -12,8 +12,9 @@ export interface LeadQualificationAiOptions {
 
 const allowedFields = new Set<QualificationField>([
   'name', 'phone', 'zones', 'propertyType', 'operation', 'bedrooms', 'budget', 'currency',
-  'paymentMethod', 'needsFinancing', 'creditPossible', 'purpose', 'purchaseTimeframe',
-  'knowsArea', 'canMoveForward', 'interest', 'objections', 'urgency', 'nextAction',
+  'paymentMethod', 'needsFinancing', 'creditPossible', 'creditApprovedAmount', 'purpose',
+  'purchaseTimeframe', 'knowsArea', 'canMoveForward', 'interest', 'objections', 'urgency',
+  'garage', 'patio', 'pool', 'requiresCreditReady', 'features', 'preferences', 'nextAction',
   'nextFollowUp', 'pipeline', 'temperature',
 ]);
 
@@ -100,7 +101,10 @@ function providerPrompt(text: string, deterministic: unknown): string {
   return [
     'Analizá una conversación inmobiliaria en español.',
     'Devolvé JSON con {"suggestions":[{"field":"...","value":"...","confidence":"Alta|Media|Baja","evidence":"fragmento exacto","ambiguous":false,"warning":"..."}]}.',
-    'No inventes datos ausentes. No asumas moneda. No conviertas una consulta inicial en Calificado.',
+    'No inventes datos ausentes. No asumas moneda.',
+    'Priorizá presupuesto, moneda, forma de pago, situación del crédito, zona, finalidad, plazo y capacidad de avance.',
+    'Tipo, dormitorios y características son secundarios: extraelos solo cuando aparezcan naturalmente y no los uses para exigir una ficha completa.',
+    'No conviertas una consulta inicial en Calificado. Un pedido de visita sin presupuesto ni forma de pago no está calificado.',
     'Visita coordinada requiere confirmación explícita y fecha. Negociación requiere precio, oferta o condiciones.',
     'Ganado, Perdido y Reservado son solo sugerencias que requerirán confirmación humana.',
     `Extracción determinística previa: ${JSON.stringify(deterministic).slice(0, 12_000)}`,

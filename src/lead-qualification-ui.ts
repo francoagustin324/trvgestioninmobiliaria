@@ -5,7 +5,6 @@ import {
   confirmedValue,
   conversationQualificationText,
   qualificationActivities,
-  qualificationFieldLabel,
   sourceLabel,
   suggestionBlockedByConfirmedValue,
   type QualificationAnalysis,
@@ -127,8 +126,9 @@ function suggestionRow(client: Client, item: QualificationAnalysis['suggestions'
 }
 
 function questionsBlock(analysis: QualificationAnalysis): string {
-  if (!analysis.missingQuestions.length) return '<p class="qualification-complete">No quedan preguntas prioritarias de calificación.</p>';
-  return `<section class="qualification-questions"><div><h4>Próximas preguntas</h4><p>Máximo tres, priorizadas por impacto comercial.</p></div><ol>${analysis.missingQuestions.map((question, index) => `<li${index === 0 ? ' data-next-question' : ''}>${escapeHtml(question)}</li>`).join('')}</ol><button type="button" class="secondary" data-copy-next-question>Copiar próxima pregunta</button></section>`;
+  if (!analysis.missingQuestions.length) return '<p class="qualification-complete">No queda una pregunta comercial prioritaria.</p>';
+  const question = analysis.missingQuestions[0] || '';
+  return `<section class="qualification-questions"><div><h4>Próxima pregunta</h4><p>Una sola pregunta, priorizada por impacto comercial.</p></div><p data-next-question>${escapeHtml(question)}</p><button type="button" class="secondary" data-copy-next-question>Copiar próxima pregunta</button></section>`;
 }
 
 function analysisBlock(client: Client, analysis: QualificationAnalysis): string {
@@ -141,11 +141,11 @@ function analysisBlock(client: Client, analysis: QualificationAnalysis): string 
       <div><span>Etapa sugerida</span><strong>${escapeHtml(stage?.value || 'Sin sugerencia')}</strong><small>${escapeHtml(stage?.evidence || 'Sin señales suficientes.')}</small></div>
       <div><span>Temperatura sugerida</span><strong>${escapeHtml(temperature?.value || 'Sin sugerencia')}</strong><small>${escapeHtml(temperature?.evidence || 'Sin señales suficientes.')}</small></div>
     </div>
-    ${analysis.visitWarning ? `<div class="qualification-visit-warning"><strong>${escapeHtml(analysis.visitWarning)}</strong><span>Falta: ${escapeHtml(analysis.visitMissingFields.join(', '))}</span></div>` : '<div class="qualification-visit-ready">El Lead tiene los datos mínimos observables para evaluar una visita.</div>'}
+    ${analysis.visitWarning ? `<div class="qualification-visit-warning"><strong>${escapeHtml(analysis.visitWarning)}</strong></div>` : '<div class="qualification-visit-ready">El Lead tiene señales suficientes para evaluar una visita.</div>'}
     <div class="lead-qualification-suggestions">${analysis.suggestions.map((item) => suggestionRow(client, item)).join('') || '<p class="empty-state">No se detectaron datos comerciales concretos.</p>'}</div>
     ${terminal ? '<label class="qualification-terminal-confirm"><input type="checkbox" data-confirm-terminal>Confirmo humanamente el estado terminal sugerido</label>' : ''}
     ${questionsBlock(analysis)}
-    <div class="lead-qualification-actions"><button type="button" data-apply-qualification>Aplicar calificación</button><small>Solo se guardan los campos aceptados. El texto analizado no se duplica en el historial.</small></div>
+    <div class="lead-qualification-actions"><button type="button" data-apply-qualification>Aplicar calificación</button><small>Solo se guardan los campos aceptados. La información detectada sigue siendo editable.</small></div>
   </div>`;
 }
 
@@ -177,9 +177,9 @@ export function renderLeadQualificationPanel(client: Client): string {
   const showTextarea = session.source !== 'conversation';
   const placeholder = session.source === 'notes_transcript'
     ? 'Pegá notas de una llamada, reunión o transcripción de audio.'
-    : 'Pegá el intercambio de WhatsApp. No hace falta ordenarlo.';
+    : 'Pegá el intercambio de WhatsApp. Si incluye nombres, se excluirán las preguntas del corredor.';
   return `<section class="lead-qualification-panel" data-qualification-client="${client.id}">
-    <header><div><span>Calificación supervisada</span><h3>Calificar automáticamente</h3><p>Detecta datos presentes y siempre requiere revisión antes de guardar.</p></div><button type="button" class="quiet-button" data-close-qualification>Cerrar</button></header>
+    <header><div><span>Calificación supervisada</span><h3>Calificar automáticamente</h3><p>Detecta solo la información comercial esencial y siempre requiere revisión antes de guardar.</p></div><button type="button" class="quiet-button" data-close-qualification>Cerrar</button></header>
     <div class="lead-qualification-source">
       <label>Fuente<select data-qualification-source>${sourceOptions(session, conversations)}</select></label>
       ${session.source === 'conversation' ? `<label>Conversación<select data-qualification-conversation>${conversationOptions(session, conversations)}</select></label>` : ''}
@@ -212,7 +212,7 @@ function reviewedSuggestions(panel: HTMLElement, analysis: QualificationAnalysis
   });
 }
 
-async function analyze(panel: HTMLElement, client: Client, session: QualificationSession, rerender: () => void): Promise<void> {
+async function analyze(client: Client, session: QualificationSession, rerender: () => void): Promise<void> {
   const text = sourceText(session);
   if (!text) {
     session.error = session.source === 'conversation'
@@ -269,7 +269,7 @@ export function bindLeadQualificationPanel(
     session.pastedText = (event.currentTarget as HTMLTextAreaElement).value;
   });
   panel.querySelector<HTMLButtonElement>('[data-analyze-qualification]')?.addEventListener('click', () => {
-    void analyze(panel, client, session, rerender);
+    void analyze(client, session, rerender);
   });
   panel.querySelector<HTMLButtonElement>('[data-copy-next-question]')?.addEventListener('click', async () => {
     const question = session.analysis?.missingQuestions[0];
@@ -293,10 +293,13 @@ export function bindLeadQualificationPanel(
     if (index === -1) return;
     state.crm.clients[index] = result.client;
     qualificationActivities(current.id, analysis, result).slice(1).forEach(addActivity);
-    session.info = result.appliedFields.length
-      ? `Se aplicaron ${result.appliedFields.length} campos confirmados.`
-      : 'No se aplicaron campos. Revisá las selecciones o los datos protegidos.';
-    if (result.blockedFields.length) session.info += ` Protegidos: ${result.blockedFields.map(qualificationFieldLabel).join(', ')}.`;
+    const alreadyConfirmed = analysis.suggestions.filter((item) => {
+      const currentValue = confirmedValue(current, item.field);
+      return Boolean(currentValue && sameValue(currentValue, item.value));
+    }).length;
+    const newCount = result.appliedFields.length;
+    const reviewRequired = result.reviewRequiredFields.length;
+    session.info = `${newCount} ${newCount === 1 ? 'dato nuevo guardado' : 'datos nuevos guardados'}; ${alreadyConfirmed} ${alreadyConfirmed === 1 ? 'dato ya estaba confirmado' : 'datos ya estaban confirmados'}; ${reviewRequired} ${reviewRequired === 1 ? 'dato requiere revisión' : 'datos requieren revisión'}.`;
     saveData(`Calificación aplicada: ${current.name}`);
     rerender();
   });

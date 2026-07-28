@@ -3,6 +3,19 @@ import { Client, Temperature } from './models.js';
 import { normalizePhone } from './phone-normalizer.js';
 
 const temperatures: Temperature[] = ['Caliente', 'Tibio', 'Frío'];
+const essentialKeys: Array<keyof Client> = [
+  'budget',
+  'currency',
+  'paymentMethod',
+  'creditPossible',
+  'creditApprovedAmount',
+  'zones',
+  'purpose',
+  'purchaseTimeframe',
+  'urgency',
+  'canMoveForward',
+  'knowsArea',
+];
 
 function clean(values: Record<string, string>, key: string): string {
   return (values[key] ?? '').trim();
@@ -28,6 +41,11 @@ function optional(value: string): string | undefined {
 function optionalNumber(value: string): number | undefined {
   const number = Number(value.trim());
   return Number.isFinite(number) && number > 0 ? number : undefined;
+}
+
+function essentialChanged(current: Client | null | undefined, next: Client): boolean {
+  if (!current) return essentialKeys.some((key) => String(next[key] ?? '').trim());
+  return essentialKeys.some((key) => String(current[key] ?? '').trim() !== String(next[key] ?? '').trim());
 }
 
 export function clientFromFormValues(id: number, values: Record<string, string>, current?: Client | null): Client {
@@ -58,10 +76,19 @@ export function clientFromFormValues(id: number, values: Record<string, string>,
     currency: optional(valueOrCurrent(values, 'currency', current ?? undefined)),
     needsFinancing: optional(valueOrCurrent(values, 'needsFinancing', current ?? undefined)),
     creditPossible: optional(valueOrCurrent(values, 'creditPossible', current ?? undefined)),
+    creditApprovedAmount: optional(valueOrCurrent(values, 'creditApprovedAmount', current ?? undefined)),
     urgency: optional(valueOrCurrent(values, 'urgency', current ?? undefined)),
+    garage: optional(valueOrCurrent(values, 'garage', current ?? undefined)),
+    patio: optional(valueOrCurrent(values, 'patio', current ?? undefined)),
+    pool: optional(valueOrCurrent(values, 'pool', current ?? undefined)),
+    requiresCreditReady: optional(valueOrCurrent(values, 'requiresCreditReady', current ?? undefined)),
+    features: optional(valueOrCurrent(values, 'features', current ?? undefined)),
+    preferences: optional(valueOrCurrent(values, 'preferences', current ?? undefined)),
+    qualificationUpdatedAt: current?.qualificationUpdatedAt,
     assignedToId: current?.assignedToId,
     createdById: current?.createdById,
   };
+  if (essentialChanged(current, client)) client.qualificationUpdatedAt = new Date().toISOString();
   return applyCommercialStage(client, client.pipeline);
 }
 

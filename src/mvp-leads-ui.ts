@@ -6,7 +6,6 @@ import {
   filterLeads,
   isTerminalClient,
   localIsoDate,
-  qualificationProgress,
   stageCounters,
   type LeadFilters,
 } from './lead-pipeline.js';
@@ -15,6 +14,12 @@ import {
   renderLeadQualificationPanel,
   requestLeadQualification,
 } from './lead-qualification-ui.js';
+import {
+  renderEssentialQualificationFields,
+  renderLeadCommercialSummary,
+  renderLeadSecondaryMeta,
+  renderSecondaryQualificationFields,
+} from './lead-essential-ui.js';
 import type { ActivityEntry, Client, CommercialStage, Temperature } from './models.js';
 import { findDuplicateClient, formatPhone, isPlausiblePhone } from './phone-normalizer.js';
 import { matchPropertiesForClient, type PropertyMatch } from './property-matching.js';
@@ -28,7 +33,7 @@ if (typeof document !== 'undefined' && !document.getElementById(qualificationSty
   const link = document.createElement('link');
   link.id = qualificationStyleId;
   link.rel = 'stylesheet';
-  link.href = '/src/lead-qualification.css?v=20260727-1';
+  link.href = '/src/lead-qualification.css?v=20260727-2';
   document.head.append(link);
 }
 
@@ -135,38 +140,16 @@ function formattedLeadDate(valueText: string | undefined): string {
   return Number.isNaN(date.getTime()) ? valueText : dateFormatter.format(date);
 }
 
-function budgetBlock(client: Client): string {
-  const budget = client.budget?.trim();
-  if (!budget) return '<strong>Sin definir</strong>';
-  const explicitCurrency = /\b(?:USD|ARS|US\$|d[oó]lares?|pesos?)\b/i.test(budget);
-  const text = explicitCurrency || !client.currency ? budget : `${client.currency} ${budget}`;
-  const warning = explicitCurrency || client.currency ? '' : '<small class="qualification-budget-warning">Moneda sin confirmar</small>';
-  return `<strong>${escapeHtml(text)}</strong>${warning}`;
-}
-
-function detectedSummary(client: Client): string {
-  const values = [
-    client.zones ? `Zona: ${client.zones}` : '',
-    client.propertyType ? `Tipo: ${client.propertyType}` : '',
-    client.bedrooms ? `${client.bedrooms} dormitorios` : '',
-    client.needsFinancing ? `Financiación: ${client.needsFinancing}` : '',
-    client.creditPossible ? `Crédito: ${client.creditPossible}` : '',
-  ].filter(Boolean);
-  return values.length ? `<div class="mvp-property-meta">${values.map((item) => `<span>${escapeHtml(item)}</span>`).join('')}</div>` : '';
-}
-
 function card(client: Client): string {
   const digits = client.phone.replace(/\D/g, '');
   const stage = commercialStage(client);
   const terminal = isTerminalClient(client);
-  const qualification = qualificationProgress(client);
-  const missing = qualification.missing.length ? `Falta: ${qualification.missing.slice(0, 3).join(', ')}` : 'Calificación completa';
   return `<article class="mvp-lead-card mvp-lead-card-with-matches${terminal ? ' terminal' : ''}">
     <div class="mvp-lead-card-main">
       <div class="mvp-lead-main-copy">
         <div class="mvp-lead-title-line">${tempIcon(client.temperature)}<h3>${escapeHtml(client.name)}</h3><span class="mvp-stage-badge${terminal ? ' terminal' : ''}">${escapeHtml(stage)}</span></div>
         <p>${client.interest ? `Busca ${escapeHtml(client.interest)}` : 'Sin interés definido'}</p>
-        ${detectedSummary(client)}
+        ${renderLeadSecondaryMeta(client)}
         <div class="mvp-lead-contact"><a class="mvp-contact-btn wa" href="https://wa.me/${digits}" target="_blank" rel="noopener noreferrer" title="WhatsApp · ${escapeHtml(formatPhone(client.phone))}" aria-label="Enviar WhatsApp">${appIcons.whatsapp}</a><a class="mvp-contact-btn call" href="tel:+${digits}" title="Llamar · ${escapeHtml(formatPhone(client.phone))}" aria-label="Llamar">${appIcons.phone}</a>${client.email ? `<a class="mvp-contact-btn mail" href="mailto:${escapeHtml(client.email)}" title="${escapeHtml(client.email)}" aria-label="Enviar email">${appIcons.mail}</a>` : `<span class="mvp-contact-btn mail" data-disabled title="Sin email cargado" aria-label="Sin email cargado">${appIcons.mail}</span>`}</div>
       </div>
       <div class="mvp-lead-actions"><button type="button" class="secondary mvp-auto-qualify-button" data-auto-qualify-client="${client.id}">Calificar automáticamente</button><button type="button" class="secondary mvp-icon-btn" data-edit-client="${client.id}" aria-controls="mvp-lead-form" title="Editar" aria-label="Editar ${escapeHtml(client.name)}">${appIcons.edit}</button><button type="button" class="delete mvp-icon-btn" data-delete="clients" data-id="${client.id}" title="Eliminar" aria-label="Eliminar ${escapeHtml(client.name)}">×</button></div>
@@ -176,13 +159,7 @@ function card(client: Client): string {
       <div><span>Fecha</span><strong>${terminal ? '—' : escapeHtml(formattedLeadDate(client.nextFollowUp))}</strong></div>
       <div><span>Responsable</span><strong>${escapeHtml(memberName(client.assignedToId))}</strong></div>
     </div>
-    <div class="mvp-lead-summary">
-      <div><span>Presupuesto</span>${budgetBlock(client)}</div>
-      <div><span>Forma de pago</span><strong>${summaryValue(client.paymentMethod)}</strong></div>
-      <div><span>Plazo</span><strong>${summaryValue(client.purchaseTimeframe)}</strong></div>
-      <div><span>Finalidad</span><strong>${summaryValue(client.purpose)}</strong></div>
-    </div>
-    <div class="mvp-qualification"><strong>Calificación ${qualification.completed}/${qualification.total}</strong><small>${escapeHtml(missing)}</small></div>
+    ${renderLeadCommercialSummary(client)}
     ${renderLeadQualificationPanel(client)}
     ${historyBlock(client)}
     ${matchesForLead(client)}
@@ -246,10 +223,6 @@ function stageOptions(current: CommercialStage): string {
   return COMMERCIAL_STAGES.map((stage) => `<option value="${stage}"${selected(current, stage)}>${stage}</option>`).join('');
 }
 
-function compactOptions(values: string[], current: string | undefined, emptyLabel = 'Sin definir'): string {
-  return [`<option value=""${current ? '' : ' selected'}>${emptyLabel}</option>`, ...values.map((option) => `<option value="${option}"${selected(current, option)}>${option}</option>`)].join('');
-}
-
 function leadForm(editing: Client | null): string {
   const stage = editing ? commercialStage(editing) : 'Nuevo';
   return `<form id="mvp-lead-form" class="mvp-lead-form ${state.openForms.client ? '' : 'collapsed'}">
@@ -258,23 +231,12 @@ function leadForm(editing: Client | null): string {
     <label>Número de WhatsApp<input name="phone" value="${value(editing, 'phone')}" inputmode="tel" required></label>
     <label>Email<input name="email" type="email" value="${value(editing, 'email')}" placeholder="cliente@correo.com"></label>
     <label>Temperatura<select name="temperature">${(['Caliente', 'Tibio', 'Frío'] as Temperature[]).map((temperature) => `<option value="${temperature}"${selected(editing?.temperature ?? 'Tibio', temperature)}>${temperature}</option>`).join('')}</select></label>
-    <label class="lead-form-wide">Lugar o propiedad de interés<input name="interest" value="${value(editing, 'interest')}" placeholder="Ej. Departamento de 2 dormitorios en General Paz, apto crédito" required></label>
-    <label>Presupuesto<input name="budget" value="${value(editing, 'budget')}" placeholder="Ej. USD 85.000"></label>
+    <label class="lead-form-wide">Lugar o propiedad de interés<input name="interest" value="${value(editing, 'interest')}" placeholder="Ej. Dúplex en Manantiales" required></label>
     <label>Etapa comercial<select name="pipeline" data-commercial-stage>${stageOptions(stage)}</select></label>
-    <label>Próxima acción<input name="nextAction" value="${value(editing, 'nextAction')}" placeholder="Ej. Confirmar fondos y coordinar visita"></label>
+    <label>Próxima acción<input name="nextAction" value="${value(editing, 'nextAction')}" placeholder="Ej. Confirmar entrega y financiación"></label>
     <label>Fecha del próximo seguimiento<input name="nextFollowUp" type="date" value="${value(editing, 'nextFollowUp')}"></label>
-    <details class="lead-form-more">
-      <summary>Completar calificación y notas</summary>
-      <div class="lead-form-more-grid">
-        <label>Forma de pago<select name="paymentMethod">${compactOptions(['Contado', 'Crédito hipotecario', 'Financiación', 'Mixto', 'A definir'], editing?.paymentMethod)}</select></label>
-        <label>Plazo estimado<select name="purchaseTimeframe">${compactOptions(['0-30 días', '1-3 meses', '3-6 meses', '6-12 meses', 'Más de 12 meses'], editing?.purchaseTimeframe)}</select></label>
-        <label>Finalidad<select name="purpose">${compactOptions(['Vivir', 'Invertir', 'Otra'], editing?.purpose)}</select></label>
-        <label>¿Conoce la zona?<select name="knowsArea">${compactOptions(['Sí', 'Parcialmente', 'No'], editing?.knowsArea)}</select></label>
-        <label>¿Puede avanzar económicamente?<select name="canMoveForward">${compactOptions(['Sí', 'Depende de vender', 'Depende de crédito', 'Todavía no'], editing?.canMoveForward)}</select></label>
-        <label class="lead-form-wide">Objeciones o condicionantes<textarea name="objections" placeholder="Ej. Necesita vender primero, escritura, crédito, ubicación específica">${value(editing, 'objections')}</textarea></label>
-        <label class="lead-form-wide">Notas internas<textarea name="notes" placeholder="Información comercial útil para el equipo">${value(editing, 'notes')}</textarea></label>
-      </div>
-    </details>
+    ${renderEssentialQualificationFields(editing)}
+    ${renderSecondaryQualificationFields(editing)}
     <div data-lead-error class="form-error" hidden></div>
     <button type="submit">${editing ? 'Guardar cambios' : 'Guardar lead'}</button>
   </form>`;
@@ -327,7 +289,7 @@ function bindFilters(container: HTMLElement): void {
 export function renderMvpLeads(container: HTMLElement): void {
   const editing = visibleClients().find((client) => client.id === state.editingClientId) ?? null;
   const leads = leadRows();
-  container.innerHTML = `<div class="mvp-page-heading"><div><h1>Leads</h1><p>Calificá, definí la próxima acción y avanzá cada oportunidad sin duplicar seguimientos.</p></div><button type="button" data-toggle="client-form">Nuevo lead</button></div>${leadForm(editing)}${filterPanel()}<div id="mvp-lead-results" class="mvp-lead-list">${leads.map(card).join('') || '<p class="empty-state">No hay leads para mostrar con estos filtros.</p>'}</div>`;
+  container.innerHTML = `<div class="mvp-page-heading"><div><h1>Leads</h1><p>Calificá lo esencial, definí la próxima acción y avanzá cada oportunidad sin interrogatorios.</p></div><button type="button" data-toggle="client-form">Nuevo lead</button></div>${leadForm(editing)}${filterPanel()}<div id="mvp-lead-results" class="mvp-lead-list">${leads.map(card).join('') || '<p class="empty-state">No hay leads para mostrar con estos filtros.</p>'}</div>`;
 
   bindFilters(container);
   bindLeadCardActions(container);
