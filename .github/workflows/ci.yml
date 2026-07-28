@@ -27,11 +27,12 @@ jobs:
         id: functional
         run: |
           python scripts/b1-2-2-functional-close.py
+          python scripts/b1-2-2-screenshot-order.py
           git config user.name "PropControl CI"
           git config user.email "actions@users.noreply.github.com"
           git add src/tests/b1-2-2-mobile-leads-real-app.test.ts
           if ! git diff --cached --quiet; then
-            git commit -m "Validar geometría y capturas reales B1.2.2"
+            git commit -m "Separar capturas base y panel B1.2.2"
             git push origin HEAD:agent/b1-2-2-mobile-leads-critical-fix
           fi
           echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
