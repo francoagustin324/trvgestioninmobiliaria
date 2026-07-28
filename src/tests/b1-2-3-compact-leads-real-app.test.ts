@@ -359,6 +359,7 @@ async function assertClosedLayout(page: Page, viewport: { width: number; height:
   if (viewport.width === 390) {
     const fullLeadHeight = metrics.heights[0] || 0;
     assert.ok(fullLeadHeight >= 320 && fullLeadHeight <= 450, `Tarjeta cerrada fuera de 320-450px: ${fullLeadHeight}`);
+    console.log(`B1.2.3 altura tarjeta cerrada 390: ${fullLeadHeight.toFixed(2)}px`);
   }
   return metrics.heights;
 }
@@ -370,11 +371,13 @@ async function assertSingleExpandedAndPersistent(page: Page): Promise<void> {
   await sheets.nth(1).locator(':scope > summary').click();
   assert.equal(await page.locator('#crm .mvp-lead-full-sheet[open]').count(), 1);
   const selectedClient = await page.locator('#crm .mvp-lead-full-sheet[open]').getAttribute('data-lead-full-sheet');
+  await page.locator('#crm .mvp-lead-more-filters').evaluate((details: HTMLDetailsElement) => { details.open = true; });
   const order = page.locator('#mvp-lead-order');
   await order.selectOption('name');
   await page.waitForTimeout(100);
   assert.equal(await page.locator('#crm .mvp-lead-full-sheet[open]').count(), 1);
   assert.equal(await page.locator('#crm .mvp-lead-full-sheet[open]').getAttribute('data-lead-full-sheet'), selectedClient);
+  await page.locator('#crm .mvp-lead-more-filters').evaluate((details: HTMLDetailsElement) => { details.open = true; });
   await page.locator('#mvp-lead-order').selectOption('priority');
 }
 
