@@ -1,6 +1,8 @@
 name: TRV CI
 
 on:
+  pull_request:
+    branches: [main]
   push:
     branches: [agent/b1-2-3-leads-compact-priority]
   workflow_dispatch:
