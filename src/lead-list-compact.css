@@ -1,5 +1,10 @@
 /* B1.2.3 — Responsive exclusivo de la lista compacta de Leads. */
 
+#crm .mvp-lead-compact-card:has(.mvp-lead-followup-menu[open]) {
+  position: relative;
+  z-index: 140;
+}
+
 #crm .mvp-lead-followup-menu[open] {
   z-index: 130;
 }
