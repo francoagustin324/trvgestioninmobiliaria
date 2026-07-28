@@ -1,16 +1,17 @@
 /* B1.2.3 — Responsive exclusivo de la lista compacta de Leads. */
 
-#crm .mvp-lead-compact-card:has(.mvp-lead-followup-menu[open]) {
-  position: relative;
-  z-index: 140;
+#crm .mvp-lead-next-action:has(.mvp-lead-followup-menu[open]) {
+  grid-template-columns: 1fr;
 }
 
 #crm .mvp-lead-followup-menu[open] {
-  z-index: 130;
+  display: grid;
+  width: 100%;
+  gap: 7px;
 }
 
-#crm .mvp-lead-followup-menu[open] > .mvp-lead-followup-popover {
-  z-index: 131;
+#crm .mvp-lead-followup-menu[open] > summary {
+  justify-self: end;
 }
 
 #crm .mvp-lead-followup-menu:not([open]) > .mvp-lead-followup-popover,
@@ -238,11 +239,9 @@
   }
 
   #crm .mvp-lead-followup-popover {
-    position: absolute;
-    top: calc(100% + 6px);
-    right: 0;
-    bottom: auto;
-    width: min(300px, calc(100vw - 32px));
+    position: static;
+    width: 100%;
+    box-shadow: none;
   }
 
   #crm .mvp-lead-followup-popover form {
