@@ -21,6 +21,14 @@ export interface CompactLeadCardContext {
   matches: string;
 }
 
+interface LeadFact {
+  key: 'budget' | 'payment' | 'timeframe';
+  label: string;
+  missingLabel: string;
+  value: string;
+  missing: boolean;
+}
+
 function text(value: string | undefined, fallback = 'No confirmado'): string {
   return escapeHtml(value?.trim() || fallback);
 }
@@ -101,6 +109,49 @@ function fullSheet(client: Client, context: CompactLeadCardContext): string {
   </details>`;
 }
 
+function commercialFacts(client: Client): LeadFact[] {
+  return [
+    {
+      key: 'budget',
+      label: 'Presupuesto',
+      missingLabel: 'presupuesto',
+      value: compactBudget(client),
+      missing: !client.budget?.trim(),
+    },
+    {
+      key: 'payment',
+      label: 'Pago / crédito',
+      missingLabel: 'forma de pago',
+      value: compactPayment(client),
+      missing: !client.paymentMethod?.trim(),
+    },
+    {
+      key: 'timeframe',
+      label: 'Plazo / urgencia',
+      missingLabel: 'plazo',
+      value: compactTimeframe(client),
+      missing: !client.purchaseTimeframe?.trim() && !client.urgency?.trim(),
+    },
+  ];
+}
+
+function joinedMissingLabels(labels: string[]): string {
+  if (labels.length <= 1) return labels[0] ?? '';
+  if (labels.length === 2) return `${labels[0]} y ${labels[1]}`;
+  return `${labels.slice(0, -1).join(', ')} y ${labels.at(-1)}`;
+}
+
+function renderCommercialFacts(client: Client): string {
+  const facts = commercialFacts(client);
+  const missing = facts.filter((fact) => fact.missing);
+  const shownFacts = missing.length >= 2 ? facts.filter((fact) => !fact.missing) : facts;
+  const summary = missing.length >= 2
+    ? `<div class="mvp-lead-missing-summary" role="note"><strong>Faltan ${escapeHtml(joinedMissingLabels(missing.map((fact) => fact.missingLabel)))}</strong><span>Confirmalos para completar la calificación comercial.</span></div>`
+    : '';
+  const blocks = shownFacts.map((fact) => `<div class="mvp-lead-fact" data-lead-fact="${fact.key}"><span>${fact.label}</span><strong>${escapeHtml(fact.value)}</strong></div>`).join('');
+  return `<div class="mvp-lead-compact-facts${missing.length >= 2 ? ' has-missing-summary' : ''}">${summary}${blocks}</div>`;
+}
+
 export function renderCompactLeadCard(client: Client, context: CompactLeadCardContext): string {
   const stage = commercialStage(client);
   const terminal = isTerminalClient(client);
@@ -112,11 +163,7 @@ export function renderCompactLeadCard(client: Client, context: CompactLeadCardCo
       <div class="mvp-lead-alert tone-${alert.tone}" data-lead-alert-rank="${alert.rank}">${escapeHtml(alert.label)}</div>
     </header>
     <p class="mvp-lead-interest">${client.interest ? escapeHtml(client.interest) : 'Sin búsqueda definida'}</p>
-    <div class="mvp-lead-compact-facts">
-      <div><span>Presupuesto</span><strong>${escapeHtml(compactBudget(client))}</strong></div>
-      <div><span>Pago / crédito</span><strong>${escapeHtml(compactPayment(client))}</strong></div>
-      <div><span>Plazo / urgencia</span><strong>${escapeHtml(compactTimeframe(client))}</strong></div>
-    </div>
+    ${renderCommercialFacts(client)}
     <div class="mvp-lead-next-action state-${followUp.state}">
       <div><span>Próxima acción</span><strong>${escapeHtml(followUp.action)}</strong>${followUp.dateLabel ? `<small>${escapeHtml(followUp.dateLabel)}</small>` : ''}</div>
       ${followUpMenu(client)}
