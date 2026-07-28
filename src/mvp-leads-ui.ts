@@ -233,7 +233,7 @@ function card(client: Client): string {
   </article>`;
 }
 
-function focusLeadFormfunction focusLeadForm(container: HTMLElement): void {
+function focusLeadForm(container: HTMLElement): void {
   window.requestAnimationFrame(() => {
     const form = container.querySelector<HTMLFormElement>('#mvp-lead-form:not(.collapsed)');
     if (!form) return;
@@ -322,7 +322,7 @@ function updateLeadResults(container: HTMLElement): void {
   bindLeadCardActions(container);
 }
 
-function stageOptionsfunction stageOptions(current: CommercialStage): string {
+function stageOptions(current: CommercialStage): string {
   return COMMERCIAL_STAGES.map((stage) => `<option value="${stage}"${selected(current, stage)}>${stage}</option>`).join('');
 }
 
@@ -446,7 +446,7 @@ function bindFilters(container: HTMLElement): void {
   bindPipelineScroll(container);
 }
 
-export function renderMvpLeadsexport function renderMvpLeads(container: HTMLElement): void {
+export function renderMvpLeads(container: HTMLElement): void {
   const editing = visibleClients().find((client) => client.id === state.editingClientId) ?? null;
   const leads = leadRows();
   container.innerHTML = `<div class="mvp-page-heading"><div><h1>Leads</h1><p>Calificá lo esencial, definí la próxima acción y avanzá cada oportunidad sin interrogatorios.</p></div><button type="button" data-toggle="client-form">Nuevo lead</button></div>${leadForm(editing)}${filterPanel()}<div id="mvp-lead-results" class="mvp-lead-list">${leads.map(card).join('') || '<p class="empty-state">No hay leads para mostrar con estos filtros.</p>'}</div>`;
