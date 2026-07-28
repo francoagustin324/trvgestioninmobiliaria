@@ -72,15 +72,16 @@ test('conserva invitación, cambio de rol y acceso sin ejecutar acciones en prue
   assert.ok(ui.includes('if (!canManage || !getCloudSession()) return'));
   assert.ok(ui.includes('void updateTeamMemberAccess(id, { role: select.value'));
   assert.ok(ui.includes('void updateTeamMemberAccess(id, { status })'));
-  assert.ok(ui.includes("Ya existe un usuario con ese correo."));
-  assert.ok(ui.includes("Ingresá para invitar"));
+  assert.ok(ui.includes('Ya existe un usuario con ese correo.'));
+  assert.ok(ui.includes('Ingresá para invitar'));
   assert.equal(css.includes('inviteTeamMember'), false);
   assert.equal(css.includes('updateTeamMemberAccess'), false);
 });
 
 test('respeta navegación inferior, safe area y última tarjeta accesible', () => {
   assert.ok(css.includes('scroll-margin-bottom: calc(var(--pc-mobile-nav-height, 76px) + 24px + env(safe-area-inset-bottom))'));
-  assert.ok(shellCss.includes('padding: 12px 14px calc(var(--pc-mobile-nav-height) + 40px + env(safe-area-inset-bottom))'));
+  assert.ok(shellCss.includes('--pc-mobile-nav-clearance: calc(var(--pc-mobile-nav-height) + var(--pc-mobile-nav-edge) + 56px + env(safe-area-inset-bottom))'));
+  assert.ok(shellCss.includes('padding: 12px 14px var(--pc-mobile-nav-clearance)'));
   assert.ok(shellCss.includes('grid-template-columns: repeat(5, minmax(0, 1fr))'));
   assert.equal(css.includes('.mobile-bottom-nav {'), false);
   assert.equal(css.includes('.mvp-content {'), false);
