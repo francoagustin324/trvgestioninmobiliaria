@@ -365,9 +365,9 @@ async function assertClosedLayout(page: Page, viewport: { width: number; height:
 
 async function assertSingleExpandedAndPersistent(page: Page): Promise<void> {
   const sheets = page.locator('#crm .mvp-lead-full-sheet');
-  await sheets.nth(0).locator('summary').click();
+  await sheets.nth(0).locator(':scope > summary').click();
   assert.equal(await page.locator('#crm .mvp-lead-full-sheet[open]').count(), 1);
-  await sheets.nth(1).locator('summary').click();
+  await sheets.nth(1).locator(':scope > summary').click();
   assert.equal(await page.locator('#crm .mvp-lead-full-sheet[open]').count(), 1);
   const selectedClient = await page.locator('#crm .mvp-lead-full-sheet[open]').getAttribute('data-lead-full-sheet');
   const order = page.locator('#mvp-lead-order');
