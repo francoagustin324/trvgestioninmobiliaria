@@ -83,7 +83,8 @@ test('mantiene alcance móvil, dos columnas en 720 px y una columna en teléfono
 
 test('respeta la navegación inferior y safe area sin modificar la capa global', () => {
   assert.ok(css.includes('scroll-margin-bottom: calc(var(--pc-mobile-nav-height, 76px) + 24px + env(safe-area-inset-bottom))'));
-  assert.ok(shellCss.includes('padding: 12px 14px calc(var(--pc-mobile-nav-height) + 40px + env(safe-area-inset-bottom))'));
+  assert.ok(shellCss.includes('--pc-mobile-nav-clearance: calc(var(--pc-mobile-nav-height) + var(--pc-mobile-nav-edge) + 56px + env(safe-area-inset-bottom))'));
+  assert.ok(shellCss.includes('padding: 12px 14px var(--pc-mobile-nav-clearance)'));
   assert.ok(shellCss.includes('grid-template-columns: repeat(5, minmax(0, 1fr))'));
   assert.equal(css.includes('.mobile-bottom-nav {'), false);
   assert.equal(css.includes('.mvp-content {'), false);
