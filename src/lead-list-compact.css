@@ -279,3 +279,10 @@
     flex-basis: 100%;
   }
 }
+
+@media (max-width: 380px) {
+  #crm .mvp-lead-quick-actions .mvp-auto-qualify-button {
+    width: 100%;
+    flex-basis: 100%;
+  }
+}
