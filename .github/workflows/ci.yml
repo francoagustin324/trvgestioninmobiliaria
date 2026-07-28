@@ -5,10 +5,9 @@ on:
     branches: [main]
   push:
     branches: [main]
+  schedule:
+    - cron: "0 10 * * *"
   workflow_dispatch:
-
-permissions:
-  contents: write
 
 concurrency:
   group: trv-ci-${{ github.ref }}
@@ -21,51 +20,25 @@ jobs:
       PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
     steps:
       - uses: actions/checkout@v4
-        with:
-          ref: agent/b1-2-2-mobile-leads-critical-fix
-      - name: Ajustar tolerancia subpíxel
-        run: |
-          python - <<'PY'
-          from pathlib import Path
-          path = Path('src/tests/b1-2-2-mobile-leads-real-app.test.ts')
-          text = path.read_text()
-          old = '  assert.equal(metrics.counter.scrollLeft, 0);'
-          new = "  assert.ok(metrics.counter.scrollLeft >= 0 && metrics.counter.scrollLeft <= 1, `Desplazamiento inicial inesperado en ${viewport.width}px: ${metrics.counter.scrollLeft}`);"
-          if old not in text:
-              raise SystemExit('No se encontró la aserción de scrollLeft esperada.')
-          path.write_text(text.replace(old, new, 1))
-          PY
-          git config user.name "PropControl CI"
-          git config user.email "actions@users.noreply.github.com"
-          git add src/tests/b1-2-2-mobile-leads-real-app.test.ts
-          git commit -m "Aceptar redondeo subpíxel del pipeline B1.2.2"
-          git push origin HEAD:agent/b1-2-2-mobile-leads-critical-fix
       - uses: actions/setup-node@v4
         with:
           node-version: 22
       - name: Instalar dependencias
         run: npm install --silent
       - name: Compilar TypeScript
-        run: npm run build --silent
-      - name: Ejecutar prueba visual aislada
+        id: build
         run: |
           set +e
-          node --test --test-concurrency=1 dist/tests/b1-2-2-mobile-leads-real-app.test.js > b1-2-2-isolated.log 2>&1
+          npm run build --silent > build.log 2>&1
           code=$?
-          cat b1-2-2-isolated.log
+          cat build.log
           exit $code
-      - name: Guardar diagnóstico visual aislado
+      - name: Guardar diagnóstico de compilación
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: b1-2-2-isolated-diagnostics
-          path: b1-2-2-isolated.log
+          name: build-diagnostics
+          path: build.log
           retention-days: 1
-      - name: Guardar screenshots completos
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: b1-2-2-mobile-leads-screenshots
-          path: artifacts/b1-2-2-mobile-leads/*.png
-          if-no-files-found: ignore
-          retention-days: 7
+      - name: Ejecutar pruebas
+        run: npm test --silent
