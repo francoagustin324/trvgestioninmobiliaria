@@ -6,11 +6,14 @@ const html = readFileSync('index.html', 'utf8');
 const css = readFileSync('src/mobile-leads-polish.css', 'utf8');
 const layoutCss = readFileSync('src/mobile-layout-fix.css', 'utf8');
 const leads = readFileSync('src/mvp-leads-ui.ts', 'utf8');
+const compactCss = readFileSync('src/lead-list-compact.css', 'utf8');
+const compactCard = readFileSync('src/lead-card-compact-ui.ts', 'utf8');
 
 test('carga el pulido de Leads después de la navegación móvil y de la calificación', () => {
   assert.ok(html.includes('/src/mobile-leads-polish.css?v=20260728-1'));
   assert.ok(html.indexOf('mobile-leads-polish.css') > html.indexOf('mobile-bottom-nav.css'));
   assert.ok(html.indexOf('mobile-leads-polish.css') > html.indexOf('lead-qualification.css'));
+  assert.ok(html.indexOf('lead-list-compact.css') > html.indexOf('mobile-leads-polish.css'));
 });
 
 test('consolida una única fuente móvil para el DOM vigente de Leads', () => {
@@ -33,8 +36,9 @@ test('mantiene accesibles contactos y separa acción principal de acciones secun
   assert.ok(css.includes('#crm .mvp-lead-secondary-actions .mvp-icon-btn'));
   assert.ok(css.includes('#crm .mvp-auto-qualify-button'));
   assert.ok(css.includes('min-height: 44px'));
-  assert.ok(leads.includes('class="mvp-lead-primary-action"'));
-  assert.ok(leads.includes('class="mvp-lead-actions mvp-lead-secondary-actions"'));
+  assert.ok(compactCard.includes('class="mvp-lead-quick-actions"'));
+  assert.ok(compactCard.includes('class="mvp-lead-full-actions"'));
+  assert.ok(compactCss.includes('.mvp-lead-full-sheet:not([open])'));
   assert.equal(css.includes('.mvp-contact-btn { display: none'), false);
   assert.equal(css.includes('.mvp-lead-secondary-actions { display: none'), false);
 });
@@ -50,7 +54,7 @@ test('protege nombres e intereses de cortes carácter por carácter', () => {
 });
 
 test('no incorpora frameworks ni afecta datos o seguridad', () => {
-  const source = `${html}\n${css}\n${leads}`.toLowerCase();
+  const source = `${html}\n${css}\n${compactCss}\n${leads}\n${compactCard}`.toLowerCase();
   assert.equal(source.includes('react'), false);
   assert.equal(source.includes('tailwind'), false);
   assert.equal(source.includes('service_role'), false);

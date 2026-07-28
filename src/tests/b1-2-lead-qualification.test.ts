@@ -269,6 +269,6 @@ test('Leads y Conversaciones conservan visibilidad vigente y acceso supervisado'
   const conversations = readFileSync('src/mvp-conversations-ui.ts', 'utf8');
   assert.match(leads, /visibleClients\(\)/);
   assert.match(conversations, /visibleConversations\(\)/);
-  assert.match(leads, /Calificar automáticamente/);
+  assert.match(readFileSync('src/lead-card-compact-ui.ts', 'utf8'), /Calificar automáticamente/);
   assert.match(conversations, /Calificar Lead/);
 });

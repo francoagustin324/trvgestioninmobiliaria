@@ -237,7 +237,7 @@ test('campos esenciales y secundarios persisten en payload cloud', () => {
 test('la interfaz usa estado comercial simple y mensaje posterior legible', () => {
   const leads = readFileSync('src/mvp-leads-ui.ts', 'utf8');
   const qualificationUi = readFileSync('src/lead-qualification-ui.ts', 'utf8');
-  assert.match(leads, /renderLeadCommercialSummary/);
+  assert.match(leads, /renderCompactLeadCard/);
   assert.doesNotMatch(leads, /Calificación \$\{qualification\.completed\}\/\$\{qualification\.total\}/);
   assert.match(qualificationUi, /datos nuevos guardados/);
   assert.match(qualificationUi, /ya estaban confirmados/);
