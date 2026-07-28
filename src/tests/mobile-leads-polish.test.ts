@@ -33,8 +33,9 @@ test('mantiene accesibles contactos y separa acción principal de acciones secun
   assert.ok(css.includes('#crm .mvp-lead-secondary-actions .mvp-icon-btn'));
   assert.ok(css.includes('#crm .mvp-auto-qualify-button'));
   assert.ok(css.includes('min-height: 44px'));
-  assert.ok(leads.includes('class="mvp-lead-primary-action"'));
-  assert.ok(leads.includes('class="mvp-lead-actions mvp-lead-secondary-actions"'));
+  assert.ok(leads.includes('class="mvp-lead-quick-row"'));
+  assert.ok(leads.includes('class="mvp-lead-card-menu"'));
+  assert.ok(leads.includes('class="secondary mvp-lead-toggle"'));
   assert.equal(css.includes('.mvp-contact-btn { display: none'), false);
   assert.equal(css.includes('.mvp-lead-secondary-actions { display: none'), false);
 });
