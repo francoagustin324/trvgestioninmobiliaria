@@ -2,36 +2,70 @@ from pathlib import Path
 
 css_path = Path('src/lead-list-compact.css')
 css = css_path.read_text()
-old_css = """  #crm .mvp-lead-followup-popover {
+stacking_rules = """#crm .mvp-lead-compact-card:has(.mvp-lead-followup-menu[open]) {
+  position: relative;
+  z-index: 140;
+}
+
+#crm .mvp-lead-followup-menu[open] {
+  z-index: 130;
+}
+
+#crm .mvp-lead-followup-menu[open] > .mvp-lead-followup-popover {
+  z-index: 131;
+}
+
+"""
+inline_rules = """#crm .mvp-lead-next-action:has(.mvp-lead-followup-menu[open]) {
+  grid-template-columns: 1fr;
+}
+
+#crm .mvp-lead-followup-menu[open] {
+  display: grid;
+  width: 100%;
+  gap: 7px;
+}
+
+#crm .mvp-lead-followup-menu[open] > summary {
+  justify-self: end;
+}
+
+"""
+if inline_rules not in css:
+    if stacking_rules in css:
+        css = css.replace(stacking_rules, inline_rules, 1)
+    else:
+        marker = "#crm .mvp-lead-followup-menu:not([open]) > .mvp-lead-followup-popover,"
+        if marker not in css:
+            raise SystemExit('No se encontró el marcador del menú de seguimiento.')
+        css = css.replace(marker, inline_rules + marker, 1)
+
+fixed_css = """  #crm .mvp-lead-followup-popover {
     position: fixed;
     right: 12px;
     bottom: calc(var(--pc-mobile-nav-clearance,120px) - 18px);
     top: auto;
     width: calc(100vw - 24px);
   }"""
-new_css = """  #crm .mvp-lead-followup-popover {
+absolute_css = """  #crm .mvp-lead-followup-popover {
     position: absolute;
     top: calc(100% + 6px);
     right: 0;
     bottom: auto;
     width: min(300px, calc(100vw - 32px));
   }"""
-if new_css not in css:
-    if old_css not in css:
+inline_css = """  #crm .mvp-lead-followup-popover {
+    position: static;
+    width: 100%;
+    box-shadow: none;
+  }"""
+if inline_css not in css:
+    if absolute_css in css:
+        css = css.replace(absolute_css, inline_css, 1)
+    elif fixed_css in css:
+        css = css.replace(fixed_css, inline_css, 1)
+    else:
         raise SystemExit('No se encontró el posicionamiento móvil del seguimiento.')
-    css = css.replace(old_css, new_css, 1)
-
-card_rule = """#crm .mvp-lead-compact-card:has(.mvp-lead-followup-menu[open]) {
-  position: relative;
-  z-index: 140;
-}
-
-"""
-marker = "#crm .mvp-lead-followup-menu[open] {"
-if card_rule not in css:
-    if marker not in css:
-        raise SystemExit('No se encontró el marcador del menú abierto.')
-    css = css.replace(marker, card_rule + marker, 1)
 css_path.write_text(css)
 
 ui_path = Path('src/mvp-leads-ui.ts')
