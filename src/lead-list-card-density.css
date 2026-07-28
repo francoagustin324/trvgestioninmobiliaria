@@ -1,0 +1,17 @@
+/* B1.2.4 — Ajustes finales de densidad sin alterar contenido ni comportamiento. */
+
+@media (min-width: 901px) {
+  #crm .mvp-lead-full-sheet > summary {
+    min-height: 44px;
+  }
+}
+
+@media (min-width: 381px) and (max-width: 520px) {
+  #crm .mvp-lead-compact-facts:not(.has-missing-summary) {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  #crm .mvp-lead-compact-facts:not(.has-missing-summary) > .mvp-lead-fact:last-child:nth-child(odd) {
+    grid-column: auto;
+  }
+}
