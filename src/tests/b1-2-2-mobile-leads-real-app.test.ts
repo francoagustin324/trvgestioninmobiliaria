@@ -444,7 +444,9 @@ async function assertBaseLayout(page: Page, viewport: { width: number; height: n
       bodyScrollWidth: document.body.scrollWidth,
       cards: cards.map((card) => {
         const rect = card.getBoundingClientRect();
-        const buttons = [...card.querySelectorAll<HTMLElement>('button, a.mvp-contact-btn')].map((control) => {
+        const buttons = [...card.querySelectorAll<HTMLElement>('button, a.mvp-contact-btn')]
+          .filter((control) => control.getClientRects().length > 0)
+          .map((control) => {
           const controlRect = control.getBoundingClientRect();
           return {
             text: control.textContent?.trim() || control.getAttribute('aria-label') || '',
