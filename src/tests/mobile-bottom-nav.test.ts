@@ -17,7 +17,7 @@ function mobileModuleIds(): string[] {
 }
 
 test('carga el ajuste móvil después del skin visual principal', () => {
-  assert.ok(html.includes('/src/mobile-bottom-nav.css?v=20260723-2'));
+  assert.ok(html.includes('/src/mobile-bottom-nav.css?v=20260728-1'));
   assert.ok(html.indexOf('mobile-bottom-nav.css') > html.indexOf('liquid-glass-skin.css'));
 });
 
@@ -60,7 +60,9 @@ test('en teléfono mantiene una fila, ancho seguro y espacio inferior suficiente
   assert.ok(css.includes('grid-template-columns: repeat(5, minmax(0, 1fr))'));
   assert.ok(css.includes('right: var(--pc-mobile-nav-edge)'));
   assert.ok(css.includes('left: var(--pc-mobile-nav-edge)'));
-  assert.ok(css.includes('padding: 12px 14px calc(var(--pc-mobile-nav-height) + 40px + env(safe-area-inset-bottom))'));
+  assert.ok(css.includes('--pc-mobile-nav-clearance: calc(var(--pc-mobile-nav-height) + var(--pc-mobile-nav-edge) + 56px + env(safe-area-inset-bottom))'));
+  assert.ok(css.includes('padding: 12px 14px var(--pc-mobile-nav-clearance)'));
+  assert.ok(css.includes('scroll-padding-bottom: var(--pc-mobile-nav-clearance)'));
   assert.ok(css.includes('padding: 7px 7px calc(7px + env(safe-area-inset-bottom))'));
   assert.ok(css.includes('overflow: hidden'));
   assert.ok(css.includes('min-width: 0'));
