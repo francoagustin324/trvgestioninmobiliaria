@@ -26,6 +26,7 @@ import type { ActivityEntry, Client, CommercialStage, Temperature } from './mode
 import { followUpDisplay, primaryLeadAlert, readableResponsible, relativeCommercialDate, sortLeads, type LeadSort } from './lead-list-priority.js';
 import { followUpDisplay, primaryLeadAlert, readableResponsible, relativeCommercialDate, sortLeads, type LeadSort } from './lead-list-priority.js';
 import { followUpDisplay, primaryLeadAlert, readableResponsible, relativeCommercialDate, sortLeads, type LeadSort } from './lead-list-priority.js';
+import { followUpDisplay, primaryLeadAlert, readableResponsible, relativeCommercialDate, sortLeads, type LeadSort } from './lead-list-priority.js';
 import { findDuplicateClient, formatPhone, isPlausiblePhone } from './phone-normalizer.js';
 import { matchPropertiesForClient, type PropertyMatch } from './property-matching.js';
 import { saveData, state } from './store.js';
@@ -142,6 +143,25 @@ function formattedLeadDate(valueText: string | undefined): string {
   if (!valueText) return 'Sin fecha';
   const date = new Date(`${valueText}T12:00:00Z`);
   return Number.isNaN(date.getTime()) ? valueText : dateFormatter.format(date);
+}
+
+function expandedDetails(client: Client): string {
+  const updated = client.qualificationUpdatedAt ? new Date(client.qualificationUpdatedAt) : null;
+  const updatedText = updated && !Number.isNaN(updated.getTime()) ? activityFormatter.format(updated) : 'Sin fecha registrada';
+  const responsible = readableResponsible(client, state.crm.teamMembers, state.crm.settings.profileName, state.crm.settings.profileEmail);
+  const optional = [
+    ['Zona', client.zones], ['Finalidad', client.purpose], ['Puede avanzar', client.canMoveForward],
+    ['Conoce la zona', client.knowsArea], ['Crédito', client.creditPossible], ['Monto aprobado', client.creditApprovedAmount],
+    ['Preferencias', client.preferences], ['Características', client.features], ['Objeciones', client.objections], ['Notas', client.notes],
+  ].filter(([, item]) => String(item || '').trim());
+  return `<div class="compact-lead-expanded" data-lead-expanded="${client.id}"${expandedClientId === client.id ? '' : ' hidden'}>
+    ${renderLeadSecondaryMeta(client)}
+    <div class="compact-detail-grid">${optional.map(([label, item]) => `<div><span>${escapeHtml(String(label))}</span><strong>${escapeHtml(String(item))}</strong></div>`).join('') || '<p>Sin información adicional cargada.</p>'}<div><span>Responsable</span><strong>${escapeHtml(responsible)}</strong></div><div><span>Última actualización</span><strong>${escapeHtml(updatedText)}</strong></div></div>
+    ${renderLeadCommercialSummary(client)}
+    ${historyBlock(client)}
+    ${matchesForLead(client)}
+    <p class="mvp-match-empty">Evolución futura: las propiedades compatibles podrán marcarse como Enviar, Ya enviada, Le interesó, No le interesó o Quiere visita sin improvisar persistencia en esta fase.</p>
+  </div>`;
 }
 
 function expandedDetails(client: Client): string {
@@ -332,6 +352,39 @@ function bindLeadCardActions(container: HTMLElement): void {
       renderMvpLeads(container);
     });
   });
+  container.querySelectorAll<HTMLButtonElement>('[data-toggle-lead-details]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const clientId = Number(button.dataset.toggleLeadDetails);
+      expandedClientId = expandedClientId === clientId ? null : clientId;
+      renderMvpLeads(container);
+      if (expandedClientId) window.requestAnimationFrame(() => container.querySelector(`[data-client-id="${expandedClientId}"]`)?.scrollIntoView({ block: 'nearest' }));
+    });
+  });
+  container.querySelectorAll<HTMLButtonElement>('[data-complete-followup]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const clientId = Number(button.dataset.completeFollowup);
+      const client = visibleClients().find((item) => item.id === clientId);
+      if (!client) return;
+      const completed = completeClientFollowUp(client);
+      state.crm.clients = upsertClient(state.crm.clients, completed.client);
+      addActivity(completed.activity);
+      saveData(`Seguimiento completado: ${client.name}`);
+      renderMvpLeads(container);
+    });
+  });
+  container.querySelectorAll<HTMLButtonElement>('[data-reprogram-followup]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const clientId = Number(button.dataset.reprogramFollowup);
+      const client = visibleClients().find((item) => item.id === clientId);
+      const input = container.querySelector<HTMLInputElement>(`[data-reprogram-date="${clientId}"]`);
+      if (!client || !input?.value) return;
+      const reprogrammed = reprogramClientFollowUp(client, input.value);
+      state.crm.clients = upsertClient(state.crm.clients, reprogrammed.client);
+      addActivity(reprogrammed.activity);
+      saveData(`Seguimiento reprogramado: ${client.name}`);
+      renderMvpLeads(container);
+    });
+  });
   container.querySelectorAll<HTMLButtonElement>('[data-edit-client]').forEach((button) => {
     button.addEventListener('click', (event) => {
       event.stopPropagation();
@@ -410,6 +463,8 @@ function activeSecondaryFilters(): string[] {
   if (filters.order !== 'priority') active.push(`Orden: ${filters.order}`);
   if (filters.assignedTo !== 'Todos') active.push(`Responsable: ${readableResponsible({ assignedToId: filters.assignedTo } as Client, state.crm.teamMembers, state.crm.settings.profileName, state.crm.settings.profileEmail)}`);
   if (filters.order !== 'priority') active.push(`Orden: ${filters.order}`);
+  if (filters.assignedTo !== 'Todos') active.push(`Responsable: ${readableResponsible({ assignedToId: filters.assignedTo } as Client, state.crm.teamMembers, state.crm.settings.profileName, state.crm.settings.profileEmail)}`);
+  if (filters.order !== 'priority') active.push(`Orden: ${filters.order}`);
   return active;
 }
 
@@ -434,6 +489,27 @@ function filterPanel(): string {
 }
 
 function bindFilters(container: HTMLElement): void {
+  container.querySelector<HTMLSelectElement>('#mvp-lead-assigned-filter')?.addEventListener('change', (event) => {
+    const value = (event.currentTarget as HTMLSelectElement).value;
+    filters.assignedTo = value === 'Todos' ? 'Todos' : Number(value);
+    renderMvpLeads(container);
+  });
+  container.querySelector<HTMLSelectElement>('#mvp-lead-order')?.addEventListener('change', (event) => {
+    filters.order = (event.currentTarget as HTMLSelectElement).value as LeadSort;
+    renderMvpLeads(container);
+  });
+  container.querySelector<HTMLButtonElement>('[data-clear-lead-filters]')?.addEventListener('click', () => {
+    filters = { search: '', stage: 'Todas', temperature: 'Todas', overdueOnly: false, missingNextActionOnly: false, assignedTo: 'Todos', order: 'priority' };
+    renderMvpLeads(container);
+  });
+  const pipeline = container.querySelector<HTMLElement>('.mvp-stage-counters');
+  const updatePipelineEdges = (): void => {
+    if (!pipeline) return;
+    pipeline.classList.toggle('can-scroll-left', pipeline.scrollLeft > 2);
+    pipeline.classList.toggle('can-scroll-right', pipeline.scrollLeft + pipeline.clientWidth < pipeline.scrollWidth - 2);
+  };
+  pipeline?.addEventListener('scroll', updatePipelineEdges, { passive: true });
+  updatePipelineEdges();
   container.querySelector<HTMLSelectElement>('#mvp-lead-assigned-filter')?.addEventListener('change', (event) => {
     const value = (event.currentTarget as HTMLSelectElement).value;
     filters.assignedTo = value === 'Todos' ? 'Todos' : Number(value);
