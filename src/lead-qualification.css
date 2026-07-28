@@ -47,7 +47,7 @@
 .qualification-confidence.medium { color:#705b1b; background:#f5efd7; }
 .qualification-confidence.low { color:#7d4825; background:#f8e6d9; }
 .qualification-current { color:#627681; }
-.lead-qualification-suggestion > input { min-height:42px; border:1px solid #cbd8de; border-radius:9px; background:#fff; }
+.lead-qualification-suggestion > input { min-height:44px; border:1px solid #cbd8de; border-radius:9px; background:#fff; }
 .lead-qualification-suggestion blockquote { margin:0; padding:9px 11px; border-left:3px solid #9fb7c3; color:#5f737e; background:#f5f8f9; font-size:.7rem; line-height:1.4; }
 .qualification-warning,.qualification-protected { color:#865022; font-size:.69rem; }
 .qualification-overwrite,.qualification-terminal-confirm { display:flex; align-items:center; gap:7px; color:#546b76; font-size:.7rem; font-weight:800; }
@@ -56,7 +56,7 @@
 .qualification-questions h4 { color:#244554; }
 .qualification-questions p { margin-top:3px; color:#71828b; font-size:.68rem; }
 .qualification-questions [data-next-question] { grid-column:1/-1; margin:0; color:#415b67; font-size:.78rem; font-weight:750; line-height:1.5; }
-.qualification-questions button { min-height:42px; justify-self:start; }
+.qualification-questions button { min-height:44px; justify-self:start; }
 .lead-qualification-actions { display:flex; align-items:center; gap:12px; }
 .mvp-auto-qualify-button { min-height:40px; padding:8px 12px; color:#294f61; background:#edf4f7; }
 .qualification-budget-warning { display:block; margin-top:3px; color:#8a5a21; font-size:.65rem; font-weight:750; }
@@ -76,7 +76,7 @@
 @media (max-width:430px) {
   .lead-qualification-panel button { min-height:44px; }
   .lead-qualification-panel > header { flex-direction:column; }
-  .lead-qualification-panel > header button { width:100%; min-height:42px; }
+  .lead-qualification-panel > header button { width:100%; min-height:44px; }
   .lead-qualification-suggestion-head { align-items:flex-start; }
   .lead-qualification-suggestion-head label { min-width:100%; }
   .qualification-state,.qualification-confidence { white-space:nowrap; }
