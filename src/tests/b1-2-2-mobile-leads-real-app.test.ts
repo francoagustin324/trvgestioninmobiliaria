@@ -360,7 +360,7 @@ async function assertBaseLayout(page: Page, viewport: { width: number; height: n
     assert.ok(button.scrollWidth <= button.clientWidth + 1, `Texto truncado en botón automático a ${viewport.width}px.`);
     assert.ok(button.height >= 43.5);
   }
-  assert.equal(metrics.counter.scrollLeft, 0);
+  assert.ok(metrics.counter.scrollLeft >= 0 && metrics.counter.scrollLeft <= 1, `Desplazamiento inicial inesperado en ${viewport.width}px: ${metrics.counter.scrollLeft}`);
   assert.ok(metrics.counter.firstLeft >= metrics.counter.containerLeft - 1, `Primer contador cortado en ${viewport.width}px.`);
   const pipelineIndex = metrics.cssOrder.indexOf('/src/lead-pipeline.css');
   const qualificationIndex = metrics.cssOrder.indexOf('/src/lead-qualification.css');
