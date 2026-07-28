@@ -3,9 +3,11 @@ import {
   activitiesForClientSave,
   commercialStage,
   COMMERCIAL_STAGES,
+  completeClientFollowUp,
   filterLeads,
   isTerminalClient,
   localIsoDate,
+  reprogramClientFollowUp,
   stageCounters,
   type LeadFilters,
 } from './lead-pipeline.js';
@@ -21,6 +23,14 @@ import {
   renderSecondaryQualificationFields,
 } from './lead-essential-ui.js';
 import type { ActivityEntry, Client, CommercialStage, Temperature } from './models.js';
+import {
+  leadCompactPayment,
+  leadCompactTimeframe,
+  leadFollowUpPresentation,
+  leadPrimaryAlert,
+  sortLeadsForDailyWork,
+  type LeadOrder,
+} from './lead-daily-priority.js';
 import { findDuplicateClient, formatPhone, isPlausiblePhone } from './phone-normalizer.js';
 import { matchPropertiesForClient, type PropertyMatch } from './property-matching.js';
 import { saveData, state } from './store.js';
@@ -28,13 +38,21 @@ import { addActivity, memberName, visibleClients, visibleProperties } from './te
 import { escapeHtml, formValues, nextId } from './utils.js';
 import { appIcons } from './icons.js';
 
-let filters: LeadFilters = {
+interface LeadUiFilters extends LeadFilters {
+  assigneeId: number | 'Todos';
+  order: LeadOrder;
+}
+
+let filters: LeadUiFilters = {
   search: '',
   stage: 'Todas',
   temperature: 'Todas',
   overdueOnly: false,
   missingNextActionOnly: false,
+  assigneeId: 'Todos',
+  order: 'Prioridad',
 };
+let expandedLeadId: number | null = null;
 
 const priceFormatter = new Intl.NumberFormat('es-AR');
 const activityFormatter = new Intl.DateTimeFormat('es-AR', {
@@ -61,7 +79,9 @@ function selected(current: string | undefined, expected: string): string {
 }
 
 function leadRows(): Client[] {
-  return filterLeads(visibleClients(), filters);
+  const filtered = filterLeads(visibleClients(), filters)
+    .filter((client) => filters.assigneeId === 'Todos' || client.assignedToId === filters.assigneeId);
+  return sortLeadsForDailyWork(filtered, filters.order);
 }
 
 function matchRow(match: PropertyMatch): string {
@@ -131,34 +151,89 @@ function formattedLeadDate(valueText: string | undefined): string {
   return Number.isNaN(date.getTime()) ? valueText : dateFormatter.format(date);
 }
 
+function qualificationUpdated(client: Client): string {
+  if (!client.qualificationUpdatedAt) return 'Sin actualización registrada';
+  const date = new Date(client.qualificationUpdatedAt);
+  return Number.isNaN(date.getTime()) ? client.qualificationUpdatedAt : activityFormatter.format(date);
+}
+
+function detailValue(label: string, valueText: string | number | undefined, fallback = 'No confirmado'): string {
+  return `<div><span>${escapeHtml(label)}</span><strong>${escapeHtml(String(valueText ?? '').trim() || fallback)}</strong></div>`;
+}
+
+function fullProfile(client: Client): string {
+  const credit = [client.creditPossible?.trim(), client.creditApprovedAmount?.trim()].filter(Boolean).join(' · ') || 'No confirmado';
+  return `<section class="mvp-lead-full-profile" data-full-profile="${client.id}">
+    <div class="mvp-lead-full-grid">
+      ${detailValue('Zona', client.zones)}
+      ${detailValue('Finalidad', client.purpose)}
+      ${detailValue('Puede avanzar', client.canMoveForward)}
+      ${detailValue('Conoce la zona', client.knowsArea, 'Dato adicional no confirmado')}
+      ${detailValue('Crédito', credit)}
+      ${detailValue('Responsable', memberName(client.assignedToId), 'Sin asignar')}
+      ${detailValue('Preferencias', client.preferences)}
+      ${detailValue('Características', client.features)}
+      ${detailValue('Objeciones', client.objections)}
+      ${detailValue('Notas', client.notes)}
+      ${detailValue('Actualización', qualificationUpdated(client))}
+    </div>
+    ${renderLeadSecondaryMeta(client)}
+    ${renderLeadCommercialSummary(client)}
+    ${historyBlock(client)}
+    ${matchesForLead(client)}
+    <aside class="mvp-buyer-evolution-note"><strong>Próxima fase</strong><span>Las propiedades compatibles podrán registrar Enviar al cliente, Ya enviada, Le interesó, No le interesó y Quiere visita sin improvisar estados en este PR.</span></aside>
+  </section>`;
+}
+
+function compactBudget(client: Client): string {
+  const budget = client.budget?.trim() || 'Sin presupuesto';
+  if (!client.currency?.trim() || /\b(?:USD|ARS|EUR|US\$|d[oó]lares?|pesos?)\b/i.test(budget)) return budget;
+  return `${client.currency.trim()} ${budget}`;
+}
+
+function quickFollowUpActions(client: Client): string {
+  if (isTerminalClient(client)) return '';
+  if (!client.nextAction?.trim() && !client.nextFollowUp) return '';
+  return `<div class="mvp-lead-followup-actions">
+    ${client.nextAction?.trim() && client.nextFollowUp ? `<button type="button" class="secondary mvp-compact-action" data-complete-followup="${client.id}">Completar</button>` : ''}
+    <button type="button" class="secondary mvp-compact-action" data-reprogram-followup="${client.id}">Reprogramar</button>
+  </div>`;
+}
+
 function card(client: Client): string {
   const digits = client.phone.replace(/\D/g, '');
   const stage = commercialStage(client);
   const terminal = isTerminalClient(client);
-  return `<article class="mvp-lead-card mvp-lead-card-with-matches${terminal ? ' terminal' : ''}">
-    <div class="mvp-lead-card-main">
-      <div class="mvp-lead-main-copy">
-        <div class="mvp-lead-title-line">${tempIcon(client.temperature)}<h3>${escapeHtml(client.name)}</h3><span class="mvp-stage-badge${terminal ? ' terminal' : ''}">${escapeHtml(stage)}</span></div>
-        <p>${client.interest ? `Busca ${escapeHtml(client.interest)}` : 'Sin interés definido'}</p>
-        ${renderLeadSecondaryMeta(client)}
-        <div class="mvp-lead-contact"><a class="mvp-contact-btn wa" href="https://wa.me/${digits}" target="_blank" rel="noopener noreferrer" title="WhatsApp · ${escapeHtml(formatPhone(client.phone))}" aria-label="Enviar WhatsApp">${appIcons.whatsapp}</a><a class="mvp-contact-btn call" href="tel:+${digits}" title="Llamar · ${escapeHtml(formatPhone(client.phone))}" aria-label="Llamar">${appIcons.phone}</a>${client.email ? `<a class="mvp-contact-btn mail" href="mailto:${escapeHtml(client.email)}" title="${escapeHtml(client.email)}" aria-label="Enviar email">${appIcons.mail}</a>` : `<span class="mvp-contact-btn mail" data-disabled title="Sin email cargado" aria-label="Sin email cargado">${appIcons.mail}</span>`}</div>
-      </div>
-      <div class="mvp-lead-primary-action"><button type="button" class="secondary mvp-auto-qualify-button" data-auto-qualify-client="${client.id}">Calificar automáticamente</button></div>
-      <div class="mvp-lead-actions mvp-lead-secondary-actions"><button type="button" class="secondary mvp-icon-btn" data-edit-client="${client.id}" aria-controls="mvp-lead-form" title="Editar" aria-label="Editar ${escapeHtml(client.name)}">${appIcons.edit}</button><button type="button" class="delete mvp-icon-btn" data-delete="clients" data-id="${client.id}" title="Eliminar" aria-label="Eliminar ${escapeHtml(client.name)}">×</button></div>
+  const alert = leadPrimaryAlert(client);
+  const followUp = leadFollowUpPresentation(client);
+  const expanded = expandedLeadId === client.id;
+  return `<article class="mvp-lead-card mvp-lead-card-with-matches mvp-lead-daily-card${terminal ? ' terminal' : ''}${expanded ? ' expanded' : ''}" data-lead-card="${client.id}">
+    <div class="mvp-lead-compact-head">
+      <div class="mvp-lead-title-line">${tempIcon(client.temperature)}<h3>${escapeHtml(client.name)}</h3><span class="mvp-stage-badge${terminal ? ' terminal' : ''}">${escapeHtml(stage)}</span></div>
+      <span class="mvp-lead-alert ${alert.kind}">${escapeHtml(alert.label)}</span>
     </div>
-    <div class="mvp-lead-critical">
-      <div><span>Próxima acción</span><strong>${terminal ? 'Operación cerrada' : summaryValue(client.nextAction, 'Sin próxima acción')}</strong></div>
-      <div><span>Fecha</span><strong>${terminal ? '—' : escapeHtml(formattedLeadDate(client.nextFollowUp))}</strong></div>
-      <div><span>Responsable</span><strong>${escapeHtml(memberName(client.assignedToId))}</strong></div>
+    <p class="mvp-lead-interest">${client.interest ? escapeHtml(client.interest) : 'Sin interés definido'}</p>
+    <div class="mvp-lead-compact-grid">
+      <div><span>Presupuesto</span><strong>${escapeHtml(compactBudget(client))}</strong></div>
+      <div><span>Pago / crédito</span><strong>${escapeHtml(leadCompactPayment(client))}</strong></div>
+      <div><span>Plazo / urgencia</span><strong>${escapeHtml(leadCompactTimeframe(client))}</strong></div>
     </div>
-    ${renderLeadCommercialSummary(client)}
+    ${followUp ? `<div class="mvp-lead-next${followUp.overdue ? ' overdue' : ''}"><span>Próxima acción</span><strong>${escapeHtml(followUp.action)}</strong>${followUp.date ? `<small>${escapeHtml(followUp.date)}</small>` : ''}</div>` : ''}
+    <div class="mvp-lead-quick-row">
+      <div class="mvp-lead-contact"><a class="mvp-contact-btn wa" href="https://wa.me/${digits}" target="_blank" rel="noopener noreferrer" title="WhatsApp · ${escapeHtml(formatPhone(client.phone))}" aria-label="Enviar WhatsApp">${appIcons.whatsapp}</a><a class="mvp-contact-btn call" href="tel:+${digits}" title="Llamar · ${escapeHtml(formatPhone(client.phone))}" aria-label="Llamar">${appIcons.phone}</a>${client.email ? `<a class="mvp-contact-btn mail" href="mailto:${escapeHtml(client.email)}" title="${escapeHtml(client.email)}" aria-label="Enviar email">${appIcons.mail}</a>` : ''}</div>
+      <button type="button" class="secondary mvp-auto-qualify-button" data-auto-qualify-client="${client.id}">Calificar automáticamente</button>
+    </div>
+    ${quickFollowUpActions(client)}
+    <div class="mvp-lead-disclosure-row">
+      <button type="button" class="secondary mvp-lead-toggle" data-toggle-lead-full="${client.id}" aria-expanded="${expanded}">${expanded ? 'Ocultar ficha' : 'Ver ficha completa'}</button>
+      <details class="mvp-lead-card-menu"><summary aria-label="Más acciones">•••</summary><div><button type="button" class="secondary mvp-icon-btn" data-edit-client="${client.id}" aria-controls="mvp-lead-form" title="Editar" aria-label="Editar ${escapeHtml(client.name)}">${appIcons.edit}</button><button type="button" class="delete mvp-icon-btn" data-delete="clients" data-id="${client.id}" title="Eliminar" aria-label="Eliminar ${escapeHtml(client.name)}">×</button></div></details>
+    </div>
+    ${expanded ? fullProfile(client) : ''}
     ${renderLeadQualificationPanel(client)}
-    ${historyBlock(client)}
-    ${matchesForLead(client)}
   </article>`;
 }
 
-function focusLeadForm(container: HTMLElement): void {
+function focusLeadFormfunction focusLeadForm(container: HTMLElement): void {
   window.requestAnimationFrame(() => {
     const form = container.querySelector<HTMLFormElement>('#mvp-lead-form:not(.collapsed)');
     if (!form) return;
@@ -168,6 +243,41 @@ function focusLeadForm(container: HTMLElement): void {
 }
 
 function bindLeadCardActions(container: HTMLElement): void {
+  container.querySelectorAll<HTMLButtonElement>('[data-toggle-lead-full]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const clientId = Number(button.dataset.toggleLeadFull);
+      if (!clientId || !visibleClients().some((client) => client.id === clientId)) return;
+      expandedLeadId = expandedLeadId === clientId ? null : clientId;
+      renderMvpLeads(container);
+      if (expandedLeadId) window.requestAnimationFrame(() => container.querySelector(`[data-lead-card="${expandedLeadId}"]`)?.scrollIntoView({ block: 'nearest' }));
+    });
+  });
+  container.querySelectorAll<HTMLButtonElement>('[data-complete-followup]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const clientId = Number(button.dataset.completeFollowup);
+      const client = visibleClients().find((item) => item.id === clientId);
+      if (!client) return;
+      const completed = completeClientFollowUp(client);
+      state.crm.clients = upsertClient(state.crm.clients, completed.client);
+      addActivity(completed.activity);
+      saveData(`Seguimiento completado: ${client.name}`);
+      renderMvpLeads(container);
+    });
+  });
+  container.querySelectorAll<HTMLButtonElement>('[data-reprogram-followup]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const clientId = Number(button.dataset.reprogramFollowup);
+      const client = visibleClients().find((item) => item.id === clientId);
+      if (!client) return;
+      const date = window.prompt('Nueva fecha de seguimiento (AAAA-MM-DD)', client.nextFollowUp || localIsoDate());
+      if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(date)) return;
+      const reprogrammed = reprogramClientFollowUp(client, date);
+      state.crm.clients = upsertClient(state.crm.clients, reprogrammed.client);
+      addActivity(reprogrammed.activity);
+      saveData(`Seguimiento reprogramado: ${client.name}`);
+      renderMvpLeads(container);
+    });
+  });
   container.querySelectorAll<HTMLButtonElement>('[data-edit-client]').forEach((button) => {
     button.addEventListener('click', (event) => {
       event.stopPropagation();
@@ -204,6 +314,7 @@ function bindLeadCardActions(container: HTMLElement): void {
 
 function updateLeadResults(container: HTMLElement): void {
   const leads = leadRows();
+  if (expandedLeadId && !leads.some((client) => client.id === expandedLeadId)) expandedLeadId = null;
   const results = container.querySelector<HTMLElement>('#mvp-lead-results');
   const count = container.querySelector<HTMLElement>('#mvp-lead-count');
   if (results) results.innerHTML = leads.map(card).join('') || '<p class="empty-state">No hay leads para mostrar con estos filtros.</p>';
@@ -211,7 +322,7 @@ function updateLeadResults(container: HTMLElement): void {
   bindLeadCardActions(container);
 }
 
-function stageOptions(current: CommercialStage): string {
+function stageOptionsfunction stageOptions(current: CommercialStage): string {
   return COMMERCIAL_STAGES.map((stage) => `<option value="${stage}"${selected(current, stage)}>${stage}</option>`).join('');
 }
 
@@ -234,12 +345,21 @@ function leadForm(editing: Client | null): string {
   </form>`;
 }
 
+function availableAssignees(): Array<{ id: number; name: string }> {
+  const visibleIds = new Set(visibleClients().map((client) => client.assignedToId).filter((id): id is number => Boolean(id)));
+  return state.crm.teamMembers
+    .filter((member) => member.status === 'Activo' && visibleIds.has(member.id))
+    .map((member) => ({ id: member.id, name: memberName(member.id) }));
+}
+
 function activeSecondaryFilters(): string[] {
   const active: string[] = [];
   if (filters.stage !== 'Todas') active.push(`Etapa: ${filters.stage}`);
   if (filters.temperature !== 'Todas') active.push(`Temperatura: ${filters.temperature}`);
   if (filters.overdueOnly) active.push('Vencidos');
   if (filters.missingNextActionOnly) active.push('Sin próxima acción');
+  if (filters.assigneeId !== 'Todos') active.push(`Responsable: ${memberName(filters.assigneeId)}`);
+  if (filters.order !== 'Prioridad') active.push(`Orden: ${filters.order}`);
   return active;
 }
 
@@ -247,6 +367,7 @@ function filterPanel(): string {
   const visible = visibleClients();
   const counters = stageCounters(visible);
   const active = activeSecondaryFilters();
+  const assignees = availableAssignees();
   const mobile = typeof window !== 'undefined' && window.matchMedia('(max-width: 520px)').matches;
   const open = !mobile || active.length > 0;
   return `<div class="mvp-lead-filter-panel">
@@ -255,15 +376,31 @@ function filterPanel(): string {
       <strong id="mvp-lead-count">${leadRows().length} de ${visible.length} leads</strong>
     </div>
     <details class="mvp-lead-more-filters"${open ? ' open' : ''}>
-      <summary><span>Más filtros</span><small>${escapeHtml(active.length ? active.join(' · ') : 'Etapa, temperatura y seguimiento')}</small></summary>
+      <summary><span>Más filtros${active.length ? ` · ${active.length}` : ''}</span><small>${escapeHtml(active.length ? active.join(' · ') : 'Etapa, temperatura, responsable y orden')}</small></summary>
       <div class="mvp-lead-filter-grid">
         <label><span>Etapa</span><select id="mvp-lead-stage-filter"><option value="Todas">Todas</option>${COMMERCIAL_STAGES.map((stage) => `<option value="${stage}"${selected(filters.stage, stage)}>${stage}</option>`).join('')}</select></label>
         <label><span>Temperatura</span><select id="mvp-lead-temperature-filter"><option value="Todas">Todas</option>${(['Caliente', 'Tibio', 'Frío'] as Temperature[]).map((temperature) => `<option value="${temperature}"${selected(filters.temperature, temperature)}>${temperature}</option>`).join('')}</select></label>
+        ${assignees.length > 1 ? `<label><span>Responsable</span><select id="mvp-lead-assignee-filter"><option value="Todos">Todos</option>${assignees.map((member) => `<option value="${member.id}"${filters.assigneeId === member.id ? ' selected' : ''}>${escapeHtml(member.name)}</option>`).join('')}</select></label>` : ''}
+        <label><span>Ordenar por</span><select id="mvp-lead-order"><option value="Prioridad"${selected(filters.order, 'Prioridad')}>Prioridad</option><option value="Seguimiento"${selected(filters.order, 'Seguimiento')}>Seguimiento</option><option value="Más recientes"${selected(filters.order, 'Más recientes')}>Más recientes</option><option value="Nombre"${selected(filters.order, 'Nombre')}>Nombre</option></select></label>
       </div>
-      <div class="mvp-lead-filter-toggles"><label><input id="mvp-lead-overdue-filter" type="checkbox"${filters.overdueOnly ? ' checked' : ''}>Seguimientos vencidos</label><label><input id="mvp-lead-missing-action-filter" type="checkbox"${filters.missingNextActionOnly ? ' checked' : ''}>Sin próxima acción completa</label></div>
+      <div class="mvp-lead-filter-toggles"><label><input id="mvp-lead-overdue-filter" type="checkbox"${filters.overdueOnly ? ' checked' : ''}>Seguimientos vencidos</label><label><input id="mvp-lead-missing-action-filter" type="checkbox"${filters.missingNextActionOnly ? ' checked' : ''}>Sin próxima acción</label>${active.length ? '<button type="button" class="secondary mvp-clear-lead-filters" data-clear-lead-filters>Limpiar</button>' : ''}</div>
     </details>
-    <div class="mvp-stage-counters" aria-label="Contadores por etapa"><button type="button" class="mvp-stage-counter${filters.stage === 'Todas' ? ' active' : ''}" data-stage-quick="Todas">Todos <b>${visible.length}</b></button>${COMMERCIAL_STAGES.map((stage) => `<button type="button" class="mvp-stage-counter${filters.stage === stage ? ' active' : ''}" data-stage-quick="${stage}">${stage} <b>${counters[stage]}</b></button>`).join('')}</div>
+    <div class="mvp-stage-counters-shell" data-pipeline-shell><div class="mvp-stage-counters" aria-label="Contadores por etapa"><button type="button" class="mvp-stage-counter${filters.stage === 'Todas' ? ' active' : ''}" data-stage-quick="Todas">Todos <b>${visible.length}</b></button>${COMMERCIAL_STAGES.map((stage) => `<button type="button" class="mvp-stage-counter${filters.stage === stage ? ' active' : ''}" data-stage-quick="${stage}">${stage} <b>${counters[stage]}</b></button>`).join('')}</div></div>
   </div>`;
+}
+
+function bindPipelineScroll(container: HTMLElement): void {
+  const shell = container.querySelector<HTMLElement>('[data-pipeline-shell]');
+  const pipeline = shell?.querySelector<HTMLElement>('.mvp-stage-counters');
+  if (!shell || !pipeline) return;
+  const update = (): void => {
+    shell.classList.toggle('has-left', pipeline.scrollLeft > 2);
+    shell.classList.toggle('has-right', pipeline.scrollLeft + pipeline.clientWidth < pipeline.scrollWidth - 2);
+  };
+  pipeline.addEventListener('scroll', update, { passive: true });
+  const selectedChip = pipeline.querySelector<HTMLElement>('.mvp-stage-counter.active');
+  selectedChip?.scrollIntoView({ block: 'nearest', inline: 'center' });
+  window.requestAnimationFrame(update);
 }
 
 function bindFilters(container: HTMLElement): void {
@@ -279,6 +416,15 @@ function bindFilters(container: HTMLElement): void {
     filters.temperature = (event.currentTarget as HTMLSelectElement).value as LeadFilters['temperature'];
     updateLeadResults(container);
   });
+  container.querySelector<HTMLSelectElement>('#mvp-lead-assignee-filter')?.addEventListener('change', (event) => {
+    const current = (event.currentTarget as HTMLSelectElement).value;
+    filters.assigneeId = current === 'Todos' ? 'Todos' : Number(current);
+    updateLeadResults(container);
+  });
+  container.querySelector<HTMLSelectElement>('#mvp-lead-order')?.addEventListener('change', (event) => {
+    filters.order = (event.currentTarget as HTMLSelectElement).value as LeadOrder;
+    updateLeadResults(container);
+  });
   container.querySelector<HTMLInputElement>('#mvp-lead-overdue-filter')?.addEventListener('change', (event) => {
     filters.overdueOnly = (event.currentTarget as HTMLInputElement).checked;
     updateLeadResults(container);
@@ -287,15 +433,20 @@ function bindFilters(container: HTMLElement): void {
     filters.missingNextActionOnly = (event.currentTarget as HTMLInputElement).checked;
     updateLeadResults(container);
   });
+  container.querySelector<HTMLElement>('[data-clear-lead-filters]')?.addEventListener('click', () => {
+    filters = { search: '', stage: 'Todas', temperature: 'Todas', overdueOnly: false, missingNextActionOnly: false, assigneeId: 'Todos', order: 'Prioridad' };
+    renderMvpLeads(container);
+  });
   container.querySelectorAll<HTMLButtonElement>('[data-stage-quick]').forEach((button) => {
     button.addEventListener('click', () => {
       filters.stage = button.dataset.stageQuick as LeadFilters['stage'];
       renderMvpLeads(container);
     });
   });
+  bindPipelineScroll(container);
 }
 
-export function renderMvpLeads(container: HTMLElement): void {
+export function renderMvpLeadsexport function renderMvpLeads(container: HTMLElement): void {
   const editing = visibleClients().find((client) => client.id === state.editingClientId) ?? null;
   const leads = leadRows();
   container.innerHTML = `<div class="mvp-page-heading"><div><h1>Leads</h1><p>Calificá lo esencial, definí la próxima acción y avanzá cada oportunidad sin interrogatorios.</p></div><button type="button" data-toggle="client-form">Nuevo lead</button></div>${leadForm(editing)}${filterPanel()}<div id="mvp-lead-results" class="mvp-lead-list">${leads.map(card).join('') || '<p class="empty-state">No hay leads para mostrar con estos filtros.</p>'}</div>`;
@@ -350,7 +501,8 @@ export function renderMvpLeads(container: HTMLElement): void {
 }
 
 export function resetLeadFiltersForTests(): void {
-  filters = { search: '', stage: 'Todas', temperature: 'Todas', overdueOnly: false, missingNextActionOnly: false };
+  filters = { search: '', stage: 'Todas', temperature: 'Todas', overdueOnly: false, missingNextActionOnly: false, assigneeId: 'Todos', order: 'Prioridad' };
+  expandedLeadId = null;
 }
 
 export function overdueReferenceDateForTests(): string {

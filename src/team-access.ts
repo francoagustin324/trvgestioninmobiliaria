@@ -40,9 +40,9 @@ function isTechnicalMemberName(member: TeamMember): boolean {
 }
 
 export function memberName(memberId: number | undefined): string {
-  if (!memberId) return 'Sin responsable';
+  if (!memberId) return 'Sin asignar';
   const member = state.crm.teamMembers.find((item) => item.id === memberId);
-  if (!member) return 'Usuario inactivo';
+  if (!member) return 'Sin asignar';
   if (isTechnicalMemberName(member)) {
     const profileName = state.crm.settings.profileName.trim();
     if (member.id === state.activeMemberId && profileName) return profileName;
