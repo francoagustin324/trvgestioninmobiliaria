@@ -416,7 +416,11 @@ async function assertFollowUpActions(page: Page): Promise<void> {
   assert.match(await updatedCard.locator('.mvp-lead-next-action').innerText(), /En 3 días/);
   await updatedCard.locator('.mvp-lead-followup-menu > summary').click();
   await updatedCard.locator('[data-complete-client-follow-up]').click();
-  await page.waitForTimeout(100);
+  await page.waitForFunction(() => {
+    const cards = [...document.querySelectorAll<HTMLElement>('#crm .mvp-lead-compact-card')];
+    const card = cards.find((item) => item.textContent?.includes('Seguimiento muy vencido'));
+    return card?.querySelector('.mvp-lead-next-action')?.textContent?.includes('Sin próxima acción') === true;
+  });
   const completedCard = page.locator('#crm .mvp-lead-compact-card').filter({ hasText: 'Seguimiento muy vencido' });
   assert.match(await completedCard.locator('.mvp-lead-next-action').innerText(), /Sin próxima acción/);
 }
