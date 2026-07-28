@@ -28,41 +28,51 @@ function card(overrides: Partial<Client> = {}): string {
   });
 }
 
+function factsMarkup(html: string): string {
+  const start = html.indexOf('<div class="mvp-lead-compact-facts');
+  const end = html.indexOf('<div class="mvp-lead-next-action', start);
+  assert.ok(start >= 0 && end > start, 'No se encontró la zona compacta de datos comerciales.');
+  return html.slice(start, end);
+}
+
 test('resume los tres datos comerciales faltantes en un solo bloque', () => {
-  const html = card();
-  assert.match(html, /Faltan presupuesto, forma de pago y plazo/);
-  assert.equal((html.match(/No confirmado/g) ?? []).length, 0);
-  assert.match(html, /mvp-lead-missing-summary/);
+  const facts = factsMarkup(card());
+  assert.match(facts, /Faltan presupuesto, forma de pago y plazo/);
+  assert.equal((facts.match(/No confirmado/g) ?? []).length, 0);
+  assert.match(facts, /mvp-lead-missing-summary/);
+  assert.equal((facts.match(/mvp-lead-fact/g) ?? []).length, 0);
 });
 
 test('resume dos faltantes sin ocultar el dato confirmado', () => {
-  const html = card({ purchaseTimeframe: '0-3 meses' });
-  assert.match(html, /Faltan presupuesto y forma de pago/);
-  assert.match(html, /Plazo \/ urgencia/);
-  assert.match(html, /0-3 meses/);
+  const facts = factsMarkup(card({ purchaseTimeframe: '0-3 meses' }));
+  assert.match(facts, /Faltan presupuesto y forma de pago/);
+  assert.match(facts, /Plazo \/ urgencia/);
+  assert.match(facts, /0-3 meses/);
+  assert.equal((facts.match(/mvp-lead-fact/g) ?? []).length, 1);
 });
 
 test('mantiene el bloque correspondiente cuando falta un solo dato', () => {
-  const html = card({ budget: 'USD 120.000', currency: 'USD', paymentMethod: 'Contado' });
-  assert.match(html, /Presupuesto/);
-  assert.match(html, /USD 120\.000/);
-  assert.match(html, /Pago \/ crédito/);
-  assert.match(html, /Contado/);
-  assert.match(html, /Plazo \/ urgencia/);
-  assert.match(html, /No confirmado/);
-  assert.doesNotMatch(html, /mvp-lead-missing-summary/);
+  const facts = factsMarkup(card({ budget: 'USD 120.000', currency: 'USD', paymentMethod: 'Contado' }));
+  assert.match(facts, /Presupuesto/);
+  assert.match(facts, /USD 120\.000/);
+  assert.match(facts, /Pago \/ crédito/);
+  assert.match(facts, /Contado/);
+  assert.match(facts, /Plazo \/ urgencia/);
+  assert.match(facts, /No confirmado/);
+  assert.doesNotMatch(facts, /mvp-lead-missing-summary/);
+  assert.equal((facts.match(/mvp-lead-fact/g) ?? []).length, 3);
 });
 
 test('muestra normalmente los tres datos cuando están confirmados', () => {
-  const html = card({
+  const facts = factsMarkup(card({
     budget: 'USD 146.000',
     currency: 'USD',
     paymentMethod: 'Financiación',
     purchaseTimeframe: '0-3 meses',
-  });
-  assert.equal((html.match(/mvp-lead-fact/g) ?? []).length, 3);
-  assert.doesNotMatch(html, /Faltan presupuesto/);
-  assert.doesNotMatch(html, /No confirmado/);
+  }));
+  assert.equal((facts.match(/mvp-lead-fact/g) ?? []).length, 3);
+  assert.doesNotMatch(facts, /Faltan presupuesto/);
+  assert.doesNotMatch(facts, /No confirmado/);
 });
 
 test('la navegación visible usa exactamente los mismos nombres en escritorio y celular', () => {
@@ -81,7 +91,7 @@ test('la navegación visible usa exactamente los mismos nombres en escritorio y 
 });
 
 test('los estilos B1.2.4 fijan densidad, contraste, controles y degradados condicionales', () => {
-  const css = readFileSync('src/lead-list-compact.css', 'utf8');
+  const css = `${readFileSync('src/lead-list-compact.css', 'utf8')}\n${readFileSync('src/lead-list-polish.css', 'utf8')}`;
   assert.match(css, /B1\.2\.4/);
   assert.match(css, /@media \(min-width: 901px\)/);
   assert.match(css, /mvp-lead-filter-primary/);
