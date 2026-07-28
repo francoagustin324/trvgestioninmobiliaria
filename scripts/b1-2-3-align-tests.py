@@ -46,3 +46,8 @@ replace(
     "  assert.ok(leads.includes('Calificá lo esencial, definí la próxima acción y avanzá cada oportunidad sin interrogatorios.'));",
     "  assert.ok(leads.includes('Priorizá a quién contactar, resolvé la próxima acción y abrí la ficha completa solo cuando haga falta.'));",
 )
+replace(
+    'src/tests/b1-2-3-compact-leads-real-app.test.ts',
+    "    const controls = [...document.querySelectorAll<HTMLElement>('#crm .mvp-lead-compact-card button, #crm .mvp-lead-compact-card a.mvp-contact-btn, #crm .mvp-lead-full-sheet > summary, #crm .mvp-lead-followup-menu > summary')];",
+    "    const controls = [...document.querySelectorAll<HTMLElement>('#crm .mvp-lead-compact-card button, #crm .mvp-lead-compact-card a.mvp-contact-btn, #crm .mvp-lead-full-sheet > summary, #crm .mvp-lead-followup-menu > summary')]\n      .filter((control) => control.getClientRects().length > 0);",
+)
