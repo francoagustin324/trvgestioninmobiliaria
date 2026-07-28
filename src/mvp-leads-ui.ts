@@ -163,7 +163,7 @@ function focusLeadForm(container: HTMLElement): void {
 function saveLeadFollowUp(reason: string, container: HTMLElement): void {
   saveData(reason);
   renderMvpLeads(container);
-  document.dispatchEvent(new CustomEvent('trv-render'));
+  queueMicrotask(() => document.dispatchEvent(new CustomEvent('trv-render')));
 }
 
 function bindFullSheets(container: HTMLElement): void {
@@ -183,6 +183,37 @@ function bindFullSheets(container: HTMLElement): void {
       if (label) label.textContent = details.open ? 'Ocultar ficha' : 'Ver ficha completa';
       details.querySelector('summary')?.setAttribute('aria-expanded', String(details.open));
     });
+  });
+}
+
+const followUpActionContainers = new WeakSet<HTMLElement>();
+
+function bindDelegatedFollowUpActions(container: HTMLElement): void {
+  if (followUpActionContainers.has(container)) return;
+  followUpActionContainers.add(container);
+  container.addEventListener('click', (event) => {
+    const button = (event.target as HTMLElement).closest<HTMLButtonElement>('[data-complete-client-follow-up]');
+    if (!button || !container.contains(button)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const client = visibleClients().find((item) => item.id === Number(button.dataset.completeClientFollowUp));
+    if (!client || isTerminalClient(client)) return;
+    const result = completeClientFollowUp(client);
+    Object.assign(client, result.client);
+    addActivity(result.activity);
+    saveLeadFollowUp(`Seguimiento de lead completado: ${client.name}`, container);
+  });
+  container.addEventListener('submit', (event) => {
+    const form = (event.target as HTMLElement).closest<HTMLFormElement>('[data-reprogram-client-follow-up]');
+    if (!form || !container.contains(form)) return;
+    event.preventDefault();
+    const client = visibleClients().find((item) => item.id === Number(form.dataset.reprogramClientFollowUp));
+    const date = new FormData(form).get('date')?.toString() || '';
+    if (!client || !date || isTerminalClient(client)) return;
+    const result = reprogramClientFollowUp(client, date);
+    Object.assign(client, result.client);
+    addActivity(result.activity);
+    saveLeadFollowUp(`Seguimiento reprogramado: ${client.name}`, container);
   });
 }
 
@@ -218,28 +249,7 @@ function bindLeadCardActions(container: HTMLElement): void {
       window.requestAnimationFrame(() => document.querySelector('#mvp-property-form')?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
     });
   });
-  container.querySelectorAll<HTMLButtonElement>('[data-complete-client-follow-up]').forEach((button) => {
-    button.addEventListener('click', () => {
-      const client = visibleClients().find((item) => item.id === Number(button.dataset.completeClientFollowUp));
-      if (!client || isTerminalClient(client)) return;
-      const result = completeClientFollowUp(client);
-      Object.assign(client, result.client);
-      addActivity(result.activity);
-      saveLeadFollowUp(`Seguimiento de lead completado: ${client.name}`, container);
-    });
-  });
-  container.querySelectorAll<HTMLFormElement>('[data-reprogram-client-follow-up]').forEach((form) => {
-    form.addEventListener('submit', (event) => {
-      event.preventDefault();
-      const client = visibleClients().find((item) => item.id === Number(form.dataset.reprogramClientFollowUp));
-      const date = new FormData(form).get('date')?.toString() || '';
-      if (!client || !date || isTerminalClient(client)) return;
-      const result = reprogramClientFollowUp(client, date);
-      Object.assign(client, result.client);
-      addActivity(result.activity);
-      saveLeadFollowUp(`Seguimiento reprogramado: ${client.name}`, container);
-    });
-  });
+  bindDelegatedFollowUpActions(container);
   bindFullSheets(container);
   visibleClients().forEach((client) => bindLeadQualificationPanel(container, client, () => renderMvpLeads(container)));
 }
