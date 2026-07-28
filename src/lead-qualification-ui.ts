@@ -170,21 +170,45 @@ export function closeLeadQualification(): void {
   openClientId = null;
 }
 
+function mobileNavigationTop(): number {
+  const navigation = document.querySelector<HTMLElement>('.mobile-bottom-nav');
+  if (!navigation || getComputedStyle(navigation).display === 'none') return window.innerHeight;
+  return navigation.getBoundingClientRect().top;
+}
+
+function moveScrollableAncestor(control: HTMLElement, delta: number): boolean {
+  let ancestor = control.parentElement;
+  while (ancestor) {
+    const before = ancestor.scrollTop;
+    if (before !== 0 || ancestor.scrollHeight > ancestor.clientHeight + 1) {
+      ancestor.scrollTop = Math.max(0, before + delta);
+      if (ancestor.scrollTop !== before) return true;
+    }
+    ancestor = ancestor.parentElement;
+  }
+  return false;
+}
+
+function adjustMobileControl(control: HTMLElement): void {
+  if (!control.isConnected) return;
+  const topBoundary = 76;
+  const bottomBoundary = mobileNavigationTop() - 12;
+  let rect = control.getBoundingClientRect();
+  if (rect.top >= topBoundary && rect.bottom <= bottomBoundary) return;
+  const availableHeight = Math.max(120, bottomBoundary - topBoundary);
+  const desiredTop = topBoundary + Math.max(0, (availableHeight - rect.height) / 2);
+  const delta = rect.top - desiredTop;
+  moveScrollableAncestor(control, delta);
+  rect = control.getBoundingClientRect();
+  if (rect.top < topBoundary || rect.bottom > bottomBoundary) {
+    window.scrollBy({ top: rect.top - desiredTop, behavior: 'auto' });
+  }
+}
+
 function keepMobileControlVisible(control: HTMLElement): void {
   if (typeof window === 'undefined' || !window.matchMedia('(max-width: 720px)').matches) return;
-  window.requestAnimationFrame(() => {
-    if (!control.isConnected) return;
-    const rect = control.getBoundingClientRect();
-    const navigation = document.querySelector<HTMLElement>('.mobile-bottom-nav');
-    const navigationVisible = navigation && getComputedStyle(navigation).display !== 'none';
-    const navigationTop = navigationVisible ? navigation.getBoundingClientRect().top : window.innerHeight;
-    const topBoundary = 76;
-    const bottomBoundary = navigationTop - 12;
-    if (rect.top >= topBoundary && rect.bottom <= bottomBoundary) return;
-    const availableHeight = Math.max(120, bottomBoundary - topBoundary);
-    const targetTop = Math.max(0, window.scrollY + rect.top - topBoundary - Math.max(0, (availableHeight - rect.height) / 2));
-    window.scrollTo({ top: targetTop, behavior: 'auto' });
-  });
+  adjustMobileControl(control);
+  window.requestAnimationFrame(() => adjustMobileControl(control));
 }
 
 export function renderLeadQualificationPanel(client: Client): string {
