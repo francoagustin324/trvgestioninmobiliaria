@@ -437,8 +437,7 @@ async function openAndAnalyzePanel(page: Page, width: number): Promise<void> {
   assert.ok(applyVisible.buttonBottom <= applyVisible.navTop - 2, `Aplicar calificación queda tapado en ${width}px.`);
 
   await textarea.focus();
-  await textarea.evaluate((element) => element.scrollIntoView({ block: 'center', behavior: 'auto' }));
-  await page.waitForTimeout(50);
+  await page.waitForTimeout(550);
   const focused = await textarea.evaluate((element) => {
     const nav = document.querySelector<HTMLElement>('.mobile-bottom-nav');
     const rect = element.getBoundingClientRect();
