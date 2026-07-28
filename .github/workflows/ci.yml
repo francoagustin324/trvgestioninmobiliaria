@@ -24,11 +24,12 @@ jobs:
       - name: Alinear pruebas relacionadas
         run: |
           python scripts/b1-2-3-align-tests.py
+          python scripts/b1-2-3-zindex-fix.py
           git config user.name "PropControl CI"
           git config user.email "actions@users.noreply.github.com"
           git add src/mvp-leads-ui.ts src/lead-list-compact.css src/tests/b1-2-1-essential-qualification.test.ts src/tests/b1-2-lead-qualification.test.ts src/tests/mobile-leads-polish.test.ts src/tests/mvp-leads-heading.test.ts src/tests/b1-2-3-compact-leads-real-app.test.ts
           if ! git diff --cached --quiet; then
-            git commit -m "Estabilizar seguimiento y alinear pruebas relacionadas"
+            git commit -m "Asegurar acciones de seguimiento accesibles"
             git push origin HEAD:agent/b1-2-3-compact-prioritized-leads
           fi
       - uses: actions/setup-node@v4
