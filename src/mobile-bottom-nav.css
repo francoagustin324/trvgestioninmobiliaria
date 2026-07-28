@@ -13,6 +13,19 @@
     --pc-mobile-nav-clearance: calc(var(--pc-mobile-nav-height) + var(--pc-mobile-nav-edge) + 56px + env(safe-area-inset-bottom));
   }
 
+  html {
+    scroll-padding-top: 76px;
+    scroll-padding-bottom: var(--pc-mobile-nav-clearance);
+  }
+
+  input,
+  textarea,
+  select,
+  button {
+    scroll-margin-top: 76px;
+    scroll-margin-bottom: var(--pc-mobile-nav-clearance);
+  }
+
   .premium-shell,
   .mvp-shell {
     display: block !important;
