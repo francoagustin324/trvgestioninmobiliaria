@@ -4,9 +4,11 @@ from pathlib import Path
 def replace(path: str, old: str, new: str) -> None:
     file = Path(path)
     text = file.read_text()
-    if new in text:
+    if new and new in text:
         return
     if old not in text:
+        if not new:
+            return
         raise SystemExit(f'No se encontró el bloque esperado en {path}: {old}')
     file.write_text(text.replace(old, new, 1))
 
@@ -70,4 +72,9 @@ replace(
     'src/lead-list-compact.css',
     "  #crm .mvp-lead-compact-facts,\n  #crm .mvp-lead-full-grid {\n    grid-template-columns: 1fr;\n  }\n\n  #crm .mvp-lead-compact-facts > div:last-child {\n    grid-column: 1;\n  }",
     "  #crm .mvp-lead-compact-header {\n    grid-template-columns: 1fr;\n  }\n\n  #crm .mvp-lead-compact-facts {\n    grid-template-columns: repeat(2,minmax(0,1fr));\n  }\n\n  #crm .mvp-lead-compact-facts > div:last-child {\n    grid-column: 1 / -1;\n  }\n\n  #crm .mvp-lead-full-grid {\n    grid-template-columns: 1fr;\n  }\n\n  #crm .mvp-lead-quick-actions .mvp-auto-qualify-button {\n    width: 100%;\n    flex-basis: 100%;\n  }",
+)
+replace(
+    'src/lead-list-compact.css',
+    "  #crm .mvp-lead-compact-card {\n    gap: 10px !important;\n    padding: 14px;\n  }",
+    "  #crm .mvp-lead-compact-card {\n    gap: 7px !important;\n    padding: 12px;\n  }",
 )
