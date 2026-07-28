@@ -170,6 +170,23 @@ export function closeLeadQualification(): void {
   openClientId = null;
 }
 
+function keepMobileControlVisible(control: HTMLElement): void {
+  if (typeof window === 'undefined' || !window.matchMedia('(max-width: 720px)').matches) return;
+  window.requestAnimationFrame(() => {
+    if (!control.isConnected) return;
+    const rect = control.getBoundingClientRect();
+    const navigation = document.querySelector<HTMLElement>('.mobile-bottom-nav');
+    const navigationVisible = navigation && getComputedStyle(navigation).display !== 'none';
+    const navigationTop = navigationVisible ? navigation.getBoundingClientRect().top : window.innerHeight;
+    const topBoundary = 76;
+    const bottomBoundary = navigationTop - 12;
+    if (rect.top >= topBoundary && rect.bottom <= bottomBoundary) return;
+    const availableHeight = Math.max(120, bottomBoundary - topBoundary);
+    const targetTop = Math.max(0, window.scrollY + rect.top - topBoundary - Math.max(0, (availableHeight - rect.height) / 2));
+    window.scrollTo({ top: targetTop, behavior: 'auto' });
+  });
+}
+
 export function renderLeadQualificationPanel(client: Client): string {
   if (!isLeadQualificationOpen(client.id)) return '';
   const session = sessionFor(client.id);
@@ -251,6 +268,9 @@ export function bindLeadQualificationPanel(
   if (!panel) return;
   const session = sessionFor(client.id);
 
+  panel.querySelectorAll<HTMLElement>('input, textarea, select, button').forEach((control) => {
+    control.addEventListener('focus', () => keepMobileControlVisible(control));
+  });
   panel.querySelector<HTMLButtonElement>('[data-close-qualification]')?.addEventListener('click', () => {
     closeLeadQualification();
     rerender();
