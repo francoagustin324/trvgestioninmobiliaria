@@ -9,9 +9,6 @@ on:
     - cron: "0 10 * * *"
   workflow_dispatch:
 
-permissions:
-  contents: write
-
 concurrency:
   group: trv-ci-${{ github.ref }}
   cancel-in-progress: true
@@ -23,40 +20,6 @@ jobs:
       PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
     steps:
       - uses: actions/checkout@v4
-        with:
-          ref: agent/b1-2-2-mobile-leads-critical-fix
-      - name: Revalidar foco durante los primeros frames
-        run: |
-          python - <<'PY'
-          from pathlib import Path
-          path = Path('src/lead-qualification-ui.ts')
-          text = path.read_text()
-          old = """function keepMobileControlVisible(control: HTMLElement): void {
-            if (typeof window === 'undefined' || !window.matchMedia('(max-width: 720px)').matches) return;
-            adjustMobileControl(control);
-            window.requestAnimationFrame(() => adjustMobileControl(control));
-          }
-          """
-          new = """function keepMobileControlVisible(control: HTMLElement): void {
-            if (typeof window === 'undefined' || !window.matchMedia('(max-width: 720px)').matches) return;
-            const startedAt = performance.now();
-            const enforceVisibility = (): void => {
-              if (!control.isConnected || document.activeElement !== control) return;
-              adjustMobileControl(control);
-              if (performance.now() - startedAt < 480) window.requestAnimationFrame(enforceVisibility);
-            };
-            enforceVisibility();
-          }
-          """
-          if old not in text:
-              raise SystemExit('No se encontró la función de foco esperada.')
-          path.write_text(text.replace(old, new))
-          PY
-          git config user.name "PropControl CI"
-          git config user.email "actions@users.noreply.github.com"
-          git add src/lead-qualification-ui.ts
-          git commit -m "Revalidar foco móvil durante cambios de viewport B1.2.2"
-          git push origin HEAD:agent/b1-2-2-mobile-leads-critical-fix
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -78,24 +41,4 @@ jobs:
           path: build.log
           retention-days: 1
       - name: Ejecutar pruebas
-        run: |
-          set +e
-          npm test --silent > test.log 2>&1
-          code=$?
-          cat test.log
-          exit $code
-      - name: Guardar diagnóstico final B1.2.2
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: b1-2-2-final-diagnostics
-          path: test.log
-          retention-days: 1
-      - name: Guardar screenshots B1.2.2
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: b1-2-2-mobile-leads-screenshots
-          path: artifacts/b1-2-2-mobile-leads/*.png
-          if-no-files-found: ignore
-          retention-days: 7
+        run: npm test --silent
