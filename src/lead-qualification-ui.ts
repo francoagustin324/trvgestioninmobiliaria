@@ -176,17 +176,21 @@ function mobileNavigationTop(): number {
   return navigation.getBoundingClientRect().top;
 }
 
-function moveScrollableAncestor(control: HTMLElement, delta: number): boolean {
+function moveScrollableAncestors(control: HTMLElement, desiredTop: number): void {
   let ancestor = control.parentElement;
   while (ancestor) {
+    const rect = control.getBoundingClientRect();
+    const bottomBoundary = mobileNavigationTop() - 12;
+    if (rect.top >= 76 && rect.bottom <= bottomBoundary) return;
     const before = ancestor.scrollTop;
-    if (before !== 0 || ancestor.scrollHeight > ancestor.clientHeight + 1) {
-      ancestor.scrollTop = Math.max(0, before + delta);
-      if (ancestor.scrollTop !== before) return true;
+    const maximum = Math.max(0, ancestor.scrollHeight - ancestor.clientHeight);
+    if (before !== 0 || maximum > 0) {
+      const delta = rect.top - desiredTop;
+      const next = Math.max(0, Math.min(maximum, before + delta));
+      if (next !== before) ancestor.scrollTop = next;
     }
     ancestor = ancestor.parentElement;
   }
-  return false;
 }
 
 function adjustMobileControl(control: HTMLElement): void {
@@ -198,7 +202,7 @@ function adjustMobileControl(control: HTMLElement): void {
   const availableHeight = Math.max(120, bottomBoundary - topBoundary);
   const desiredTop = topBoundary + Math.max(0, (availableHeight - rect.height) / 2);
   const delta = rect.top - desiredTop;
-  moveScrollableAncestor(control, delta);
+  moveScrollableAncestors(control, desiredTop);
   rect = control.getBoundingClientRect();
   if (rect.top < topBoundary || rect.bottom > bottomBoundary) {
     window.scrollBy({ top: rect.top - desiredTop, behavior: 'auto' });
