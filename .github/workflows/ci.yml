@@ -9,9 +9,6 @@ on:
     - cron: "0 10 * * *"
   workflow_dispatch:
 
-permissions:
-  contents: write
-
 concurrency:
   group: trv-ci-${{ github.ref }}
   cancel-in-progress: true
@@ -23,58 +20,6 @@ jobs:
       PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
     steps:
       - uses: actions/checkout@v4
-        with:
-          ref: agent/b1-2-2-mobile-leads-critical-fix
-      - name: Ajustar validación del scroller real
-        run: |
-          python - <<'PY'
-          from pathlib import Path
-          import re
-          path = Path('src/tests/b1-2-2-mobile-leads-real-app.test.ts')
-          text = path.read_text()
-          pattern = re.compile(
-              r"  await textarea\.focus\(\);\n"
-              r"  await textarea\.evaluate\(\(element\) => element\.scrollIntoView\(\{ block: 'center', behavior: 'auto' \}\)\);\n"
-              r"  await page\.waitForTimeout\(50\);\n"
-              r"  const focused = await textarea\.evaluate\(\(element\) => \{[\s\S]*?"
-              r"  \);\n"
-              r"\}\n\nasync function assertBottomNavigationClearance",
-          )
-          replacement = """  await textarea.focus();
-          const focused = await textarea.evaluate((element) => {
-            const initial = element.getBoundingClientRect();
-            const absoluteTop = window.scrollY + initial.top;
-            window.scrollTo({ top: Math.max(0, absoluteTop - 88), behavior: 'auto' });
-            const nav = document.querySelector<HTMLElement>('.mobile-bottom-nav');
-            const rect = element.getBoundingClientRect();
-            const navRect = nav && getComputedStyle(nav).display !== 'none' ? nav.getBoundingClientRect() : null;
-            return {
-              active: document.activeElement === element,
-              top: rect.top,
-              bottom: rect.bottom,
-              height: rect.height,
-              navTop: navRect?.top ?? Infinity,
-              scrollMarginBottom: getComputedStyle(element).scrollMarginBottom,
-            };
-          });
-          assert.equal(focused.active, true, `El textarea no conservó foco en ${width}px: ${JSON.stringify(focused)}`);
-          assert.ok(
-            focused.top >= 70 && focused.bottom <= focused.navTop - 2,
-            `Campo enfocado queda tapado en ${width}px: ${JSON.stringify(focused)}`,
-          );
-        }
-
-        async function assertBottomNavigationClearance"""
-          updated, count = pattern.subn(replacement, text, count=1)
-          if count != 1:
-              raise SystemExit(f'Cantidad inesperada de bloques reemplazados: {count}')
-          path.write_text(updated)
-          PY
-          git config user.name "PropControl CI"
-          git config user.email "actions@users.noreply.github.com"
-          git add src/tests/b1-2-2-mobile-leads-real-app.test.ts
-          git commit -m "Validar foco con scroller real B1.2.2"
-          git push origin HEAD:agent/b1-2-2-mobile-leads-critical-fix
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -96,27 +41,4 @@ jobs:
           path: build.log
           retention-days: 1
       - name: Ejecutar pruebas
-        run: |
-          set +e
-          npm test --silent > test.log 2>&1
-          code=$?
-          cat test.log
-          exit $code
-      - name: Guardar diagnóstico B1.2.2
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: b1-2-2-test-diagnostics
-          path: test.log
-          retention-days: 1
-      - name: Guardar screenshots B1.2.2
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: b1-2-2-mobile-leads-screenshots
-          path: artifacts/b1-2-2-mobile-leads/*.png
-          if-no-files-found: ignore
-          retention-days: 7
-      - name: Confirmar parche técnico
-        if: always()
-        run: echo "B1.2.2 scroller patch attempted"
+        run: npm test --silent
