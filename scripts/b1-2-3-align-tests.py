@@ -59,6 +59,16 @@ replace(
     "  await sheets.nth(0).locator(':scope > summary').click();\n  assert.equal(await page.locator('#crm .mvp-lead-full-sheet[open]').count(), 1);\n  await sheets.nth(1).locator(':scope > summary').click();",
 )
 replace(
+    'src/tests/b1-2-3-compact-leads-real-app.test.ts',
+    "  const selectedClient = await page.locator('#crm .mvp-lead-full-sheet[open]').getAttribute('data-lead-full-sheet');\n  const order = page.locator('#mvp-lead-order');\n  await order.selectOption('name');\n  await page.waitForTimeout(100);\n  assert.equal(await page.locator('#crm .mvp-lead-full-sheet[open]').count(), 1);\n  assert.equal(await page.locator('#crm .mvp-lead-full-sheet[open]').getAttribute('data-lead-full-sheet'), selectedClient);\n  await page.locator('#mvp-lead-order').selectOption('priority');",
+    "  const selectedClient = await page.locator('#crm .mvp-lead-full-sheet[open]').getAttribute('data-lead-full-sheet');\n  await page.locator('#crm .mvp-lead-more-filters').evaluate((details: HTMLDetailsElement) => { details.open = true; });\n  const order = page.locator('#mvp-lead-order');\n  await order.selectOption('name');\n  await page.waitForTimeout(100);\n  assert.equal(await page.locator('#crm .mvp-lead-full-sheet[open]').count(), 1);\n  assert.equal(await page.locator('#crm .mvp-lead-full-sheet[open]').getAttribute('data-lead-full-sheet'), selectedClient);\n  await page.locator('#crm .mvp-lead-more-filters').evaluate((details: HTMLDetailsElement) => { details.open = true; });\n  await page.locator('#mvp-lead-order').selectOption('priority');",
+)
+replace(
+    'src/tests/b1-2-3-compact-leads-real-app.test.ts',
+    "    assert.ok(fullLeadHeight >= 320 && fullLeadHeight <= 450, `Tarjeta cerrada fuera de 320-450px: ${fullLeadHeight}`);",
+    "    assert.ok(fullLeadHeight >= 320 && fullLeadHeight <= 450, `Tarjeta cerrada fuera de 320-450px: ${fullLeadHeight}`);\n    console.log(`B1.2.3 altura tarjeta cerrada 390: ${fullLeadHeight.toFixed(2)}px`);",
+)
+replace(
     'src/lead-list-compact.css',
     "  #crm .mvp-lead-quick-actions .mvp-auto-qualify-button {\n    width: 100%;\n    flex-basis: 100%;\n  }",
     "  #crm .mvp-lead-quick-actions .mvp-auto-qualify-button {\n    min-width: 0;\n    width: auto;\n    flex: 1 1 160px;\n  }",
