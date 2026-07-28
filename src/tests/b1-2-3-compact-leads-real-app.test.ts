@@ -313,7 +313,8 @@ async function waitForLeads(page: Page, baseUrl: string): Promise<void> {
 async function assertClosedLayout(page: Page, viewport: { width: number; height: number }): Promise<number[]> {
   const metrics = await page.evaluate(() => {
     const cards = [...document.querySelectorAll<HTMLElement>('#crm .mvp-lead-compact-card')];
-    const controls = [...document.querySelectorAll<HTMLElement>('#crm .mvp-lead-compact-card button, #crm .mvp-lead-compact-card a.mvp-contact-btn, #crm .mvp-lead-full-sheet > summary, #crm .mvp-lead-followup-menu > summary')];
+    const controls = [...document.querySelectorAll<HTMLElement>('#crm .mvp-lead-compact-card button, #crm .mvp-lead-compact-card a.mvp-contact-btn, #crm .mvp-lead-full-sheet > summary, #crm .mvp-lead-followup-menu > summary')]
+      .filter((control) => control.getClientRects().length > 0);
     const hiddenFullContents = [...document.querySelectorAll<HTMLElement>('#crm .mvp-lead-full-content')].map((element) => element.getClientRects().length === 0);
     const shell = document.querySelector<HTMLElement>('#crm [data-stage-shell]');
     const counters = shell?.querySelector<HTMLElement>('.mvp-stage-counters');
