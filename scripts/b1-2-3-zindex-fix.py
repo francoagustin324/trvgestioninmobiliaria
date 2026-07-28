@@ -20,7 +20,7 @@ if rule not in css:
 
 test_path = Path('src/tests/b1-2-3-compact-leads-real-app.test.ts')
 test = test_path.read_text()
-old = """  await page.evaluate(() => {
+old_diagnostic = """  await page.evaluate(() => {
     document.querySelector('#crm')?.addEventListener('click', (event) => {
       const button = (event.target as HTMLElement).closest<HTMLElement>('[data-complete-client-follow-up]');
       if (button) document.documentElement.dataset.b123CompleteClick = button.dataset.completeClientFollowUp || '';
@@ -48,7 +48,7 @@ old = """  await page.evaluate(() => {
   assert.equal(diagnostic.nextFollowUp, null);
   const completedCard = page.locator('#crm .mvp-lead-compact-card').filter({ hasText: 'Seguimiento muy vencido' });
   assert.match(await completedCard.locator('.mvp-lead-next-action').innerText(), /Sin próxima acción/);"""
-new = """  const completeButton = updatedCard.locator('[data-complete-client-follow-up]');
+physical = """  const completeButton = updatedCard.locator('[data-complete-client-follow-up]');
   const hitTarget = await completeButton.evaluate((button) => {
     const rect = button.getBoundingClientRect();
     const target = document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2);
@@ -63,7 +63,41 @@ new = """  const completeButton = updatedCard.locator('[data-complete-client-fol
   });
   const completedCard = page.locator('#crm .mvp-lead-compact-card').filter({ hasText: 'Seguimiento muy vencido' });
   assert.match(await completedCard.locator('.mvp-lead-next-action').innerText(), /Sin próxima acción/);"""
-if new not in test:
-    if old not in test:
-        raise SystemExit('No se encontró el bloque diagnóstico del seguimiento.')
-    test_path.write_text(test.replace(old, new, 1))
+if physical not in test and old_diagnostic in test:
+    test = test.replace(old_diagnostic, physical, 1)
+
+detailed = """  const completeButton = updatedCard.locator('[data-complete-client-follow-up]');
+  const hitTarget = await completeButton.evaluate((button) => {
+    const rect = button.getBoundingClientRect();
+    const x = rect.left + rect.width / 2;
+    const y = rect.top + rect.height / 2;
+    const target = document.elementFromPoint(x, y) as HTMLElement | null;
+    const nav = document.querySelector<HTMLElement>('.mobile-bottom-nav');
+    const navRect = nav?.getBoundingClientRect();
+    return {
+      valid: target === button || button.contains(target),
+      button: { left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom },
+      point: { x, y },
+      targetTag: target?.tagName || '',
+      targetClass: target?.className || '',
+      targetText: target?.textContent?.trim().slice(0, 80) || '',
+      nav: navRect ? { left: navRect.left, top: navRect.top, right: navRect.right, bottom: navRect.bottom } : null,
+      menuZ: getComputedStyle(button.closest<HTMLElement>('.mvp-lead-followup-menu')!).zIndex,
+      popoverZ: getComputedStyle(button.closest<HTMLElement>('.mvp-lead-followup-popover')!).zIndex,
+    };
+  });
+  assert.equal(hitTarget.valid, true, `El botón Completar seguimiento está cubierto: ${JSON.stringify(hitTarget)}`);
+  await completeButton.click();
+  await page.waitForFunction(() => {
+    const cards = [...document.querySelectorAll<HTMLElement>('#crm .mvp-lead-compact-card')];
+    const card = cards.find((item) => item.textContent?.includes('Seguimiento muy vencido'));
+    return card?.querySelector('.mvp-lead-next-action')?.textContent?.includes('Sin próxima acción') === true;
+  });
+  const completedCard = page.locator('#crm .mvp-lead-compact-card').filter({ hasText: 'Seguimiento muy vencido' });
+  assert.match(await completedCard.locator('.mvp-lead-next-action').innerText(), /Sin próxima acción/);"""
+if detailed not in test:
+    if physical not in test:
+        raise SystemExit('No se encontró el bloque físico para instrumentar.')
+    test = test.replace(physical, detailed, 1)
+
+test_path.write_text(test)
