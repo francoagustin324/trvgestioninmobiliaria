@@ -233,11 +233,11 @@
   }
 
   #crm .mvp-lead-followup-popover {
-    position: fixed;
-    right: 12px;
-    bottom: calc(var(--pc-mobile-nav-clearance,120px) - 18px);
-    top: auto;
-    width: calc(100vw - 24px);
+    position: absolute;
+    top: calc(100% + 6px);
+    right: 0;
+    bottom: auto;
+    width: min(300px, calc(100vw - 32px));
   }
 
   #crm .mvp-lead-followup-popover form {

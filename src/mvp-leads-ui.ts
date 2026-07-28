@@ -192,7 +192,16 @@ function bindDelegatedFollowUpActions(container: HTMLElement): void {
   if (followUpActionContainers.has(container)) return;
   followUpActionContainers.add(container);
   container.addEventListener('click', (event) => {
-    const button = (event.target as HTMLElement).closest<HTMLButtonElement>('[data-complete-client-follow-up]');
+    const target = event.target as HTMLElement;
+    const followUpSummary = target.closest<HTMLElement>('.mvp-lead-followup-menu > summary');
+    if (followUpSummary && container.contains(followUpSummary)) {
+      const details = followUpSummary.closest<HTMLDetailsElement>('.mvp-lead-followup-menu');
+      window.requestAnimationFrame(() => {
+        if (details?.open) details.scrollIntoView({ behavior: 'instant', block: 'center', inline: 'nearest' });
+      });
+      return;
+    }
+    const button = target.closest<HTMLButtonElement>('[data-complete-client-follow-up]');
     if (!button || !container.contains(button)) return;
     event.preventDefault();
     event.stopPropagation();
