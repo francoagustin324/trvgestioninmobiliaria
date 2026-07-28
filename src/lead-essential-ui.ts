@@ -78,16 +78,22 @@ export function renderLeadCommercialSummary(client: Client): string {
   const budgetText = budget
     ? (/\b(?:USD|ARS|EUR|US\$|d[oó]lares?|pesos?)\b/i.test(budget) || !currency ? budget : `${currency} ${budget}`)
     : 'No confirmado';
+  const showAdditional = typeof window === 'undefined' || !window.matchMedia('(max-width: 520px)').matches;
   return `<div class="mvp-lead-summary mvp-lead-essential-summary">
     <div><span>Presupuesto</span><strong>${escapeHtml(budgetText)}</strong>${budget && !currency ? '<small class="qualification-budget-warning">Moneda sin confirmar</small>' : ''}</div>
     <div><span>Forma de pago</span><strong>${summaryValue(client.paymentMethod)}</strong></div>
     <div><span>Crédito</span><strong>${escapeHtml(creditSummary(client))}</strong></div>
     <div><span>Zona principal</span><strong>${summaryValue(client.zones)}</strong></div>
-    <div><span>Finalidad</span><strong>${summaryValue(client.purpose)}</strong></div>
     <div><span>Plazo / urgencia</span><strong>${escapeHtml(timeframeSummary(client))}</strong></div>
     <div><span>Puede avanzar</span><strong>${summaryValue(client.canMoveForward)}</strong></div>
-    <div><span>Conoce la zona</span><strong>${summaryValue(client.knowsArea, 'Dato adicional no confirmado')}</strong></div>
   </div>
+  <details class="mvp-lead-summary-more"${showAdditional ? ' open' : ''}>
+    <summary>Ver calificación completa</summary>
+    <div class="mvp-lead-summary-secondary">
+      <div><span>Finalidad</span><strong>${summaryValue(client.purpose)}</strong></div>
+      <div><span>Conoce la zona</span><strong>${summaryValue(client.knowsArea, 'Dato adicional no confirmado')}</strong></div>
+    </div>
+  </details>
   <div class="mvp-qualification state-${qualification.slug}">
     <div><strong>${escapeHtml(qualification.state)}</strong><small>${escapeHtml(qualification.detail)}</small></div>
     ${updatedAt(client)}
