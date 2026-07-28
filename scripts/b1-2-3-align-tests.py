@@ -51,3 +51,23 @@ replace(
     "    const controls = [...document.querySelectorAll<HTMLElement>('#crm .mvp-lead-compact-card button, #crm .mvp-lead-compact-card a.mvp-contact-btn, #crm .mvp-lead-full-sheet > summary, #crm .mvp-lead-followup-menu > summary')];",
     "    const controls = [...document.querySelectorAll<HTMLElement>('#crm .mvp-lead-compact-card button, #crm .mvp-lead-compact-card a.mvp-contact-btn, #crm .mvp-lead-full-sheet > summary, #crm .mvp-lead-followup-menu > summary')]\n      .filter((control) => control.getClientRects().length > 0);",
 )
+replace(
+    'src/lead-list-compact.css',
+    "  #crm .mvp-lead-compact-header {\n    grid-template-columns: 1fr;\n  }\n\n",
+    '',
+)
+replace(
+    'src/lead-list-compact.css',
+    "  #crm .mvp-lead-compact-facts {\n    grid-template-columns: repeat(2,minmax(0,1fr));\n  }\n\n  #crm .mvp-lead-compact-facts > div:last-child {\n    grid-column: 1 / -1;\n  }\n\n",
+    '',
+)
+replace(
+    'src/lead-list-compact.css',
+    "  #crm .mvp-lead-quick-actions .mvp-auto-qualify-button {\n    width: 100%;\n    flex-basis: 100%;\n  }",
+    "  #crm .mvp-lead-quick-actions .mvp-auto-qualify-button {\n    min-width: 0;\n    width: auto;\n    flex: 1 1 160px;\n  }",
+)
+replace(
+    'src/lead-list-compact.css',
+    "  #crm .mvp-lead-compact-facts,\n  #crm .mvp-lead-full-grid {\n    grid-template-columns: 1fr;\n  }\n\n  #crm .mvp-lead-compact-facts > div:last-child {\n    grid-column: 1;\n  }",
+    "  #crm .mvp-lead-compact-header {\n    grid-template-columns: 1fr;\n  }\n\n  #crm .mvp-lead-compact-facts {\n    grid-template-columns: repeat(2,minmax(0,1fr));\n  }\n\n  #crm .mvp-lead-compact-facts > div:last-child {\n    grid-column: 1 / -1;\n  }\n\n  #crm .mvp-lead-full-grid {\n    grid-template-columns: 1fr;\n  }\n\n  #crm .mvp-lead-quick-actions .mvp-auto-qualify-button {\n    width: 100%;\n    flex-basis: 100%;\n  }",
+)
