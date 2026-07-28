@@ -661,10 +661,12 @@ test('B1.2.2 valida Leads con DOM real, CSS real y navegación real en todos los
         }
         await assertBaseLayout(page, viewport);
         await assertFilterContrast(page, viewport.width);
+        await captureLeadsScreenshot(page, viewport);
+        await page.locator('#crm [data-toggle-lead-full]').first().click();
+        await page.waitForSelector('#crm .mvp-lead-full-profile', { state: 'visible' });
         await page.locator('#crm .mvp-lead-matches').first().evaluate((details: HTMLDetailsElement) => { details.open = true; });
         const history = page.locator('#crm .mvp-lead-history').last();
         if (await history.count()) await history.evaluate((details: HTMLDetailsElement) => { details.open = true; });
-        await captureLeadsScreenshot(page, viewport);
         await openAndAnalyzePanel(page, viewport.width);
         await capturePanelScreenshot(page, viewport);
         await assertBottomNavigationClearance(page, viewport.width);

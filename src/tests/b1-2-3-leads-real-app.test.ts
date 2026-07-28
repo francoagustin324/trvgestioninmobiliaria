@@ -176,7 +176,7 @@ async function assertPipeline(page: Page): Promise<void> {
 async function assertFilters(page: Page): Promise<void> {
   await page.locator('#crm .mvp-lead-more-filters').evaluate((details: HTMLDetailsElement) => { details.open = true; });
   await page.locator('#mvp-lead-temperature-filter').selectOption('Caliente');
-  await page.waitForFunction(() => document.querySelectorAll('#crm .mvp-lead-daily-card').length === 3);
+  await page.waitForFunction(() => document.querySelectorAll('#crm .mvp-lead-daily-card').length === 4);
   assert.match(await page.locator('#crm .mvp-lead-more-filters summary small').innerText(), /Temperatura/);
   await page.locator('[data-clear-lead-filters]').click();
   await page.waitForFunction(() => document.querySelectorAll('#crm .mvp-lead-daily-card').length === 8);
