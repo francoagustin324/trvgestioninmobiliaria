@@ -8,9 +8,22 @@ import {
 
 export type LeadOrder = 'priority' | 'follow-up' | 'recent' | 'name';
 export type LeadAlertTone = 'danger' | 'warning' | 'today' | 'ready' | 'neutral' | 'terminal';
+export type LeadAlertKind =
+  | 'overdue'
+  | 'due-today'
+  | 'visit-today'
+  | 'new-uncontacted'
+  | 'qualification-missing'
+  | 'no-follow-up'
+  | 'no-action'
+  | 'ready'
+  | 'terminal'
+  | 'stage-summary'
+  | 'neutral';
 export type FollowUpState = 'terminal' | 'overdue' | 'today' | 'upcoming' | 'missing-action' | 'missing-date' | 'empty';
 
 export interface LeadAlert {
+  kind: LeadAlertKind;
   label: string;
   tone: LeadAlertTone;
   rank: number;
@@ -126,39 +139,55 @@ function isMortgage(client: Client): boolean {
 
 export function leadPrimaryAlert(client: Client, today = localIsoDate()): LeadAlert {
   const stage = commercialStage(client);
-  if (isTerminalClient(client)) return { label: stage, tone: 'terminal', rank: 99 };
+  if (isTerminalClient(client)) return { kind: 'terminal', label: stage, tone: 'terminal', rank: 99 };
 
   const days = leadDaysFromToday(client.nextFollowUp, today);
   if (days !== null && days < 0) {
     return {
+      kind: 'overdue',
       label: days === -1 ? 'Seguimiento vencido ayer' : `Seguimiento vencido hace ${Math.abs(days)} días`,
       tone: 'danger',
       rank: 1,
     };
   }
   if (stage === 'Nuevo' && !client.lastContact) {
-    return { label: 'Nuevo sin contactar', tone: 'warning', rank: 2 };
+    return { kind: 'new-uncontacted', label: 'Nuevo sin contactar', tone: 'warning', rank: 2 };
   }
   if (days === 0 && (stage === 'Visita coordinada' || normalized(client.nextAction).includes('visita'))) {
     const time = visitTime(client);
-    return { label: time ? `Visita hoy a las ${time}` : 'Visita hoy', tone: 'today', rank: 3 };
+    return { kind: 'visit-today', label: time ? `Visita hoy a las ${time}` : 'Visita hoy', tone: 'today', rank: 3 };
   }
-  if (days === 0) return { label: 'Contactar hoy', tone: 'today', rank: 4 };
+  if (days === 0) return { kind: 'due-today', label: 'Contactar hoy', tone: 'today', rank: 4 };
   if (stage === 'Calificado' && (!client.nextAction?.trim() || !client.nextFollowUp)) {
-    return { label: 'Calificado sin seguimiento', tone: 'warning', rank: 5 };
+    return { kind: 'no-follow-up', label: 'Calificado sin seguimiento', tone: 'warning', rank: 5 };
   }
 
   const qualification = commercialQualificationState(client);
-  if (qualification.state === 'Falta presupuesto') return { label: 'Falta presupuesto', tone: 'warning', rank: 6 };
-  if (qualification.state === 'Falta forma de pago') return { label: 'Falta forma de pago', tone: 'warning', rank: 7 };
-  if (isMortgage(client) && !client.creditPossible?.trim()) return { label: 'Falta confirmar crédito', tone: 'warning', rank: 7 };
-  if (qualification.state === 'Falta confirmar capacidad de avance') {
-    return { label: 'Falta confirmar capacidad de avance', tone: 'warning', rank: 8 };
+  if (qualification.state === 'Falta presupuesto') {
+    return { kind: 'qualification-missing', label: 'Falta presupuesto', tone: 'warning', rank: 6 };
   }
-  if (qualification.state === 'No listo todavía') return { label: 'No listo todavía', tone: 'neutral', rank: 9 };
-  if (!client.nextAction?.trim() && !client.nextFollowUp) return { label: 'Sin próxima acción', tone: 'neutral', rank: 10 };
-  if (qualification.state === 'Calificado' || stage === 'Calificado') return { label: 'Calificado', tone: 'ready', rank: 11 };
-  return { label: stage === 'Nuevo' ? 'Información inicial' : stage, tone: 'neutral', rank: 12 };
+  if (qualification.state === 'Falta forma de pago') {
+    return { kind: 'qualification-missing', label: 'Falta forma de pago', tone: 'warning', rank: 7 };
+  }
+  if (isMortgage(client) && !client.creditPossible?.trim()) {
+    return { kind: 'qualification-missing', label: 'Falta confirmar crédito', tone: 'warning', rank: 7 };
+  }
+  if (qualification.state === 'Falta confirmar capacidad de avance') {
+    return { kind: 'qualification-missing', label: 'Falta confirmar capacidad de avance', tone: 'warning', rank: 8 };
+  }
+  if (qualification.state === 'No listo todavía') {
+    return { kind: 'qualification-missing', label: 'No listo todavía', tone: 'neutral', rank: 9 };
+  }
+  if (!client.nextAction?.trim() && !client.nextFollowUp) {
+    return { kind: 'no-action', label: 'Sin próxima acción', tone: 'neutral', rank: 10 };
+  }
+  if (qualification.state === 'Calificado' || stage === 'Calificado') {
+    return { kind: 'ready', label: 'Calificado', tone: 'ready', rank: 11 };
+  }
+  if (stage === 'Nuevo') {
+    return { kind: 'neutral', label: 'Información inicial', tone: 'neutral', rank: 12 };
+  }
+  return { kind: 'stage-summary', label: stage, tone: 'neutral', rank: 12 };
 }
 
 function priorityGroup(client: Client, today: string): number {
