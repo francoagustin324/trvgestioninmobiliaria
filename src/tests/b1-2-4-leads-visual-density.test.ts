@@ -91,7 +91,12 @@ test('la navegación visible usa exactamente los mismos nombres en escritorio y 
 });
 
 test('los estilos B1.2.4 fijan densidad, contraste, controles y degradados condicionales', () => {
-  const css = `${readFileSync('src/lead-list-compact.css', 'utf8')}\n${readFileSync('src/lead-list-polish.css', 'utf8')}`;
+  const css = [
+    'src/lead-pipeline.css',
+    'src/lead-list-compact.css',
+    'src/lead-list-polish.css',
+    'src/lead-list-card-density.css',
+  ].map((path) => readFileSync(path, 'utf8')).join('\n');
   assert.match(css, /B1\.2\.4/);
   assert.match(css, /@media \(min-width: 901px\)/);
   assert.match(css, /mvp-lead-filter-primary/);
