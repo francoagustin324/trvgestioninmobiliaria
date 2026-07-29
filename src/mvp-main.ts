@@ -13,6 +13,7 @@ import { installPropertyPhotoUxGuard } from './property-photo-ux.js';
 import { isInvitationPage, renderInvitationAuth } from './mvp-invitation-auth.js';
 import { appIcons } from './icons.js';
 import {
+  closeAccountMenuPanel,
   hasAuthenticatedSession,
   hydrateAuthenticatedSession,
   isLoginPage,
@@ -101,19 +102,17 @@ function setMobileNavigation(open: boolean): void {
 
 function ensureAccountSettingsAction(): void {
   if (!canAccessModule('configuracion')) return;
-  const menu = document.querySelector<HTMLElement>('.mvp-account-menu > div');
-  const logout = menu?.querySelector<HTMLButtonElement>('[data-account-logout]');
-  if (!menu || !logout || menu.querySelector('[data-account-settings]')) return;
+  const actions = document.querySelector<HTMLElement>('.mvp-account-actions');
+  if (!actions || actions.querySelector('[data-account-settings]')) return;
   const settingsButton = document.createElement('button');
   settingsButton.type = 'button';
+  settingsButton.className = 'mvp-account-action';
   settingsButton.dataset.accountSettings = '';
   settingsButton.dataset.module = 'configuracion';
-  settingsButton.textContent = 'Configuración';
-  logout.before(settingsButton);
-}
-
-function closeAccountMenu(): void {
-  document.querySelector<HTMLDetailsElement>('.mvp-account-menu')?.removeAttribute('open');
+  settingsButton.setAttribute('aria-label', 'Configuración');
+  settingsButton.title = 'Configuración';
+  settingsButton.innerHTML = `<span class="mvp-account-action-icon" aria-hidden="true">${appIcons.config}</span><span class="mvp-account-action-copy"><strong>Configuración</strong><small>Preferencias de la cuenta</small></span>`;
+  actions.append(settingsButton);
 }
 
 function resetModuleScroll(): void {
@@ -193,7 +192,7 @@ function bindEvents(): void {
     if (target.closest('[data-mobile-nav-close]')) { setMobileNavigation(false); return; }
     const module = target.closest<HTMLElement>('[data-module]')?.dataset.module as ModuleId | undefined;
     if (module && canAccessModule(module)) {
-      closeAccountMenu();
+      closeAccountMenuPanel({ restoreFocus: false });
       state.activeModule = module;
       render();
       setMobileNavigation(false);
