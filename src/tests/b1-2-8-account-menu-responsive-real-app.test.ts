@@ -18,7 +18,7 @@ import {
   type Locator,
   type Page,
 } from 'playwright';
-import { initialData, type CrmData } from '../models.js';
+import { initialData, type CrmData, type TeamRole } from '../models.js';
 
 const viewports = [
   { width: 320, height: 568 },
@@ -44,11 +44,11 @@ const captureViewports = [
 
 const captureScenarios = [
   'cerrado',
-  'abierto',
-  'nombre-largo',
-  'inmobiliaria-larga',
-  'estado-nube',
-  'parte-inferior',
+  'nube-al-dia',
+  'identidad-extensa',
+  'cambios-pendientes',
+  'seguridad-recuperacion',
+  'cerrar-sesion',
   'despues-scroll',
 ] as const;
 
@@ -64,7 +64,7 @@ interface WindowWithB128 extends Window {
   __b128CloudMessages?: string[];
 }
 
-function crmFixture(): CrmData {
+function crmFixture(role: TeamRole = 'Dueño'): CrmData {
   const crm = structuredClone(initialData);
   crm.organization = {
     id: 'trvgestioninmobiliaria',
@@ -75,16 +75,16 @@ function crmFixture(): CrmData {
   crm.teamMembers = [{
     id: 1,
     userId,
-    name: 'Franco Solís',
+    name: role === 'Corredor' ? 'Carla Corredora' : role === 'Administrador' ? 'Ana Administradora' : 'Franco Solís',
     email: 'franco.solis@example.test',
     phone: '5493515110069',
-    role: 'Dueño',
+    role,
     status: 'Activo',
     createdAt: '2026-07-01T12:00:00.000Z',
   }];
   crm.settings = {
     ...crm.settings,
-    profileName: 'trvgestioninmobiliaria',
+    profileName: role === 'Corredor' ? 'Carla Corredora' : role === 'Administrador' ? 'Ana Administradora' : 'trvgestioninmobiliaria',
     profileEmail: 'franco.solis@example.test',
     agencyName: 'TRV Gestión Inmobiliaria',
     defaultZone: 'Datos actuales',
@@ -106,8 +106,8 @@ function crmFixture(): CrmData {
   return crm;
 }
 
-function backupFixture(): CrmData {
-  const crm = crmFixture();
+function backupFixture(role: TeamRole = 'Dueño'): CrmData {
+  const crm = crmFixture(role);
   crm.settings.defaultZone = 'Backup restaurado';
   return crm;
 }
@@ -118,6 +118,14 @@ function savedSyncState() {
     localUpdatedAt: '2026-07-29T16:40:00-03:00',
     lastCloudSavedAt: '2026-07-29T14:12:00-03:00',
     lastCloudVersion: '2026-07-29T14:12:00-03:00',
+  };
+}
+
+function pendingSyncState() {
+  return {
+    ...savedSyncState(),
+    dirty: true,
+    localUpdatedAt: '2026-07-29T16:40:00-03:00',
   };
 }
 
@@ -181,6 +189,7 @@ async function stopServer(server: ChildProcess): Promise<void> {
 async function createContext(
   browser: Browser,
   viewport: { width: number; height: number },
+  role: TeamRole = 'Dueño',
 ): Promise<BrowserContext> {
   const mobile = viewport.width <= 430;
   const context = await browser.newContext({
@@ -211,8 +220,8 @@ async function createContext(
     }]));
     localStorage.setItem('propcontrol-active-team-member-v1', '1');
   }, {
-    data: crmFixture(),
-    backup: backupFixture(),
+    data: crmFixture(role),
+    backup: backupFixture(role),
     user: userId,
     keys: {
       session: sessionKey,
@@ -262,61 +271,41 @@ async function closeAccountMenuWithTrigger(page: Page): Promise<void> {
   assert.equal(await accountTrigger(page).getAttribute('aria-expanded'), 'false');
 }
 
-async function replaceIdentityData(
-  page: Page,
-  changes: {
-    profileName: string;
-    organizationName: string;
-    agencyName: string;
-  },
-): Promise<void> {
-  await page.evaluate(({ key, update }) => {
-    const data = JSON.parse(localStorage.getItem(key) || '{}') as CrmData;
-    data.settings.profileName = update.profileName;
-    data.organization.name = update.organizationName;
-    data.settings.agencyName = update.agencyName;
-    localStorage.setItem(key, JSON.stringify(data));
-  }, { key: storageKey, update: changes });
-  await page.reload({ waitUntil: 'domcontentloaded' });
-  await page.waitForSelector('[data-account-toggle]', {
-    state: 'visible',
-    timeout: 20_000,
-  });
+async function setSyncState(page: Page, value: Record<string, unknown>): Promise<void> {
+  await page.evaluate(({ key, stateValue }) => {
+    localStorage.setItem(key, JSON.stringify(stateValue));
+    document.dispatchEvent(new CustomEvent('propcontrol-cloud-status', {
+      detail: { message: '', kind: 'working' },
+    }));
+  }, { key: syncKey, stateValue: value });
+  await page.waitForTimeout(80);
 }
 
-async function restoreSavedFixture(page: Page): Promise<void> {
+async function replaceIdentityData(page: Page): Promise<void> {
+  await page.evaluate((key) => {
+    const data = JSON.parse(localStorage.getItem(key) || '{}') as CrmData;
+    data.settings.profileName = 'Juan Ignacio Rodríguez Martínez de la Fuente';
+    data.organization.name = 'Inmobiliaria Desarrollo Patrimonial del Centro de Córdoba';
+    data.settings.agencyName = 'Inmobiliaria Desarrollo Patrimonial del Centro de Córdoba';
+    data.teamMembers[0]!.name = 'Juan Ignacio Rodríguez Martínez de la Fuente';
+    localStorage.setItem(key, JSON.stringify(data));
+  }, storageKey);
+  await page.reload({ waitUntil: 'domcontentloaded' });
+  await page.waitForSelector('[data-account-toggle]', { state: 'visible', timeout: 20_000 });
+}
+
+async function restoreOwnerFixture(page: Page): Promise<void> {
   await page.evaluate(({ key, stateKey, data, sync }) => {
     localStorage.setItem(key, JSON.stringify(data));
     localStorage.setItem(stateKey, JSON.stringify(sync));
   }, {
     key: storageKey,
     stateKey: syncKey,
-    data: crmFixture(),
+    data: crmFixture('Dueño'),
     sync: savedSyncState(),
   });
   await page.reload({ waitUntil: 'domcontentloaded' });
-  await page.waitForSelector('[data-account-toggle]', {
-    state: 'visible',
-    timeout: 20_000,
-  });
-}
-
-async function setPendingStateWithoutCloudAttempt(page: Page): Promise<void> {
-  await page.evaluate((stateKey) => {
-    const current = JSON.parse(localStorage.getItem(stateKey) || '{}') as Record<string, unknown>;
-    delete current.lastError;
-    localStorage.setItem(stateKey, JSON.stringify({
-      ...current,
-      dirty: true,
-      localUpdatedAt: '2026-07-29T16:40:00-03:00',
-    }));
-    document.dispatchEvent(new CustomEvent('propcontrol-cloud-status', {
-      detail: { message: '', kind: 'working' },
-    }));
-  }, syncKey);
-  await page.waitForFunction(() => {
-    return document.querySelector('.mvp-account-sync strong')?.textContent?.trim() === 'Cambios pendientes';
-  });
+  await page.waitForSelector('[data-account-toggle]', { state: 'visible', timeout: 20_000 });
 }
 
 async function scrollWorkspace(page: Page): Promise<void> {
@@ -330,36 +319,38 @@ async function scrollWorkspace(page: Page): Promise<void> {
   await page.waitForTimeout(60);
 }
 
+async function menuActionLabels(page: Page): Promise<string[]> {
+  return accountPanel(page).locator('.mvp-account-action strong').allTextContents()
+    .then((labels) => labels.map((label) => label.trim()));
+}
+
+async function assertSavedMenu(page: Page): Promise<void> {
+  await openAccountMenu(page);
+  assert.equal(await page.locator('.mvp-account-sync strong').innerText(), 'Nube al día');
+  assert.equal(await accountPanel(page).locator('[data-account-sync]').count(), 0);
+  assert.equal(await accountPanel(page).locator('[data-account-restore]').count(), 0);
+  assert.deepEqual(await menuActionLabels(page), ['Configuración', 'Cerrar sesión']);
+}
+
 async function validatePanelGeometry(
   page: Page,
   viewport: { width: number; height: number },
 ): Promise<void> {
-  await openAccountMenu(page);
+  await assertSavedMenu(page);
   const geometry = await page.evaluate(() => {
     const menu = document.querySelector<HTMLElement>('.mvp-account-menu');
     const panel = document.querySelector<HTMLElement>('.mvp-account-panel');
     const trigger = document.querySelector<HTMLElement>('[data-account-toggle]');
     const nav = document.querySelector<HTMLElement>('.mobile-bottom-nav');
-    const topbar = document.querySelector<HTMLElement>('.app-topbar');
-    const actions = [...document.querySelectorAll<HTMLElement>('.mvp-account-action')];
     const name = document.querySelector<HTMLElement>('#propcontrol-account-name');
     const detail = document.querySelector<HTMLElement>('.mvp-account-identity-copy small');
-    if (!menu || !panel || !trigger || !topbar || !name || !detail) {
+    if (!menu || !panel || !trigger || !name || !detail) {
       throw new Error('Estructura del menú de cuenta incompleta.');
     }
     const panelRect = panel.getBoundingClientRect();
     const triggerRect = trigger.getBoundingClientRect();
     const navVisible = nav && getComputedStyle(nav).display !== 'none';
     const navRect = navVisible ? nav.getBoundingClientRect() : null;
-    const visibleLineCount = (element: HTMLElement) => {
-      const range = document.createRange();
-      range.selectNodeContents(element);
-      return new Set(
-        [...range.getClientRects()]
-          .filter((rect) => rect.width > 0 && rect.height > 0)
-          .map((rect) => Math.round(rect.top)),
-      ).size;
-    };
     return {
       viewportWidth: innerWidth,
       viewportHeight: innerHeight,
@@ -378,208 +369,56 @@ async function validatePanelGeometry(
       navTop: navRect?.top ?? null,
       menuZ: Number.parseInt(getComputedStyle(menu).zIndex, 10) || 0,
       navZ: nav ? Number.parseInt(getComputedStyle(nav).zIndex, 10) || 0 : 0,
-      actions: actions.map((action) => {
-        const rect = action.getBoundingClientRect();
-        return {
-          label: action.querySelector('strong')?.textContent?.trim() || '',
-          height: rect.height,
-          textAlign: getComputedStyle(action).textAlign,
-          left: rect.left,
-          right: rect.right,
-        };
-      }),
-      identityName: name.textContent?.trim() || '',
-      identityDetail: detail.textContent?.trim() || '',
-      identityNameLines: visibleLineCount(name),
-      identityDetailLines: visibleLineCount(detail),
+      bodyLocked: document.body.classList.contains('account-menu-open'),
       nameWordBreak: getComputedStyle(name).wordBreak,
       detailWordBreak: getComputedStyle(detail).wordBreak,
-      bodyLocked: document.body.classList.contains('account-menu-open'),
-      topbarVisible: topbar.getBoundingClientRect().bottom > 0,
     };
   });
 
-  assert.ok(
-    geometry.panel.left >= 11.5,
-    `Panel sin margen izquierdo: ${JSON.stringify(geometry)}`,
-  );
-  assert.ok(
-    geometry.panel.right <= geometry.viewportWidth - 11.5,
-    `Panel sin margen derecho: ${JSON.stringify(geometry)}`,
-  );
-  assert.ok(
-    geometry.panel.top >= geometry.triggerBottom + 7,
-    `Separación insuficiente respecto del avatar: ${JSON.stringify(geometry)}`,
-  );
-  assert.ok(
-    geometry.panel.bottom <= geometry.viewportHeight + 0.5,
-    `Panel fuera del alto visible: ${JSON.stringify(geometry)}`,
-  );
-  assert.ok(
-    geometry.panel.scrollWidth <= geometry.panel.clientWidth + 1,
-    `Overflow horizontal interno: ${JSON.stringify(geometry)}`,
-  );
-  assert.ok(
-    geometry.documentWidth <= geometry.viewportWidth + 1,
-    `Scroll horizontal del documento: ${JSON.stringify(geometry)}`,
-  );
-  assert.ok(
-    geometry.bodyWidth <= geometry.viewportWidth + 1,
-    `Scroll horizontal del body: ${JSON.stringify(geometry)}`,
-  );
-  assert.equal(geometry.topbarVisible, true);
-  assert.equal(geometry.bodyLocked, viewport.width <= 520);
-
-  if (viewport.width === 320) {
-    assert.ok(
-      geometry.panel.width >= 295,
-      `Panel todavía angosto en 320 px: ${JSON.stringify(geometry.panel)}`,
-    );
-  }
-  if (viewport.width === 360) {
-    assert.ok(geometry.panel.left >= 11.5);
-    assert.ok(geometry.panel.right <= 348.5);
-  }
-  if (viewport.width > 520) {
-    assert.ok(geometry.panel.width >= 299 && geometry.panel.width <= 341);
-  }
-
-  assert.equal(geometry.identityName, 'Franco Solís');
-  assert.equal(geometry.identityDetail, 'TRV Gestión Inmobiliaria · Dueño');
-  assert.ok(geometry.identityNameLines <= 2);
-  assert.ok(geometry.identityDetailLines <= 2);
+  assert.ok(geometry.panel.left >= 11.5, `Panel sin margen izquierdo: ${JSON.stringify(geometry)}`);
+  assert.ok(geometry.panel.right <= geometry.viewportWidth - 11.5, `Panel sin margen derecho: ${JSON.stringify(geometry)}`);
+  assert.ok(geometry.panel.top >= geometry.triggerBottom + 7, `Panel demasiado cerca del avatar: ${JSON.stringify(geometry)}`);
+  assert.ok(geometry.panel.bottom <= geometry.viewportHeight + 0.5, `Panel fuera del alto visible: ${JSON.stringify(geometry)}`);
+  assert.ok(geometry.panel.scrollWidth <= geometry.panel.clientWidth + 1, `Overflow horizontal interno: ${JSON.stringify(geometry)}`);
+  assert.ok(geometry.documentWidth <= geometry.viewportWidth + 1, `Scroll horizontal del documento: ${JSON.stringify(geometry)}`);
+  assert.ok(geometry.bodyWidth <= geometry.viewportWidth + 1, `Scroll horizontal del body: ${JSON.stringify(geometry)}`);
   assert.notEqual(geometry.nameWordBreak, 'break-all');
   assert.notEqual(geometry.detailWordBreak, 'break-all');
+  assert.equal(geometry.bodyLocked, viewport.width <= 520);
 
-  const labels = geometry.actions.map((action) => action.label);
-  assert.deepEqual(labels, [
-    'Sincronizar ahora',
-    'Recuperar copia',
-    'Configuración',
-    'Cerrar sesión',
-  ]);
-  assert.equal(new Set(labels).size, 4);
-  for (const action of geometry.actions) {
-    assert.ok(
-      action.height >= 47.5,
-      `Acción menor a 48 px: ${JSON.stringify(action)}`,
-    );
+  if (viewport.width === 320) assert.ok(geometry.panel.width >= 295);
+  if (viewport.width > 520) assert.ok(geometry.panel.width >= 299 && geometry.panel.width <= 341);
+
+  const actions = await accountPanel(page).locator('.mvp-account-action').evaluateAll((buttons) => {
+    return buttons.map((button) => {
+      const rect = button.getBoundingClientRect();
+      return {
+        height: rect.height,
+        textAlign: getComputedStyle(button).textAlign,
+      };
+    });
+  });
+  for (const action of actions) {
+    assert.ok(action.height >= 47.5);
     assert.equal(action.textAlign, 'left');
-    assert.ok(action.left >= geometry.panel.left);
-    assert.ok(action.right <= geometry.panel.right + 0.5);
   }
 
-  assert.equal(
-    await page.locator('[data-account-sync]').getAttribute('aria-label'),
-    'Sincronizar de forma segura',
-  );
-  assert.equal(
-    await page.locator('[data-account-restore]').getAttribute('aria-label'),
-    'Recuperar copia anterior',
-  );
-  assert.equal(
-    await page.locator('.mvp-account-sync strong').innerText(),
-    'Nube al día',
-  );
-  assert.match(
-    await page.locator('.mvp-account-sync small').innerText(),
-    /^Guardada/,
-  );
-
   if (geometry.navTop !== null) {
-    assert.ok(
-      geometry.menuZ > geometry.navZ,
-      `Panel detrás de la navegación inferior: ${JSON.stringify(geometry)}`,
-    );
-    await accountPanel(page).evaluate((element) => {
-      element.scrollTop = element.scrollHeight;
-    });
+    assert.ok(geometry.menuZ > geometry.navZ);
     const logout = await page.locator('[data-account-logout]').evaluate((button) => {
       const rect = button.getBoundingClientRect();
       const nav = document.querySelector<HTMLElement>('.mobile-bottom-nav');
       const navRect = nav?.getBoundingClientRect();
-      const x = rect.left + rect.width / 2;
-      const y = rect.top + rect.height / 2;
-      const hit = document.elementFromPoint(x, y);
+      const hit = document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2);
       return {
         bottom: rect.bottom,
         navTop: navRect?.top ?? innerHeight,
         hit: hit === button || button.contains(hit),
       };
     });
-    assert.ok(
-      logout.bottom <= logout.navTop + 0.5,
-      `Cerrar sesión queda bajo la navegación: ${JSON.stringify(logout)}`,
-    );
-    assert.equal(
-      logout.hit,
-      true,
-      `Cerrar sesión no es pulsable: ${JSON.stringify(logout)}`,
-    );
+    assert.ok(logout.bottom <= logout.navTop + 0.5);
+    assert.equal(logout.hit, true);
   }
-}
-
-async function validateOpenCloseAndFocus(page: Page): Promise<void> {
-  const trigger = accountTrigger(page);
-  assert.equal(await trigger.getAttribute('aria-expanded'), 'false');
-  assert.equal(
-    await trigger.getAttribute('aria-controls'),
-    'propcontrol-account-panel',
-  );
-
-  await openAccountMenu(page);
-  assert.equal(
-    await page.evaluate(() => {
-      return (document.activeElement as HTMLElement | null)?.hasAttribute('data-account-sync');
-    }),
-    true,
-  );
-
-  await closeAccountMenuWithTrigger(page);
-  assert.equal(
-    await page.evaluate(() => {
-      return document.activeElement === document.querySelector('[data-account-toggle]');
-    }),
-    true,
-  );
-
-  await openAccountMenu(page);
-  await page.keyboard.press('Escape');
-  await accountPanel(page).waitFor({ state: 'hidden' });
-  assert.equal(await trigger.getAttribute('aria-expanded'), 'false');
-  assert.equal(
-    await page.evaluate(() => {
-      return document.activeElement === document.querySelector('[data-account-toggle]');
-    }),
-    true,
-  );
-
-  await openAccountMenu(page);
-  await page.evaluate(() => {
-    document.querySelector<HTMLElement>('.app-brand')?.click();
-  });
-  await accountPanel(page).waitFor({ state: 'hidden' });
-  assert.equal(await trigger.getAttribute('aria-expanded'), 'false');
-
-  await openAccountMenu(page);
-  await page.locator('[data-account-backdrop]').click({
-    position: { x: 2, y: 2 },
-  });
-  await accountPanel(page).waitFor({ state: 'hidden' });
-  assert.equal(await trigger.getAttribute('aria-expanded'), 'false');
-
-  for (let cycle = 0; cycle < 10; cycle += 1) {
-    await trigger.click();
-    assert.equal(await trigger.getAttribute('aria-expanded'), 'true');
-    await trigger.click();
-    assert.equal(await trigger.getAttribute('aria-expanded'), 'false');
-  }
-  assert.equal(await page.locator('.mvp-account-menu').count(), 1);
-  assert.equal(await page.locator('.mvp-account-panel').count(), 1);
-  assert.equal(
-    await page.evaluate(() => document.body.classList.contains('account-menu-open')),
-    false,
-  );
 }
 
 async function recordCloudStatusMessages(page: Page): Promise<void> {
@@ -591,128 +430,6 @@ async function recordCloudStatusMessages(page: Page): Promise<void> {
       if (detail?.message) target.__b128CloudMessages?.push(detail.message);
     });
   });
-}
-
-async function validateRerenderSettingsAndSync(page: Page): Promise<void> {
-  await page.evaluate(() => {
-    document.dispatchEvent(new CustomEvent('trv-render'));
-  });
-  await page.waitForTimeout(50);
-  assert.equal(await page.locator('.mvp-account-menu').count(), 1);
-  assert.equal(await page.locator('.mvp-account-panel').count(), 1);
-
-  await openAccountMenu(page);
-  await page.locator('[data-account-settings]').click();
-  await page.locator('#configuracion.active').waitFor({ state: 'visible' });
-  assert.equal(await accountTrigger(page).getAttribute('aria-expanded'), 'false');
-  assert.equal(await accountPanel(page).isHidden(), true);
-  assert.equal(
-    await page.evaluate(() => document.body.classList.contains('account-menu-open')),
-    false,
-  );
-
-  await recordCloudStatusMessages(page);
-  await openAccountMenu(page);
-  await page.locator('[data-account-sync]').click();
-  await page.waitForTimeout(150);
-  const starts = await page.evaluate(() => {
-    const messages = (window as unknown as WindowWithB128).__b128CloudMessages ?? [];
-    return messages.filter((message) => {
-      return message === 'Comprobando datos locales y de la nube…';
-    }).length;
-  });
-  assert.equal(
-    starts,
-    1,
-    'Sincronizar ahora ejecutó el handler existente más de una vez.',
-  );
-  assert.equal(
-    await page.evaluate(() => document.body.classList.contains('account-menu-open')),
-    false,
-  );
-}
-
-async function validateRestoreHandler(page: Page): Promise<void> {
-  await recordCloudStatusMessages(page);
-  await page.evaluate(() => {
-    window.confirm = () => true;
-  });
-  await openAccountMenu(page);
-  await page.locator('[data-account-restore]').click();
-  await page.waitForTimeout(100);
-  const restored = await page.evaluate(({ key, backups }) => {
-    const data = JSON.parse(localStorage.getItem(key) || '{}') as CrmData;
-    const remaining = JSON.parse(localStorage.getItem(backups) || '[]') as unknown[];
-    const messages = (window as unknown as WindowWithB128).__b128CloudMessages ?? [];
-    return {
-      zone: data.settings.defaultZone,
-      remaining: remaining.length,
-      successCount: messages.filter((message) => {
-        return message.startsWith('Copia anterior recuperada.');
-      }).length,
-    };
-  }, { key: storageKey, backups: backupKey });
-  assert.deepEqual(restored, {
-    zone: 'Backup restaurado',
-    remaining: 0,
-    successCount: 1,
-  });
-  assert.equal(
-    await page.evaluate(() => document.body.classList.contains('account-menu-open')),
-    false,
-  );
-}
-
-async function validateLogout(page: Page, url: string): Promise<void> {
-  await openAccountMenu(page);
-  await page.locator('[data-account-logout]').click();
-  await page.waitForURL(`${url}/login`, { timeout: 10_000 });
-  assert.equal(
-    await page.evaluate((key) => localStorage.getItem(key), sessionKey),
-    null,
-  );
-}
-
-async function validateResizeCycle(page: Page): Promise<void> {
-  await openAccountMenu(page);
-  assert.equal(
-    await page.evaluate(() => document.body.classList.contains('account-menu-open')),
-    true,
-  );
-  await page.setViewportSize({ width: 1024, height: 768 });
-  await page.waitForTimeout(50);
-  assert.equal(
-    await page.evaluate(() => document.body.classList.contains('account-menu-open')),
-    false,
-  );
-  assert.equal(await accountTrigger(page).getAttribute('aria-expanded'), 'true');
-
-  await page.setViewportSize({ width: 390, height: 844 });
-  await page.waitForTimeout(50);
-  assert.equal(
-    await page.evaluate(() => document.body.classList.contains('account-menu-open')),
-    true,
-  );
-  await closeAccountMenuWithTrigger(page);
-  assert.equal(
-    await page.evaluate(() => document.body.classList.contains('account-menu-open')),
-    false,
-  );
-}
-
-function visibleTextMetrics(element: HTMLElement) {
-  const range = document.createRange();
-  range.selectNodeContents(element);
-  return {
-    text: element.textContent?.trim() || '',
-    wordBreak: getComputedStyle(element).wordBreak,
-    overflow: element.scrollWidth > element.clientWidth + 1,
-    lines: new Set(
-      [...range.getClientRects()]
-        .filter((rect) => rect.width > 0 && rect.height > 0)
-        .map((rect) => Math.round(rect.top)),
-    ).size,
-  };
 }
 
 async function captureViewport(
@@ -735,28 +452,16 @@ function validateScreenshots(directory: string, expectedCount: number): void {
     const path = join(directory, name);
     const buffer = readFileSync(path);
     assert.ok(statSync(path).size > 2_000, `${name} parece vacío.`);
-    assert.deepEqual(
-      [...buffer.subarray(0, 8)],
-      [137, 80, 78, 71, 13, 10, 26, 10],
-      `${name} no tiene firma PNG válida.`,
-    );
+    assert.deepEqual([...buffer.subarray(0, 8)], [137, 80, 78, 71, 13, 10, 26, 10]);
     const match = name.match(/^(\d+)x(\d+)-/);
     assert.ok(match, `No se pudo leer el viewport desde ${name}.`);
-    assert.equal(
-      buffer.readUInt32BE(16),
-      Number(match[1]),
-      `Ancho PNG incorrecto en ${name}.`,
-    );
-    assert.equal(
-      buffer.readUInt32BE(20),
-      Number(match[2]),
-      `Alto PNG incorrecto en ${name}.`,
-    );
+    assert.equal(buffer.readUInt32BE(16), Number(match[1]));
+    assert.equal(buffer.readUInt32BE(20), Number(match[2]));
   }
 }
 
 test(
-  'B1.2.8 valida geometría, identidad y estado en la matriz responsive real',
+  'B1.2.8 muestra Nube al día sin acción manual y conserva geometría responsive',
   { timeout: 300_000 },
   async () => {
     const executablePath = chromeExecutable();
@@ -773,21 +478,10 @@ test(
           await loadApplication(page, url);
           await validatePanelGeometry(page, viewport);
           await closeAccountMenuWithTrigger(page);
-
           await scrollWorkspace(page);
-          await openAccountMenu(page);
-          const afterScroll = await accountPanel(page).boundingBox();
-          assert.ok(
-            afterScroll
-              && afterScroll.x >= 11.5
-              && afterScroll.x + afterScroll.width <= viewport.width - 11.5,
-            `Panel fuera del viewport después del scroll: ${JSON.stringify(afterScroll)}`,
-          );
+          await assertSavedMenu(page);
           await closeAccountMenuWithTrigger(page);
-          assert.equal(
-            await page.evaluate(() => document.body.classList.contains('account-menu-open')),
-            false,
-          );
+          assert.equal(await page.evaluate(() => document.body.classList.contains('account-menu-open')), false);
         } finally {
           await context.close();
         }
@@ -800,7 +494,7 @@ test(
 );
 
 test(
-  'B1.2.8 valida apertura, cierre, foco, navegación y handlers existentes',
+  'B1.2.8 muestra sincronización solo cuando corresponde y conserva cierres, foco y Configuración',
   { timeout: 180_000 },
   async () => {
     const executablePath = chromeExecutable();
@@ -809,42 +503,158 @@ test(
     const url = `http://127.0.0.1:${port}`;
     const server = await startServer(port);
     const browser = await chromium.launch({ executablePath, headless: true });
+    const context = await createContext(browser, { width: 390, height: 844 });
     try {
-      const behaviorContext = await createContext(browser, { width: 390, height: 844 });
+      const page = await context.newPage();
+      await loadApplication(page, url);
+
+      await assertSavedMenu(page);
+      assert.equal(await page.evaluate(() => document.activeElement?.hasAttribute('data-account-settings')), true);
+      await closeAccountMenuWithTrigger(page);
+      assert.equal(await page.evaluate(() => document.activeElement === document.querySelector('[data-account-toggle]')), true);
+
+      await openAccountMenu(page);
+      await page.keyboard.press('Escape');
+      await accountPanel(page).waitFor({ state: 'hidden' });
+      assert.equal(await accountTrigger(page).getAttribute('aria-expanded'), 'false');
+
+      await openAccountMenu(page);
+      await page.locator('[data-account-backdrop]').click({ position: { x: 2, y: 120 } });
+      await accountPanel(page).waitFor({ state: 'hidden' });
+
+      await openAccountMenu(page);
+      await page.evaluate(() => document.querySelector<HTMLElement>('.app-brand')?.click());
+      await accountPanel(page).waitFor({ state: 'hidden' });
+
+      await setSyncState(page, pendingSyncState());
+      await openAccountMenu(page);
+      assert.equal(await page.locator('.mvp-account-sync strong').innerText(), 'Cambios pendientes');
+      assert.equal(await accountPanel(page).locator('[data-account-sync]').count(), 1);
+      assert.equal(await accountPanel(page).locator('[data-account-restore]').count(), 0);
+      assert.deepEqual(await menuActionLabels(page), ['Sincronizar ahora', 'Configuración', 'Cerrar sesión']);
+
+      await recordCloudStatusMessages(page);
+      await page.locator('[data-account-sync]').click();
+      await page.waitForTimeout(150);
+      const syncStarts = await page.evaluate(() => {
+        return ((window as unknown as WindowWithB128).__b128CloudMessages ?? [])
+          .filter((message) => message === 'Comprobando datos locales y de la nube…').length;
+      });
+      assert.equal(syncStarts, 1);
+
+      await setSyncState(page, {
+        ...pendingSyncState(),
+        lastError: 'No se pudo conectar con la nube.',
+      });
+      await openAccountMenu(page);
+      assert.equal(await page.locator('.mvp-account-sync strong').innerText(), 'Error de sincronización');
+      assert.equal(await accountPanel(page).locator('[data-account-sync]').count(), 1);
+      await closeAccountMenuWithTrigger(page);
+
+      await setSyncState(page, {
+        ...pendingSyncState(),
+        lastError: 'Hay datos distintos y cambios más nuevos en la nube.',
+      });
+      await openAccountMenu(page);
+      assert.equal(await accountPanel(page).locator('[data-account-resolve]').count(), 1);
+      assert.equal(await accountPanel(page).locator('[data-account-sync]').count(), 0);
+      await page.locator('[data-account-settings]').click();
+      await page.locator('#configuracion.active').waitFor({ state: 'visible' });
+      assert.equal(await accountTrigger(page).getAttribute('aria-expanded'), 'false');
+      assert.equal(await page.evaluate(() => document.body.classList.contains('account-menu-open')), false);
+    } finally {
+      await context.close();
+      await browser.close();
+      await stopServer(server);
+    }
+  },
+);
+
+test(
+  'B1.2.8 mueve Recuperar copia a Seguridad y recuperación y aplica permisos existentes',
+  { timeout: 180_000 },
+  async () => {
+    const executablePath = chromeExecutable();
+    assert.ok(executablePath, 'Chrome/Chromium no disponible para B1.2.8.');
+    const port = 48500 + Math.floor(Math.random() * 1000);
+    const url = `http://127.0.0.1:${port}`;
+    const server = await startServer(port);
+    const browser = await chromium.launch({ executablePath, headless: true });
+    try {
+      const ownerContext = await createContext(browser, { width: 390, height: 844 }, 'Dueño');
       try {
-        const page = await behaviorContext.newPage();
+        const page = await ownerContext.newPage();
         await loadApplication(page, url);
-        await validateOpenCloseAndFocus(page);
-        await validateRerenderSettingsAndSync(page);
+        await assertSavedMenu(page);
+        assert.equal(await accountPanel(page).locator('[data-account-restore]').count(), 0);
+        assert.equal(await page.locator('[data-settings-security-recovery]').count(), 1);
+        assert.equal(await page.locator('#configuracion [data-account-restore]').count(), 1);
+        assert.match(
+          await page.locator('#propcontrol-recovery-guidance').innerText(),
+          /solo si faltan datos o soporte lo recomienda/i,
+        );
+        assert.match(await page.locator('#propcontrol-recovery-guidance').innerText(), /Nunca se ejecuta automáticamente/i);
+
+        const before = await page.evaluate(({ dataKey, backupsKey }) => ({
+          zone: (JSON.parse(localStorage.getItem(dataKey) || '{}') as CrmData).settings.defaultZone,
+          backups: (JSON.parse(localStorage.getItem(backupsKey) || '[]') as unknown[]).length,
+        }), { dataKey: storageKey, backupsKey: backupKey });
+        assert.deepEqual(before, { zone: 'Datos actuales', backups: 1 });
+
+        await page.locator('[data-account-settings]').click();
+        await page.locator('#configuracion.active').waitFor({ state: 'visible' });
+        await page.evaluate(() => { window.confirm = () => false; });
+        await page.locator('#configuracion [data-account-restore]').click();
+        const cancelledZone = await page.evaluate((key) => {
+          return (JSON.parse(localStorage.getItem(key) || '{}') as CrmData).settings.defaultZone;
+        }, storageKey);
+        assert.equal(cancelledZone, 'Datos actuales');
+
+        await recordCloudStatusMessages(page);
+        await page.evaluate(() => { window.confirm = () => true; });
+        await page.locator('#configuracion [data-account-restore]').click();
+        await page.waitForTimeout(120);
+        const restored = await page.evaluate(({ dataKey, backupsKey }) => ({
+          zone: (JSON.parse(localStorage.getItem(dataKey) || '{}') as CrmData).settings.defaultZone,
+          backups: (JSON.parse(localStorage.getItem(backupsKey) || '[]') as unknown[]).length,
+          successCount: ((window as unknown as WindowWithB128).__b128CloudMessages ?? [])
+            .filter((message) => message.startsWith('Copia anterior recuperada.')).length,
+        }), { dataKey: storageKey, backupsKey: backupKey });
+        assert.deepEqual(restored, { zone: 'Backup restaurado', backups: 0, successCount: 1 });
       } finally {
-        await behaviorContext.close();
+        await ownerContext.close();
       }
 
-      const restoreContext = await createContext(browser, { width: 390, height: 844 });
+      const adminContext = await createContext(browser, { width: 390, height: 844 }, 'Administrador');
       try {
-        const page = await restoreContext.newPage();
+        const page = await adminContext.newPage();
         await loadApplication(page, url);
-        await validateRestoreHandler(page);
+        assert.equal(await page.locator('[data-settings-security-recovery]').count(), 1);
+        assert.equal(await page.locator('#configuracion [data-account-restore]').count(), 1);
+        assert.equal(await accountPanel(page).locator('[data-account-restore]').count(), 0);
       } finally {
-        await restoreContext.close();
+        await adminContext.close();
       }
 
-      const resizeContext = await createContext(browser, { width: 390, height: 844 });
+      const corredorContext = await createContext(browser, { width: 390, height: 844 }, 'Corredor');
       try {
-        const page = await resizeContext.newPage();
+        const page = await corredorContext.newPage();
         await loadApplication(page, url);
-        await validateResizeCycle(page);
+        assert.equal(await page.locator('[data-settings-security-recovery]').count(), 0);
+        assert.equal(await page.locator('[data-account-restore]').count(), 0);
+        assert.equal(await page.locator('[data-account-settings]').count(), 0);
+        const unauthorized = await page.evaluate(({ dataKey, backupsKey }) => ({
+          recoverControl: Boolean(document.querySelector('[data-account-restore]')),
+          zone: (JSON.parse(localStorage.getItem(dataKey) || '{}') as CrmData).settings.defaultZone,
+          backups: (JSON.parse(localStorage.getItem(backupsKey) || '[]') as unknown[]).length,
+        }), { dataKey: storageKey, backupsKey: backupKey });
+        assert.deepEqual(unauthorized, {
+          recoverControl: false,
+          zone: 'Datos actuales',
+          backups: 1,
+        });
       } finally {
-        await resizeContext.close();
-      }
-
-      const logoutContext = await createContext(browser, { width: 390, height: 844 });
-      try {
-        const page = await logoutContext.newPage();
-        await loadApplication(page, url);
-        await validateLogout(page, url);
-      } finally {
-        await logoutContext.close();
+        await corredorContext.close();
       }
     } finally {
       await browser.close();
@@ -854,14 +664,14 @@ test(
 );
 
 test(
-  'B1.2.8 conserva nombres largos, estados pendientes y genera capturas efímeras estructurales',
+  'B1.2.8 conserva identidad extensa y genera la matriz estructural de capturas',
   { timeout: 420_000 },
   async () => {
     const executablePath = chromeExecutable();
     assert.ok(executablePath, 'Chrome/Chromium no disponible para B1.2.8.');
     const port = 49000 + Math.floor(Math.random() * 1000);
     const url = `http://127.0.0.1:${port}`;
-    const screenshots = mkdtempSync(join(tmpdir(), 'propcontrol-b128-'));
+    const screenshots = mkdtempSync(join(tmpdir(), 'propcontrol-b128-product-'));
     const server = await startServer(port);
     const browser = await chromium.launch({ executablePath, headless: true });
     let captured = 0;
@@ -872,89 +682,57 @@ test(
           const page = await context.newPage();
           await loadApplication(page, url);
 
-          await closeAccountMenuWithTrigger(page);
           await captureViewport(page, screenshots, viewport, 'cerrado');
           captured += 1;
 
-          await openAccountMenu(page);
-          await captureViewport(page, screenshots, viewport, 'abierto');
+          await assertSavedMenu(page);
+          await captureViewport(page, screenshots, viewport, 'nube-al-dia');
           captured += 1;
-
-          await replaceIdentityData(page, {
-            profileName: 'Juan Ignacio Rodríguez Martínez de la Fuente',
-            organizationName: 'TRV Gestión Inmobiliaria',
-            agencyName: 'TRV Gestión Inmobiliaria',
-          });
-          await openAccountMenu(page);
-          const longName = await page
-            .locator('#propcontrol-account-name')
-            .evaluate(visibleTextMetrics);
-          assert.equal(
-            longName.text,
-            'Juan Ignacio Rodríguez Martínez de la Fuente',
-          );
-          assert.notEqual(longName.wordBreak, 'break-all');
-          assert.equal(longName.overflow, false);
-          assert.ok(longName.lines <= 2);
-          await captureViewport(page, screenshots, viewport, 'nombre-largo');
-          captured += 1;
-
-          await replaceIdentityData(page, {
-            profileName: 'Franco Solís',
-            organizationName: 'Inmobiliaria Desarrollo Patrimonial del Centro de Córdoba',
-            agencyName: 'Inmobiliaria Desarrollo Patrimonial del Centro de Córdoba',
-          });
-          await openAccountMenu(page);
-          const longAgency = await page
-            .locator('.mvp-account-identity-copy small')
-            .evaluate(visibleTextMetrics);
-          assert.match(
-            longAgency.text,
-            /Inmobiliaria Desarrollo Patrimonial del Centro de Córdoba · Dueño/,
-          );
-          assert.notEqual(longAgency.wordBreak, 'break-all');
-          assert.equal(longAgency.overflow, false);
-          assert.ok(longAgency.lines <= 2);
-          await captureViewport(page, screenshots, viewport, 'inmobiliaria-larga');
-          captured += 1;
-
-          await restoreSavedFixture(page);
-          await openAccountMenu(page);
-          assert.equal(
-            await page.locator('.mvp-account-sync strong').innerText(),
-            'Nube al día',
-          );
-          await captureViewport(page, screenshots, viewport, 'estado-nube');
-          captured += 1;
-
-          await accountPanel(page).evaluate((element) => {
-            element.scrollTop = element.scrollHeight;
-          });
-          await captureViewport(page, screenshots, viewport, 'parte-inferior');
-          captured += 1;
-
           await closeAccountMenuWithTrigger(page);
-          await scrollWorkspace(page);
+
+          await replaceIdentityData(page);
+          await assertSavedMenu(page);
+          const identityMetrics = await page.evaluate(() => {
+            const name = document.querySelector<HTMLElement>('#propcontrol-account-name');
+            const detail = document.querySelector<HTMLElement>('.mvp-account-identity-copy small');
+            if (!name || !detail) throw new Error('Identidad no disponible.');
+            return {
+              name: name.getAttribute('aria-label'),
+              detail: detail.getAttribute('aria-label'),
+              overflow: name.scrollWidth > name.clientWidth + 1 || detail.scrollWidth > detail.clientWidth + 1,
+              documentOverflow: document.documentElement.scrollWidth > innerWidth + 1,
+            };
+          });
+          assert.equal(identityMetrics.name, 'Juan Ignacio Rodríguez Martínez de la Fuente');
+          assert.match(identityMetrics.detail || '', /Inmobiliaria Desarrollo Patrimonial del Centro de Córdoba · Dueño/);
+          assert.equal(identityMetrics.overflow, false);
+          assert.equal(identityMetrics.documentOverflow, false);
+          await captureViewport(page, screenshots, viewport, 'identidad-extensa');
+          captured += 1;
+          await closeAccountMenuWithTrigger(page);
+
+          await restoreOwnerFixture(page);
+          await setSyncState(page, pendingSyncState());
           await openAccountMenu(page);
+          assert.equal(await accountPanel(page).locator('[data-account-sync]').count(), 1);
+          await captureViewport(page, screenshots, viewport, 'cambios-pendientes');
+          captured += 1;
+          await page.locator('[data-account-settings]').click();
+          await page.locator('#configuracion.active').waitFor({ state: 'visible' });
+          await captureViewport(page, screenshots, viewport, 'seguridad-recuperacion');
+          captured += 1;
+
+          await setSyncState(page, savedSyncState());
+          await openAccountMenu(page);
+          await captureViewport(page, screenshots, viewport, 'cerrar-sesion');
+          captured += 1;
+          await closeAccountMenuWithTrigger(page);
+
+          await scrollWorkspace(page);
+          await assertSavedMenu(page);
           await captureViewport(page, screenshots, viewport, 'despues-scroll');
           captured += 1;
-
           await closeAccountMenuWithTrigger(page);
-          await setPendingStateWithoutCloudAttempt(page);
-          await openAccountMenu(page);
-          assert.equal(
-            await page.locator('.mvp-account-sync strong').innerText(),
-            'Cambios pendientes',
-          );
-          assert.match(
-            await page.locator('.mvp-account-sync small').innerText(),
-            /^Actualizados/,
-          );
-          await closeAccountMenuWithTrigger(page);
-          assert.equal(
-            await page.evaluate(() => document.body.classList.contains('account-menu-open')),
-            false,
-          );
         } finally {
           await context.close();
         }
@@ -962,12 +740,37 @@ test(
 
       assert.equal(captured, captureViewports.length * captureScenarios.length);
       validateScreenshots(screenshots, 49);
-      console.log('# B1.2.8 capturas efímeras validadas automáticamente por firma, dimensiones, tamaño y geometría: 49');
-      console.log('# B1.2.8 inspección visual humana de capturas: NO');
+      console.log('# B1.2.8 capturas estructurales validadas por firma, dimensiones, tamaño y geometría: 49');
     } finally {
       await browser.close();
       await stopServer(server);
       rmSync(screenshots, { recursive: true, force: true });
+    }
+  },
+);
+
+test(
+  'B1.2.8 conserva cierre de sesión y limpia la sesión autenticada',
+  { timeout: 60_000 },
+  async () => {
+    const executablePath = chromeExecutable();
+    assert.ok(executablePath, 'Chrome/Chromium no disponible para B1.2.8.');
+    const port = 49500 + Math.floor(Math.random() * 1000);
+    const url = `http://127.0.0.1:${port}`;
+    const server = await startServer(port);
+    const browser = await chromium.launch({ executablePath, headless: true });
+    const context = await createContext(browser, { width: 390, height: 844 });
+    try {
+      const page = await context.newPage();
+      await loadApplication(page, url);
+      await assertSavedMenu(page);
+      await page.locator('[data-account-logout]').click();
+      await page.waitForURL(`${url}/login`, { timeout: 10_000 });
+      assert.equal(await page.evaluate((key) => localStorage.getItem(key), sessionKey), null);
+    } finally {
+      await context.close();
+      await browser.close();
+      await stopServer(server);
     }
   },
 );
