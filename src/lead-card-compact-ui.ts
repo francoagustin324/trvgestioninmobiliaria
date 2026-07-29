@@ -41,8 +41,12 @@ function temperatureIcon(temperature: string): string {
 }
 
 function compactAlertLabel(label: string): string {
-  const compact = label.replace(/^Seguimiento\s+/i, '');
-  return compact.replace(/^\p{Ll}/u, (letter) => letter.toUpperCase());
+  if (/^Seguimiento vencido\b/i.test(label)) {
+    return label.replace(/^Seguimiento\s+/i, '').replace(/^\p{Ll}/u, (letter) => letter.toUpperCase());
+  }
+  if (label === 'Falta confirmar capacidad de avance') return 'Falta confirmar avance';
+  if (label === 'Calificado sin seguimiento') return 'Sin seguimiento';
+  return label;
 }
 
 function creditDetail(client: Client): string {
@@ -162,12 +166,12 @@ export function renderCompactLeadCard(client: Client, context: CompactLeadCardCo
   const terminal = isTerminalClient(client);
   const alert = leadPrimaryAlert(client);
   const alertLabel = escapeHtml(alert.label);
-  const compactLabel = escapeHtml(compactAlertLabel(alert.label));
+  const mobileAlertLabel = escapeHtml(compactAlertLabel(alert.label));
   const followUp = leadFollowUpDisplay(client);
   return `<article class="mvp-lead-card mvp-lead-card-with-matches mvp-lead-compact-card${terminal ? ' terminal' : ''}" data-client-id="${client.id}">
     <header class="mvp-lead-compact-header">
       <div class="mvp-lead-identity">${temperatureIcon(client.temperature)}<h3>${escapeHtml(client.name)}</h3></div>
-      <div class="mvp-lead-statuses"><span class="mvp-stage-badge${terminal ? ' terminal' : ''}">${escapeHtml(stage)}</span><div class="mvp-lead-alert tone-${alert.tone}" data-lead-alert-rank="${alert.rank}" aria-label="${alertLabel}" title="${alertLabel}"><span class="mvp-lead-alert-full" aria-hidden="true">${alertLabel}</span><span class="mvp-lead-alert-compact" aria-hidden="true">${compactLabel}</span></div></div>
+      <div class="mvp-lead-statuses"><span class="mvp-stage-badge${terminal ? ' terminal' : ''}">${escapeHtml(stage)}</span><div class="mvp-lead-alert tone-${alert.tone}" data-lead-alert-rank="${alert.rank}" data-mobile-label="${mobileAlertLabel}" aria-label="${alertLabel}" title="${alertLabel}"><span class="mvp-lead-alert-text">${alertLabel}</span></div></div>
     </header>
     <p class="mvp-lead-interest">${client.interest ? escapeHtml(client.interest) : 'Sin búsqueda definida'}</p>
     ${renderCommercialFacts(client)}
