@@ -82,7 +82,7 @@
 .mvp-lead-card .mvp-lead-matches { margin-top:0; }
 
 /* B1.2.3 — Tarjeta diaria compacta y ficha progresiva. */
-.mvp-lead-compact-card { gap:10px !important; }
+.mvp-lead-compact-card { gap:10px; }
 .mvp-lead-compact-header { display:grid; grid-template-columns:minmax(0,1fr) auto; align-items:start; gap:10px 14px; min-width:0; }
 .mvp-lead-alert { display:inline-flex; min-height:34px; align-items:center; justify-content:center; max-width:100%; padding:7px 10px; border:1px solid transparent; border-radius:999px; font-size:.72rem; font-weight:900; line-height:1.15; text-align:center; }
 .mvp-lead-alert.tone-danger { color:#8b302d; border-color:#efc3bd; background:#fff0ed; }
