@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
+import { formatLeadBudget } from '../lead-budget-display.js';
 import { renderCompactLeadCard } from '../lead-card-compact-ui.js';
-import { compactBudget } from '../lead-list-priority.js';
 import { localIsoDate } from '../lead-pipeline.js';
 import type { Client } from '../models.js';
 
@@ -45,20 +45,20 @@ test('formatea importes numéricos sin modificar el valor almacenado', () => {
   const ars = lead({ budget: '7600000', currency: 'ARS' });
   const unknown = lead({ budget: '168000', currency: undefined });
 
-  assert.equal(compactBudget(usd), 'USD 168.000');
-  assert.equal(compactBudget(ars), 'ARS 7.600.000');
-  assert.equal(compactBudget(unknown), '168.000 · moneda no confirmada');
+  assert.equal(formatLeadBudget(usd), 'USD 168.000');
+  assert.equal(formatLeadBudget(ars), 'ARS 7.600.000');
+  assert.equal(formatLeadBudget(unknown), '168.000 · moneda no confirmada');
   assert.equal(usd.budget, '168000');
   assert.equal(ars.budget, '7600000');
   assert.equal(unknown.budget, '168000');
 });
 
 test('preserva moneda incluida en el presupuesto y textos no puramente numéricos', () => {
-  assert.equal(compactBudget(lead({ budget: 'USD 168000', currency: undefined })), 'USD 168.000');
-  assert.equal(compactBudget(lead({ budget: 'ARS 7600000', currency: undefined })), 'ARS 7.600.000');
-  assert.equal(compactBudget(lead({ budget: 'Hasta USD 120.000', currency: 'USD' })), 'Hasta USD 120.000');
-  assert.equal(compactBudget(lead({ budget: 'Entre 100 y 120 mil dólares', currency: undefined })), 'Entre 100 y 120 mil dólares');
-  assert.equal(compactBudget(lead({ budget: 'A confirmar', currency: 'ARS' })), 'A confirmar');
+  assert.equal(formatLeadBudget(lead({ budget: 'USD 168000', currency: undefined })), 'USD 168.000');
+  assert.equal(formatLeadBudget(lead({ budget: 'ARS 7600000', currency: undefined })), 'ARS 7.600.000');
+  assert.equal(formatLeadBudget(lead({ budget: 'Hasta USD 120.000', currency: 'USD' })), 'Hasta USD 120.000');
+  assert.equal(formatLeadBudget(lead({ budget: 'Entre 100 y 120 mil dólares', currency: undefined })), 'Entre 100 y 120 mil dólares');
+  assert.equal(formatLeadBudget(lead({ budget: 'A confirmar', currency: 'ARS' })), 'A confirmar');
 });
 
 test('el encabezado separa identidad y estados y conserva la alerta completa accesible', () => {
@@ -85,7 +85,7 @@ test('los nombres obligatorios se renderizan completos y sin fragmentación arti
 });
 
 test('el CSS móvil usa dos filas estables y prohíbe cortar palabras del nombre', () => {
-  const css = readFileSync('src/lead-list-polish.css', 'utf8');
+  const css = readFileSync('src/lead-list-compact.css', 'utf8');
   assert.match(css, /@media \(max-width: 520px\)/);
   assert.match(css, /grid-template-areas:\s*['"]identity['"]\s*['"]statuses['"]/);
   assert.match(css, /\.mvp-lead-identity/);
@@ -94,5 +94,6 @@ test('el CSS móvil usa dos filas estables y prohíbe cortar palabras del nombre
   assert.match(css, /overflow-wrap:\s*normal/);
   assert.match(css, /hyphens:\s*none/);
   assert.match(css, /white-space:\s*normal/);
-  assert.doesNotMatch(css, /#crm \.mvp-lead-title-line h3[^}]*overflow-wrap:\s*break-word/s);
+  assert.doesNotMatch(css, /\.mvp-lead-identity h3[^}]*overflow-wrap:\s*break-word/s);
+  assert.doesNotMatch(css, /!important/);
 });
