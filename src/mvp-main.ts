@@ -1,3 +1,4 @@
+import { organizeAccountMenuProductActions } from './account-menu-product.js';
 import type { ModuleId } from './models.js';
 import { modules } from './models.js';
 import { PRODUCT_BRAND } from './branding.js';
@@ -159,6 +160,12 @@ function ensureAccountIdentityClamping(): void {
   clampAccountIdentityElement('.mvp-account-identity-copy small', 48);
 }
 
+function finalizeAccountMenu(): void {
+  ensureAccountSettingsAction();
+  ensureAccountIdentityClamping();
+  organizeAccountMenuProductActions();
+}
+
 function resetModuleScroll(): void {
   document.querySelector<HTMLElement>('.mvp-content')?.scrollTo({ top: 0, left: 0, behavior: 'auto' });
   window.scrollTo({ top: 0, left: 0, behavior: 'auto' });
@@ -190,8 +197,7 @@ function render(): void {
   renderMvpUsers(qs<HTMLElement>('#equipo'));
   renderSettings(qs<HTMLElement>('#configuracion'));
   renderAccountMenu();
-  ensureAccountSettingsAction();
-  ensureAccountIdentityClamping();
+  finalizeAccountMenu();
   modules.forEach(([id]) => {
     const allowed = canAccessModule(id);
     const panel = qs<HTMLElement>(`#${id}`);
@@ -225,12 +231,12 @@ function bindEvents(): void {
   eventsBound = true;
   installPropertyPhotoUxGuard();
   document.addEventListener('trv-render', render);
+  document.addEventListener('propcontrol-account-menu-rendered', finalizeAccountMenu);
   document.addEventListener('propcontrol-cloud-status', (event) => {
     const detail = (event as CustomEvent<{ message?: string }>).detail;
     if (detail?.message) showNotice(detail.message);
     renderAccountMenu();
-    ensureAccountSettingsAction();
-    ensureAccountIdentityClamping();
+    finalizeAccountMenu();
   });
   document.addEventListener('click', (event) => {
     const target = event.target as HTMLElement;
