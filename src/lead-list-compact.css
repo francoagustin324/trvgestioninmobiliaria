@@ -29,6 +29,44 @@
   display: none;
 }
 
+/* B1.2.5 — identidad y estados independientes para evitar comprimir nombres. */
+#crm .mvp-lead-compact-header {
+  grid-template-areas: 'identity statuses';
+}
+
+#crm .mvp-lead-identity {
+  grid-area: identity;
+  display: flex;
+  min-width: 0;
+  max-width: 100%;
+  align-items: center;
+  gap: 8px;
+}
+
+#crm .mvp-lead-identity h3 {
+  min-width: 0;
+  max-width: 100%;
+  margin: 0;
+  word-break: normal;
+  overflow-wrap: normal;
+  hyphens: none;
+  white-space: normal;
+}
+
+#crm .mvp-lead-statuses {
+  grid-area: statuses;
+  display: flex;
+  min-width: 0;
+  max-width: 100%;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+#crm .mvp-lead-alert-compact {
+  display: none;
+}
+
 @media (max-width: 720px) {
   #crm .mvp-lead-active-filters {
     gap: 8px;
@@ -202,8 +240,57 @@
 }
 
 @media (max-width: 520px) {
-  #crm .mvp-lead-compact-header {
-    grid-template-columns: 1fr;
+  #crm .mvp-lead-card .mvp-lead-compact-header {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas:
+      'identity'
+      'statuses';
+    align-items: start;
+    gap: 7px;
+  }
+
+  #crm .mvp-lead-card .mvp-lead-identity {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    width: 100%;
+    align-items: center;
+    gap: 8px;
+  }
+
+  #crm .mvp-lead-card .mvp-lead-identity h3 {
+    min-width: 0;
+    max-width: 100%;
+    word-break: normal;
+    overflow-wrap: normal;
+    hyphens: none;
+    white-space: normal;
+  }
+
+  #crm .mvp-lead-card .mvp-lead-statuses {
+    width: 100%;
+    justify-content: flex-start;
+    align-items: flex-start;
+    flex-wrap: wrap;
+    gap: 6px 7px;
+  }
+
+  #crm .mvp-lead-card .mvp-stage-badge,
+  #crm .mvp-lead-card .mvp-lead-alert {
+    max-width: 100%;
+    flex: 0 1 auto;
+  }
+
+  #crm .mvp-lead-card .mvp-lead-alert {
+    min-height: 32px;
+    justify-self: start;
+  }
+
+  #crm .mvp-lead-alert-full {
+    display: none;
+  }
+
+  #crm .mvp-lead-alert-compact {
+    display: inline;
   }
 
   #crm .mvp-lead-compact-facts {
@@ -212,11 +299,6 @@
 
   #crm .mvp-lead-compact-facts > div:last-child {
     grid-column: 1 / -1;
-  }
-
-  #crm .mvp-lead-alert {
-    min-height: 32px;
-    justify-self: start;
   }
 
   #crm .mvp-lead-next-action {
