@@ -194,12 +194,14 @@ async function validateIdempotentBindings(page: Page): Promise<void> {
     track.dispatchEvent(new WheelEvent('wheel', { deltaY: 23, bubbles: true, cancelable: true }));
     return {
       scrollByCalls,
+      wheelMoved: track.scrollLeft > 0,
       documentWidth: document.documentElement.scrollWidth,
       viewport: window.innerWidth,
     };
   });
 
   assert.equal(result.scrollByCalls, 1, `El pipeline recibió listeners duplicados: ${JSON.stringify(result)}`);
+  assert.equal(result.wheelMoved, true, `La rueda no desplazó el pipeline: ${JSON.stringify(result)}`);
   assert.equal(result.documentWidth <= result.viewport + 1, true);
 }
 
@@ -242,12 +244,6 @@ async function validatePipelineInputs(page: Page): Promise<void> {
   await page.waitForFunction(() => document.querySelectorAll('#crm .mvp-lead-compact-card').length === 11);
 
   const refreshed = page.locator('#crm .mvp-stage-counters');
-  await refreshed.evaluate((element) => element.scrollTo({ left: 0, behavior: 'instant' }));
-  await refreshed.hover();
-  await page.mouse.wheel(0, 120);
-  await page.waitForTimeout(60);
-  assert.ok(await refreshed.evaluate((element) => element.scrollLeft > 0));
-
   await refreshed.focus();
   await refreshed.press('End');
   await page.waitForTimeout(60);
