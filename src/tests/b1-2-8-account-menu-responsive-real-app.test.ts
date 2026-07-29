@@ -18,7 +18,7 @@ import {
   type Locator,
   type Page,
 } from 'playwright';
-import { initialData, type CrmData, type TeamRole } from '../models.js';
+import { initialData, type CrmData, type TeamMember, type TeamRole } from '../models.js';
 
 const viewports = [
   { width: 320, height: 568 },
@@ -92,14 +92,9 @@ function memberName(role: TeamRole): string {
 function crmFixture(role: TeamRole = 'Dueño'): CrmData {
   const identity = fixtureIdentity(role);
   const crm = structuredClone(initialData);
-  crm.organization = {
-    id: `trv-${identity.userId}`,
-    name: 'TRV Gestión Inmobiliaria',
-    seatLimit: null,
-    planLabel: 'Validación B1.2.8',
-  };
-  crm.teamMembers = [{
-    id: 1,
+  const testedMemberId = role === 'Dueño' ? 1 : 2;
+  const testedMember: TeamMember = {
+    id: testedMemberId,
     userId: identity.userId,
     name: memberName(role),
     email: identity.email,
@@ -107,7 +102,27 @@ function crmFixture(role: TeamRole = 'Dueño'): CrmData {
     role,
     status: 'Activo',
     createdAt: '2026-07-01T12:00:00.000Z',
-  }];
+  };
+  const organizationOwner: TeamMember = {
+    id: 1,
+    userId: `b128-required-owner-${identity.userId}`,
+    name: 'Dueño de la organización',
+    email: `owner-${identity.email}`,
+    phone: '5493515110000',
+    role: 'Dueño',
+    status: 'Activo',
+    createdAt: '2026-07-01T11:00:00.000Z',
+  };
+
+  crm.organization = {
+    id: `trv-${identity.userId}`,
+    name: 'TRV Gestión Inmobiliaria',
+    seatLimit: null,
+    planLabel: 'Validación B1.2.8',
+  };
+  crm.teamMembers = role === 'Dueño'
+    ? [testedMember]
+    : [organizationOwner, testedMember];
   crm.settings = {
     ...crm.settings,
     profileName: role === 'Dueño' ? 'trvgestioninmobiliaria' : memberName(role),
@@ -120,8 +135,8 @@ function crmFixture(role: TeamRole = 'Dueño'): CrmData {
     id: index + 1,
     name: index === 0 ? 'Lucía Martín' : `Lead de prueba ${index + 1}`,
     phone: `351555${String(index + 1).padStart(4, '0')}`,
-    assignedToId: 1,
-    createdById: 1,
+    assignedToId: testedMemberId,
+    createdById: testedMemberId,
   }));
   crm.properties = [];
   crm.activityLog = [];
@@ -219,6 +234,7 @@ async function createContext(
 ): Promise<BrowserContext> {
   const mobile = viewport.width <= 430;
   const identity = fixtureIdentity(role);
+  const activeMemberId = role === 'Dueño' ? 1 : 2;
   const context = await browser.newContext({
     viewport,
     deviceScaleFactor: 1,
@@ -228,7 +244,7 @@ async function createContext(
     locale: 'es-AR',
     colorScheme: 'dark',
   });
-  await context.addInitScript(({ data, backup, user, email, keys, sync, marker }) => {
+  await context.addInitScript(({ data, backup, user, email, memberId, keys, sync, marker }) => {
     if (localStorage.getItem(marker)) return;
     localStorage.setItem(marker, '1');
     localStorage.setItem(keys.session, JSON.stringify({
@@ -245,12 +261,13 @@ async function createContext(
       reason: 'Copia anterior de prueba',
       crm: backup,
     }]));
-    localStorage.setItem('propcontrol-active-team-member-v1', '1');
+    localStorage.setItem('propcontrol-active-team-member-v1', String(memberId));
   }, {
     data: crmFixture(role),
     backup: backupFixture(role),
     user: identity.userId,
     email: identity.email,
+    memberId: activeMemberId,
     keys: {
       session: sessionKey,
       storage: identity.storageKey,
