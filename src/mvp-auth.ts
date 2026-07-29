@@ -35,6 +35,7 @@ import {
   stableFingerprint,
   writeLocalSnapshot,
 } from './sync-safety.js';
+import { canManageTeam } from './team-access.js';
 import { escapeHtml } from './utils.js';
 
 const ACCOUNT_PANEL_ID = 'propcontrol-account-panel';
@@ -390,24 +391,26 @@ export function renderAccountMenu(): void {
   const avatarGlyph = settings.avatar
     ? `<img src="${escapeHtml(settings.avatar)}" alt="">`
     : '<svg viewBox="0 0 24 24" role="img"><path d="M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8Zm-7 8a7 7 0 0 1 14 0" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>';
-  const syncAction = differencePending
-    ? actionMarkup(
-        appIcons.sync,
-        'Revisar y unir datos',
-        'Resolver diferencias sin sobrescribir',
-        'data-account-resolve aria-label="Revisar y unir datos" title="Revisar y unir datos"',
-      )
-    : actionMarkup(
-        appIcons.sync,
-        'Sincronizar ahora',
-        'Guardar y comprobar la nube',
-        'data-account-sync aria-label="Sincronizar de forma segura" title="Sincronizar de forma segura"',
-      );
+  const syncAction = sync.kind === 'saved'
+    ? ''
+    : differencePending
+      ? actionMarkup(
+          appIcons.sync,
+          'Revisar y unir datos',
+          'Resolver diferencias sin sobrescribir',
+          'data-account-resolve aria-label="Revisar y unir datos" title="Revisar y unir datos"',
+        )
+      : actionMarkup(
+          appIcons.sync,
+          'Sincronizar ahora',
+          'Guardar y comprobar la nube',
+          'data-account-sync aria-label="Sincronizar de forma segura" title="Sincronizar de forma segura"',
+        );
   const restoreAction = actionMarkup(
     appIcons.history,
-    'Recuperar copia',
+    'Recuperar copia anterior',
     backupAvailable ? 'Usar la copia local anterior' : 'No hay copias disponibles',
-    'data-account-restore aria-label="Recuperar copia anterior" title="Recuperar copia anterior"',
+    'data-account-restore aria-label="Recuperar copia anterior" title="Recuperar copia anterior" aria-describedby="propcontrol-recovery-guidance"',
     { disabled: !backupAvailable },
   );
   const logoutAction = actionMarkup(
@@ -440,11 +443,15 @@ export function renderAccountMenu(): void {
       </div>
       <div class="mvp-account-actions" aria-label="Acciones de cuenta">
         ${syncAction}
-        ${restoreAction}
       </div>
       <div class="mvp-account-danger">${logoutAction}</div>
     </section>
   </div>`;
+
+  const recoveryTarget = canManageTeam()
+    ? document.querySelector<HTMLElement>('[data-settings-recovery-action]')
+    : null;
+  if (recoveryTarget) recoveryTarget.innerHTML = restoreAction;
 
   container.querySelector<HTMLElement>('[data-account-sync]')?.addEventListener('click', () => {
     closeAccountMenuPanel({ restoreFocus: false });
@@ -454,7 +461,7 @@ export function renderAccountMenu(): void {
     closeAccountMenuPanel({ restoreFocus: false });
     void resolveSyncDifferences();
   });
-  container.querySelector<HTMLElement>('[data-account-restore]')?.addEventListener('click', () => {
+  recoveryTarget?.querySelector<HTMLElement>('[data-account-restore]')?.addEventListener('click', () => {
     closeAccountMenuPanel({ restoreFocus: false });
     if (!window.confirm('Se recuperará la copia local anterior y quedará pendiente de sincronización. ¿Continuar?')) return;
     if (!restoreLatestLocalBackup()) return;
