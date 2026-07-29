@@ -181,6 +181,7 @@ body { background:#f5f7f9; }
 @media (max-width:640px) { .mvp-lead-form,.mvp-user-form { grid-template-columns:1fr; padding:16px; } .mvp-lead-card { align-items:flex-start; flex-direction:column; } .mvp-lead-actions { width:100%; justify-content:flex-end; } .mvp-lead-toolbar,.mvp-page-heading,.mvp-section-heading,.meta-template-toolbar { align-items:stretch; flex-direction:column; } .public-auth-brand { min-height:28vh; padding:26px; } .public-auth-panel { padding:18px; } .public-auth-card { padding:22px; } .mvp-company-name { display:none; } .meta-template-columns,.meta-template-row { grid-template-columns:1fr; } .meta-template-columns { display:none; } .meta-template-row > span { display:block!important; } .meta-template-row time { display:block; } .mvp-chat-lead-data { grid-template-columns:1fr; } }
 @media (max-width:520px) {
   body.account-menu-open { overflow:hidden !important; }
+  body.account-menu-open .app-topbar { -webkit-backdrop-filter:none; backdrop-filter:none; }
   .mvp-account-panel { right:-2px; width:calc(100vw - 24px); max-width:340px; max-height:calc(100dvh - 80px); padding:14px; border-radius:20px; }
   .mvp-account-backdrop:not([hidden]) { display:block; }
 }
