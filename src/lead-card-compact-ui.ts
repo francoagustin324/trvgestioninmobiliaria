@@ -1,6 +1,6 @@
+import { formatLeadBudget } from './lead-budget-display.js';
 import { renderLeadSecondaryMeta } from './lead-essential-ui.js';
 import {
-  compactBudget,
   compactPayment,
   compactTimeframe,
   leadFollowUpDisplay,
@@ -38,6 +38,10 @@ function temperatureIcon(temperature: string): string {
     : temperature === 'Frío' ? 'cliente-frio'
       : 'cliente-tibio';
   return `<img class="mvp-temp-icon" src="/src/assets/${slug}.png?v=20260722-45" alt="" title="Cliente ${escapeHtml(temperature.toLowerCase())}">`;
+}
+
+function compactAlertLabel(label: string): string {
+  return label.replace(/^Seguimiento\s+/i, '');
 }
 
 function creditDetail(client: Client): string {
@@ -115,7 +119,7 @@ function commercialFacts(client: Client): LeadFact[] {
       key: 'budget',
       label: 'Presupuesto',
       missingLabel: 'presupuesto',
-      value: compactBudget(client),
+      value: formatLeadBudget(client),
       missing: !client.budget?.trim(),
     },
     {
@@ -156,11 +160,13 @@ export function renderCompactLeadCard(client: Client, context: CompactLeadCardCo
   const stage = commercialStage(client);
   const terminal = isTerminalClient(client);
   const alert = leadPrimaryAlert(client);
+  const alertLabel = escapeHtml(alert.label);
+  const compactLabel = escapeHtml(compactAlertLabel(alert.label));
   const followUp = leadFollowUpDisplay(client);
   return `<article class="mvp-lead-card mvp-lead-card-with-matches mvp-lead-compact-card${terminal ? ' terminal' : ''}" data-client-id="${client.id}">
     <header class="mvp-lead-compact-header">
-      <div class="mvp-lead-title-line">${temperatureIcon(client.temperature)}<h3>${escapeHtml(client.name)}</h3><span class="mvp-stage-badge${terminal ? ' terminal' : ''}">${escapeHtml(stage)}</span></div>
-      <div class="mvp-lead-alert tone-${alert.tone}" data-lead-alert-rank="${alert.rank}">${escapeHtml(alert.label)}</div>
+      <div class="mvp-lead-identity">${temperatureIcon(client.temperature)}<h3>${escapeHtml(client.name)}</h3></div>
+      <div class="mvp-lead-statuses"><span class="mvp-stage-badge${terminal ? ' terminal' : ''}">${escapeHtml(stage)}</span><div class="mvp-lead-alert tone-${alert.tone}" data-lead-alert-rank="${alert.rank}" aria-label="${alertLabel}" title="${alertLabel}"><span class="mvp-lead-alert-full" aria-hidden="true">${alertLabel}</span><span class="mvp-lead-alert-compact" aria-hidden="true">${compactLabel}</span></div></div>
     </header>
     <p class="mvp-lead-interest">${client.interest ? escapeHtml(client.interest) : 'Sin búsqueda definida'}</p>
     ${renderCommercialFacts(client)}
