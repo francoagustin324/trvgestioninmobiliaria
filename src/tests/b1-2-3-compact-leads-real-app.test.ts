@@ -405,8 +405,19 @@ async function assertPipelineSelection(page: Page): Promise<void> {
   await page.locator('#crm [data-stage-quick="Todas"]').click();
 }
 
+async function visibleAlertLabel(card: ReturnType<Page['locator']>): Promise<string> {
+  const alert = card.locator('.mvp-lead-alert:not([hidden])');
+  return alert.evaluate((element) => {
+    const text = element.querySelector<HTMLElement>('.mvp-lead-alert-text');
+    if (text && getComputedStyle(text).display !== 'none') return text.textContent?.trim() || '';
+    return getComputedStyle(element, '::after').content.replace(/^['"]|['"]$/g, '');
+  });
+}
+
 async function assertFollowUpActions(page: Page): Promise<void> {
   const overdueCard = page.locator('#crm .mvp-lead-compact-card').filter({ hasText: 'Seguimiento muy vencido' });
+  assert.equal(await visibleAlertLabel(overdueCard), 'Vencido · 19 días');
+  assert.doesNotMatch(await overdueCard.locator('.mvp-lead-next-action').innerText(), /vencid|19 días/i);
   await overdueCard.locator('.mvp-lead-followup-menu > summary').click();
   const form = overdueCard.locator('[data-reprogram-client-follow-up]');
   await form.locator('input[name="date"]').fill(isoOffset(3));
@@ -440,10 +451,11 @@ async function assertFollowUpActions(page: Page): Promise<void> {
   await page.waitForFunction(() => {
     const cards = [...document.querySelectorAll<HTMLElement>('#crm .mvp-lead-compact-card')];
     const card = cards.find((item) => item.textContent?.includes('Seguimiento muy vencido'));
-    return card?.querySelector('.mvp-lead-next-action')?.textContent?.includes('Sin próxima acción') === true;
+    return card?.querySelector('.mvp-lead-next-action')?.textContent?.includes('Definir próxima acción') === true;
   });
   const completedCard = page.locator('#crm .mvp-lead-compact-card').filter({ hasText: 'Seguimiento muy vencido' });
-  assert.match(await completedCard.locator('.mvp-lead-next-action').innerText(), /Sin próxima acción/);
+  assert.match(await completedCard.locator('.mvp-lead-next-action').innerText(), /Definir próxima acción/);
+  assert.equal(await completedCard.locator('.mvp-lead-alert[data-lead-alert-kind="overdue"]:not([hidden])').count(), 0);
 }
 
 async function assertAutomaticPanel(page: Page, width: number): Promise<void> {

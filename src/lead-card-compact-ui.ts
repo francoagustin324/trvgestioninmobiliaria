@@ -1,10 +1,9 @@
+import { leadCardAttentionPresentation, type LeadCardAttentionPresentation } from './lead-card-attention.js';
 import { formatLeadBudget } from './lead-budget-display.js';
 import { renderLeadSecondaryMeta } from './lead-essential-ui.js';
 import {
   compactPayment,
   compactTimeframe,
-  leadFollowUpDisplay,
-  leadPrimaryAlert,
   leadUpdatedLabel,
 } from './lead-list-priority.js';
 import { commercialQualificationState, commercialStage, isTerminalClient } from './lead-pipeline.js';
@@ -38,15 +37,6 @@ function temperatureIcon(temperature: string): string {
     : temperature === 'Frío' ? 'cliente-frio'
       : 'cliente-tibio';
   return `<img class="mvp-temp-icon" src="/src/assets/${slug}.png?v=20260722-45" alt="" title="Cliente ${escapeHtml(temperature.toLowerCase())}">`;
-}
-
-function compactAlertLabel(label: string): string {
-  if (/^Seguimiento vencido\b/i.test(label)) {
-    return label.replace(/^Seguimiento\s+/i, '').replace(/^\p{Ll}/u, (letter) => letter.toUpperCase());
-  }
-  if (label === 'Falta confirmar capacidad de avance') return 'Falta confirmar avance';
-  if (label === 'Calificado sin seguimiento') return 'Sin seguimiento';
-  return label;
 }
 
 function creditDetail(client: Client): string {
@@ -91,8 +81,19 @@ function secondaryText(client: Client): string {
   return `<div class="mvp-lead-full-notes">${blocks.map(([label, value]) => `<article><span>${label}</span><p>${escapeHtml(value)}</p></article>`).join('')}</div>`;
 }
 
-function fullSheet(client: Client, context: CompactLeadCardContext): string {
+function fullSheet(
+  client: Client,
+  context: CompactLeadCardContext,
+  attention: LeadCardAttentionPresentation,
+): string {
   const qualification = commercialQualificationState(client);
+  const terminal = isTerminalClient(client);
+  const followUpLabel = terminal
+    ? attention.scheduledDateLabel ? 'Fecha de seguimiento registrada' : 'Seguimiento'
+    : 'Seguimiento programado';
+  const followUpValue = terminal
+    ? attention.scheduledDateLabel || 'Sin seguimiento pendiente'
+    : attention.scheduledDateLabel || 'Sin fecha programada';
   return `<details class="mvp-lead-full-sheet" data-lead-full-sheet="${client.id}"${context.expanded ? ' open' : ''}>
     <summary aria-expanded="${context.expanded ? 'true' : 'false'}"><span>${context.expanded ? 'Ocultar ficha' : 'Ver ficha completa'}</span><small>Datos secundarios, historial y propiedades</small></summary>
     <div class="mvp-lead-full-content">
@@ -104,6 +105,7 @@ function fullSheet(client: Client, context: CompactLeadCardContext): string {
         <div><span>Crédito</span><strong>${escapeHtml(creditDetail(client))}</strong></div>
         <div><span>Responsable</span><strong>${escapeHtml(context.responsible)}</strong></div>
         <div><span>Estado comercial</span><strong>${escapeHtml(qualification.state)}</strong></div>
+        <div><span>${followUpLabel}</span><strong>${escapeHtml(followUpValue)}</strong></div>
         <div><span>Última actualización</span><strong>${escapeHtml(leadUpdatedLabel(client))}</strong></div>
       </div>
       ${renderLeadSecondaryMeta(client)}
@@ -164,23 +166,28 @@ function renderCommercialFacts(client: Client): string {
 export function renderCompactLeadCard(client: Client, context: CompactLeadCardContext): string {
   const stage = commercialStage(client);
   const terminal = isTerminalClient(client);
-  const alert = leadPrimaryAlert(client);
-  const alertLabel = escapeHtml(alert.label);
-  const mobileAlertLabel = escapeHtml(compactAlertLabel(alert.label));
-  const followUp = leadFollowUpDisplay(client);
+  const attention = leadCardAttentionPresentation(client);
+  const alertLabel = escapeHtml(attention.alertLabel);
+  const alertFullLabel = escapeHtml(attention.alertFullLabel);
+  const alert = attention.showAlert
+    ? `<div class="mvp-lead-alert tone-${attention.alertTone}" data-lead-alert-rank="${attention.alertRank}" data-lead-alert-kind="${attention.alertKind}" data-mobile-label="${alertLabel}" aria-label="${alertFullLabel}" title="${alertFullLabel}"><span class="mvp-lead-alert-text">${alertLabel}</span></div>`
+    : '<div class="mvp-lead-alert" data-lead-alert-kind="none" hidden aria-hidden="true"></div>';
+  const nextAction = attention.showAction
+    ? `<div class="mvp-lead-next-action state-${attention.followUpState}" data-lead-attention-kind="${attention.alertKind}" aria-label="${escapeHtml(attention.actionTitle)}" title="${escapeHtml(attention.actionTitle)}">
+        <div><span>Próxima acción</span><strong>${escapeHtml(attention.actionLabel)}</strong>${attention.showDate ? `<small>${escapeHtml(attention.dateLabel)}</small>` : ''}</div>
+        ${followUpMenu(client)}
+      </div>`
+    : '';
   return `<article class="mvp-lead-card mvp-lead-card-with-matches mvp-lead-compact-card${terminal ? ' terminal' : ''}" data-client-id="${client.id}">
     <header class="mvp-lead-compact-header">
       <div class="mvp-lead-identity">${temperatureIcon(client.temperature)}<h3>${escapeHtml(client.name)}</h3></div>
-      <div class="mvp-lead-statuses"><span class="mvp-stage-badge${terminal ? ' terminal' : ''}">${escapeHtml(stage)}</span><div class="mvp-lead-alert tone-${alert.tone}" data-lead-alert-rank="${alert.rank}" data-mobile-label="${mobileAlertLabel}" aria-label="${alertLabel}" title="${alertLabel}"><span class="mvp-lead-alert-text">${alertLabel}</span></div></div>
+      <div class="mvp-lead-statuses"><span class="mvp-stage-badge${terminal ? ' terminal' : ''}">${escapeHtml(stage)}</span>${alert}</div>
     </header>
     <p class="mvp-lead-interest">${client.interest ? escapeHtml(client.interest) : 'Sin búsqueda definida'}</p>
     ${renderCommercialFacts(client)}
-    <div class="mvp-lead-next-action state-${followUp.state}">
-      <div><span>Próxima acción</span><strong>${escapeHtml(followUp.action)}</strong>${followUp.dateLabel ? `<small>${escapeHtml(followUp.dateLabel)}</small>` : ''}</div>
-      ${followUpMenu(client)}
-    </div>
+    ${nextAction}
     ${quickActions(client)}
     ${context.qualificationPanel}
-    ${fullSheet(client, context)}
+    ${fullSheet(client, context, attention)}
   </article>`;
 }

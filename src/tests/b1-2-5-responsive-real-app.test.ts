@@ -28,6 +28,15 @@ function isoOffset(days: number): string {
   return date.toISOString().slice(0, 10);
 }
 
+function exactDateLabel(value: string): string {
+  return new Intl.DateTimeFormat('es-AR', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    timeZone: 'UTC',
+  }).format(new Date(`${value}T12:00:00Z`));
+}
+
 function lead(id: number, overrides: Partial<Client>): Client {
   return {
     id,
@@ -188,7 +197,8 @@ async function validateName(card: Locator, name: string, mobileHeader: boolean):
     const identityRect = identity.getBoundingClientRect();
     const statusesRect = statuses.getBoundingClientRect();
     const stageRect = stage.getBoundingClientRect();
-    const alertRect = alert.getBoundingClientRect();
+    const alertVisible = !alert.hidden && alert.getClientRects().length > 0;
+    const alertRect = alertVisible ? alert.getBoundingClientRect() : null;
     return {
       cardWidth: cardRect.width,
       headingWidth: heading.getBoundingClientRect().width,
@@ -196,8 +206,8 @@ async function validateName(card: Locator, name: string, mobileHeader: boolean):
       statusesTop: statusesRect.top,
       horizontal: statusesRect.top < identityRect.bottom,
       stageInside: stageRect.left >= cardRect.left - 1 && stageRect.right <= cardRect.right + 1,
-      alertInside: alertRect.left >= cardRect.left - 1 && alertRect.right <= cardRect.right + 1,
-      separated: stageRect.right <= alertRect.left + 1 || alertRect.top >= stageRect.bottom - 1,
+      alertInside: !alertRect || (alertRect.left >= cardRect.left - 1 && alertRect.right <= cardRect.right + 1),
+      separated: !alertRect || stageRect.right <= alertRect.left + 1 || alertRect.top >= stageRect.bottom - 1,
     };
   });
   assert.equal(geometry.stageInside, true);
@@ -282,17 +292,20 @@ test('B1.2.5 valida nombres, badges, importes y navegación inferior con DOM y C
           return {
             aria: element.getAttribute('aria-label'),
             title: element.getAttribute('title'),
+            mobileLabel: element.getAttribute('data-mobile-label'),
             fullText: text.textContent?.trim(),
             textDisplay: getComputedStyle(text).display,
             mobileText: getComputedStyle(element, '::after').content.replace(/^["']|["']$/g, ''),
           };
         });
-        assert.equal(alertPresentation.aria, 'Seguimiento vencido hace 19 días');
-        assert.equal(alertPresentation.title, 'Seguimiento vencido hace 19 días');
-        assert.equal(alertPresentation.fullText, 'Seguimiento vencido hace 19 días');
+        const fullAlert = `Seguimiento vencido hace 19 días. Programado para ${exactDateLabel(isoOffset(-19))}.`;
+        assert.equal(alertPresentation.aria, fullAlert);
+        assert.equal(alertPresentation.title, fullAlert);
+        assert.equal(alertPresentation.mobileLabel, 'Vencido · 19 días');
+        assert.equal(alertPresentation.fullText, 'Vencido · 19 días');
         if (mobileHeader) {
           assert.equal(alertPresentation.textDisplay, 'none');
-          assert.equal(alertPresentation.mobileText, 'Vencido hace 19 días');
+          assert.equal(alertPresentation.mobileText, 'Vencido · 19 días');
         } else {
           assert.notEqual(alertPresentation.textDisplay, 'none');
           assert.ok(alertPresentation.mobileText === 'none' || alertPresentation.mobileText === '');
@@ -324,7 +337,7 @@ test('B1.2.5 valida nombres, badges, importes y navegación inferior con DOM y C
     const files = readdirSync(screenshots).filter((name) => name.endsWith('.png'));
     assert.equal(files.length, 48);
     assert.ok(files.every((name) => statSync(join(screenshots, name)).size > 1_000), 'Alguna captura responsive está vacía o dañada.');
-    console.log(`# B1.2.5 capturas efímeras inspeccionadas: ${files.length}`);
+    console.log(`# B1.2.5 capturas efímeras generadas y validadas estructuralmente: ${files.length}`);
   } finally {
     await browser.close();
     await stopServer(server);

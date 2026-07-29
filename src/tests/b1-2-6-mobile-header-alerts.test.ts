@@ -29,6 +29,15 @@ function isoOffset(days: number): string {
   return date.toISOString().slice(0, 10);
 }
 
+function exactDateLabel(value: string): string {
+  return new Intl.DateTimeFormat('es-AR', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    timeZone: 'UTC',
+  }).format(new Date(`${value}T12:00:00Z`));
+}
+
 function lead(id: number, overrides: Partial<Client>): Client {
   return {
     id,
@@ -118,10 +127,12 @@ const cardContext = {
 
 test('B1.2.6 renderiza una sola cadena de alerta y conserva la información accesible', () => {
   const html = renderCompactLeadCard(fixture().clients[0]!, cardContext);
+  const accessible = `Seguimiento vencido hace 20 días. Programado para ${exactDateLabel(isoOffset(-20))}.`;
   assert.match(html, /class="mvp-lead-alert-text"/);
-  assert.match(html, /data-mobile-label="Vencido hace 20 días"/);
-  assert.match(html, /aria-label="Seguimiento vencido hace 20 días"/);
-  assert.match(html, /title="Seguimiento vencido hace 20 días"/);
+  assert.match(html, /data-mobile-label="Vencido · 20 días"/);
+  assert.ok(html.includes(`aria-label="${accessible}"`));
+  assert.ok(html.includes(`title="${accessible}"`));
+  assert.match(html, /class="mvp-lead-alert-text">Vencido · 20 días<\/span>/);
   assert.equal((html.match(/mvp-lead-alert-text/g) ?? []).length, 1);
   assert.doesNotMatch(html, /mvp-lead-alert-full|mvp-lead-alert-compact/);
 });
@@ -276,15 +287,31 @@ async function validateHeader(card: Locator, name: string, stacked: boolean): Pr
 
 interface ExpectedAlert {
   name: string;
-  full: string;
-  mobile: string;
+  accessible: string;
+  visual: string;
 }
 
 const expectedAlerts: ExpectedAlert[] = [
-  { name: 'Lucía Martín', full: 'Seguimiento vencido hace 20 días', mobile: 'Vencido hace 20 días' },
-  { name: 'edgardo', full: 'Falta confirmar capacidad de avance', mobile: 'Falta confirmar avance' },
-  { name: 'Prueba cel 1', full: 'Nuevo sin contactar', mobile: 'Nuevo sin contactar' },
-  { name: 'María de los Ángeles Fernández', full: 'Seguimiento vencido hace 28 días', mobile: 'Vencido hace 28 días' },
+  {
+    name: 'Lucía Martín',
+    accessible: `Seguimiento vencido hace 20 días. Programado para ${exactDateLabel(isoOffset(-20))}.`,
+    visual: 'Vencido · 20 días',
+  },
+  {
+    name: 'edgardo',
+    accessible: 'Falta confirmar capacidad de avance',
+    visual: 'Falta confirmar avance',
+  },
+  {
+    name: 'Prueba cel 1',
+    accessible: 'Nuevo sin contactar',
+    visual: 'Nuevo sin contactar',
+  },
+  {
+    name: 'María de los Ángeles Fernández',
+    accessible: `Seguimiento vencido hace 28 días. Programado para ${exactDateLabel(isoOffset(-28))}.`,
+    visual: 'Vencido · 28 días',
+  },
 ];
 
 async function validateAlert(page: Page, expected: ExpectedAlert, mobile: boolean): Promise<void> {
@@ -306,13 +333,13 @@ async function validateAlert(page: Page, expected: ExpectedAlert, mobile: boolea
   assert.equal(result.childCount, 1);
   assert.equal(result.textCount, 1);
   assert.equal(result.legacyCount, 0);
-  assert.equal(result.aria, expected.full);
-  assert.equal(result.title, expected.full);
-  assert.equal(result.mobileLabel, expected.mobile);
-  assert.equal(result.textContent, expected.full);
+  assert.equal(result.aria, expected.accessible);
+  assert.equal(result.title, expected.accessible);
+  assert.equal(result.mobileLabel, expected.visual);
+  assert.equal(result.textContent, expected.visual);
   if (mobile) {
     assert.equal(result.textDisplay, 'none');
-    assert.equal(result.pseudoContent, expected.mobile);
+    assert.equal(result.pseudoContent, expected.visual);
   } else {
     assert.notEqual(result.textDisplay, 'none');
     assert.ok(result.pseudoContent === 'none' || result.pseudoContent === '');
@@ -365,7 +392,7 @@ test('B1.2.6 valida el encabezado y una sola alerta visible con la aplicación r
     const files = readdirSync(screenshots).filter((name) => name.endsWith('.png'));
     assert.equal(files.length, 24);
     assert.ok(files.every((name) => statSync(join(screenshots, name)).size > 1_000), 'Alguna captura B1.2.6 está vacía o dañada.');
-    console.log(`# B1.2.6 capturas efímeras inspeccionadas: ${files.length}`);
+    console.log(`# B1.2.6 capturas efímeras generadas y validadas estructuralmente: ${files.length}`);
   } finally {
     await browser.close();
     await stopServer(server);

@@ -61,15 +61,15 @@ test('preserva moneda incluida en el presupuesto y textos no puramente numérico
   assert.equal(formatLeadBudget(lead({ budget: 'A confirmar', currency: 'ARS' })), 'A confirmar');
 });
 
-test('el encabezado separa identidad y estados y conserva una alerta completa accesible', () => {
+test('el encabezado separa identidad y estados y conserva el detalle completo accesible', () => {
   const html = renderCompactLeadCard(lead(), context);
   assert.match(html, /class="mvp-lead-identity"/);
   assert.match(html, /class="mvp-lead-statuses"/);
   assert.match(html, /<h3>Lucía Martín<\/h3>/);
-  assert.match(html, /aria-label="Seguimiento vencido hace 19 días"/);
-  assert.match(html, /title="Seguimiento vencido hace 19 días"/);
-  assert.match(html, /data-mobile-label="Vencido hace 19 días"/);
-  assert.match(html, /class="mvp-lead-alert-text">Seguimiento vencido hace 19 días<\/span>/);
+  assert.match(html, /aria-label="Seguimiento vencido hace 19 días\. Programado para \d{2}\/\d{2}\/\d{4}\."/);
+  assert.match(html, /title="Seguimiento vencido hace 19 días\. Programado para \d{2}\/\d{2}\/\d{4}\."/);
+  assert.match(html, /data-mobile-label="Vencido · 19 días"/);
+  assert.match(html, /class="mvp-lead-alert-text">Vencido · 19 días<\/span>/);
   assert.equal((html.match(/mvp-lead-alert-text/g) ?? []).length, 1);
   assert.doesNotMatch(html, /mvp-lead-alert-full|mvp-lead-alert-compact/);
 });
