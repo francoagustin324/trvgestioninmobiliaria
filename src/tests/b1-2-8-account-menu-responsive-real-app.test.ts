@@ -53,30 +53,56 @@ const captureScenarios = [
 ] as const;
 
 const mobileUserAgent = 'Mozilla/5.0 (Linux; Android 14; Pixel 7 Build/AP2A.240705.004) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Mobile Safari/537.36';
-const userId = 'b128-owner';
-const storageKey = `trv-crm-basico:user:${userId}`;
-const sessionKey = 'propcontrol-cloud-session-v1';
-const syncKey = `${storageKey}:sync`;
-const backupKey = `${storageKey}:backups`;
 const fixtureMarker = 'propcontrol-b128-fixture-ready';
+const sessionKey = 'propcontrol-cloud-session-v1';
 
 interface WindowWithB128 extends Window {
   __b128CloudMessages?: string[];
 }
 
+interface FixtureIdentity {
+  userId: string;
+  email: string;
+  storageKey: string;
+  syncKey: string;
+  backupKey: string;
+}
+
+function fixtureIdentity(role: TeamRole): FixtureIdentity {
+  const slug = role === 'Dueño' ? 'owner' : role === 'Administrador' ? 'admin' : 'agent';
+  const userId = `b128-${slug}`;
+  const storageKey = `trv-crm-basico:user:${userId}`;
+  return {
+    userId,
+    email: `${slug}@propcontrol.test`,
+    storageKey,
+    syncKey: `${storageKey}:sync`,
+    backupKey: `${storageKey}:backups`,
+  };
+}
+
+const ownerIdentity = fixtureIdentity('Dueño');
+
+function memberName(role: TeamRole): string {
+  if (role === 'Administrador') return 'Ana Administradora';
+  if (role === 'Corredor') return 'Carla Corredora';
+  return 'Franco Solís';
+}
+
 function crmFixture(role: TeamRole = 'Dueño'): CrmData {
+  const identity = fixtureIdentity(role);
   const crm = structuredClone(initialData);
   crm.organization = {
-    id: 'trvgestioninmobiliaria',
+    id: `trv-${identity.userId}`,
     name: 'TRV Gestión Inmobiliaria',
     seatLimit: null,
     planLabel: 'Validación B1.2.8',
   };
   crm.teamMembers = [{
     id: 1,
-    userId,
-    name: role === 'Corredor' ? 'Carla Corredora' : role === 'Administrador' ? 'Ana Administradora' : 'Franco Solís',
-    email: 'franco.solis@example.test',
+    userId: identity.userId,
+    name: memberName(role),
+    email: identity.email,
     phone: '5493515110069',
     role,
     status: 'Activo',
@@ -84,8 +110,8 @@ function crmFixture(role: TeamRole = 'Dueño'): CrmData {
   }];
   crm.settings = {
     ...crm.settings,
-    profileName: role === 'Corredor' ? 'Carla Corredora' : role === 'Administrador' ? 'Ana Administradora' : 'trvgestioninmobiliaria',
-    profileEmail: 'franco.solis@example.test',
+    profileName: role === 'Dueño' ? 'trvgestioninmobiliaria' : memberName(role),
+    profileEmail: identity.email,
     agencyName: 'TRV Gestión Inmobiliaria',
     defaultZone: 'Datos actuales',
   };
@@ -192,6 +218,7 @@ async function createContext(
   role: TeamRole = 'Dueño',
 ): Promise<BrowserContext> {
   const mobile = viewport.width <= 430;
+  const identity = fixtureIdentity(role);
   const context = await browser.newContext({
     viewport,
     deviceScaleFactor: 1,
@@ -201,15 +228,15 @@ async function createContext(
     locale: 'es-AR',
     colorScheme: 'dark',
   });
-  await context.addInitScript(({ data, backup, user, keys, sync, marker }) => {
+  await context.addInitScript(({ data, backup, user, email, keys, sync, marker }) => {
     if (localStorage.getItem(marker)) return;
     localStorage.setItem(marker, '1');
     localStorage.setItem(keys.session, JSON.stringify({
-      accessToken: 'b128-access-token',
-      refreshToken: 'b128-refresh-token',
+      accessToken: `b128-access-${user}`,
+      refreshToken: `b128-refresh-${user}`,
       expiresAt: Date.now() + 3_600_000,
       userId: user,
-      email: 'franco.solis@example.test',
+      email,
     }));
     localStorage.setItem(keys.storage, JSON.stringify(data));
     localStorage.setItem(keys.sync, JSON.stringify(sync));
@@ -222,12 +249,13 @@ async function createContext(
   }, {
     data: crmFixture(role),
     backup: backupFixture(role),
-    user: userId,
+    user: identity.userId,
+    email: identity.email,
     keys: {
       session: sessionKey,
-      storage: storageKey,
-      sync: syncKey,
-      backup: backupKey,
+      storage: identity.storageKey,
+      sync: identity.syncKey,
+      backup: identity.backupKey,
     },
     sync: savedSyncState(),
     marker: fixtureMarker,
@@ -237,14 +265,8 @@ async function createContext(
 
 async function loadApplication(page: Page, url: string): Promise<void> {
   await page.goto(url, { waitUntil: 'domcontentloaded' });
-  await page.waitForSelector('[data-account-toggle]', {
-    state: 'visible',
-    timeout: 20_000,
-  });
-  await page.waitForSelector('#crm.active', {
-    state: 'visible',
-    timeout: 20_000,
-  });
+  await page.waitForSelector('[data-account-toggle]', { state: 'visible', timeout: 20_000 });
+  await page.waitForSelector('#crm.active', { state: 'visible', timeout: 20_000 });
 }
 
 function accountTrigger(page: Page): Locator {
@@ -271,13 +293,14 @@ async function closeAccountMenuWithTrigger(page: Page): Promise<void> {
   assert.equal(await accountTrigger(page).getAttribute('aria-expanded'), 'false');
 }
 
-async function setSyncState(page: Page, value: Record<string, unknown>): Promise<void> {
+async function setSyncState(page: Page, value: Record<string, unknown>, role: TeamRole = 'Dueño'): Promise<void> {
+  const identity = fixtureIdentity(role);
   await page.evaluate(({ key, stateValue }) => {
     localStorage.setItem(key, JSON.stringify(stateValue));
     document.dispatchEvent(new CustomEvent('propcontrol-cloud-status', {
       detail: { message: '', kind: 'working' },
     }));
-  }, { key: syncKey, stateValue: value });
+  }, { key: identity.syncKey, stateValue: value });
   await page.waitForTimeout(80);
 }
 
@@ -289,18 +312,18 @@ async function replaceIdentityData(page: Page): Promise<void> {
     data.settings.agencyName = 'Inmobiliaria Desarrollo Patrimonial del Centro de Córdoba';
     data.teamMembers[0]!.name = 'Juan Ignacio Rodríguez Martínez de la Fuente';
     localStorage.setItem(key, JSON.stringify(data));
-  }, storageKey);
+  }, ownerIdentity.storageKey);
   await page.reload({ waitUntil: 'domcontentloaded' });
   await page.waitForSelector('[data-account-toggle]', { state: 'visible', timeout: 20_000 });
 }
 
 async function restoreOwnerFixture(page: Page): Promise<void> {
-  await page.evaluate(({ key, stateKey, data, sync }) => {
-    localStorage.setItem(key, JSON.stringify(data));
+  await page.evaluate(({ dataKey, stateKey, data, sync }) => {
+    localStorage.setItem(dataKey, JSON.stringify(data));
     localStorage.setItem(stateKey, JSON.stringify(sync));
   }, {
-    key: storageKey,
-    stateKey: syncKey,
+    dataKey: ownerIdentity.storageKey,
+    stateKey: ownerIdentity.syncKey,
     data: crmFixture('Dueño'),
     sync: savedSyncState(),
   });
@@ -311,17 +334,15 @@ async function restoreOwnerFixture(page: Page): Promise<void> {
 async function scrollWorkspace(page: Page): Promise<void> {
   await page.evaluate(() => {
     const content = document.querySelector<HTMLElement>('.mvp-content');
-    if (content && getComputedStyle(content).overflowY !== 'visible') {
-      content.scrollTo({ top: 500 });
-    }
+    if (content && getComputedStyle(content).overflowY !== 'visible') content.scrollTo({ top: 500 });
     window.scrollTo({ top: 500 });
   });
   await page.waitForTimeout(60);
 }
 
 async function menuActionLabels(page: Page): Promise<string[]> {
-  return accountPanel(page).locator('.mvp-account-action strong').allTextContents()
-    .then((labels) => labels.map((label) => label.trim()));
+  const labels = await accountPanel(page).locator('.mvp-account-action strong').allTextContents();
+  return labels.map((label) => label.trim());
 }
 
 async function assertSavedMenu(page: Page): Promise<void> {
@@ -344,9 +365,7 @@ async function validatePanelGeometry(
     const nav = document.querySelector<HTMLElement>('.mobile-bottom-nav');
     const name = document.querySelector<HTMLElement>('#propcontrol-account-name');
     const detail = document.querySelector<HTMLElement>('.mvp-account-identity-copy small');
-    if (!menu || !panel || !trigger || !name || !detail) {
-      throw new Error('Estructura del menú de cuenta incompleta.');
-    }
+    if (!menu || !panel || !trigger || !name || !detail) throw new Error('Estructura de cuenta incompleta.');
     const panelRect = panel.getBoundingClientRect();
     const triggerRect = trigger.getBoundingClientRect();
     const navVisible = nav && getComputedStyle(nav).display !== 'none';
@@ -385,18 +404,14 @@ async function validatePanelGeometry(
   assert.notEqual(geometry.nameWordBreak, 'break-all');
   assert.notEqual(geometry.detailWordBreak, 'break-all');
   assert.equal(geometry.bodyLocked, viewport.width <= 520);
-
   if (viewport.width === 320) assert.ok(geometry.panel.width >= 295);
   if (viewport.width > 520) assert.ok(geometry.panel.width >= 299 && geometry.panel.width <= 341);
 
   const actions = await accountPanel(page).locator('.mvp-account-action').evaluateAll((buttons) => {
-    return buttons.map((button) => {
-      const rect = button.getBoundingClientRect();
-      return {
-        height: rect.height,
-        textAlign: getComputedStyle(button).textAlign,
-      };
-    });
+    return buttons.map((button) => ({
+      height: button.getBoundingClientRect().height,
+      textAlign: getComputedStyle(button).textAlign,
+    }));
   });
   for (const action of actions) {
     assert.ok(action.height >= 47.5);
@@ -407,8 +422,7 @@ async function validatePanelGeometry(
     assert.ok(geometry.menuZ > geometry.navZ);
     const logout = await page.locator('[data-account-logout]').evaluate((button) => {
       const rect = button.getBoundingClientRect();
-      const nav = document.querySelector<HTMLElement>('.mobile-bottom-nav');
-      const navRect = nav?.getBoundingClientRect();
+      const navRect = document.querySelector<HTMLElement>('.mobile-bottom-nav')?.getBoundingClientRect();
       const hit = document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2);
       return {
         bottom: rect.bottom,
@@ -542,10 +556,7 @@ test(
       });
       assert.equal(syncStarts, 1);
 
-      await setSyncState(page, {
-        ...pendingSyncState(),
-        lastError: 'No se pudo conectar con la nube.',
-      });
+      await setSyncState(page, { ...pendingSyncState(), lastError: 'No se pudo conectar con la nube.' });
       await openAccountMenu(page);
       assert.equal(await page.locator('.mvp-account-sync strong').innerText(), 'Error de sincronización');
       assert.equal(await accountPanel(page).locator('[data-account-sync]').count(), 1);
@@ -589,16 +600,13 @@ test(
         assert.equal(await accountPanel(page).locator('[data-account-restore]').count(), 0);
         assert.equal(await page.locator('[data-settings-security-recovery]').count(), 1);
         assert.equal(await page.locator('#configuracion [data-account-restore]').count(), 1);
-        assert.match(
-          await page.locator('#propcontrol-recovery-guidance').innerText(),
-          /solo si faltan datos o soporte lo recomienda/i,
-        );
+        assert.match(await page.locator('#propcontrol-recovery-guidance').innerText(), /solo si faltan datos o soporte lo recomienda/i);
         assert.match(await page.locator('#propcontrol-recovery-guidance').innerText(), /Nunca se ejecuta automáticamente/i);
 
         const before = await page.evaluate(({ dataKey, backupsKey }) => ({
           zone: (JSON.parse(localStorage.getItem(dataKey) || '{}') as CrmData).settings.defaultZone,
           backups: (JSON.parse(localStorage.getItem(backupsKey) || '[]') as unknown[]).length,
-        }), { dataKey: storageKey, backupsKey: backupKey });
+        }), { dataKey: ownerIdentity.storageKey, backupsKey: ownerIdentity.backupKey });
         assert.deepEqual(before, { zone: 'Datos actuales', backups: 1 });
 
         await page.locator('[data-account-settings]').click();
@@ -607,7 +615,7 @@ test(
         await page.locator('#configuracion [data-account-restore]').click();
         const cancelledZone = await page.evaluate((key) => {
           return (JSON.parse(localStorage.getItem(key) || '{}') as CrmData).settings.defaultZone;
-        }, storageKey);
+        }, ownerIdentity.storageKey);
         assert.equal(cancelledZone, 'Datos actuales');
 
         await recordCloudStatusMessages(page);
@@ -619,7 +627,7 @@ test(
           backups: (JSON.parse(localStorage.getItem(backupsKey) || '[]') as unknown[]).length,
           successCount: ((window as unknown as WindowWithB128).__b128CloudMessages ?? [])
             .filter((message) => message.startsWith('Copia anterior recuperada.')).length,
-        }), { dataKey: storageKey, backupsKey: backupKey });
+        }), { dataKey: ownerIdentity.storageKey, backupsKey: ownerIdentity.backupKey });
         assert.deepEqual(restored, { zone: 'Backup restaurado', backups: 0, successCount: 1 });
       } finally {
         await ownerContext.close();
@@ -636,6 +644,7 @@ test(
         await adminContext.close();
       }
 
+      const corredorIdentity = fixtureIdentity('Corredor');
       const corredorContext = await createContext(browser, { width: 390, height: 844 }, 'Corredor');
       try {
         const page = await corredorContext.newPage();
@@ -647,7 +656,7 @@ test(
           recoverControl: Boolean(document.querySelector('[data-account-restore]')),
           zone: (JSON.parse(localStorage.getItem(dataKey) || '{}') as CrmData).settings.defaultZone,
           backups: (JSON.parse(localStorage.getItem(backupsKey) || '[]') as unknown[]).length,
-        }), { dataKey: storageKey, backupsKey: backupKey });
+        }), { dataKey: corredorIdentity.storageKey, backupsKey: corredorIdentity.backupKey });
         assert.deepEqual(unauthorized, {
           recoverControl: false,
           zone: 'Datos actuales',
