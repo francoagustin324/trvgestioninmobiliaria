@@ -2,7 +2,6 @@ import type { TeamMember, TeamRole } from './models.js';
 import { getCloudSession, inviteTeamMember, updateTeamMemberAccess } from './cloud-api.js';
 import { saveData, state } from './store.js';
 import {
-  activeMember,
   canAccessModule,
   canAdministerTeam,
   canChangeTeamMemberRole,
@@ -49,8 +48,7 @@ export function renderMvpUsers(container: HTMLElement): void {
 
   const canManage = canAdministerTeam();
   const sessionReady = Boolean(getCloudSession());
-  const current = activeMember();
-  container.innerHTML = `<div class="mvp-page-heading"><div><h1>Administración de usuarios</h1><p>Administrá accesos y roles de la inmobiliaria.</p></div>${canManage ? '<button type="button" data-toggle-user-form>Invitar usuario</button>' : ''}</div>${canManage ? `<form id="mvp-user-form" class="mvp-user-form ${state.openForms.member ? '' : 'collapsed'}"><div class="mvp-form-heading"><h2>Invitar usuario</h2><button type="button" class="quiet-button" data-toggle-user-form>Cerrar</button></div><label>Nombre<input name="name" required></label><label>Correo<input name="email" type="email" required></label><label>Rol<select name="role"><option>Corredor</option>${current.role === 'Dueño' ? '<option>Administrador</option>' : ''}</select></label><button type="submit"${sessionReady ? '' : ' disabled'}>${sessionReady ? 'Enviar invitación' : 'Ingresá para invitar'}</button><div data-user-feedback class="auth-message"></div></form>` : ''}<div class="mvp-user-list">${state.crm.teamMembers.map(userRow).join('')}</div>`;
+  container.innerHTML = `<div class="mvp-page-heading"><div><h1>Administración de usuarios</h1><p>Administrá accesos y roles de la inmobiliaria.</p></div>${canManage ? '<button type="button" data-toggle-user-form>Invitar usuario</button>' : ''}</div>${canManage ? `<form id="mvp-user-form" class="mvp-user-form ${state.openForms.member ? '' : 'collapsed'}"><div class="mvp-form-heading"><h2>Invitar usuario</h2><button type="button" class="quiet-button" data-toggle-user-form>Cerrar</button></div><label>Nombre<input name="name" required></label><label>Correo<input name="email" type="email" required></label><label>Rol<select name="role"><option>Corredor</option>${canInviteTeamRole('Administrador') ? '<option>Administrador</option>' : ''}</select></label><button type="submit"${sessionReady ? '' : ' disabled'}>${sessionReady ? 'Enviar invitación' : 'Ingresá para invitar'}</button><div data-user-feedback class="auth-message"></div></form>` : ''}<div class="mvp-user-list">${state.crm.teamMembers.map(userRow).join('')}</div>`;
 
   container.querySelectorAll<HTMLElement>('[data-toggle-user-form]').forEach((button) => button.addEventListener('click', () => {
     if (!canAdministerTeam()) {
