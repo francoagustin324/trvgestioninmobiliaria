@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { leadCardAttentionPresentation } from '../lead-card-attention.js';
+import { renderCompactLeadCard } from '../lead-card-compact-ui.js';
 import { leadPrimaryAlert } from '../lead-list-priority.js';
 import type { Client } from '../models.js';
 
@@ -34,6 +35,14 @@ function commerciallyComplete(overrides: Partial<Client> = {}): Client {
     ...overrides,
   });
 }
+
+const cardContext = {
+  expanded: false,
+  responsible: 'Franco Solís',
+  qualificationPanel: '',
+  history: '',
+  matches: '',
+};
 
 test('LeadAlert incorpora un identificador semántico no persistente', () => {
   assert.equal(leadPrimaryAlert(lead({ nextFollowUp: '2026-07-09' }), today).kind, 'overdue');
@@ -87,7 +96,7 @@ test('visita de hoy muestra la hora solo en la alerta', () => {
   assert.equal(presentation.showDate, false);
 });
 
-test('seguimiento futuro conserva la fecha cuando la alerta describe calificación', () => {
+test('seguimiento futuro conserva la fecha en la acción sin contaminar la alerta de calificación', () => {
   const presentation = leadCardAttentionPresentation(lead({
     budget: '120000',
     currency: 'USD',
@@ -96,9 +105,11 @@ test('seguimiento futuro conserva la fecha cuando la alerta describe calificaci�
   }), today);
   assert.equal(presentation.alertKind, 'qualification-missing');
   assert.equal(presentation.alertLabel, 'Falta forma de pago');
+  assert.equal(presentation.alertFullLabel, 'Falta forma de pago');
   assert.equal(presentation.actionLabel, 'Confirmar monto de entrega');
   assert.equal(presentation.showDate, true);
   assert.equal(presentation.dateLabel, 'En 3 días');
+  assert.equal(presentation.actionTitle, 'Próxima acción: Confirmar monto de entrega. Programada para 01/08/2026.');
 });
 
 test('nuevo sin contactar recomienda el primer contacto sin mostrar Sin próxima acción', () => {
@@ -143,7 +154,29 @@ test('Ganado y Perdido se comunican solamente mediante la etapa', () => {
     assert.equal(presentation.showAction, false);
     assert.equal(presentation.actionLabel, '');
     assert.equal(presentation.dateLabel, '');
+    assert.equal(presentation.scheduledDateLabel, '09/07/2026');
   }
+});
+
+test('la ficha terminal presenta la fecha histórica como registro y no como obligación activa', () => {
+  const withHistory = renderCompactLeadCard(lead({
+    pipeline: 'Ganado',
+    status: 'Operación ganada',
+    nextAction: 'Seguimiento heredado',
+    nextFollowUp: '2026-07-09',
+  }), cardContext);
+  assert.match(withHistory, /<span>Fecha de seguimiento registrada<\/span><strong>09\/07\/2026<\/strong>/);
+  assert.doesNotMatch(withHistory, /<span>Seguimiento programado<\/span>/);
+  assert.doesNotMatch(withHistory, /class="mvp-lead-next-action/);
+
+  const withoutHistory = renderCompactLeadCard(lead({
+    pipeline: 'Perdido',
+    status: 'Operación perdida',
+    nextAction: undefined,
+    nextFollowUp: undefined,
+  }), cardContext);
+  assert.match(withoutHistory, /<span>Seguimiento<\/span><strong>Sin seguimiento pendiente<\/strong>/);
+  assert.doesNotMatch(withoutHistory, /<span>Seguimiento programado<\/span>/);
 });
 
 test('la presentación no modifica ni persiste nextFollowUp ni nextAction', () => {
