@@ -1,5 +1,10 @@
 /* B1.2.4 — Ajustes finales de densidad sin alterar contenido ni comportamiento. */
 
+#crm .mvp-stage-counters-shell::before,
+#crm .mvp-stage-counters-shell::after {
+  transition: none;
+}
+
 @media (min-width: 901px) {
   #crm .mvp-lead-full-sheet > summary {
     min-height: 44px;
@@ -7,6 +12,11 @@
 }
 
 @media (min-width: 381px) and (max-width: 520px) {
+  #crm .mvp-lead-card.mvp-lead-card-with-matches {
+    gap: 6px !important;
+    padding-block: 11px;
+  }
+
   #crm .mvp-lead-compact-facts:not(.has-missing-summary) {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
