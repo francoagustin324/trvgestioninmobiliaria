@@ -192,10 +192,11 @@ test('B1.2.8 conserva el estado pendiente original cuando todavía no existe gua
   });
 });
 
-test('B1.2.8 invalida los assets immutable responsables y mantiene etiquetas accesibles completas', () => {
+test('B1.2.8 invalida assets y define la jerarquía contextual sin alterar handlers técnicos', () => {
   const index = readFileSync('index.html', 'utf8');
   const auth = readFileSync('src/mvp-auth.ts', 'utf8');
   const main = readFileSync('src/mvp-main.ts', 'utf8');
+  const settingsUi = readFileSync('src/settings-ui.ts', 'utf8');
   const css = readFileSync('src/mvp.css', 'utf8');
   const cacheHelper = readFileSync('src/server/request-helpers.ts', 'utf8');
 
@@ -205,12 +206,16 @@ test('B1.2.8 invalida los assets immutable responsables y mantiene etiquetas acc
   assert.doesNotMatch(index, /\/dist\/mvp-main\.js\?v=20260723-104/);
   assert.match(cacheHelper, /max-age=31536000, immutable/);
 
-  assert.match(auth, /'Sincronizar ahora'/);
-  assert.match(auth, /aria-label=\"Sincronizar de forma segura\"/);
-  assert.match(auth, /'Recuperar copia'/);
-  assert.match(auth, /aria-label=\"Recuperar copia anterior\"/);
+  assert.match(auth, /sync\.kind === 'saved'/);
+  assert.match(auth, /aria-label="Sincronizar de forma segura"/);
+  assert.match(auth, /data-settings-recovery-action/);
+  assert.match(auth, /aria-label="Recuperar copia anterior"/);
+  assert.match(auth, /Se recuperará la copia local anterior y quedará pendiente de sincronización/);
   assert.match(auth, /let accountMenuEventsBound = false/);
   assert.match(main, /data-account-settings/);
+  assert.match(settingsUi, /Seguridad y recuperación/);
+  assert.match(settingsUi, /solo si faltan datos o soporte lo recomienda/i);
+  assert.match(settingsUi, /Nunca se ejecuta automáticamente/);
   assert.match(css, /min-height:48px/);
   assert.match(css, /width:calc\(100vw - 24px\)/);
 });
