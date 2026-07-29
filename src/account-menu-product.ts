@@ -2,7 +2,6 @@ import { canManageTeam } from './team-access.js';
 
 const RECOVERY_GUIDANCE = 'Usar solo si faltan datos o soporte lo recomienda.';
 let observerInstalled = false;
-let organizationQueued = false;
 
 /**
  * Ajusta la jerarquía del menú sin modificar sincronización ni recuperación:
@@ -33,15 +32,6 @@ export function organizeAccountMenuProductActions(): void {
   recoveryTarget.replaceChildren(restore);
 }
 
-function queueOrganization(): void {
-  if (organizationQueued) return;
-  organizationQueued = true;
-  queueMicrotask(() => {
-    organizationQueued = false;
-    organizeAccountMenuProductActions();
-  });
-}
-
 function mutationTouchesAccountMenu(mutation: MutationRecord): boolean {
   const target = mutation.target instanceof Element ? mutation.target : mutation.target.parentElement;
   if (target?.closest('#cloud-account')) return true;
@@ -62,7 +52,7 @@ export function installAccountMenuProductObserver(): void {
   if (observerInstalled || typeof document === 'undefined' || typeof MutationObserver === 'undefined') return;
   observerInstalled = true;
   const observer = new MutationObserver((mutations) => {
-    if (mutations.some(mutationTouchesAccountMenu)) queueOrganization();
+    if (mutations.some(mutationTouchesAccountMenu)) organizeAccountMenuProductActions();
   });
   observer.observe(document.documentElement, { childList: true, subtree: true });
 }
