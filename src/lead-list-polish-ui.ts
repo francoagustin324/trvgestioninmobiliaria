@@ -1,36 +1,51 @@
 const desktopQuery = '(min-width: 901px)';
-let scheduled = false;
 
-function scheduleEnhancement(): void {
-  if (scheduled) return;
-  scheduled = true;
-  window.requestAnimationFrame(() => {
-    scheduled = false;
-    enhanceLeadList();
-  });
+interface LeadListEnhancementOptions {
+  centerSelectedStage?: boolean;
 }
 
-function placeNewLeadButton(): void {
-  const crm = document.querySelector<HTMLElement>('#crm');
-  const heading = crm?.querySelector<HTMLElement>('.mvp-page-heading');
-  const primary = crm?.querySelector<HTMLElement>('.mvp-lead-filter-primary');
-  const button = crm?.querySelector<HTMLButtonElement>('[data-toggle="client-form"]');
+let activeLeadContainer: HTMLElement | null = null;
+let desktopMedia: MediaQueryList | null = null;
+let pendingPipelineFrame: number | null = null;
+const filterDetailsBindings = new WeakSet<HTMLDetailsElement>();
+const pipelineBindings = new WeakSet<HTMLElement>();
+
+function placeNewLeadButton(container: HTMLElement, desktop: boolean): void {
+  const heading = container.querySelector<HTMLElement>('.mvp-page-heading');
+  const primary = container.querySelector<HTMLElement>('.mvp-lead-filter-primary');
+  const button = container.querySelector<HTMLButtonElement>('[data-toggle="client-form"]');
   if (!heading || !primary || !button) return;
   button.classList.add('mvp-lead-new-button');
-  const destination = window.matchMedia(desktopQuery).matches ? primary : heading;
+  const destination = desktop ? primary : heading;
   if (button.parentElement !== destination) destination.append(button);
 }
 
-function syncFilterDetails(): void {
-  document.querySelectorAll<HTMLDetailsElement>('#crm .mvp-lead-more-filters').forEach((details) => {
+function handleDesktopChange(event: MediaQueryListEvent): void {
+  const container = activeLeadContainer;
+  if (!container?.isConnected) {
+    activeLeadContainer = null;
+    return;
+  }
+  placeNewLeadButton(container, event.matches);
+}
+
+function desktopBreakpoint(): MediaQueryList {
+  if (desktopMedia) return desktopMedia;
+  desktopMedia = window.matchMedia(desktopQuery);
+  desktopMedia.addEventListener('change', handleDesktopChange);
+  return desktopMedia;
+}
+
+function syncFilterDetails(container: HTMLElement): void {
+  container.querySelectorAll<HTMLDetailsElement>('.mvp-lead-more-filters').forEach((details) => {
     const summary = details.querySelector<HTMLElement>(':scope > summary');
     if (!summary) return;
     summary.setAttribute('aria-expanded', String(details.open));
-    if (summary.dataset.b124Bound === 'true') return;
-    summary.dataset.b124Bound = 'true';
+    if (filterDetailsBindings.has(details)) return;
+    filterDetailsBindings.add(details);
     details.addEventListener('toggle', () => {
       summary.setAttribute('aria-expanded', String(details.open));
-      if (details.open) window.requestAnimationFrame(() => details.scrollIntoView({ block: 'nearest', inline: 'nearest' }));
+      if (details.open) details.scrollIntoView({ block: 'nearest', inline: 'nearest' });
     });
   });
 }
@@ -56,8 +71,8 @@ function bindPipeline(counters: HTMLElement, shell: HTMLElement): void {
   counters.setAttribute('role', 'group');
   counters.setAttribute('aria-label', 'Filtrar Leads por etapa. Usá las flechas para recorrer las etapas.');
   updateOverflow(counters, shell);
-  if (counters.dataset.b124Bound === 'true') return;
-  counters.dataset.b124Bound = 'true';
+  if (pipelineBindings.has(counters)) return;
+  pipelineBindings.add(counters);
   counters.addEventListener('scroll', () => updateOverflow(counters, shell), { passive: true });
   counters.addEventListener('wheel', (event) => {
     if (counters.scrollWidth <= counters.clientWidth + 2) return;
@@ -86,30 +101,31 @@ function bindPipeline(counters: HTMLElement, shell: HTMLElement): void {
   });
 }
 
-function enhancePipelines(): void {
-  document.querySelectorAll<HTMLElement>('#crm [data-stage-shell]').forEach((shell) => {
+function enhancePipelines(container: HTMLElement, centerSelectedStage: boolean): void {
+  container.querySelectorAll<HTMLElement>('[data-stage-shell]').forEach((shell) => {
     const counters = shell.querySelector<HTMLElement>('.mvp-stage-counters');
-    if (counters) bindPipeline(counters, shell);
+    if (!counters) return;
+    bindPipeline(counters, shell);
+    if (centerSelectedStage) {
+      counters.querySelector<HTMLElement>('.mvp-stage-counter.active')?.scrollIntoView({ block: 'nearest', inline: 'center' });
+    }
+    updateOverflow(counters, shell);
   });
 }
 
-function enhanceLeadList(): void {
-  placeNewLeadButton();
-  syncFilterDetails();
-  enhancePipelines();
+function schedulePipelineEnhancement(container: HTMLElement, centerSelectedStage: boolean): void {
+  if (pendingPipelineFrame !== null) window.cancelAnimationFrame(pendingPipelineFrame);
+  pendingPipelineFrame = window.requestAnimationFrame(() => {
+    pendingPipelineFrame = null;
+    if (activeLeadContainer !== container || !container.isConnected) return;
+    enhancePipelines(container, centerSelectedStage);
+  });
 }
 
-function install(): void {
-  const root = document.querySelector<HTMLElement>('#root');
-  if (!root) return;
-  const observer = new MutationObserver(scheduleEnhancement);
-  observer.observe(root, { childList: true, subtree: true });
-  document.addEventListener('trv-render', scheduleEnhancement);
-  window.addEventListener('resize', scheduleEnhancement, { passive: true });
-  scheduleEnhancement();
+export function enhanceLeadList(container: HTMLElement, options: LeadListEnhancementOptions = {}): void {
+  activeLeadContainer = container;
+  const breakpoint = desktopBreakpoint();
+  placeNewLeadButton(container, breakpoint.matches);
+  syncFilterDetails(container);
+  schedulePipelineEnhancement(container, options.centerSelectedStage === true);
 }
-
-if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', install, { once: true });
-else install();
-
-export { enhanceLeadList };
