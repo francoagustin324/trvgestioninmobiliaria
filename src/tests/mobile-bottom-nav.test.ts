@@ -36,10 +36,10 @@ test('Configuración continúa en escritorio y se abre desde el menú del avatar
   assert.ok(main.includes(': modules;'));
   assert.ok(main.includes("canAccessModule('configuracion')"));
   assert.ok(main.includes("settingsButton.dataset.module = 'configuracion'"));
-  assert.ok(main.includes("settingsButton.textContent = 'Configuración'"));
   assert.ok(main.includes("settingsButton.dataset.accountSettings = ''"));
-  assert.ok(main.includes('logout.before(settingsButton)'));
-  assert.ok(main.includes("removeAttribute('open')"));
+  assert.ok(main.includes('<strong>Configuración</strong>'));
+  assert.ok(main.includes('actions.append(settingsButton)'));
+  assert.ok(main.includes('closeAccountMenuPanel({ restoreFocus: false })'));
 });
 
 test('sincroniza estado, permisos y aria-current en todas las copias de navegación', () => {

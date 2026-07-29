@@ -1,3 +1,4 @@
+import { organizeAccountMenuProductActions } from './account-menu-product.js';
 import type { ModuleId } from './models.js';
 import { modules } from './models.js';
 import { PRODUCT_BRAND } from './branding.js';
@@ -13,6 +14,7 @@ import { installPropertyPhotoUxGuard } from './property-photo-ux.js';
 import { isInvitationPage, renderInvitationAuth } from './mvp-invitation-auth.js';
 import { appIcons } from './icons.js';
 import {
+  closeAccountMenuPanel,
   hasAuthenticatedSession,
   hydrateAuthenticatedSession,
   isLoginPage,
@@ -101,19 +103,67 @@ function setMobileNavigation(open: boolean): void {
 
 function ensureAccountSettingsAction(): void {
   if (!canAccessModule('configuracion')) return;
-  const menu = document.querySelector<HTMLElement>('.mvp-account-menu > div');
-  const logout = menu?.querySelector<HTMLButtonElement>('[data-account-logout]');
-  if (!menu || !logout || menu.querySelector('[data-account-settings]')) return;
+  const actions = document.querySelector<HTMLElement>('.mvp-account-actions');
+  if (!actions || actions.querySelector('[data-account-settings]')) return;
   const settingsButton = document.createElement('button');
   settingsButton.type = 'button';
+  settingsButton.className = 'mvp-account-action';
   settingsButton.dataset.accountSettings = '';
   settingsButton.dataset.module = 'configuracion';
-  settingsButton.textContent = 'Configuración';
-  logout.before(settingsButton);
+  settingsButton.setAttribute('aria-label', 'Configuración');
+  settingsButton.title = 'Configuración';
+  settingsButton.innerHTML = `<span class="mvp-account-action-icon" aria-hidden="true">${appIcons.config}</span><span class="mvp-account-action-copy"><strong>Configuración</strong><small>Preferencias de la cuenta</small></span>`;
+  actions.append(settingsButton);
 }
 
-function closeAccountMenu(): void {
-  document.querySelector<HTMLDetailsElement>('.mvp-account-menu')?.removeAttribute('open');
+function visibleAccountWords(value: string, limit: number): { visible: string; hidden: string } {
+  const normalized = value.trim().replace(/\s+/g, ' ');
+  if (normalized.length <= limit) return { visible: normalized, hidden: '' };
+  const words = normalized.split(' ');
+  const visibleWords: string[] = [];
+  while (words.length) {
+    const next = words[0] || '';
+    const candidate = [...visibleWords, next].join(' ');
+    if (visibleWords.length && candidate.length > limit) break;
+    visibleWords.push(words.shift() || '');
+  }
+  const visible = visibleWords.join(' ');
+  const hidden = words.length ? ` ${words.join(' ')}` : '';
+  return { visible, hidden };
+}
+
+function clampAccountIdentityElement(selector: string, limit: number): void {
+  const element = document.querySelector<HTMLElement>(selector);
+  const fullText = element?.textContent?.trim().replace(/\s+/g, ' ') || '';
+  if (!element || !fullText) return;
+  const display = visibleAccountWords(fullText, limit);
+  element.setAttribute('aria-label', fullText);
+  element.title = fullText;
+  element.textContent = '';
+
+  const visible = document.createElement('span');
+  visible.textContent = display.visible;
+  visible.setAttribute('aria-hidden', 'true');
+  element.append(visible);
+
+  if (display.hidden) {
+    const hidden = document.createElement('span');
+    hidden.textContent = display.hidden;
+    hidden.hidden = true;
+    hidden.setAttribute('aria-hidden', 'true');
+    element.append(hidden);
+  }
+}
+
+function ensureAccountIdentityClamping(): void {
+  clampAccountIdentityElement('#propcontrol-account-name', 32);
+  clampAccountIdentityElement('.mvp-account-identity-copy small', 48);
+}
+
+function finalizeAccountMenu(): void {
+  ensureAccountSettingsAction();
+  ensureAccountIdentityClamping();
+  organizeAccountMenuProductActions();
 }
 
 function resetModuleScroll(): void {
@@ -147,7 +197,7 @@ function render(): void {
   renderMvpUsers(qs<HTMLElement>('#equipo'));
   renderSettings(qs<HTMLElement>('#configuracion'));
   renderAccountMenu();
-  ensureAccountSettingsAction();
+  finalizeAccountMenu();
   modules.forEach(([id]) => {
     const allowed = canAccessModule(id);
     const panel = qs<HTMLElement>(`#${id}`);
@@ -181,11 +231,12 @@ function bindEvents(): void {
   eventsBound = true;
   installPropertyPhotoUxGuard();
   document.addEventListener('trv-render', render);
+  document.addEventListener('propcontrol-account-menu-rendered', finalizeAccountMenu);
   document.addEventListener('propcontrol-cloud-status', (event) => {
     const detail = (event as CustomEvent<{ message?: string }>).detail;
     if (detail?.message) showNotice(detail.message);
     renderAccountMenu();
-    ensureAccountSettingsAction();
+    finalizeAccountMenu();
   });
   document.addEventListener('click', (event) => {
     const target = event.target as HTMLElement;
@@ -193,7 +244,7 @@ function bindEvents(): void {
     if (target.closest('[data-mobile-nav-close]')) { setMobileNavigation(false); return; }
     const module = target.closest<HTMLElement>('[data-module]')?.dataset.module as ModuleId | undefined;
     if (module && canAccessModule(module)) {
-      closeAccountMenu();
+      closeAccountMenuPanel({ restoreFocus: false });
       state.activeModule = module;
       render();
       setMobileNavigation(false);
