@@ -1,5 +1,7 @@
+import { recoveryGuidance } from './account-menu-product.js';
 import { defaultSettings, type Settings } from './models.js';
 import { saveData, state } from './store.js';
+import { canManageTeam } from './team-access.js';
 import { renderAccountMenu } from './mvp-auth.js';
 import { escapeHtml, formValues } from './utils.js';
 
@@ -69,6 +71,18 @@ export function renderSettings(container: HTMLElement): void {
   const currencyOptions = ['USD', 'ARS']
     .map((code) => `<option value="${code}"${s.currency === code ? ' selected' : ''}>${code}</option>`)
     .join('');
+  const recoverySection = canManageTeam()
+    ? `<section class="mvp-settings-group" data-settings-security-recovery>
+      <header><h2>Seguridad y recuperación</h2><p>Herramientas de contingencia para proteger la información de la inmobiliaria.</p></header>
+      <div class="mvp-settings-avatar">
+        <div class="mvp-avatar-actions">
+          <strong>Recuperar copia anterior</strong>
+          <small id="propcontrol-recovery-guidance">${escapeHtml(recoveryGuidance())} Nunca se ejecuta automáticamente.</small>
+          <div data-settings-recovery-action></div>
+        </div>
+      </div>
+    </section>`
+    : '';
 
   container.innerHTML = `<div class="mvp-page-heading"><div><h1>Configuración</h1><p>Tu perfil, los datos de la inmobiliaria y las preferencias de la app.</p></div></div>
   <form id="mvp-settings-form" class="mvp-settings">
@@ -107,6 +121,8 @@ export function renderSettings(container: HTMLElement): void {
       </div>
       <label>Mensaje al compartir una ficha por WhatsApp<textarea name="shareText" rows="2" placeholder="Hola, te comparto esta propiedad que puede interesarte:">${escapeHtml(s.shareText)}</textarea><small>Se usa como texto sugerido cuando compartís una ficha.</small></label>
     </section>
+
+    ${recoverySection}
 
     <div class="mvp-settings-actions">
       <span class="mvp-settings-saved" data-saved hidden>Cambios guardados ✓</span>
@@ -155,6 +171,7 @@ export function renderSettings(container: HTMLElement): void {
     avatarDraft = null;
     saveData('Configuración actualizada');
     renderAccountMenu();
+    document.dispatchEvent(new CustomEvent('propcontrol-account-menu-rendered'));
     const saved = form.querySelector<HTMLElement>('[data-saved]');
     if (saved) {
       saved.hidden = false;
