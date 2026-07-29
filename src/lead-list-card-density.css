@@ -14,7 +14,7 @@
 @media (min-width: 381px) and (max-width: 520px) {
   #crm .mvp-lead-card.mvp-lead-card-with-matches {
     gap: 6px !important;
-    padding-block: 11px;
+    padding-block: 9px;
   }
 
   #crm .mvp-lead-compact-facts:not(.has-missing-summary) {
