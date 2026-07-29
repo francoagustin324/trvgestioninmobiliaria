@@ -405,10 +405,18 @@ async function assertPipelineSelection(page: Page): Promise<void> {
   await page.locator('#crm [data-stage-quick="Todas"]').click();
 }
 
+async function visibleAlertLabel(card: ReturnType<Page['locator']>): Promise<string> {
+  const alert = card.locator('.mvp-lead-alert:not([hidden])');
+  return alert.evaluate((element) => {
+    const text = element.querySelector<HTMLElement>('.mvp-lead-alert-text');
+    if (text && getComputedStyle(text).display !== 'none') return text.textContent?.trim() || '';
+    return getComputedStyle(element, '::after').content.replace(/^['"]|['"]$/g, '');
+  });
+}
+
 async function assertFollowUpActions(page: Page): Promise<void> {
   const overdueCard = page.locator('#crm .mvp-lead-compact-card').filter({ hasText: 'Seguimiento muy vencido' });
-  const initialAlert = overdueCard.locator('.mvp-lead-alert:not([hidden])');
-  assert.equal((await initialAlert.innerText()).trim(), 'Vencido · 19 días');
+  assert.equal(await visibleAlertLabel(overdueCard), 'Vencido · 19 días');
   assert.doesNotMatch(await overdueCard.locator('.mvp-lead-next-action').innerText(), /vencid|19 días/i);
   await overdueCard.locator('.mvp-lead-followup-menu > summary').click();
   const form = overdueCard.locator('[data-reprogram-client-follow-up]');
