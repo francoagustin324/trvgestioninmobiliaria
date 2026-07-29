@@ -115,6 +115,50 @@ function ensureAccountSettingsAction(): void {
   actions.append(settingsButton);
 }
 
+function visibleAccountWords(value: string, limit: number): { visible: string; hidden: string } {
+  const normalized = value.trim().replace(/\s+/g, ' ');
+  if (normalized.length <= limit) return { visible: normalized, hidden: '' };
+  const words = normalized.split(' ');
+  const visibleWords: string[] = [];
+  while (words.length) {
+    const next = words[0] || '';
+    const candidate = [...visibleWords, next].join(' ');
+    if (visibleWords.length && candidate.length > limit) break;
+    visibleWords.push(words.shift() || '');
+  }
+  const visible = visibleWords.join(' ');
+  const hidden = words.length ? ` ${words.join(' ')}` : '';
+  return { visible, hidden };
+}
+
+function clampAccountIdentityElement(selector: string, limit: number): void {
+  const element = document.querySelector<HTMLElement>(selector);
+  const fullText = element?.textContent?.trim().replace(/\s+/g, ' ') || '';
+  if (!element || !fullText) return;
+  const display = visibleAccountWords(fullText, limit);
+  element.setAttribute('aria-label', fullText);
+  element.title = fullText;
+  element.textContent = '';
+
+  const visible = document.createElement('span');
+  visible.textContent = display.visible;
+  visible.setAttribute('aria-hidden', 'true');
+  element.append(visible);
+
+  if (display.hidden) {
+    const hidden = document.createElement('span');
+    hidden.textContent = display.hidden;
+    hidden.hidden = true;
+    hidden.setAttribute('aria-hidden', 'true');
+    element.append(hidden);
+  }
+}
+
+function ensureAccountIdentityClamping(): void {
+  clampAccountIdentityElement('#propcontrol-account-name', 32);
+  clampAccountIdentityElement('.mvp-account-identity-copy small', 48);
+}
+
 function resetModuleScroll(): void {
   document.querySelector<HTMLElement>('.mvp-content')?.scrollTo({ top: 0, left: 0, behavior: 'auto' });
   window.scrollTo({ top: 0, left: 0, behavior: 'auto' });
@@ -147,6 +191,7 @@ function render(): void {
   renderSettings(qs<HTMLElement>('#configuracion'));
   renderAccountMenu();
   ensureAccountSettingsAction();
+  ensureAccountIdentityClamping();
   modules.forEach(([id]) => {
     const allowed = canAccessModule(id);
     const panel = qs<HTMLElement>(`#${id}`);
@@ -185,6 +230,7 @@ function bindEvents(): void {
     if (detail?.message) showNotice(detail.message);
     renderAccountMenu();
     ensureAccountSettingsAction();
+    ensureAccountIdentityClamping();
   });
   document.addEventListener('click', (event) => {
     const target = event.target as HTMLElement;
