@@ -63,8 +63,12 @@ function compactAlertLabel(kind: LeadAlertKind, fullLabel: string, client: Clien
   return fullLabel;
 }
 
+function isTemporalAlert(kind: LeadAlertKind): boolean {
+  return kind === 'overdue' || kind === 'due-today' || kind === 'visit-today';
+}
+
 function alertAccessibilityLabel(kind: LeadAlertKind, fullLabel: string, scheduledDateLabel: string): string {
-  if (!scheduledDateLabel) return fullLabel;
+  if (!scheduledDateLabel || !isTemporalAlert(kind)) return fullLabel;
   if (kind === 'visit-today') return `${fullLabel}. Visita programada para ${scheduledDateLabel}.`;
   return `${fullLabel}. Programado para ${scheduledDateLabel}.`;
 }
