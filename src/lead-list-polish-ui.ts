@@ -113,12 +113,12 @@ function enhancePipelines(container: HTMLElement, centerSelectedStage: boolean):
   });
 }
 
-function schedulePipelineEnhancement(container: HTMLElement, centerSelectedStage: boolean): void {
+function schedulePipelineGeometryRefresh(container: HTMLElement): void {
   if (pendingPipelineFrame !== null) window.cancelAnimationFrame(pendingPipelineFrame);
   pendingPipelineFrame = window.requestAnimationFrame(() => {
     pendingPipelineFrame = null;
     if (activeLeadContainer !== container || !container.isConnected) return;
-    enhancePipelines(container, centerSelectedStage);
+    enhancePipelines(container, false);
   });
 }
 
@@ -127,5 +127,6 @@ export function enhanceLeadList(container: HTMLElement, options: LeadListEnhance
   const breakpoint = desktopBreakpoint();
   placeNewLeadButton(container, breakpoint.matches);
   syncFilterDetails(container);
-  schedulePipelineEnhancement(container, options.centerSelectedStage === true);
+  enhancePipelines(container, options.centerSelectedStage === true);
+  schedulePipelineGeometryRefresh(container);
 }
