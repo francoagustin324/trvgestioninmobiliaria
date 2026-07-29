@@ -359,7 +359,7 @@ async function validateFutureAccessibility(page: Page): Promise<void> {
 
 async function validateTerminalSheet(page: Page, name: 'Ganado' | 'Perdido'): Promise<void> {
   const card = exactCard(page, name);
-  const fullGridText = await card.locator('.mvp-lead-full-grid').innerText();
+  const fullGridText = (await card.locator('.mvp-lead-full-grid').textContent()) ?? '';
   assert.match(fullGridText, /Fecha de seguimiento registrada/);
   assert.match(fullGridText, new RegExp(exactDateLabel(isoOffset(-5)).replaceAll('/', '\\/')));
   assert.doesNotMatch(fullGridText, /Seguimiento programado/);
