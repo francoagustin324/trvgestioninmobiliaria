@@ -197,6 +197,7 @@ test('B1.2.8 invalida assets y define la jerarquía contextual sin alterar handl
   const auth = readFileSync('src/mvp-auth.ts', 'utf8');
   const main = readFileSync('src/mvp-main.ts', 'utf8');
   const settingsUi = readFileSync('src/settings-ui.ts', 'utf8');
+  const accountProduct = readFileSync('src/account-menu-product.ts', 'utf8');
   const css = readFileSync('src/mvp.css', 'utf8');
   const cacheHelper = readFileSync('src/server/request-helpers.ts', 'utf8');
 
@@ -214,7 +215,7 @@ test('B1.2.8 invalida assets y define la jerarquía contextual sin alterar handl
   assert.match(auth, /let accountMenuEventsBound = false/);
   assert.match(main, /data-account-settings/);
   assert.match(settingsUi, /Seguridad y recuperación/);
-  assert.match(settingsUi, /solo si faltan datos o soporte lo recomienda/i);
+  assert.match(accountProduct, /solo si faltan datos o soporte lo recomienda/i);
   assert.match(settingsUi, /Nunca se ejecuta automáticamente/);
   assert.match(css, /min-height:48px/);
   assert.match(css, /width:calc\(100vw - 24px\)/);
