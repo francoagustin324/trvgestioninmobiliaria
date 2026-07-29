@@ -41,7 +41,8 @@ function temperatureIcon(temperature: string): string {
 }
 
 function compactAlertLabel(label: string): string {
-  return label.replace(/^Seguimiento\s+/i, '');
+  const compact = label.replace(/^Seguimiento\s+/i, '');
+  return compact.replace(/^\p{Ll}/u, (letter) => letter.toUpperCase());
 }
 
 function creditDetail(client: Client): string {
