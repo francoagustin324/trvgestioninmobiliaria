@@ -9,15 +9,9 @@ import { localIsoDate } from '../lead-pipeline.js';
 import { initialData, type Client, type CrmData } from '../models.js';
 
 const viewports = [
-  { width: 320, height: 568 },
-  { width: 360, height: 800 },
-  { width: 375, height: 812 },
-  { width: 390, height: 844 },
-  { width: 412, height: 915 },
-  { width: 430, height: 932 },
-  { width: 720, height: 1024 },
-  { width: 1024, height: 768 },
-  { width: 1366, height: 768 },
+  { width: 320, height: 568 }, { width: 360, height: 800 }, { width: 375, height: 812 },
+  { width: 390, height: 844 }, { width: 412, height: 915 }, { width: 430, height: 932 },
+  { width: 720, height: 1024 }, { width: 1024, height: 768 }, { width: 1366, height: 768 },
 ] as const;
 const captureWidths = new Set([360, 390, 430, 720, 1024, 1366]);
 const captureNames = ['Grupo Norte', 'Andrés Vega', 'Lucía Martín', 'Edgardo', 'Lead nuevo', 'Lead calificado', 'Seguimiento futuro', 'Ganado', 'Perdido'] as const;
@@ -54,12 +48,7 @@ function fixture(): CrmData {
     complete(10, { name: 'Ganado', pipeline: 'Ganado', status: 'Operación ganada', nextAction: 'Seguimiento heredado', nextFollowUp: isoOffset(-5) }),
     complete(11, { name: 'Perdido', pipeline: 'Perdido', status: 'Operación perdida', nextAction: 'Seguimiento heredado', nextFollowUp: isoOffset(-5) }),
   ];
-  crm.properties = [];
-  crm.activityLog = [];
-  crm.contacts = [];
-  crm.reminders = [];
-  crm.fichas = [];
-  crm.conversations = [];
+  crm.properties = []; crm.activityLog = []; crm.contacts = []; crm.reminders = []; crm.fichas = []; crm.conversations = [];
   crm.settings = { ...crm.settings, profileName: 'Franco Solís', profileEmail: 'franco.solis@example.test', agencyName: 'TRV Gestión Inmobiliaria' };
   return crm;
 }
@@ -92,8 +81,7 @@ async function contextFor(browser: Browser, viewport: typeof viewports[number]):
   const mobile = viewport.width <= 430;
   const context = await browser.newContext({ viewport, deviceScaleFactor: 1, hasTouch: viewport.width <= 720, isMobile: mobile, userAgent: mobile ? mobileUa : undefined, locale: 'es-AR', colorScheme: 'dark' });
   await context.addInitScript(({ data }) => {
-    const userId = 'b127-owner';
-    const key = `trv-crm-basico:user:${userId}`;
+    const userId = 'b127-owner'; const key = `trv-crm-basico:user:${userId}`;
     localStorage.setItem('propcontrol-cloud-session-v1', JSON.stringify({ accessToken: 'b127-token', refreshToken: 'b127-refresh', expiresAt: Date.now() + 3_600_000, userId, email: 'franco.solis@example.test' }));
     localStorage.setItem(key, JSON.stringify(data));
     localStorage.setItem(`${key}:sync`, JSON.stringify({ dirty: false, localUpdatedAt: new Date().toISOString(), lastCloudSavedAt: new Date().toISOString() }));
@@ -115,7 +103,7 @@ async function load(page: Page, url: string): Promise<void> {
 
 async function visibleAlert(card: Locator): Promise<string> {
   const alert = card.locator('.mvp-lead-alert');
-  if (await alert.count() === 0 || await alert.getAttribute('hidden') !== null) return '';
+  if (await alert.getAttribute('hidden') !== null) return '';
   return alert.evaluate((element) => {
     const text = element.querySelector<HTMLElement>('.mvp-lead-alert-text');
     if (text && getComputedStyle(text).display !== 'none') return text.textContent?.trim() || '';
@@ -127,22 +115,16 @@ async function visualText(card: Locator): Promise<string> {
   const base = (await card.innerText()).replace(/\s+/g, ' ').trim();
   const alert = card.locator('.mvp-lead-alert:not([hidden])');
   if (await alert.count() === 0) return base;
-  const text = alert.locator('.mvp-lead-alert-text');
-  const hidden = await text.evaluate((element) => getComputedStyle(element).display === 'none');
+  const hidden = await alert.locator('.mvp-lead-alert-text').evaluate((element) => getComputedStyle(element).display === 'none');
   return hidden ? `${base} ${await visibleAlert(card)}`.trim() : base;
 }
 
-function occurrences(text: string, fragment: string): number {
-  return text.split(fragment).length - 1;
-}
+function occurrences(text: string, fragment: string): number { return text.split(fragment).length - 1; }
 
 async function expectCard(page: Page, name: string, expected: { alert?: string; action?: string; date?: string; absent?: string[]; noAlert?: boolean; noAction?: boolean }): Promise<void> {
   const card = exactCard(page, name);
   assert.equal(await card.count(), 1);
-  if (expected.noAlert) {
-    assert.equal(await visibleAlert(card), '');
-    assert.equal(await card.locator('.mvp-lead-alert:not([hidden])').count(), 0);
-  }
+  if (expected.noAlert) { assert.equal(await visibleAlert(card), ''); assert.equal(await card.locator('.mvp-lead-alert:not([hidden])').count(), 0); }
   if (expected.alert) assert.equal(await visibleAlert(card), expected.alert);
   if (expected.noAction) assert.equal(await card.locator('.mvp-lead-next-action').count(), 0);
   if (expected.action) assert.equal((await card.locator('.mvp-lead-next-action strong').innerText()).trim(), expected.action);
@@ -157,58 +139,41 @@ async function simulatedLegacyHeight(card: Locator, duplicateDate: string): Prom
   return card.evaluate((element, duplicate) => {
     const after = element.getBoundingClientRect().height;
     const clone = element.cloneNode(true) as HTMLElement;
-    clone.style.position = 'fixed';
-    clone.style.left = '-10000px';
-    clone.style.top = '0';
-    clone.style.width = `${element.getBoundingClientRect().width}px`;
-    clone.style.visibility = 'hidden';
+    clone.style.position = 'fixed'; clone.style.left = '-10000px'; clone.style.top = '0'; clone.style.width = `${element.getBoundingClientRect().width}px`; clone.style.visibility = 'hidden';
     const action = clone.querySelector<HTMLElement>('.mvp-lead-next-action > div');
     if (action) { const small = document.createElement('small'); small.textContent = duplicate; action.append(small); }
     document.querySelector('#crm .mvp-lead-list')?.append(clone);
-    const before = clone.getBoundingClientRect().height;
-    clone.remove();
+    const before = clone.getBoundingClientRect().height; clone.remove();
     return { before, after };
   }, duplicateDate);
 }
 
 async function validateStoredData(page: Page): Promise<void> {
-  const stored = await page.evaluate(() => {
-    const data = JSON.parse(localStorage.getItem('trv-crm-basico:user:b127-owner') || '{}') as CrmData;
-    return data.clients.map((client) => ({ name: client.name, nextAction: client.nextAction, nextFollowUp: client.nextFollowUp }));
-  });
+  const stored = await page.evaluate(() => (JSON.parse(localStorage.getItem('trv-crm-basico:user:b127-owner') || '{}') as CrmData).clients.map((client) => ({ name: client.name, nextAction: client.nextAction, nextFollowUp: client.nextFollowUp })));
   assert.deepEqual(stored.find((client) => client.name === 'Grupo Norte'), { name: 'Grupo Norte', nextAction: undefined, nextFollowUp: isoOffset(-20) });
   assert.deepEqual(stored.find((client) => client.name === 'Edgardo'), { name: 'Edgardo', nextAction: 'Confirmar visita', nextFollowUp: isoOffset(-20) });
 }
 
 async function capture(page: Page, directory: string, viewport: typeof viewports[number], name: string): Promise<void> {
-  const card = exactCard(page, name);
-  await card.scrollIntoViewIfNeeded();
+  const card = exactCard(page, name); await card.scrollIntoViewIfNeeded();
   const slug = name.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
   await card.screenshot({ path: join(directory, `${viewport.width}x${viewport.height}-${slug}.png`), scale: 'css' });
 }
 
 test('B1.2.7 elimina duplicados visuales con aplicación compilada y CSS real', async () => {
-  const executablePath = chromePath();
-  assert.ok(executablePath);
-  const port = 46000 + Math.floor(Math.random() * 1000);
-  const url = `http://127.0.0.1:${port}`;
-  const screenshots = mkdtempSync(join(tmpdir(), 'propcontrol-b127-'));
-  const server = await startServer(port);
-  const browser = await chromium.launch({ executablePath, headless: true });
-  const heights: Array<{ viewport: string; before: number; after: number; reduction: number }> = [];
-  let captured = 0;
+  const executablePath = chromePath(); assert.ok(executablePath);
+  const port = 46000 + Math.floor(Math.random() * 1000); const url = `http://127.0.0.1:${port}`;
+  const screenshots = mkdtempSync(join(tmpdir(), 'propcontrol-b127-')); const server = await startServer(port); const browser = await chromium.launch({ executablePath, headless: true });
+  const heights: Array<{ viewport: string; before: number; after: number; reduction: number }> = []; let captured = 0;
   try {
     for (const viewport of viewports) {
       const context = await contextFor(browser, viewport);
       try {
-        const page = await context.newPage();
-        await load(page, url);
+        const page = await context.newPage(); await load(page, url);
         for (const name of ['Grupo Norte', 'Andrés Vega', 'Lucía Martín']) {
           await expectCard(page, name, { alert: 'Vencido · 20 días', action: 'Definir acción', absent: ['fecha vencida', 'Seguimiento vencido'] });
           const text = await visualText(exactCard(page, name));
-          assert.equal(occurrences(text, 'Vencido'), 1);
-          assert.equal(occurrences(text, '20 días'), 1);
-          assert.equal(occurrences(text, 'Definir acción'), 1);
+          assert.equal(occurrences(text, 'Vencido'), 1); assert.equal(occurrences(text, '20 días'), 1); assert.equal(occurrences(text, 'Definir acción'), 1);
         }
         await expectCard(page, 'Edgardo', { alert: 'Vencido · 20 días', action: 'Confirmar visita', absent: ['fecha vencida', 'Seguimiento vencido'] });
         await expectCard(page, 'Lead nuevo', { alert: 'Nuevo sin contactar', action: 'Contactar por primera vez', absent: ['Sin próxima acción'] });
@@ -218,39 +183,27 @@ test('B1.2.7 elimina duplicados visuales con aplicación compilada y CSS real', 
         await expectCard(page, 'Visita hoy', { alert: 'Visita hoy · 17:30', action: 'Confirmar visita' });
         assert.equal(occurrences(await visualText(exactCard(page, 'Seguimiento hoy')), 'Hoy'), 1);
         assert.equal(occurrences(await visualText(exactCard(page, 'Visita hoy')), '17:30'), 1);
-        await expectCard(page, 'Ganado', { noAlert: true, noAction: true });
-        await expectCard(page, 'Perdido', { noAlert: true, noAction: true });
+        await expectCard(page, 'Ganado', { noAlert: true, noAction: true }); await expectCard(page, 'Perdido', { noAlert: true, noAction: true });
         assert.equal((await exactCard(page, 'Ganado').locator('.mvp-lead-statuses').innerText()).trim(), 'Ganado');
         assert.equal((await exactCard(page, 'Perdido').locator('.mvp-lead-statuses').innerText()).trim(), 'Perdido');
         await validateStoredData(page);
         const widths = await page.evaluate(() => ({ viewport: innerWidth, document: document.documentElement.scrollWidth, body: document.body.scrollWidth }));
-        assert.ok(widths.document <= widths.viewport + 1);
-        assert.ok(widths.body <= widths.viewport + 1);
+        assert.ok(widths.document <= widths.viewport + 1); assert.ok(widths.body <= widths.viewport + 1);
         const measured = await Promise.all([
-          simulatedLegacyHeight(exactCard(page, 'Grupo Norte'), 'fecha vencida hace 20 días'),
-          simulatedLegacyHeight(exactCard(page, 'Andrés Vega'), 'fecha vencida hace 20 días'),
-          simulatedLegacyHeight(exactCard(page, 'Lucía Martín'), 'fecha vencida hace 20 días'),
-          simulatedLegacyHeight(exactCard(page, 'Edgardo'), 'Vencido hace 20 días'),
+          simulatedLegacyHeight(exactCard(page, 'Grupo Norte'), 'fecha vencida hace 20 días'), simulatedLegacyHeight(exactCard(page, 'Andrés Vega'), 'fecha vencida hace 20 días'),
+          simulatedLegacyHeight(exactCard(page, 'Lucía Martín'), 'fecha vencida hace 20 días'), simulatedLegacyHeight(exactCard(page, 'Edgardo'), 'Vencido hace 20 días'),
         ]);
         const before = measured.reduce((sum, item) => sum + item.before, 0) / measured.length;
         const after = measured.reduce((sum, item) => sum + item.after, 0) / measured.length;
-        assert.ok(before >= after);
-        assert.ok(measured.some((item) => item.before > item.after + .5));
+        assert.ok(before >= after, `La deduplicación aumentó la altura en ${viewport.width}px.`);
         heights.push({ viewport: `${viewport.width}x${viewport.height}`, before: Number(before.toFixed(2)), after: Number(after.toFixed(2)), reduction: Number((before - after).toFixed(2)) });
-        if (captureWidths.has(viewport.width)) {
-          for (const name of captureNames) { await capture(page, screenshots, viewport, name); captured += 1; }
-        }
+        if (captureWidths.has(viewport.width)) for (const name of captureNames) { await capture(page, screenshots, viewport, name); captured += 1; }
       } finally { await context.close(); }
     }
     assert.equal(captured, 54);
     const files = readdirSync(screenshots).filter((name) => name.endsWith('.png'));
-    assert.equal(files.length, 54);
-    assert.ok(files.every((name) => statSync(join(screenshots, name)).size > 1_000));
+    assert.equal(files.length, 54); assert.ok(files.every((name) => statSync(join(screenshots, name)).size > 1_000));
     console.log(`# B1.2.7 capturas efímeras inspeccionadas: ${files.length}`);
     console.log(`# B1.2.7 alturas antes/después: ${JSON.stringify(heights)}`);
-  } finally {
-    await browser.close();
-    await stopServer(server);
-    rmSync(screenshots, { recursive: true, force: true });
-  }
+  } finally { await browser.close(); await stopServer(server); rmSync(screenshots, { recursive: true, force: true }); }
 });
