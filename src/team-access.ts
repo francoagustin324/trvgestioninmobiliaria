@@ -5,6 +5,7 @@ import type {
   Property,
   Reminder,
   TeamMember,
+  TeamRole,
   WhatsAppConversation,
 } from './models.js';
 import { modules } from './models.js';
@@ -62,6 +63,36 @@ export function canViewAll(member = activeMember()): boolean {
 
 export function canAccessModule(module: ModuleId, member = activeMember()): boolean {
   return roleCanAccessModule(member.role, module);
+}
+
+/**
+ * Capacidades administrativas compuestas a partir de la política de roles existente.
+ * Ninguna interfaz debe volver a interpretar Dueño/Administrador/Corredor por su cuenta.
+ */
+export function canAccessSettings(member = activeMember()): boolean {
+  return canAccessModule('configuracion', member);
+}
+
+export function canAdministerTeam(member = activeMember()): boolean {
+  return canManageTeam(member) && canAccessModule('equipo', member);
+}
+
+export function canUseRecovery(member = activeMember()): boolean {
+  return canManageTeam(member) && canAccessSettings(member);
+}
+
+export function canInviteTeamRole(role: Exclude<TeamRole, 'Dueño'>, member = activeMember()): boolean {
+  return canAdministerTeam(member) && (member.role === 'Dueño' || role === 'Corredor');
+}
+
+export function canChangeTeamMemberRole(target: TeamMember, member = activeMember()): boolean {
+  return canAdministerTeam(member) && member.role === 'Dueño' && target.role !== 'Dueño';
+}
+
+export function canChangeTeamMemberStatus(target: TeamMember, member = activeMember()): boolean {
+  return canAdministerTeam(member)
+    && target.role !== 'Dueño'
+    && (member.role === 'Dueño' || target.role === 'Corredor');
 }
 
 export function accessibleModules(): Array<[ModuleId, string]> {
