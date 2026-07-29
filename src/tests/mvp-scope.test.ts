@@ -76,7 +76,8 @@ test('el pulido visual mejora consistencia sin sumar funciones', () => {
 
 test('la cuenta usa icono genérico y no repite la inicial de TRV', () => {
   const source = readFileSync('src/mvp-auth.ts', 'utf8');
-  assert.ok(source.includes('aria-label="Abrir menú de cuenta"'));
+  assert.ok(source.includes('aria-label="Abrir menú de cuenta de'));
+  assert.ok(source.includes('aria-controls="${ACCOUNT_PANEL_ID}"'));
   assert.ok(source.includes('<svg viewBox="0 0 24 24"'));
   assert.equal(source.includes('const initials'), false);
 });
