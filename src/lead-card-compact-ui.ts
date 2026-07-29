@@ -87,6 +87,13 @@ function fullSheet(
   attention: LeadCardAttentionPresentation,
 ): string {
   const qualification = commercialQualificationState(client);
+  const terminal = isTerminalClient(client);
+  const followUpLabel = terminal
+    ? attention.scheduledDateLabel ? 'Fecha de seguimiento registrada' : 'Seguimiento'
+    : 'Seguimiento programado';
+  const followUpValue = terminal
+    ? attention.scheduledDateLabel || 'Sin seguimiento pendiente'
+    : attention.scheduledDateLabel || 'Sin fecha programada';
   return `<details class="mvp-lead-full-sheet" data-lead-full-sheet="${client.id}"${context.expanded ? ' open' : ''}>
     <summary aria-expanded="${context.expanded ? 'true' : 'false'}"><span>${context.expanded ? 'Ocultar ficha' : 'Ver ficha completa'}</span><small>Datos secundarios, historial y propiedades</small></summary>
     <div class="mvp-lead-full-content">
@@ -98,7 +105,7 @@ function fullSheet(
         <div><span>Crédito</span><strong>${escapeHtml(creditDetail(client))}</strong></div>
         <div><span>Responsable</span><strong>${escapeHtml(context.responsible)}</strong></div>
         <div><span>Estado comercial</span><strong>${escapeHtml(qualification.state)}</strong></div>
-        <div><span>Seguimiento programado</span><strong>${escapeHtml(attention.scheduledDateLabel || 'Sin fecha programada')}</strong></div>
+        <div><span>${followUpLabel}</span><strong>${escapeHtml(followUpValue)}</strong></div>
         <div><span>Última actualización</span><strong>${escapeHtml(leadUpdatedLabel(client))}</strong></div>
       </div>
       ${renderLeadSecondaryMeta(client)}
