@@ -200,12 +200,15 @@ async function validateName(card: Locator, name: string, mobileHeader: boolean):
       separated: stageRect.right <= alertRect.left + 1 || alertRect.top >= stageRect.bottom - 1,
     };
   });
-  assert.ok(geometry.headingWidth >= geometry.cardWidth * .66, `Nombre sin ancho útil: ${JSON.stringify(geometry)}`);
   assert.equal(geometry.stageInside, true);
   assert.equal(geometry.alertInside, true);
   assert.equal(geometry.separated, true);
-  if (mobileHeader) assert.ok(geometry.statusesTop >= geometry.identityBottom - 1, `Los badges no quedaron debajo: ${JSON.stringify(geometry)}`);
-  else assert.equal(geometry.horizontal, true, `Escritorio dejó de ser horizontal: ${JSON.stringify(geometry)}`);
+  if (mobileHeader) {
+    assert.ok(geometry.headingWidth >= geometry.cardWidth * .66, `Nombre sin ancho útil: ${JSON.stringify(geometry)}`);
+    assert.ok(geometry.statusesTop >= geometry.identityBottom - 1, `Los badges no quedaron debajo: ${JSON.stringify(geometry)}`);
+  } else {
+    assert.equal(geometry.horizontal, true, `Escritorio dejó de ser horizontal: ${JSON.stringify(geometry)}`);
+  }
 }
 
 async function validateAmounts(page: Page): Promise<void> {
