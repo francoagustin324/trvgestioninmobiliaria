@@ -1,6 +1,8 @@
 import { canManageTeam } from './team-access.js';
 
 const RECOVERY_GUIDANCE = 'Usar solo si faltan datos o soporte lo recomienda.';
+let observerInstalled = false;
+let organizationQueued = false;
 
 /**
  * Ajusta la jerarquía del menú sin modificar sincronización ni recuperación:
@@ -31,6 +33,42 @@ export function organizeAccountMenuProductActions(): void {
   recoveryTarget.replaceChildren(restore);
 }
 
+function queueOrganization(): void {
+  if (organizationQueued) return;
+  organizationQueued = true;
+  queueMicrotask(() => {
+    organizationQueued = false;
+    organizeAccountMenuProductActions();
+  });
+}
+
+function mutationTouchesAccountMenu(mutation: MutationRecord): boolean {
+  const target = mutation.target instanceof Element ? mutation.target : mutation.target.parentElement;
+  if (target?.closest('#cloud-account')) return true;
+  return [...mutation.addedNodes].some((node) => {
+    if (!(node instanceof Element)) return false;
+    return node.id === 'cloud-account'
+      || node.matches('.mvp-account-menu')
+      || Boolean(node.querySelector('#cloud-account, .mvp-account-menu'));
+  });
+}
+
+/**
+ * El menú se vuelve a renderizar desde varios flujos existentes. Este observador
+ * mantiene la jerarquía de producto después de cualquier reemplazo tardío del
+ * contenedor, sin agregar handlers ni ejecutar acciones técnicas.
+ */
+export function installAccountMenuProductObserver(): void {
+  if (observerInstalled || typeof document === 'undefined' || typeof MutationObserver === 'undefined') return;
+  observerInstalled = true;
+  const observer = new MutationObserver((mutations) => {
+    if (mutations.some(mutationTouchesAccountMenu)) queueOrganization();
+  });
+  observer.observe(document.documentElement, { childList: true, subtree: true });
+}
+
 export function recoveryGuidance(): string {
   return RECOVERY_GUIDANCE;
 }
+
+installAccountMenuProductObserver();
