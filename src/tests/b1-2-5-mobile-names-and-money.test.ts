@@ -61,14 +61,17 @@ test('preserva moneda incluida en el presupuesto y textos no puramente numérico
   assert.equal(formatLeadBudget(lead({ budget: 'A confirmar', currency: 'ARS' })), 'A confirmar');
 });
 
-test('el encabezado separa identidad y estados y conserva la alerta completa accesible', () => {
+test('el encabezado separa identidad y estados y conserva una alerta completa accesible', () => {
   const html = renderCompactLeadCard(lead(), context);
   assert.match(html, /class="mvp-lead-identity"/);
   assert.match(html, /class="mvp-lead-statuses"/);
   assert.match(html, /<h3>Lucía Martín<\/h3>/);
   assert.match(html, /aria-label="Seguimiento vencido hace 19 días"/);
   assert.match(html, /title="Seguimiento vencido hace 19 días"/);
-  assert.match(html, /class="mvp-lead-alert-compact"[^>]*>Vencido hace 19 días/);
+  assert.match(html, /data-mobile-label="Vencido hace 19 días"/);
+  assert.match(html, /class="mvp-lead-alert-text">Seguimiento vencido hace 19 días<\/span>/);
+  assert.equal((html.match(/mvp-lead-alert-text/g) ?? []).length, 1);
+  assert.doesNotMatch(html, /mvp-lead-alert-full|mvp-lead-alert-compact/);
 });
 
 test('los nombres obligatorios se renderizan completos y sin fragmentación artificial en el HTML', () => {
@@ -87,6 +90,7 @@ test('los nombres obligatorios se renderizan completos y sin fragmentación arti
 test('el CSS móvil usa dos filas estables y prohíbe cortar palabras del nombre', () => {
   const css = readFileSync('src/lead-list-compact.css', 'utf8');
   assert.match(css, /@media \(max-width: 520px\)/);
+  assert.match(css, /grid-template-rows:\s*auto auto/);
   assert.match(css, /grid-template-areas:\s*['"]identity['"]\s*['"]statuses['"]/);
   assert.match(css, /\.mvp-lead-identity/);
   assert.match(css, /\.mvp-lead-statuses/);
@@ -94,6 +98,7 @@ test('el CSS móvil usa dos filas estables y prohíbe cortar palabras del nombre
   assert.match(css, /overflow-wrap:\s*normal/);
   assert.match(css, /hyphens:\s*none/);
   assert.match(css, /white-space:\s*normal/);
+  assert.match(css, /\.mvp-lead-alert::after[^}]*content:\s*attr\(data-mobile-label\)/s);
   assert.doesNotMatch(css, /\.mvp-lead-identity h3[^}]*overflow-wrap:\s*break-word/s);
   assert.doesNotMatch(css, /!important/);
 });

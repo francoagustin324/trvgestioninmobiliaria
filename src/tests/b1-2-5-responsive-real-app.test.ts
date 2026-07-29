@@ -277,9 +277,26 @@ test('B1.2.5 valida nombres, badges, importes y navegación inferior con DOM y C
         assert.ok(widths.body <= widths.viewport + 1, `Scroll horizontal del body: ${JSON.stringify(widths)}`);
 
         const alert = exactCard(page, 'Lucía Martín').locator('.mvp-lead-alert');
-        assert.equal(await alert.getAttribute('aria-label'), 'Seguimiento vencido hace 19 días');
-        assert.equal(await alert.getAttribute('title'), 'Seguimiento vencido hace 19 días');
-        assert.equal((await alert.innerText()).trim(), mobileHeader ? 'Vencido hace 19 días' : 'Seguimiento vencido hace 19 días');
+        const alertPresentation = await alert.evaluate((element) => {
+          const text = element.querySelector<HTMLElement>('.mvp-lead-alert-text')!;
+          return {
+            aria: element.getAttribute('aria-label'),
+            title: element.getAttribute('title'),
+            fullText: text.textContent?.trim(),
+            textDisplay: getComputedStyle(text).display,
+            mobileText: getComputedStyle(element, '::after').content.replace(/^["']|["']$/g, ''),
+          };
+        });
+        assert.equal(alertPresentation.aria, 'Seguimiento vencido hace 19 días');
+        assert.equal(alertPresentation.title, 'Seguimiento vencido hace 19 días');
+        assert.equal(alertPresentation.fullText, 'Seguimiento vencido hace 19 días');
+        if (mobileHeader) {
+          assert.equal(alertPresentation.textDisplay, 'none');
+          assert.equal(alertPresentation.mobileText, 'Vencido hace 19 días');
+        } else {
+          assert.notEqual(alertPresentation.textDisplay, 'none');
+          assert.ok(alertPresentation.mobileText === 'none' || alertPresentation.mobileText === '');
+        }
 
         if (viewport.width <= 720) await validateBottomNavigation(page);
 
