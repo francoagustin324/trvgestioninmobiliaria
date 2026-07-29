@@ -123,20 +123,20 @@ test('B1.2.6 renderiza una sola cadena de alerta y conserva la información acce
   assert.match(html, /aria-label="Seguimiento vencido hace 20 días"/);
   assert.match(html, /title="Seguimiento vencido hace 20 días"/);
   assert.equal((html.match(/mvp-lead-alert-text/g) ?? []).length, 1);
-  assert.doesNotMatch(html, /mvp-lead-alert-full/);
-  assert.doesNotMatch(html, /mvp-lead-alert-compact/);
+  assert.doesNotMatch(html, /mvp-lead-alert-full|mvp-lead-alert-compact/);
 });
 
-test('B1.2.6 consolida la regla móvil y actualiza las versiones de las hojas modificadas', () => {
+test('B1.2.6 define la estructura en la hoja responsable e invalida su caché immutable', () => {
   const compactCss = readFileSync('src/lead-list-compact.css', 'utf8');
   const polishCss = readFileSync('src/lead-list-polish.css', 'utf8');
   const html = readFileSync('index.html', 'utf8');
+  assert.match(compactCss, /#crm \.mvp-lead-card \.mvp-lead-compact-header/);
   assert.match(compactCss, /grid-template-rows:\s*auto auto/);
   assert.match(compactCss, /grid-template-areas:\s*['"]identity['"]\s*['"]statuses['"]/);
   assert.match(compactCss, /\.mvp-lead-alert::after[^}]*content:\s*attr\(data-mobile-label\)/s);
-  assert.doesNotMatch(polishCss, /@media \(min-width: 381px\) and \(max-width: 520px\)[\s\S]*?\.mvp-lead-compact-header/);
-  assert.match(html, /lead-list-compact\.css\?v=20260729-3/);
-  assert.match(html, /lead-list-polish\.css\?v=20260729-2/);
+  assert.match(polishCss, /@media \(min-width: 381px\) and \(max-width: 520px\)/);
+  assert.ok(html.indexOf('lead-list-compact.css?v=20260729-3') < html.indexOf('lead-list-polish.css?v=20260729-1'));
+  assert.equal((html.match(/lead-list-compact\.css/g) ?? []).length, 1);
 });
 
 function chromePath(): string | undefined {
@@ -248,7 +248,9 @@ async function validateHeader(card: Locator, name: string, stacked: boolean): Pr
     const headerRect = header.getBoundingClientRect();
     const identityRect = identity.getBoundingClientRect();
     const statusesRect = statuses.getBoundingClientRect();
-    const headingRects = [...heading.getClientRects()];
+    const range = document.createRange();
+    range.selectNodeContents(heading);
+    const lineTops = new Set([...range.getClientRects()].filter((rect) => rect.width > .5).map((rect) => Math.round(rect.top)));
     return {
       headerWidth: headerRect.width,
       identityWidth: identityRect.width,
@@ -258,7 +260,7 @@ async function validateHeader(card: Locator, name: string, stacked: boolean): Pr
       statusesLeft: statusesRect.left,
       headerLeft: headerRect.left,
       horizontal: statusesRect.top < identityRect.bottom,
-      headingLines: headingRects.length,
+      headingLines: lineTops.size,
     };
   });
   if (stacked) {
