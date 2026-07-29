@@ -194,7 +194,6 @@ async function validateIdempotentBindings(page: Page): Promise<void> {
     track.dispatchEvent(new WheelEvent('wheel', { deltaY: 23, bubbles: true, cancelable: true }));
     return {
       scrollByCalls,
-      bound: track.dataset.b124Bound ?? null,
       documentWidth: document.documentElement.scrollWidth,
       viewport: window.innerWidth,
     };
@@ -233,11 +232,12 @@ async function validatePipelineInputs(page: Page): Promise<void> {
   const track = page.locator('#crm .mvp-stage-counters');
   assert.equal(await track.evaluate((element) => getComputedStyle(element).touchAction), 'pan-x pan-y');
 
-  const calificado = page.locator('#crm [data-stage-quick="Calificado"]');
-  const box = await calificado.boundingBox();
+  const nuevo = page.locator('#crm [data-stage-quick="Nuevo"]');
+  await nuevo.scrollIntoViewIfNeeded();
+  const box = await nuevo.boundingBox();
   assert.ok(box);
   await page.touchscreen.tap(box.x + box.width / 2, box.y + box.height / 2);
-  await page.waitForFunction(() => document.querySelector('#crm .mvp-stage-counter.active')?.textContent?.includes('Calificado'));
+  await page.waitForFunction(() => document.querySelector('#crm .mvp-stage-counter.active')?.textContent?.includes('Nuevo'));
   await page.locator('#crm [data-stage-quick="Todas"]').click();
   await page.waitForFunction(() => document.querySelectorAll('#crm .mvp-lead-compact-card').length === 11);
 
