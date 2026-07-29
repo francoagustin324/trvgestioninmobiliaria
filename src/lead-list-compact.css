@@ -55,7 +55,7 @@
   }
 
   #crm .mvp-lead-compact-card {
-    gap: 7px !important;
+    gap: 7px;
     padding: 12px;
   }
 

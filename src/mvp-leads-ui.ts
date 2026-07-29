@@ -26,6 +26,7 @@ import {
   sortLeads,
   type LeadOrder,
 } from './lead-list-priority.js';
+import { enhanceLeadList } from './lead-list-polish-ui.js';
 import type { ActivityEntry, Client, CommercialStage, Temperature } from './models.js';
 import { findDuplicateClient, isPlausiblePhone } from './phone-normalizer.js';
 import { matchPropertiesForClient, type PropertyMatch } from './property-matching.js';
@@ -263,21 +264,6 @@ function bindLeadCardActions(container: HTMLElement): void {
   visibleClients().forEach((client) => bindLeadQualificationPanel(container, client, () => renderMvpLeads(container)));
 }
 
-function updateStageOverflow(container: HTMLElement, centerSelected = false): void {
-  const counters = container.querySelector<HTMLElement>('.mvp-stage-counters');
-  const shell = container.querySelector<HTMLElement>('[data-stage-shell]');
-  if (!counters || !shell) return;
-  const update = (): void => {
-    shell.dataset.overflowLeft = String(counters.scrollLeft > 2);
-    shell.dataset.overflowRight = String(counters.scrollLeft + counters.clientWidth < counters.scrollWidth - 2);
-  };
-  counters.addEventListener('scroll', update, { passive: true });
-  window.requestAnimationFrame(() => {
-    if (centerSelected) counters.querySelector<HTMLElement>('.mvp-stage-counter.active')?.scrollIntoView({ block: 'nearest', inline: 'center' });
-    update();
-  });
-}
-
 function updateLeadResults(container: HTMLElement): void {
   const leads = leadRows();
   if (expandedClientId !== null && !leads.some((client) => client.id === expandedClientId)) expandedClientId = null;
@@ -417,7 +403,6 @@ export function renderMvpLeads(container: HTMLElement, centerSelectedStage = fal
 
   bindFilters(container);
   bindLeadCardActions(container);
-  updateStageOverflow(container, centerSelectedStage);
 
   const stageSelect = container.querySelector<HTMLSelectElement>('[data-commercial-stage]');
   const actionInput = container.querySelector<HTMLInputElement>('input[name="nextAction"]');
@@ -463,6 +448,8 @@ export function renderMvpLeads(container: HTMLElement, centerSelectedStage = fal
     state.openForms.client = false;
     renderMvpLeads(container);
   });
+
+  enhanceLeadList(container, { centerSelectedStage });
 }
 
 export function resetLeadFiltersForTests(): void {

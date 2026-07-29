@@ -7,10 +7,10 @@ import { modules, type Client } from '../models.js';
 test('la navegación del MVP contiene los módulos aprobados', () => {
   assert.deepEqual(modules, [
     ['crm', 'Leads'],
-    ['whatsapp', 'Conversaciones'],
-    ['agenda', 'Seguimientos'],
+    ['whatsapp', 'Chats'],
+    ['agenda', 'Agenda'],
     ['propiedades', 'Propiedades'],
-    ['equipo', 'Usuarios'],
+    ['equipo', 'Equipo'],
     ['configuracion', 'Configuración'],
   ]);
 });
