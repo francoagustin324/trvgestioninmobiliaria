@@ -29,7 +29,7 @@
   display: none;
 }
 
-/* B1.2.5 — identidad y estados independientes para evitar comprimir nombres. */
+/* B1.2.5/B1.2.6 — identidad y estados independientes. */
 #crm .mvp-lead-compact-header {
   grid-template-areas: 'identity statuses';
 }
@@ -63,8 +63,12 @@
   gap: 8px;
 }
 
-#crm .mvp-lead-alert-compact {
-  display: none;
+#crm .mvp-lead-alert-text {
+  display: inline;
+}
+
+#crm .mvp-lead-alert::after {
+  content: none;
 }
 
 @media (max-width: 720px) {
@@ -241,23 +245,29 @@
 
 @media (max-width: 520px) {
   #crm .mvp-lead-card .mvp-lead-compact-header {
+    width: 100%;
     grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto auto;
     grid-template-areas:
       'identity'
       'statuses';
     align-items: start;
-    gap: 7px;
+    row-gap: 8px;
+    column-gap: 0;
   }
 
   #crm .mvp-lead-card .mvp-lead-identity {
     display: grid;
     grid-template-columns: auto minmax(0, 1fr);
     width: 100%;
+    min-width: 0;
+    max-width: 100%;
     align-items: center;
     gap: 8px;
   }
 
   #crm .mvp-lead-card .mvp-lead-identity h3 {
+    width: 100%;
     min-width: 0;
     max-width: 100%;
     word-break: normal;
@@ -268,6 +278,8 @@
 
   #crm .mvp-lead-card .mvp-lead-statuses {
     width: 100%;
+    min-width: 0;
+    max-width: 100%;
     justify-content: flex-start;
     align-items: flex-start;
     flex-wrap: wrap;
@@ -285,12 +297,12 @@
     justify-self: start;
   }
 
-  #crm .mvp-lead-alert-full {
+  #crm .mvp-lead-card .mvp-lead-alert-text {
     display: none;
   }
 
-  #crm .mvp-lead-alert-compact {
-    display: inline;
+  #crm .mvp-lead-card .mvp-lead-alert::after {
+    content: attr(data-mobile-label);
   }
 
   #crm .mvp-lead-compact-facts {
