@@ -8,14 +8,18 @@ test('el guardado automático usa la misma compatibilidad segura que la sincroni
   assert.equal(store.includes("import { queueCloudSave } from './cloud-api.js'"), false);
 });
 
-test('el menú de cuenta no repite el correo cuando el usuario todavía no está vinculado al directorio', () => {
+test('el menú de cuenta no repite el correo cuando existe una identidad humana presentable', () => {
   const auth = readFileSync('src/mvp-auth.ts', 'utf8');
-  assert.ok(auth.includes("member?.name || state.crm.organization.name || 'Cuenta PropControl';"));
-  assert.ok(auth.includes('const accountDetail = member?.role || session.email;'));
-  // El correo solo se usa como detalle secundario, nunca como nombre de la cuenta.
+  const presentation = readFileSync('src/account-menu-presentation.ts', 'utf8');
+  assert.ok(auth.includes('accountIdentityPresentation({'));
+  assert.ok(auth.includes('identity.name'));
+  assert.ok(auth.includes('identity.detail'));
+  assert.ok(presentation.includes('input.settings.profileName'));
+  assert.ok(presentation.includes('input.authenticatedMember || input.activeMember'));
+  assert.ok(presentation.includes('readableEmailName(input.email'));
+  // El correo puede derivar un nombre legible, pero nunca se imprime como identidad completa.
   assert.equal(auth.includes('const accountName = member?.name || session.email'), false);
-  assert.ok(auth.includes('${escapeHtml(accountName)}'));
-  assert.ok(auth.includes('${escapeHtml(accountDetail)}'));
+  assert.equal(auth.includes('${escapeHtml(session.email)}'), false);
 });
 
 test('los módulos principales usan una misma versión de caché explícita', () => {
