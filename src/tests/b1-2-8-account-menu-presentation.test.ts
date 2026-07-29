@@ -61,6 +61,13 @@ function identity(overrides: Partial<{
   });
 }
 
+function localTime(value: string): string {
+  return new Intl.DateTimeFormat('es-AR', {
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(new Date(value));
+}
+
 test('B1.2.8 prioriza profileName humano y presenta inmobiliaria y rol', () => {
   const presentation = identity();
   assert.equal(presentation.name, 'Franco Solís');
@@ -136,27 +143,29 @@ test('B1.2.8 usa agencyName cuando el nombre de organización es un identificado
 });
 
 test('B1.2.8 presenta nube al día con el timestamp real existente', () => {
+  const savedAt = '2026-07-29T14:12:00-03:00';
   const now = new Date('2026-07-29T18:00:00-03:00');
   const presentation = accountSyncPresentation({
     dirty: false,
-    lastCloudSavedAt: '2026-07-29T14:12:00-03:00',
+    lastCloudSavedAt: savedAt,
   }, now);
   assert.equal(presentation.kind, 'saved');
   assert.equal(presentation.label, 'Nube al día');
-  assert.equal(presentation.detail, 'Guardada hoy, 14:12');
+  assert.equal(presentation.detail, `Guardada hoy, ${localTime(savedAt)}`);
   assert.match(presentation.fullLabel, /^Nube guardada/);
 });
 
 test('B1.2.8 conserva cambios pendientes y su timestamp sin sincronizar automáticamente', () => {
+  const updatedAt = '2026-07-29T16:40:00-03:00';
   const now = new Date('2026-07-29T18:00:00-03:00');
   const presentation = accountSyncPresentation({
     dirty: true,
-    localUpdatedAt: '2026-07-29T16:40:00-03:00',
+    localUpdatedAt: updatedAt,
     lastCloudSavedAt: '2026-07-29T14:12:00-03:00',
   }, now);
   assert.equal(presentation.kind, 'pending');
   assert.equal(presentation.label, 'Cambios pendientes');
-  assert.equal(presentation.detail, 'Actualizados hoy, 16:40');
+  assert.equal(presentation.detail, `Actualizados hoy, ${localTime(updatedAt)}`);
 });
 
 test('B1.2.8 conserva el error real de sincronización', () => {
@@ -196,9 +205,9 @@ test('B1.2.8 invalida los assets immutable responsables y mantiene etiquetas acc
   assert.doesNotMatch(index, /\/dist\/mvp-main\.js\?v=20260723-104/);
   assert.match(cacheHelper, /max-age=31536000, immutable/);
 
-  assert.match(auth, />Sincronizar ahora</);
+  assert.match(auth, /'Sincronizar ahora'/);
   assert.match(auth, /aria-label=\"Sincronizar de forma segura\"/);
-  assert.match(auth, />Recuperar copia</);
+  assert.match(auth, /'Recuperar copia'/);
   assert.match(auth, /aria-label=\"Recuperar copia anterior\"/);
   assert.match(auth, /let accountMenuEventsBound = false/);
   assert.match(main, /data-account-settings/);
