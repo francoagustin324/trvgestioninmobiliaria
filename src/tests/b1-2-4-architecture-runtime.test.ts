@@ -176,7 +176,7 @@ async function validateIdempotentBindings(page: Page): Promise<void> {
   await page.waitForTimeout(80);
 
   const result = await page.evaluate(async () => {
-    const module = await import('/dist/lead-list-polish-ui.js');
+    const module = await import(`${location.origin}/dist/lead-list-polish-ui.js`);
     const container = document.querySelector<HTMLElement>('#crm')!;
     const track = container.querySelector<HTMLElement>('.mvp-stage-counters')!;
     let scrollByCalls = 0;
