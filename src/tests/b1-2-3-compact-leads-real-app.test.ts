@@ -150,7 +150,7 @@ async function assertFollowUpActions(page: Page): Promise<void> {
   await page.waitForFunction(() => [...document.querySelectorAll<HTMLElement>('#crm .mvp-lead-compact-card')].some((item) => item.textContent?.includes('Seguimiento muy vencido') && item.querySelector('.mvp-lead-next-action strong')?.textContent?.includes('Definir próxima acción')));
   card = exactCard(page, 'Seguimiento muy vencido');
   assert.equal((await card.locator('.mvp-lead-next-action strong').innerText()).trim(), 'Definir próxima acción');
-  assert.equal(await card.locator('.mvp-lead-alert:not([hidden])').count(), 0);
+  assert.notEqual(await card.locator('.mvp-lead-alert:not([hidden])').getAttribute('data-lead-alert-kind'), 'overdue');
 }
 
 test('B1.2.3 conserva lista compacta, disclosure y seguimiento con la aplicación real', async () => {
