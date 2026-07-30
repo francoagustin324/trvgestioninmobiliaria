@@ -17,6 +17,7 @@ import {
   restoreLatestBackup,
   writeLocalSnapshot,
 } from './sync-safety.js';
+import { roleCanManageTeam } from './team-policy.js';
 
 const TEAM_VIEW_KEY = 'propcontrol-active-team-member-v1';
 
@@ -220,7 +221,15 @@ export function hasLocalBackup(): boolean {
   return hasStoredLocalBackup();
 }
 
+export function canRestoreLatestLocalBackup(): boolean {
+  const member = state.crm.teamMembers.find(
+    (item) => item.id === state.activeMemberId && item.status !== 'Suspendido',
+  );
+  return Boolean(member && roleCanManageTeam(member.role));
+}
+
 export function restoreLatestLocalBackup(): boolean {
+  if (!canRestoreLatestLocalBackup()) return false;
   const restored = restoreLatestBackup();
   if (!restored) return false;
   state.crm = normalizedData(restored);

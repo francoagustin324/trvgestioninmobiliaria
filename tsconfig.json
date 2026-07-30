@@ -9,6 +9,10 @@
     "noUncheckedIndexedAccess": true,
     "exactOptionalPropertyTypes": false,
     "skipLibCheck": true,
+    "baseUrl": ".",
+    "paths": {
+      "/dist/store.js": ["src/store.ts"]
+    },
     "rootDir": "src",
     "outDir": "dist"
   },

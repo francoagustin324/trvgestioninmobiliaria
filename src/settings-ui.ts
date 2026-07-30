@@ -1,7 +1,7 @@
 import { recoveryGuidance } from './account-menu-product.js';
 import { defaultSettings, type Settings } from './models.js';
 import { saveData, state } from './store.js';
-import { canManageTeam } from './team-access.js';
+import { canAccessSettings, canUseRecovery } from './team-access.js';
 import { renderAccountMenu } from './mvp-auth.js';
 import { escapeHtml, formValues } from './utils.js';
 
@@ -67,11 +67,17 @@ function updateAvatarPreview(container: HTMLElement): void {
 }
 
 export function renderSettings(container: HTMLElement): void {
+  if (!canAccessSettings()) {
+    avatarDraft = null;
+    container.replaceChildren();
+    return;
+  }
+
   const s = currentSettings();
   const currencyOptions = ['USD', 'ARS']
     .map((code) => `<option value="${code}"${s.currency === code ? ' selected' : ''}>${code}</option>`)
     .join('');
-  const recoverySection = canManageTeam()
+  const recoverySection = canUseRecovery()
     ? `<section class="mvp-settings-group" data-settings-security-recovery>
       <header><h2>Seguridad y recuperación</h2><p>Herramientas de contingencia para proteger la información de la inmobiliaria.</p></header>
       <div class="mvp-settings-avatar">
@@ -137,14 +143,20 @@ export function renderSettings(container: HTMLElement): void {
   nameInput?.addEventListener('input', () => { if (!currentAvatar()) updateAvatarPreview(container); });
 
   avatarInput?.addEventListener('change', () => {
+    if (!canAccessSettings()) return;
     const file = avatarInput.files?.[0];
     if (!file) return;
     readAvatarFile(file)
-      .then((dataUrl) => { avatarDraft = dataUrl; updateAvatarPreview(container); })
+      .then((dataUrl) => {
+        if (!canAccessSettings()) return;
+        avatarDraft = dataUrl;
+        updateAvatarPreview(container);
+      })
       .catch((error: unknown) => window.alert(error instanceof Error ? error.message : 'No se pudo cargar la imagen.'));
   });
 
   container.querySelector<HTMLButtonElement>('[data-remove-avatar]')?.addEventListener('click', () => {
+    if (!canAccessSettings()) return;
     avatarDraft = '';
     if (avatarInput) avatarInput.value = '';
     updateAvatarPreview(container);
@@ -152,6 +164,11 @@ export function renderSettings(container: HTMLElement): void {
 
   form?.addEventListener('submit', (event) => {
     event.preventDefault();
+    if (!canAccessSettings()) {
+      avatarDraft = null;
+      container.replaceChildren();
+      return;
+    }
     const values = formValues(form);
     const parsedDays = Number.parseInt(values.overdueDays ?? '', 10);
     state.crm.settings = {
