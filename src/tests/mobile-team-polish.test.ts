@@ -4,6 +4,7 @@ import test from 'node:test';
 
 const html = readFileSync('index.html', 'utf8');
 const ui = readFileSync('src/mvp-users-ui.ts', 'utf8');
+const access = readFileSync('src/team-access.ts', 'utf8');
 const models = readFileSync('src/models.ts', 'utf8');
 const policy = readFileSync('src/team-policy.ts', 'utf8');
 const css = readFileSync('src/mobile-team-polish.css', 'utf8');
@@ -22,7 +23,8 @@ test('conserva título, descripción e invitación según permisos', () => {
   assert.ok(ui.includes('<h1>Administración de usuarios</h1>'));
   assert.ok(ui.includes('Administrá accesos y roles de la inmobiliaria.'));
   assert.ok(ui.includes('data-toggle-user-form>Invitar usuario</button>'));
-  assert.ok(ui.includes('const canManage = canManageTeam()'));
+  assert.ok(ui.includes('const canManage = canAdministerTeam()'));
+  assert.ok(ui.includes("if (!canAccessModule('equipo'))"));
   assert.ok(css.includes('#equipo .mvp-page-heading'));
   assert.ok(css.includes('min-height: 46px'));
 });
@@ -58,19 +60,23 @@ test('conserva estados y acciones Suspender o Reactivar', () => {
 });
 
 test('mantiene permisos, restricciones del dueño y ausencia de eliminación', () => {
-  assert.ok(ui.includes("canManageTeam() && member.role !== 'Dueño'"));
-  assert.ok(ui.includes("current.role === 'Dueño' || member.role === 'Corredor'"));
-  assert.ok(ui.includes("if (!target || target.role === 'Dueño') return"));
+  assert.ok(ui.includes('const roleEditable = canChangeTeamMemberRole(member)'));
+  assert.ok(ui.includes('const statusEditable = canChangeTeamMemberStatus(member)'));
+  assert.ok(ui.includes('if (!target || !canChangeTeamMemberRole(target))'));
+  assert.ok(ui.includes('if (!target || !canChangeTeamMemberStatus(target))'));
+  assert.ok(access.includes("target.role !== 'Dueño'"));
+  assert.ok(access.includes("member.role === 'Dueño' || target.role === 'Corredor'"));
   assert.ok(policy.includes("return role === 'Dueño' || role === 'Administrador'"));
   assert.ok(policy.includes("return !['equipo', 'reportes', 'configuracion'].includes(module)"));
   assert.equal(ui.includes('Eliminar usuario'), false);
   assert.equal(ui.includes('data-delete-user'), false);
 });
 
-test('conserva invitación, cambio de rol y acceso sin ejecutar acciones en pruebas', () => {
+test('conserva invitación, cambio de rol y acceso con autorización dinámica', () => {
   assert.ok(ui.includes('void inviteTeamMember'));
-  assert.ok(ui.includes('if (!canManage || !getCloudSession()) return'));
-  assert.ok(ui.includes('void updateTeamMemberAccess(id, { role: select.value'));
+  assert.ok(ui.includes('if (!canAdministerTeam() || !getCloudSession())'));
+  assert.ok(ui.includes('if (!canInviteTeamRole(role))'));
+  assert.ok(ui.includes('void updateTeamMemberAccess(id, { role: nextRole })'));
   assert.ok(ui.includes('void updateTeamMemberAccess(id, { status })'));
   assert.ok(ui.includes('Ya existe un usuario con ese correo.'));
   assert.ok(ui.includes('Ingresá para invitar'));
