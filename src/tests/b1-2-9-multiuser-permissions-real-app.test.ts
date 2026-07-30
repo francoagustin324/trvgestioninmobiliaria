@@ -285,9 +285,9 @@ async function restoreAndAssert(page: Page, role: Exclude<TeamRole, 'Corredor'>)
   }), { dataKey: identity.storageKey, backupKey: identity.backupKey });
   assert.deepEqual(before, { zone: 'Datos actuales B1.2.9', backups: 1 });
 
-  const settingsNavigation = page.locator('[data-module="configuracion"]:visible').first();
-  assert.equal(await settingsNavigation.count(), 1);
-  await settingsNavigation.click();
+  await page.locator('[data-account-toggle]').click();
+  await page.locator('.mvp-account-panel').waitFor({ state: 'visible' });
+  await page.locator('[data-account-settings]').click();
   await page.locator('#configuracion.active').waitFor({ state: 'visible' });
   await page.evaluate(() => { window.confirm = () => true; });
   await page.locator('#configuracion [data-account-restore]').click();
