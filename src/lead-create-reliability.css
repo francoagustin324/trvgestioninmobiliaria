@@ -1,4 +1,4 @@
-/* B1.3.1 — El formulario conserva todos sus campos y mantiene las acciones accesibles. */
+/* B1.3.1/B1.3.2 — El formulario conserva todos sus campos y mantiene las acciones accesibles. */
 .b131-lead-form {
   display: flex;
   flex-direction: column;
@@ -43,8 +43,51 @@
   background: linear-gradient(180deg, rgba(7, 31, 24, 0.94), #071f18 28%);
 }
 
+.b132-lead-save-status,
 .b131-lead-form-footer .form-error {
   margin: 0 0 10px;
+  overflow-wrap: anywhere;
+}
+
+.b132-lead-save-status {
+  min-height: 22px;
+  padding: 9px 11px;
+  border: 1px solid rgba(215, 180, 104, 0.25);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.045);
+  font-size: 0.9rem;
+  font-weight: 650;
+  line-height: 1.35;
+}
+
+.b132-lead-save-status[data-kind="working"] {
+  border-color: rgba(215, 180, 104, 0.52);
+}
+
+.b132-lead-save-status[data-kind="success"] {
+  border-color: rgba(88, 201, 142, 0.52);
+}
+
+.b132-lead-save-status[data-kind="error"],
+.b132-lead-save-status[data-kind="duplicate"] {
+  border-color: rgba(237, 116, 116, 0.6);
+  background: rgba(111, 28, 28, 0.22);
+}
+
+.b132-duplicate-actions {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin: 0 0 10px;
+}
+
+.b132-duplicate-actions > button {
+  min-width: 0;
+  min-height: 44px;
+  padding-inline: 10px;
+  white-space: normal;
+  line-height: 1.2;
+  touch-action: manipulation;
 }
 
 .b131-lead-form-actions {
@@ -139,6 +182,10 @@
   .b131-lead-form-footer {
     margin: 0 -14px;
     padding: 10px 14px calc(10px + env(safe-area-inset-bottom));
+  }
+
+  .b132-duplicate-actions {
+    grid-template-columns: 1fr;
   }
 
   .b131-lead-form-actions {
