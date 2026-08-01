@@ -305,6 +305,9 @@ function invalidControl(form: HTMLFormElement): HTMLInputElement | HTMLSelectEle
 
 function validationMessage(field: HTMLInputElement | HTMLSelectElement): string {
   if (field.validity.valueMissing) return 'Completá este campo obligatorio.';
+  if (field instanceof HTMLInputElement && field.name === 'nextFollowUp' && field.validity.rangeUnderflow) {
+    return 'La fecha de seguimiento no puede estar en el pasado.';
+  }
   if (field instanceof HTMLInputElement && field.type === 'email' && field.validity.typeMismatch) {
     return 'Ingresá un email válido o dejá el campo vacío.';
   }
