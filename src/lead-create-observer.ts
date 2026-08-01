@@ -6,9 +6,9 @@ function loadEnhancer(): Promise<typeof import('./lead-create-reliability.js')> 
   return enhancerPromise;
 }
 
-function reportObserverError(error: unknown): void {
+function reportBootstrapError(error: unknown): void {
   const message = error instanceof Error ? error.message : String(error);
-  document.documentElement.dataset.b131ObserverError = message;
+  document.documentElement.dataset.b131BootstrapError = message;
   console.error('B1.3.1 no pudo mejorar el formulario de leads.', error);
 }
 
@@ -21,29 +21,26 @@ function scheduleEnhancement(): void {
       const { enhanceLeadForm } = await loadEnhancer();
       enhanceLeadForm();
     } catch (error) {
-      reportObserverError(error);
+      reportBootstrapError(error);
     }
   });
 }
 
-function hasUnenhancedOpenForm(): boolean {
-  return Boolean(document.querySelector(
-    '#mvp-lead-form:not(.collapsed):not([data-b131-enhanced="true"])',
-  ));
+function opensOrRefreshesLeadForm(target: EventTarget | null): boolean {
+  return target instanceof Element
+    && Boolean(target.closest('[data-toggle="client-form"], [data-edit-client]'));
 }
 
-function installLeadFormObserver(): void {
-  document.documentElement.dataset.b131Observer = 'ready';
-  const appRoot = document.querySelector('#root') ?? document.documentElement;
-  const observer = new MutationObserver(() => {
-    if (hasUnenhancedOpenForm()) scheduleEnhancement();
-  });
-  observer.observe(appRoot, { childList: true, subtree: true });
+function installLeadFormBootstrap(): void {
+  document.documentElement.dataset.b131Bootstrap = 'ready';
 
+  document.addEventListener('click', (event) => {
+    if (opensOrRefreshesLeadForm(event.target)) scheduleEnhancement();
+  }, true);
   document.addEventListener('trv-render', scheduleEnhancement);
   document.addEventListener('propcontrol-cloud-status', scheduleEnhancement);
   window.addEventListener('pageshow', scheduleEnhancement);
   scheduleEnhancement();
 }
 
-installLeadFormObserver();
+installLeadFormBootstrap();
