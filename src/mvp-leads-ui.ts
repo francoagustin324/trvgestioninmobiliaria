@@ -25,7 +25,7 @@ import {
   type LeadOrder,
 } from './lead-list-priority.js';
 import { enhanceLeadList } from './lead-list-polish-ui.js';
-import { submitLeadForm } from './lead-create-reliability.js';
+import { enhanceLeadForm, submitLeadForm } from './lead-create-reliability.js';
 import type { ActivityEntry, Client, CommercialStage, Temperature } from './models.js';
 import { matchPropertiesForClient, type PropertyMatch } from './property-matching.js';
 import { saveData, state } from './store.js';
@@ -424,6 +424,7 @@ export function renderMvpLeads(container: HTMLElement, centerSelectedStage = fal
   });
 
   enhanceLeadList(container, { centerSelectedStage });
+  enhanceLeadForm();
 }
 
 export function resetLeadFiltersForTests(): void {
