@@ -6,6 +6,7 @@ import { renderAgenda } from './agenda-ui.js';
 import { decodePublicFicha, renderPublicMode } from './public-ficha.js';
 import { loadPublicPropertyFicha } from './public-property-share.js';
 import { renderMvpLeads } from './mvp-leads-ui.js';
+import { enhanceLeadForm } from './lead-create-reliability.js';
 import { renderMvpProperties } from './mvp-properties-ui.js';
 import { renderMvpUsers } from './mvp-users-ui.js';
 import { renderMvpConversations } from './mvp-conversations-ui.js';
@@ -210,6 +211,7 @@ function render(): void {
     });
     panel.classList.toggle('active', allowed && id === state.activeModule);
   });
+  enhanceLeadForm();
 }
 
 function removeItem(collection: string, id: number): void {

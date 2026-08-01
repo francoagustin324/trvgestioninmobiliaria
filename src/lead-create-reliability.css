@@ -1,0 +1,163 @@
+/* B1.3.1 — El formulario conserva todos sus campos y mantiene las acciones accesibles. */
+.b131-lead-form {
+  display: flex;
+  flex-direction: column;
+  max-height: calc(100dvh - 128px);
+  min-height: 0;
+  overflow: hidden;
+}
+
+.b131-lead-form > .mvp-form-heading {
+  flex: 0 0 auto;
+}
+
+.b131-lead-form-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 2px 4px 16px 0;
+  scrollbar-gutter: stable;
+}
+
+.b131-lead-form-fields > details,
+.b131-lead-form-fields > .lead-qualification-panel,
+.b131-lead-form-fields > .lead-secondary-panel,
+.b131-lead-form-fields > [data-essential-qualification],
+.b131-lead-form-fields > [data-secondary-qualification] {
+  grid-column: 1 / -1;
+  min-width: 0;
+}
+
+.b131-lead-form-footer {
+  position: sticky;
+  bottom: 0;
+  z-index: 3;
+  flex: 0 0 auto;
+  margin: 0 -2px -2px;
+  padding: 12px 2px 2px;
+  border-top: 1px solid rgba(215, 180, 104, 0.22);
+  background: linear-gradient(180deg, rgba(7, 31, 24, 0.94), #071f18 28%);
+}
+
+.b131-lead-form-footer .form-error {
+  margin: 0 0 10px;
+}
+
+.b131-lead-form-actions {
+  display: grid;
+  grid-template-columns: minmax(120px, 0.7fr) minmax(180px, 1.3fr);
+  gap: 10px;
+}
+
+.b131-lead-form-actions > button {
+  min-height: 48px;
+  width: 100%;
+  touch-action: manipulation;
+}
+
+.b131-save-lead[aria-busy="true"] {
+  cursor: progress;
+  opacity: 0.72;
+}
+
+.b131-lead-form-backdrop {
+  display: none;
+}
+
+@media (max-width: 720px) {
+  body:has(.b131-lead-form) {
+    overflow: hidden;
+  }
+
+  .b131-lead-form-backdrop {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 101;
+    background: rgba(1, 15, 11, 0.64);
+    backdrop-filter: blur(3px);
+    touch-action: none;
+  }
+
+  #crm .b131-lead-form {
+    position: fixed;
+    z-index: 102;
+    top: max(72px, calc(env(safe-area-inset-top) + 62px));
+    right: 10px;
+    bottom: calc(var(--pc-mobile-nav-height, 76px) + var(--pc-mobile-nav-edge, 8px) + env(safe-area-inset-bottom) + 8px);
+    left: 10px;
+    width: auto;
+    max-width: none;
+    max-height: none;
+    margin: 0;
+    padding: 14px 14px 0;
+    border-radius: 22px;
+    box-shadow: 0 24px 70px rgba(0, 0, 0, 0.48);
+  }
+
+  body:has(.b131-lead-form) #crm [data-toggle="client-form"] {
+    position: fixed;
+    z-index: 104;
+    top: max(80px, calc(env(safe-area-inset-top) + 70px));
+    right: 22px;
+    width: 44px;
+    min-width: 44px;
+    height: 44px;
+    min-height: 44px;
+    overflow: hidden;
+    padding: 0;
+    border-radius: 999px;
+    font-size: 0;
+    line-height: 1;
+  }
+
+  body:has(.b131-lead-form) #crm [data-toggle="client-form"]::after {
+    content: "×";
+    display: grid;
+    place-items: center;
+    width: 100%;
+    height: 100%;
+    font-size: 28px;
+    font-weight: 700;
+  }
+
+  .b131-lead-form-fields {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 10px;
+    padding: 2px 2px 18px 0;
+  }
+
+  .b131-lead-form-fields > * {
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .b131-lead-form-footer {
+    margin: 0 -14px;
+    padding: 10px 14px calc(10px + env(safe-area-inset-bottom));
+  }
+
+  .b131-lead-form-actions {
+    grid-template-columns: minmax(0, 0.72fr) minmax(0, 1.28fr);
+    gap: 8px;
+  }
+
+  .b131-lead-form-actions > button {
+    min-height: 48px;
+    padding-inline: 10px;
+  }
+}
+
+@media (max-width: 380px) {
+  .b131-lead-form-actions {
+    grid-template-columns: 1fr;
+  }
+
+  .b131-lead-form-actions .secondary {
+    order: 2;
+  }
+}
