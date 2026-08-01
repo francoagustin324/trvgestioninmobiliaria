@@ -292,7 +292,7 @@ test('B1.3.1 guarda el lead exacto en móvil y crea un único seguimiento en Age
     let saved = await crmFromStorage(page, 'Dueño');
     assert.equal(saved.clients.length, 1, 'Doble submit crea un solo lead.');
     assert.equal(saved.clients[0]?.name, 'PRUEBA B1.3');
-    assert.equal(saved.clients[0]?.phone, '3515110069');
+    assert.equal(saved.clients[0]?.phone, '5493515110069');
     assert.equal(saved.clients[0]?.email, 'prueba-b13@example.com');
     assert.equal(saved.clients[0]?.temperature, 'Tibio');
     assert.equal(saved.clients[0]?.interest, 'Balcones del Chateau, departamento');
