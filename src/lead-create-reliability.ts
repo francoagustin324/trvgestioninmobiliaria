@@ -14,6 +14,7 @@ const ENHANCED = 'b131Enhanced';
 const ACTOR = 'b131Actor';
 const EDITING = 'b131Editing';
 const DUPLICATE = 'b132DuplicateClientId';
+const SAVE_DELAY_MS = 120;
 
 type FeedbackKind = 'idle' | 'working' | 'success' | 'error' | 'duplicate';
 
@@ -365,6 +366,58 @@ function rollbackLocalState(previousCrm: typeof state.crm): void {
   }
 }
 
+function persistLead(
+  form: HTMLFormElement,
+  values: Record<string, string>,
+  editingId: number | null,
+  previous: Client | null,
+): void {
+  if (!formStillAuthorized(form)) {
+    showError(form, 'El usuario activo cambió. Volvé a abrir el formulario antes de guardar.');
+    restoreSubmit(form);
+    return;
+  }
+
+  const phoneField = form.elements.namedItem('phone');
+  const phoneInput = phoneField instanceof HTMLInputElement ? phoneField : null;
+  const duplicate = findDuplicateClient(state.crm.clients, values.phone || '', editingId);
+  if (duplicate) {
+    showDuplicate(form, duplicate, phoneInput);
+    restoreSubmit(form);
+    return;
+  }
+
+  const previousCrm = structuredClone(state.crm);
+  try {
+    const member = activeMember();
+    const id = editingId ?? nextId(state.crm.clients);
+    const client = clientFromFormValues(id, values, previous);
+    client.assignedToId = previous?.assignedToId ?? member.id;
+    client.createdById = previous?.createdById ?? member.id;
+
+    state.crm.clients = upsertClient(state.crm.clients, client);
+    activitiesForClientSave(previous, client).forEach((activity) => addActivity(activity));
+
+    writeLocalSnapshot(state.crm, {
+      markDirty: true,
+      reason: previous ? `Lead actualizado: ${client.name}` : `Lead creado: ${client.name}`,
+    });
+    if (!locallyContainsClient(client)) throw new Error('No se pudo verificar la copia local del lead.');
+
+    state.editingClientId = null;
+    state.openForms.client = false;
+    queueCloudSave(state.crm);
+    document.dispatchEvent(new CustomEvent('trv-render'));
+    setNotice(previous
+      ? `Lead actualizado correctamente. ${client.name} fue actualizado correctamente.`
+      : `Lead guardado correctamente. ${client.name} fue creado correctamente.`);
+  } catch {
+    rollbackLocalState(previousCrm);
+    showError(form, 'No se pudo guardar el lead. Tus datos siguen en el formulario.');
+    restoreSubmit(form);
+  }
+}
+
 export function submitLeadForm(event: SubmitEvent): void {
   const form = event.currentTarget;
   if (!(form instanceof HTMLFormElement) || form.id !== 'mvp-lead-form') return;
@@ -422,35 +475,7 @@ export function submitLeadForm(event: SubmitEvent): void {
   }
   setStatus(form, 'Guardando…', 'working');
 
-  const previousCrm = structuredClone(state.crm);
-  try {
-    const member = activeMember();
-    const id = editingId ?? nextId(state.crm.clients);
-    const client = clientFromFormValues(id, values, previous);
-    client.assignedToId = previous?.assignedToId ?? member.id;
-    client.createdById = previous?.createdById ?? member.id;
-
-    state.crm.clients = upsertClient(state.crm.clients, client);
-    activitiesForClientSave(previous, client).forEach((activity) => addActivity(activity));
-
-    writeLocalSnapshot(state.crm, {
-      markDirty: true,
-      reason: previous ? `Lead actualizado: ${client.name}` : `Lead creado: ${client.name}`,
-    });
-    if (!locallyContainsClient(client)) throw new Error('No se pudo verificar la copia local del lead.');
-
-    state.editingClientId = null;
-    state.openForms.client = false;
-    queueCloudSave(state.crm);
-    document.dispatchEvent(new CustomEvent('trv-render'));
-    setNotice(previous
-      ? `${client.name} fue actualizado correctamente.`
-      : `${client.name} fue creado correctamente.`);
-  } catch {
-    rollbackLocalState(previousCrm);
-    showError(form, 'No se pudo guardar el lead. Tus datos siguen en el formulario.');
-    restoreSubmit(form);
-  }
+  window.setTimeout(() => persistLead(form, values, editingId, previous), SAVE_DELAY_MS);
 }
 
 function scheduleEnhancement(): void {
