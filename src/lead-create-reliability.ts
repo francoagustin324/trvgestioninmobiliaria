@@ -123,6 +123,7 @@ function enhanceLeadForm(): void {
   form.dataset[ACTOR] = String(member.id);
   form.dataset[EDITING] = currentEditingId() === null ? '' : String(currentEditingId());
   form.classList.add('b131-lead-form');
+  form.noValidate = true;
 
   const error = formError(form);
   const fields = document.createElement('div');
