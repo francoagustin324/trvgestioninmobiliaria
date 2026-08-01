@@ -310,8 +310,8 @@ export function enhanceWhatsAppContactFlow(): void {
     }
     const presentation = statusPresentation(client);
     const summary = card.querySelector<HTMLElement>('[data-whatsapp-contact-summary]');
-    if (summary?.dataset.contactSignature !== presentation.signature) summary.outerHTML = presentation.html;
-    else if (!summary) actions?.insertAdjacentHTML('beforebegin', presentation.html);
+    if (!summary) actions?.insertAdjacentHTML('beforebegin', presentation.html);
+    else if (summary.dataset.contactSignature !== presentation.signature) summary.outerHTML = presentation.html;
   });
 
   document.querySelectorAll<HTMLElement>('.agenda-card').forEach((card) => {
