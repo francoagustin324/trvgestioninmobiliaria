@@ -1,6 +1,6 @@
 import { clientFromFormValues, upsertClient } from './client-editor.js';
 import { resolveLeadSchedule } from './lead-create-schedule.js';
-import { activitiesForClientSave, isTerminalClient, localIsoDate } from './lead-pipeline.js';
+import { activitiesForClientSave, localIsoDate } from './lead-pipeline.js';
 import { findDuplicateClient, isPlausiblePhone } from './phone-normalizer.js';
 import { saveData, state } from './store.js';
 import { activeMember, addActivity, canAccessModule, visibleClients } from './team-access.js';
@@ -52,7 +52,7 @@ function formStillAuthorized(form: HTMLFormElement): boolean {
   const member = activeMember();
   const actorId = Number(form.dataset[ACTOR]);
   const editingId = capturedEditingId(form);
-  if (!form.isConnected || !member || member.status !== 'Activo') return false;
+  if (!form.isConnected || member.status !== 'Activo') return false;
   if (!canAccessModule('crm') || state.activeModule !== 'crm' || !state.openForms.client) return false;
   if (member.id !== actorId || currentEditingId() !== editingId) return false;
   if (editingId !== null && !visibleClients().some((client) => client.id === editingId)) return false;
@@ -117,7 +117,7 @@ function enhanceLeadForm(): void {
   const member = activeMember();
   const heading = form.querySelector<HTMLElement>('.mvp-form-heading');
   const submit = form.querySelector<HTMLButtonElement>('button[type="submit"]');
-  if (!member || !heading || !submit) return;
+  if (!heading || !submit) return;
 
   form.dataset[ENHANCED] = 'true';
   form.dataset[ACTOR] = String(member.id);
@@ -165,6 +165,43 @@ function restoreSubmit(form: HTMLFormElement): void {
   }
 }
 
+function validateAndResolveSchedule(
+  form: HTMLFormElement,
+  values: Record<string, string>,
+  editingId: number | null,
+): boolean {
+  const terminal = values.pipeline === 'Ganado' || values.pipeline === 'Perdido';
+  if (terminal) return true;
+
+  const action = values.nextAction?.trim() || '';
+  const date = values.nextFollowUp?.trim() || '';
+  if (editingId !== null && !action && !date) return true;
+  if (editingId !== null && Boolean(action) !== Boolean(date)) {
+    const target = action ? form.elements.namedItem('nextFollowUp') : form.elements.namedItem('nextAction');
+    showError(
+      form,
+      'Completá la próxima acción y su fecha, o dejá ambos campos vacíos.',
+      target instanceof HTMLInputElement ? target : null,
+    );
+    return false;
+  }
+
+  const schedule = resolveLeadSchedule({
+    nextAction: values.nextAction,
+    nextFollowUp: values.nextFollowUp,
+    phone: values.phone,
+    today: localIsoDate(),
+  });
+  if (schedule.error) {
+    const dateField = form.elements.namedItem('nextFollowUp');
+    showError(form, schedule.error, dateField instanceof HTMLInputElement ? dateField : null);
+    return false;
+  }
+  values.nextAction = schedule.nextAction;
+  values.nextFollowUp = schedule.nextFollowUp;
+  return true;
+}
+
 function submitLead(event: SubmitEvent): void {
   const form = event.target;
   if (!(form instanceof HTMLFormElement) || form.id !== 'mvp-lead-form') return;
@@ -179,6 +216,14 @@ function submitLead(event: SubmitEvent): void {
     return;
   }
 
+  const values = formValues(form);
+  const editingId = capturedEditingId(form);
+  const phoneField = form.elements.namedItem('phone');
+  if (!isPlausiblePhone(values.phone || '')) {
+    showError(form, 'Ingresá un WhatsApp válido con código de área.', phoneField instanceof HTMLInputElement ? phoneField : null);
+    return;
+  }
+  if (!validateAndResolveSchedule(form, values, editingId)) return;
   if (!form.reportValidity()) {
     showError(form, 'Revisá los campos obligatorios antes de guardar.');
     return;
@@ -192,20 +237,11 @@ function submitLead(event: SubmitEvent): void {
   }
 
   try {
-    const values = formValues(form);
-    const editingId = capturedEditingId(form);
     const previous = editingId === null
       ? null
       : visibleClients().find((client) => client.id === editingId) ?? null;
     if (editingId !== null && !previous) {
       showError(form, 'El lead ya no está disponible para este usuario.');
-      restoreSubmit(form);
-      return;
-    }
-
-    const phoneField = form.elements.namedItem('phone');
-    if (!isPlausiblePhone(values.phone || '')) {
-      showError(form, 'Ingresá un WhatsApp válido con código de área.', phoneField instanceof HTMLInputElement ? phoneField : null);
       restoreSubmit(form);
       return;
     }
@@ -217,24 +253,6 @@ function submitLead(event: SubmitEvent): void {
       return;
     }
 
-    const terminal = values.pipeline === 'Ganado' || values.pipeline === 'Perdido';
-    if (!terminal) {
-      const schedule = resolveLeadSchedule({
-        nextAction: values.nextAction,
-        nextFollowUp: values.nextFollowUp,
-        phone: values.phone,
-        today: localIsoDate(),
-      });
-      if (schedule.error) {
-        const dateField = form.elements.namedItem('nextFollowUp');
-        showError(form, schedule.error, dateField instanceof HTMLInputElement ? dateField : null);
-        restoreSubmit(form);
-        return;
-      }
-      values.nextAction = schedule.nextAction;
-      values.nextFollowUp = schedule.nextFollowUp;
-    }
-
     if (!formStillAuthorized(form)) {
       showError(form, 'El usuario activo cambió. Volvé a abrir el formulario antes de guardar.');
       restoreSubmit(form);
@@ -242,12 +260,6 @@ function submitLead(event: SubmitEvent): void {
     }
 
     const member = activeMember();
-    if (!member) {
-      showError(form, 'No se pudo identificar al usuario activo.');
-      restoreSubmit(form);
-      return;
-    }
-
     const id = editingId ?? nextId(state.crm.clients);
     const client = clientFromFormValues(id, values, previous);
     client.assignedToId = previous?.assignedToId ?? member.id;
