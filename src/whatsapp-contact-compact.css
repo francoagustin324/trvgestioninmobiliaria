@@ -1,0 +1,65 @@
+.mvp-whatsapp-contact-button {
+  flex: 0 0 44px;
+  width: 44px;
+  min-width: 44px;
+  max-width: 44px;
+  padding: 0;
+  font-size: 0;
+  border-radius: 12px;
+}
+
+.mvp-whatsapp-contact-button::before {
+  content: "WA";
+  font-size: 0.78rem;
+  font-weight: 900;
+  letter-spacing: -0.04em;
+}
+
+.mvp-whatsapp-contact-summary {
+  display: none;
+}
+
+.mvp-lead-card:has(.mvp-lead-full-sheet[open]) .mvp-whatsapp-contact-summary {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  min-height: 44px;
+  margin: 10px 0 0;
+  padding: 8px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.mvp-lead-card:has(.mvp-lead-full-sheet[open]) .mvp-whatsapp-contact-summary > div {
+  display: flex;
+  align-items: baseline;
+  gap: 5px;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+
+.mvp-lead-card:has(.mvp-lead-full-sheet[open]) .mvp-whatsapp-contact-summary span,
+.mvp-lead-card:has(.mvp-lead-full-sheet[open]) .mvp-whatsapp-contact-summary strong,
+.mvp-lead-card:has(.mvp-lead-full-sheet[open]) .mvp-whatsapp-contact-summary small {
+  font-size: 0.78rem;
+  line-height: 1.25;
+  white-space: normal;
+}
+
+@media (min-width: 721px) {
+  .mvp-whatsapp-contact-button {
+    width: auto;
+    max-width: none;
+    flex-basis: auto;
+    padding: 0 14px;
+    font-size: 0.86rem;
+  }
+
+  .mvp-whatsapp-contact-button::before {
+    content: none;
+  }
+}

@@ -1,0 +1,301 @@
+body.whatsapp-contact-open {
+  overflow: hidden;
+  overscroll-behavior: none;
+}
+
+.whatsapp-contact-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1400;
+  display: grid;
+  place-items: center;
+  padding: 18px;
+}
+
+.whatsapp-contact-overlay[hidden] {
+  display: none;
+}
+
+.whatsapp-contact-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(3, 14, 10, 0.74);
+  backdrop-filter: blur(8px);
+}
+
+.whatsapp-contact-panel {
+  position: relative;
+  width: min(620px, 100%);
+  max-height: min(760px, calc(100dvh - 36px));
+  overflow: auto;
+  overscroll-behavior: contain;
+  padding: 24px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 24px;
+  background: color-mix(in srgb, var(--surface, #10261d) 94%, transparent);
+  box-shadow: 0 28px 80px rgba(0, 0, 0, 0.42);
+  color: var(--text, #f7fbf8);
+}
+
+.whatsapp-contact-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 18px;
+}
+
+.whatsapp-contact-heading h2 {
+  margin: 4px 0 6px;
+  font-size: clamp(1.32rem, 4vw, 1.72rem);
+  line-height: 1.15;
+}
+
+.whatsapp-contact-heading p,
+.whatsapp-contact-lead small,
+.whatsapp-contact-field small,
+.whatsapp-followup-reason,
+.whatsapp-return-summary p {
+  color: var(--text-muted, #b7c6bd);
+}
+
+.whatsapp-contact-heading .quiet-button {
+  min-width: 44px;
+  min-height: 44px;
+  padding: 0;
+  font-size: 1.5rem;
+}
+
+.whatsapp-contact-lead,
+.whatsapp-return-summary,
+.whatsapp-followup-reason {
+  display: grid;
+  gap: 4px;
+  margin-bottom: 16px;
+  padding: 14px 16px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.045);
+}
+
+.whatsapp-contact-lead > span,
+.mvp-whatsapp-contact-summary span {
+  font-size: 0.74rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-muted, #b7c6bd);
+}
+
+.whatsapp-contact-field {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 16px;
+  font-weight: 700;
+}
+
+.whatsapp-contact-field input,
+.whatsapp-contact-field textarea,
+.whatsapp-custom-date input {
+  width: 100%;
+  min-height: 48px;
+  box-sizing: border-box;
+}
+
+.whatsapp-contact-field textarea {
+  min-height: 148px;
+  resize: vertical;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.whatsapp-phone-valid {
+  color: #74e7a8;
+}
+
+.whatsapp-phone-error {
+  color: #ff9d9d;
+}
+
+.whatsapp-contact-update-phone {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin: -4px 0 16px;
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.whatsapp-contact-update-phone[hidden],
+.whatsapp-custom-date[hidden] {
+  display: none;
+}
+
+.whatsapp-contact-update-phone input,
+.whatsapp-followup-options input {
+  width: 20px;
+  height: 20px;
+  flex: 0 0 auto;
+}
+
+.whatsapp-contact-copy-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 44px;
+  margin-top: -4px;
+}
+
+.whatsapp-contact-copy-row button,
+.whatsapp-contact-actions button,
+.mvp-whatsapp-contact-button,
+.agenda-contact-whatsapp {
+  min-height: 44px;
+}
+
+.whatsapp-contact-copy-row span {
+  font-size: 0.86rem;
+  color: var(--text-muted, #b7c6bd);
+}
+
+.whatsapp-contact-actions {
+  position: sticky;
+  bottom: -24px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.25fr);
+  gap: 10px;
+  margin: 20px -24px -24px;
+  padding: 16px 24px calc(18px + env(safe-area-inset-bottom));
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  background: color-mix(in srgb, var(--surface, #10261d) 96%, transparent);
+  backdrop-filter: blur(14px);
+}
+
+.whatsapp-followup-form {
+  display: grid;
+  gap: 16px;
+}
+
+.whatsapp-followup-options {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.whatsapp-followup-options label {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 48px;
+  padding: 10px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.whatsapp-custom-date {
+  display: grid;
+  gap: 8px;
+  font-weight: 700;
+}
+
+.whatsapp-return-summary p {
+  max-height: 180px;
+  overflow: auto;
+  margin: 6px 0 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.mvp-whatsapp-contact-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 0 16px;
+  border-radius: 12px;
+  background: #25d366;
+  color: #062b16;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.mvp-whatsapp-contact-summary {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin: 10px 0 0;
+}
+
+.mvp-whatsapp-contact-summary > div {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  padding: 10px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.mvp-whatsapp-contact-summary strong,
+.mvp-whatsapp-contact-summary small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mvp-whatsapp-contact-summary .state-overdue strong {
+  color: #ff9d9d;
+}
+
+.mvp-whatsapp-contact-summary .state-today strong {
+  color: #ffd479;
+}
+
+.mvp-whatsapp-contact-summary .state-upcoming strong {
+  color: #74e7a8;
+}
+
+.agenda-contact-whatsapp {
+  width: 100%;
+}
+
+@media (max-width: 520px) {
+  .whatsapp-contact-overlay {
+    align-items: end;
+    padding: 0;
+  }
+
+  .whatsapp-contact-panel {
+    width: 100%;
+    max-height: 100dvh;
+    border-radius: 22px 22px 0 0;
+    padding: 18px 16px;
+    padding-top: max(18px, env(safe-area-inset-top));
+  }
+
+  .whatsapp-contact-actions {
+    bottom: -18px;
+    grid-template-columns: 1fr;
+    margin: 18px -16px -18px;
+    padding: 14px 16px calc(14px + env(safe-area-inset-bottom));
+  }
+
+  .whatsapp-followup-options,
+  .mvp-whatsapp-contact-summary {
+    grid-template-columns: 1fr;
+  }
+
+  .whatsapp-contact-copy-row {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .mvp-whatsapp-contact-button {
+    width: 100%;
+  }
+
+  .mvp-lead-quick-actions {
+    align-items: stretch;
+  }
+}

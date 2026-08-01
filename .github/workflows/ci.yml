@@ -42,3 +42,11 @@ jobs:
           retention-days: 1
       - name: Ejecutar pruebas
         run: npm test --silent
+      - name: Adjuntar capturas reales B1.3
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: b1-3-capturas-reales
+          path: artifacts/b1-3
+          if-no-files-found: ignore
+          retention-days: 14
