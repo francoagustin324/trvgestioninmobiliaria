@@ -1,13 +1,28 @@
-import { enhanceLeadForm } from './lead-create-reliability.js';
-
 let enhancementQueued = false;
+let enhancerPromise: Promise<typeof import('./lead-create-reliability.js')> | null = null;
+
+function loadEnhancer(): Promise<typeof import('./lead-create-reliability.js')> {
+  enhancerPromise ??= import('./lead-create-reliability.js');
+  return enhancerPromise;
+}
+
+function reportObserverError(error: unknown): void {
+  const message = error instanceof Error ? error.message : String(error);
+  document.documentElement.dataset.b131ObserverError = message;
+  console.error('B1.3.1 no pudo mejorar el formulario de leads.', error);
+}
 
 function scheduleEnhancement(): void {
   if (enhancementQueued) return;
   enhancementQueued = true;
-  queueMicrotask(() => {
+  queueMicrotask(async () => {
     enhancementQueued = false;
-    enhanceLeadForm();
+    try {
+      const { enhanceLeadForm } = await loadEnhancer();
+      enhanceLeadForm();
+    } catch (error) {
+      reportObserverError(error);
+    }
   });
 }
 
@@ -18,6 +33,7 @@ function hasUnenhancedOpenForm(): boolean {
 }
 
 function installLeadFormObserver(): void {
+  document.documentElement.dataset.b131Observer = 'ready';
   const appRoot = document.querySelector('#root') ?? document.documentElement;
   const observer = new MutationObserver(() => {
     if (hasUnenhancedOpenForm()) scheduleEnhancement();
