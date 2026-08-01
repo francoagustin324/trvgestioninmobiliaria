@@ -12,7 +12,7 @@
     "baseUrl": ".",
     "paths": {
       "/dist/store.js": ["src/store.ts"],
-      "/dist/whatsapp-contact.js": ["src/whatsapp-contact.ts"]
+      "/dist/whatsapp-contact.js": ["src/tests/b1-3-whatsapp-browser-module.d.ts"]
     },
     "rootDir": "src",
     "outDir": "dist"
