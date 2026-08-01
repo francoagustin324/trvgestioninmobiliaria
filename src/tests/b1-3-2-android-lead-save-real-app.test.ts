@@ -554,7 +554,7 @@ test('B1.3.2 conserva creación por rol, edición y escritorio sin desbordes', {
           const clientId = saved.clients[0]?.id;
           assert.ok(clientId);
           const details = page.locator(`#crm.active [data-lead-full-sheet="${clientId}"]`);
-          await details.locator('summary').click();
+          await details.locator(':scope > summary').click();
           await details.locator(`[data-edit-client="${clientId}"]`).click();
           const editForm = page.locator('#mvp-lead-form.b131-lead-form:not(.collapsed)');
           await editForm.locator('input[name="name"]').fill('LEAD DUEÑO EDITADO B1.3.2');
