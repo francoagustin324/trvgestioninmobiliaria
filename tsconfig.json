@@ -11,7 +11,7 @@
     "skipLibCheck": true,
     "baseUrl": ".",
     "paths": {
-      "/dist/store.js": ["src/store.ts"],
+      "/dist/store.js": ["src/tests/browser-store-module.d.ts"],
       "/dist/whatsapp-contact.js": ["src/tests/b1-3-whatsapp-browser-module.d.ts"]
     },
     "rootDir": "src",
