@@ -7,7 +7,7 @@ import {
   suggestedFollowUp,
   suggestedWhatsAppMessage,
   whatsappUrl,
-} from '../whatsapp-contact.js';
+} from '../whatsapp-contact-core.js';
 
 function client(overrides: Partial<Client> = {}): Client {
   return {
