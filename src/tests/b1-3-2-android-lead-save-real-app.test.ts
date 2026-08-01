@@ -430,6 +430,7 @@ test('B1.3.2 informa el WhatsApp duplicado y abre el lead existente sin escribir
     await form.getByRole('button', { name: 'Abrir lead existente' }).click();
     const details = page.locator('[data-lead-full-sheet="77"]');
     await details.waitFor({ state: 'visible' });
+    await page.waitForFunction(() => document.querySelector<HTMLDetailsElement>('[data-lead-full-sheet="77"]')?.open === true);
     assert.equal(await details.evaluate((node) => (node as HTMLDetailsElement).open), true);
     assert.equal(JSON.stringify(await snapshot(page, 'Dueño')), before, 'Abrir el existente no modifica datos.');
     await page.screenshot({ path: `${artifactDir}/05-abrir-lead-existente.png`, fullPage: true });
@@ -463,7 +464,7 @@ test('B1.3.2 mantiene errores visibles, conserva datos y bloquea formularios obs
     await form.locator('input[name="nextAction"]').fill('Confirmar visita');
     await form.locator('input[name="nextFollowUp"]').fill(await localYesterday(page));
     await form.locator('[data-save-lead]').click();
-    await form.locator('[data-lead-status]').getByText(/fecha.*pasada|pasada.*fecha/i).waitFor({ state: 'visible' });
+    await form.locator('[data-lead-status]').getByText(/fecha.*pasad[oa]|pasad[oa].*fecha/i).waitFor({ state: 'visible' });
 
     await form.evaluate((node) => { node.dataset.b131Actor = '999'; });
     await form.locator('input[name="nextFollowUp"]').fill(await localToday(page));
@@ -550,7 +551,11 @@ test('B1.3.2 conserva creación por rol, edición y escritorio sin desbordes', {
 
         if (role === 'Dueño') {
           await page.screenshot({ path: `${artifactDir}/08-escritorio.png`, fullPage: true });
-          await page.locator(`[data-edit-client="${saved.clients[0]?.id}"]`).click();
+          const clientId = saved.clients[0]?.id;
+          assert.ok(clientId);
+          const details = page.locator(`#crm.active [data-lead-full-sheet="${clientId}"]`);
+          await details.locator('summary').click();
+          await details.locator(`[data-edit-client="${clientId}"]`).click();
           const editForm = page.locator('#mvp-lead-form.b131-lead-form:not(.collapsed)');
           await editForm.locator('input[name="name"]').fill('LEAD DUEÑO EDITADO B1.3.2');
           await editForm.locator('[data-save-lead]').click();
