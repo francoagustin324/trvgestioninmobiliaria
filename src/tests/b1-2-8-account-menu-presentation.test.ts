@@ -201,9 +201,9 @@ test('B1.2.8 invalida assets y define la jerarquía contextual sin alterar handl
   const css = readFileSync('src/mvp.css', 'utf8');
   const cacheHelper = readFileSync('src/server/request-helpers.ts', 'utf8');
 
-  assert.match(index, /\/src\/mvp\.css\?v=20260801-3/);
+  assert.match(index, /\/src\/mvp\.css\?v=20260801-4/);
   assert.doesNotMatch(index, /\/src\/mvp\.css\?v=20260717-41/);
-  assert.match(index, /\/dist\/mvp-main\.js\?v=20260801-3/);
+  assert.match(index, /\/dist\/mvp-main\.js\?v=20260801-4/);
   assert.doesNotMatch(index, /\/dist\/mvp-main\.js\?v=20260723-104/);
   assert.match(cacheHelper, /max-age=31536000, immutable/);
 
