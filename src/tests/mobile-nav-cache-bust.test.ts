@@ -4,7 +4,7 @@ import test from 'node:test';
 
 const html = readFileSync('index.html', 'utf8');
 
-const shellVersion = '20260729-2';
+const shellVersion = '20260801-3';
 
 test('carga una versión nueva y coordinada del shell móvil', () => {
   assert.ok(html.includes(`/dist/cloud-compat-bootstrap.js?v=${shellVersion}`));
