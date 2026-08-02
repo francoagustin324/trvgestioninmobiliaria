@@ -17,9 +17,17 @@ const TECHNICAL_IDENTITIES = new Set([
   'owner',
   'corredor',
   'agente',
+  'agent',
+  'broker',
   'cuenta',
   'account',
   'inmobiliaria',
+  'crm',
+  'soporte',
+  'support',
+  'ventas',
+  'sistema',
+  'system',
 ]);
 
 function normalized(value: string): string {
@@ -48,16 +56,17 @@ export function isHumanIdentityName(value: string, organizationName = '', organi
 
   const compact = normalized(trimmed);
   if (!compact || TECHNICAL_IDENTITIES.has(compact)) return false;
-  if (/^(usuario|user|admin|agente|corredor|cuenta|account)\d+$/.test(compact)) return false;
+  if (/^(usuario|user|admin|agente|agent|corredor|broker|cuenta|account|crm|soporte|support|sistema|system)\d*$/.test(compact)) return false;
   if (compact === normalized(organizationName) || compact === normalized(organizationId)) return false;
   return true;
 }
 
 function fromEmail(email: string, organizationName: string, organizationId: string): string {
   const local = email.trim().toLowerCase().split('@')[0] || '';
-  if (!local) return '';
+  if (!local || /\d/.test(local)) return '';
   const separated = local.replace(/[._-]+/g, ' ').trim();
   const tokens = separated.split(/\s+/).filter(Boolean);
+  if (!tokens.length || tokens.some((token) => TECHNICAL_IDENTITIES.has(normalized(token)))) return '';
   if (tokens.length === 1 && tokens[0]!.length > 14) return '';
   const candidate = titleCase(tokens.join(' '));
   return isHumanIdentityName(candidate, organizationName, organizationId) ? candidate : '';
@@ -91,7 +100,7 @@ export function resolveHumanIdentity(input: {
     };
   }
 
-  const emailName = fromEmail(input.member?.email || input.profileEmail || '', organizationName, organizationId)
+  const emailName = fromEmail(input.member?.email || '', organizationName, organizationId)
     || fromEmail(input.profileEmail || '', organizationName, organizationId);
   if (emailName) {
     return {
