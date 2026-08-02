@@ -240,7 +240,7 @@ async function contextFor(
 async function load(page: Page, url: string): Promise<void> {
   await page.goto(url, { waitUntil: 'domcontentloaded' });
   await page.waitForSelector('#crm.active', { state: 'visible', timeout: 25_000 });
-  await page.locator('#mvp-lead-order').waitFor({ state: 'visible' });
+  await page.locator('#mvp-lead-order').waitFor({ state: 'attached' });
   await page.waitForFunction(() => document.querySelector<HTMLSelectElement>('#mvp-lead-order')?.value === 'recent');
 }
 
@@ -344,6 +344,8 @@ test('B1.3.3 muestra selectores legibles y el lead nuevo arriba sin F5 en Androi
 
     const order = page.locator('#mvp-lead-order');
     assert.equal(await order.inputValue(), 'recent');
+    await page.locator('.mvp-lead-more-filters').evaluate((element) => { (element as HTMLDetailsElement).open = true; });
+    await order.scrollIntoViewIfNeeded();
     await page.screenshot({ path: `${artifactDir}/04-orden-mas-recientes.png`, fullPage: true });
     let saved = await snapshot(page, 'Dueño');
     assert.equal(saved.clients.filter((item) => item.name === 'PRUEBA REAL B1.3.3').length, 1);
