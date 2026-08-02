@@ -1,7 +1,13 @@
-import type { Client } from './models.js';
+import { resolveHumanIdentity, safeOrganizationName } from './human-identity.js';
+import type { Client, WhatsAppConversation } from './models.js';
 import { saveData, state } from './store.js';
-import { visibleClients } from './team-access.js';
+import { visibleClients, visibleConversations } from './team-access.js';
 import { escapeHtml } from './utils.js';
+import { buildContextualWhatsAppMessage } from './whatsapp-message-context.js';
+import {
+  followUpDateForChoice,
+  followUpPreview,
+} from './whatsapp-followup-selection.js';
 import {
   addLocalDaysIso,
   createPendingWhatsAppAttempt,
@@ -13,7 +19,6 @@ import {
   savePendingWhatsAppAttempt,
   scheduleWhatsAppFollowUp,
   suggestedFollowUp,
-  suggestedWhatsAppMessage,
   whatsappContactSummary,
   whatsappUrl,
   type PendingWhatsAppAttempt,
@@ -27,6 +32,12 @@ let currentAttempt: PendingWhatsAppAttempt | null = null;
 
 function clientById(clientId: number): Client | null {
   return visibleClients().find((client) => client.id === clientId) ?? null;
+}
+
+function conversationForClient(clientId: number): WhatsAppConversation | null {
+  return visibleConversations()
+    .filter((conversation) => conversation.clientId === clientId)
+    .sort((left, right) => right.lastActivity.localeCompare(left.lastActivity))[0] ?? null;
 }
 
 function notify(message: string): void {
@@ -61,13 +72,19 @@ function close(): void {
   currentAttempt = null;
 }
 
-function responsible(): string {
+function identity() {
   const member = state.crm.teamMembers.find((item) => item.id === state.activeMemberId);
-  return member?.name?.trim() || state.crm.settings.profileName.trim();
+  return resolveHumanIdentity({
+    member,
+    profileName: state.crm.settings.profileName,
+    profileEmail: state.crm.settings.profileEmail,
+    organizationName: state.crm.organization.name,
+    organizationId: state.crm.organization.id,
+  });
 }
 
 function agency(): string {
-  return state.crm.settings.agencyName.trim() || state.crm.organization.name.trim();
+  return safeOrganizationName(state.crm.settings.agencyName.trim() || state.crm.organization.name.trim());
 }
 
 function phonePreview(value: string): string {
@@ -78,30 +95,56 @@ function phonePreview(value: string): string {
 }
 
 function renderContact(client: Client, phone = client.phone, message?: string): void {
-  const text = message ?? suggestedWhatsAppMessage(client, responsible(), agency());
+  const human = identity();
+  const context = human.valid
+    ? buildContextualWhatsAppMessage({
+      client,
+      responsibleFirstName: human.firstName,
+      agency: agency(),
+      conversation: conversationForClient(client.id),
+    })
+    : {
+      message: '',
+      question: '',
+      contextNote: 'No se generó un mensaje porque falta una identidad humana válida.',
+      blocked: true,
+      reason: human.reason,
+      source: 'fallback' as const,
+    };
+  const text = message ?? context.message;
+  const blocked = context.blocked;
+
   show();
   panel().dataset.clientId = String(client.id);
+  panel().dataset.contactBlocked = String(blocked);
   panel().innerHTML = `<header class="whatsapp-contact-heading">
       <div><span class="eyebrow">Contacto asistido</span><h2 id="whatsapp-contact-title">Contactar por WhatsApp</h2><p>Revisá el número y el mensaje antes de abrir WhatsApp.</p></div>
       <button type="button" class="quiet-button" data-whatsapp-close aria-label="Cerrar">×</button>
     </header>
     <div class="whatsapp-contact-lead"><span>Lead</span><strong>${escapeHtml(client.name)}</strong><small>${escapeHtml(client.interest || 'Consulta inmobiliaria')}</small></div>
+    <div class="whatsapp-context-note${blocked ? ' blocked' : ''}" data-whatsapp-context-note role="${blocked ? 'alert' : 'note'}">
+      <strong>${blocked ? 'Contacto bloqueado para revisión' : context.source === 'conversation' ? 'Contexto disponible' : 'Sin historial disponible'}</strong>
+      <p>${escapeHtml(blocked ? context.reason : context.contextNote)}</p>
+    </div>
     <label class="whatsapp-contact-field">Teléfono registrado
-      <input data-whatsapp-phone value="${escapeHtml(phone)}" inputmode="tel" autocomplete="tel">
+      <input data-whatsapp-phone value="${escapeHtml(phone)}" inputmode="tel" autocomplete="tel"${blocked ? ' disabled' : ''}>
       <small data-whatsapp-phone-preview>${phonePreview(phone)}</small>
     </label>
     <label class="whatsapp-contact-update-phone" hidden><input type="checkbox" data-whatsapp-save-phone> Actualizar el teléfono del lead con este número</label>
     <label class="whatsapp-contact-field whatsapp-message-field">Mensaje sugerido editable
-      <textarea data-whatsapp-message rows="6">${escapeHtml(text)}</textarea>
+      <textarea data-whatsapp-message rows="6"${blocked ? ' disabled' : ''}>${escapeHtml(text)}</textarea>
       <small data-whatsapp-message-status></small>
     </label>
-    <div class="whatsapp-contact-copy-row"><button type="button" class="secondary" data-whatsapp-copy>Copiar mensaje</button><span data-whatsapp-copy-status aria-live="polite"></span></div>
+    <div class="whatsapp-contact-copy-row"><button type="button" class="secondary" data-whatsapp-copy${blocked ? ' disabled' : ''}>Copiar mensaje</button><span data-whatsapp-copy-status aria-live="polite"></span></div>
     <footer class="whatsapp-contact-actions">
-      <button type="button" class="secondary" data-whatsapp-manual-register>Ya lo envié, registrar</button>
-      <button type="button" data-whatsapp-open>Abrir WhatsApp</button>
+      <button type="button" class="secondary" data-whatsapp-manual-register${blocked ? ' disabled' : ''}>Ya lo envié, registrar</button>
+      <button type="button" data-whatsapp-open${blocked ? ' disabled' : ''}>Abrir WhatsApp</button>
     </footer>`;
   validateContact();
-  queueMicrotask(() => panel().querySelector<HTMLTextAreaElement>('[data-whatsapp-message]')?.focus({ preventScroll: true }));
+  queueMicrotask(() => {
+    if (blocked) panel().querySelector<HTMLButtonElement>('[data-whatsapp-close]')?.focus({ preventScroll: true });
+    else panel().querySelector<HTMLTextAreaElement>('[data-whatsapp-message]')?.focus({ preventScroll: true });
+  });
 }
 
 function contactFields(): { client: Client | null; phone: HTMLInputElement | null; message: HTMLTextAreaElement | null } {
@@ -115,18 +158,22 @@ function contactFields(): { client: Client | null; phone: HTMLInputElement | nul
 function validateContact(): void {
   const { client, phone, message } = contactFields();
   if (!client || !phone || !message) return;
+  const blocked = panel().dataset.contactBlocked === 'true';
   const normalized = normalizeWhatsAppPhone(phone.value);
   const preview = panel().querySelector<HTMLElement>('[data-whatsapp-phone-preview]');
   if (preview) preview.innerHTML = phonePreview(phone.value);
   const status = panel().querySelector<HTMLElement>('[data-whatsapp-message-status]');
-  if (status) status.textContent = message.value.trim() ? `${message.value.length} caracteres` : 'El mensaje está vacío.';
+  if (status) status.textContent = blocked
+    ? 'El contacto requiere revisión humana.'
+    : message.value.trim() ? `${message.value.length} caracteres` : 'El mensaje está vacío.';
   const updatePhone = panel().querySelector<HTMLElement>('.whatsapp-contact-update-phone');
-  if (updatePhone) updatePhone.hidden = phone.value.trim() === client.phone.trim();
-  panel().querySelectorAll<HTMLButtonElement>('[data-whatsapp-open], [data-whatsapp-manual-register]')
-    .forEach((button) => { button.disabled = !normalized.valid || !message.value.trim(); });
+  if (updatePhone) updatePhone.hidden = blocked || phone.value.trim() === client.phone.trim();
+  panel().querySelectorAll<HTMLButtonElement>('[data-whatsapp-open], [data-whatsapp-manual-register], [data-whatsapp-copy]')
+    .forEach((button) => { button.disabled = blocked || !normalized.valid || !message.value.trim(); });
 }
 
 function attemptFromPanel(): PendingWhatsAppAttempt | null {
+  if (panel().dataset.contactBlocked === 'true') return null;
   const { client, phone, message } = contactFields();
   if (!client || !phone || !message) return null;
   const normalized = normalizeWhatsAppPhone(phone.value);
@@ -220,6 +267,20 @@ function followUpOptions(selectedDays: number | null): string {
     .join('');
 }
 
+function updateFollowUpSelection(): void {
+  const form = panel().querySelector<HTMLFormElement>('[data-whatsapp-followup-form]');
+  if (!form) return;
+  const choice = form.querySelector<HTMLInputElement>('input[name="follow-up-choice"]:checked')?.value || '';
+  const customInput = form.querySelector<HTMLInputElement>('input[name="custom-date"]');
+  const date = followUpDateForChoice(choice, customInput?.value || '');
+  const selected = form.querySelector<HTMLInputElement>('input[name="selected-date"]');
+  if (selected) selected.value = date;
+  const custom = form.querySelector<HTMLElement>('.whatsapp-custom-date');
+  if (custom) custom.hidden = choice !== 'custom';
+  const preview = form.querySelector<HTMLElement>('[data-whatsapp-followup-preview]');
+  if (preview) preview.textContent = followUpPreview(date);
+}
+
 function renderFollowUp(client: Client, attempt: PendingWhatsAppAttempt, activityId: number): void {
   const conversationOpen = state.crm.conversations.some((conversation) => conversation.clientId === client.id && conversation.mode !== 'Pausada');
   const suggestion = suggestedFollowUp(client, conversationOpen);
@@ -228,7 +289,7 @@ function renderFollowUp(client: Client, attempt: PendingWhatsAppAttempt, activit
   panel().dataset.attemptId = attempt.id;
   panel().dataset.activityId = String(activityId);
   panel().innerHTML = `<header class="whatsapp-contact-heading">
-      <div><span class="eyebrow">Próximo paso</span><h2 id="whatsapp-contact-title">¿Cuándo querés volver a contactar a ${escapeHtml(client.name)}?</h2><p>La fecha es sugerida; podés cambiarla o continuar sin seguimiento.</p></div>
+      <div><span class="eyebrow">Próximo paso</span><h2 id="whatsapp-contact-title">¿Cuándo querés volver a contactar a ${escapeHtml(client.name)}?</h2><p>La fecha visible será exactamente la fecha guardada.</p></div>
       <button type="button" class="quiet-button" data-whatsapp-close aria-label="Cerrar">×</button>
     </header>
     <p class="whatsapp-followup-reason">${escapeHtml(suggestion.reason)}</p>
@@ -238,8 +299,11 @@ function renderFollowUp(client: Client, attempt: PendingWhatsAppAttempt, activit
         <label><input type="radio" name="follow-up-choice" value="none"> <span>Sin seguimiento por ahora</span></label>
       </div>
       <label class="whatsapp-custom-date"${suggestion.days === null ? '' : ' hidden'}>Fecha personalizada<input type="date" name="custom-date" value="${escapeHtml(suggestion.date)}" min="${addLocalDaysIso(0)}"></label>
+      <input type="hidden" name="selected-date" value="${escapeHtml(suggestion.date)}">
+      <p class="whatsapp-followup-preview" data-whatsapp-followup-preview aria-live="polite">${escapeHtml(followUpPreview(suggestion.date))}</p>
       <footer class="whatsapp-contact-actions"><button type="button" class="secondary" data-whatsapp-close>Cancelar</button><button type="submit">Guardar seguimiento</button></footer>
     </form>`;
+  queueMicrotask(updateFollowUpSelection);
 }
 
 function saveFollowUp(form: HTMLFormElement): void {
@@ -257,10 +321,8 @@ function saveFollowUp(form: HTMLFormElement): void {
     document.dispatchEvent(new CustomEvent('trv-render'));
     return;
   }
-  const days = Number(choice);
-  const date = choice === 'custom'
-    ? new FormData(form).get('custom-date')?.toString() || ''
-    : Number.isFinite(days) ? addLocalDaysIso(days) : '';
+  updateFollowUpSelection();
+  const date = new FormData(form).get('selected-date')?.toString() || '';
   if (!date) return;
   if (!scheduleWhatsAppFollowUp(client.id, attemptId, activityId, date)) {
     close();
@@ -330,14 +392,13 @@ export function enhanceWhatsAppContactFlow(): void {
 function bindPanelEvents(): void {
   const element = root();
   element.addEventListener('input', (event) => {
-    if ((event.target as HTMLElement).matches('[data-whatsapp-phone], [data-whatsapp-message]')) validateContact();
+    const target = event.target as HTMLElement;
+    if (target.matches('[data-whatsapp-phone], [data-whatsapp-message]')) validateContact();
+    if (target.matches('input[name="custom-date"]')) updateFollowUpSelection();
   });
   element.addEventListener('change', (event) => {
     const input = event.target as HTMLInputElement;
-    if (input.name === 'follow-up-choice') {
-      const custom = panel().querySelector<HTMLElement>('.whatsapp-custom-date');
-      if (custom) custom.hidden = input.value !== 'custom';
-    }
+    if (input.name === 'follow-up-choice' || input.name === 'custom-date') updateFollowUpSelection();
   });
   element.addEventListener('click', (event) => {
     const target = event.target as HTMLElement;
