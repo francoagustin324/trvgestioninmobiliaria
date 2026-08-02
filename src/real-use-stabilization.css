@@ -1,0 +1,143 @@
+/* B1.3.3 — Selectores legibles, lead recién creado visible y contexto comercial claro. */
+#crm select,
+#crm .mvp-lead-form select,
+#crm .mvp-lead-filter-panel select {
+  min-height: 44px;
+  color: #f7f4ec;
+  background-color: #0c352a;
+  border: 1px solid rgba(224, 194, 127, 0.58);
+  color-scheme: dark;
+  -webkit-text-fill-color: #f7f4ec;
+  opacity: 1;
+}
+
+#crm select:hover:not(:disabled) {
+  border-color: rgba(239, 210, 146, 0.82);
+  background-color: #104235;
+}
+
+#crm select:focus,
+#crm select:focus-visible {
+  color: #ffffff;
+  background-color: #104235;
+  border-color: #efd28d;
+  outline: 3px solid rgba(239, 210, 141, 0.28);
+  outline-offset: 2px;
+  -webkit-text-fill-color: #ffffff;
+}
+
+#crm select:disabled {
+  color: #c9d0cc;
+  background-color: #243c34;
+  border-color: rgba(201, 208, 204, 0.3);
+  cursor: not-allowed;
+  -webkit-text-fill-color: #c9d0cc;
+  opacity: 1;
+}
+
+#crm select option,
+#crm select optgroup {
+  color: #10211a;
+  background-color: #fffdf8;
+  -webkit-text-fill-color: #10211a;
+}
+
+#crm select option:checked {
+  color: #071a13;
+  background-color: #ead49e;
+  -webkit-text-fill-color: #071a13;
+}
+
+.b133-new-lead-highlight {
+  position: relative;
+  scroll-margin-block: 120px;
+  animation: b133-new-lead-pulse 1.25s ease-out 2;
+  border-color: rgba(239, 210, 141, 0.92) !important;
+  box-shadow: 0 0 0 3px rgba(239, 210, 141, 0.22), 0 20px 50px rgba(0, 0, 0, 0.28) !important;
+}
+
+.b133-new-lead-highlight::before {
+  content: "Lead guardado";
+  position: absolute;
+  z-index: 2;
+  top: 10px;
+  right: 10px;
+  padding: 5px 9px;
+  border-radius: 999px;
+  color: #10211a;
+  background: #efd28d;
+  font-size: 0.76rem;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+}
+
+@keyframes b133-new-lead-pulse {
+  0% { transform: translateY(0); }
+  40% { transform: translateY(-3px); }
+  100% { transform: translateY(0); }
+}
+
+.whatsapp-context-note,
+.whatsapp-followup-preview {
+  padding: 11px 13px;
+  border: 1px solid rgba(215, 180, 104, 0.3);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.045);
+  overflow-wrap: anywhere;
+}
+
+.whatsapp-context-note strong,
+.whatsapp-followup-preview {
+  color: #f8f2e4;
+  font-weight: 750;
+}
+
+.whatsapp-context-note p {
+  margin: 5px 0 0;
+  color: #ced8d3;
+  line-height: 1.42;
+}
+
+.whatsapp-context-note.blocked {
+  border-color: rgba(239, 117, 117, 0.72);
+  background: rgba(109, 29, 29, 0.32);
+}
+
+.whatsapp-context-note.blocked strong,
+.whatsapp-context-note.blocked p {
+  color: #ffe8e8;
+}
+
+.whatsapp-followup-preview {
+  margin: 4px 0 2px;
+  border-color: rgba(95, 201, 146, 0.52);
+  background: rgba(28, 101, 71, 0.18);
+}
+
+@media (max-width: 720px) {
+  #crm select,
+  #crm .mvp-lead-form select,
+  #crm .mvp-lead-filter-panel select {
+    width: 100%;
+    max-width: 100%;
+    font-size: 16px;
+  }
+
+  .b133-new-lead-highlight {
+    scroll-margin-block: 96px;
+  }
+
+  .b133-new-lead-highlight::before {
+    position: static;
+    display: inline-flex;
+    margin: 8px 8px 0 auto;
+    width: fit-content;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .b133-new-lead-highlight {
+    animation: none;
+    scroll-behavior: auto;
+  }
+}
