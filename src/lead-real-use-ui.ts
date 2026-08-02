@@ -13,7 +13,6 @@ let observedResults: HTMLElement | null = null;
 let resultsObserver: MutationObserver | null = null;
 let observedCrm: HTMLElement | null = null;
 let crmObserver: MutationObserver | null = null;
-let reordering = false;
 const boundOrderSelectors = new WeakSet<HTMLSelectElement>();
 
 function visibleCard(clientId: number): HTMLElement | null {
@@ -39,11 +38,18 @@ function revealPendingLead(): void {
   pendingRevealId = null;
 }
 
-function bindOrderPreference(order: HTMLSelectElement): void {
+function clearVisualOrder(results: HTMLElement): void {
+  results.querySelectorAll<HTMLElement>(':scope > [data-client-id]').forEach((card) => {
+    card.style.removeProperty('order');
+  });
+}
+
+function bindOrderPreference(order: HTMLSelectElement, results: HTMLElement): void {
   if (boundOrderSelectors.has(order)) return;
   boundOrderSelectors.add(order);
   order.addEventListener('change', () => {
     manualOrderSelected = true;
+    clearVisualOrder(results);
     queueMicrotask(() => {
       notifyLeadsRendered();
       revealPendingLead();
@@ -51,43 +57,20 @@ function bindOrderPreference(order: HTMLSelectElement): void {
   });
 }
 
-function applyRecentDomOrder(): boolean {
+function applyRecentVisualOrder(): boolean {
   if (state.activeModule !== 'crm') return false;
   const order = document.querySelector<HTMLSelectElement>('#crm.active #mvp-lead-order');
   const results = document.querySelector<HTMLElement>('#crm.active #mvp-lead-results');
   if (!order || !results) return false;
-  bindOrderPreference(order);
+  bindOrderPreference(order, results);
   if (manualOrderSelected) return true;
 
   order.value = 'recent';
-  const cards = new Map(
-    [...results.querySelectorAll<HTMLElement>(':scope > [data-client-id]')]
-      .map((card) => [Number(card.dataset.clientId), card] as const),
-  );
-  const desiredIds = sortLeads(visibleClients(), 'recent')
-    .map((client) => client.id)
-    .filter((id) => cards.has(id));
-  const currentIds = [...results.querySelectorAll<HTMLElement>(':scope > [data-client-id]')]
-    .map((card) => Number(card.dataset.clientId));
-  if (desiredIds.length === currentIds.length && desiredIds.every((id, index) => id === currentIds[index])) return true;
-
-  const content = document.querySelector<HTMLElement>('.mvp-content');
-  const contentTop = content?.scrollTop ?? 0;
-  const windowTop = window.scrollY;
-  const previousAnchor = results.style.overflowAnchor;
-  results.style.overflowAnchor = 'none';
-  const fragment = document.createDocumentFragment();
-  desiredIds.forEach((id) => {
-    const card = cards.get(id);
-    if (card) fragment.append(card);
-  });
-  reordering = true;
-  results.append(fragment);
-  window.requestAnimationFrame(() => {
-    if (content) content.scrollTop = contentTop;
-    window.scrollTo({ top: windowTop, left: 0, behavior: 'auto' });
-    results.style.overflowAnchor = previousAnchor;
-    reordering = false;
+  const rank = new Map(sortLeads(visibleClients(), 'recent').map((client, index) => [client.id, index] as const));
+  results.querySelectorAll<HTMLElement>(':scope > [data-client-id]').forEach((card) => {
+    const position = rank.get(Number(card.dataset.clientId));
+    if (position === undefined) card.style.removeProperty('order');
+    else card.style.order = String(position);
   });
   return true;
 }
@@ -97,10 +80,7 @@ function ensureResultsObserver(): void {
   if (!results || results === observedResults) return;
   resultsObserver?.disconnect();
   observedResults = results;
-  resultsObserver = new MutationObserver(() => {
-    if (reordering) return;
-    queueMicrotask(synchronizeUi);
-  });
+  resultsObserver = new MutationObserver(() => queueMicrotask(synchronizeUi));
   resultsObserver.observe(results, { childList: true });
 }
 
@@ -114,7 +94,7 @@ function ensureCrmObserver(): void {
 }
 
 function bootstrapRecentOrder(attempt = 0): void {
-  if (applyRecentDomOrder() || attempt >= 120) {
+  if (applyRecentVisualOrder() || attempt >= 120) {
     ensureResultsObserver();
     ensureCrmObserver();
     notifyLeadsRendered();
@@ -164,7 +144,7 @@ function keepPendingNoticeVisible(message: string): void {
 
 function synchronizeUi(): void {
   detectNewClients();
-  applyRecentDomOrder();
+  applyRecentVisualOrder();
   ensureResultsObserver();
   ensureCrmObserver();
   notifyLeadsRendered();
