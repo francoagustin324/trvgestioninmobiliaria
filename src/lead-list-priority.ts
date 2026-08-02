@@ -1,4 +1,5 @@
-import type { Client, TeamMember } from './models.js';
+import { resolveHumanIdentity } from './human-identity.js';
+import type { ActivityEntry, Client, TeamMember } from './models.js';
 import {
   commercialQualificationState,
   commercialStage,
@@ -49,6 +50,11 @@ const updatedFormatter = new Intl.DateTimeFormat('es-AR', {
   hour: '2-digit',
   minute: '2-digit',
 });
+let activitySource: () => ActivityEntry[] = () => [];
+
+export function setLeadActivitySource(source: () => ActivityEntry[]): void {
+  activitySource = source;
+}
 
 function normalized(value: unknown): string {
   return String(value ?? '')
@@ -84,7 +90,7 @@ export function relativeLeadDate(value: string | undefined, today = localIsoDate
   const days = leadDaysFromToday(value, today);
   if (days === null) return value;
   if (days === -1) return 'Vencido ayer';
-  if (days !== null && days < -1) return `Vencido hace ${Math.abs(days)} días`;
+  if (days < -1) return `Vencido hace ${Math.abs(days)} días`;
   if (days === 0) return 'Hoy';
   if (days === 1) return 'Mañana';
   if (days > 1 && days <= 7) return `En ${days} días`;
@@ -98,15 +104,9 @@ export function leadFollowUpDisplay(client: Client, today = localIsoDate()): Lea
 
   const action = client.nextAction?.trim() || '';
   const date = client.nextFollowUp;
-  if (!action && !date) {
-    return { action: 'Sin próxima acción', dateLabel: '', state: 'empty' };
-  }
-  if (action && !date) {
-    return { action, dateLabel: 'Falta programar fecha', state: 'missing-date' };
-  }
-  if (!date) {
-    return { action: action || 'Sin próxima acción', dateLabel: '', state: 'empty' };
-  }
+  if (!action && !date) return { action: 'Sin próxima acción', dateLabel: '', state: 'empty' };
+  if (action && !date) return { action, dateLabel: 'Falta programar fecha', state: 'missing-date' };
+  if (!date) return { action: action || 'Sin próxima acción', dateLabel: '', state: 'empty' };
 
   const days = leadDaysFromToday(date, today);
   if (!action) {
@@ -150,9 +150,7 @@ export function leadPrimaryAlert(client: Client, today = localIsoDate()): LeadAl
       rank: 1,
     };
   }
-  if (stage === 'Nuevo' && !client.lastContact) {
-    return { kind: 'new-uncontacted', label: 'Nuevo sin contactar', tone: 'warning', rank: 2 };
-  }
+  if (stage === 'Nuevo' && !client.lastContact) return { kind: 'new-uncontacted', label: 'Nuevo sin contactar', tone: 'warning', rank: 2 };
   if (days === 0 && (stage === 'Visita coordinada' || normalized(client.nextAction).includes('visita'))) {
     const time = visitTime(client);
     return { kind: 'visit-today', label: time ? `Visita hoy a las ${time}` : 'Visita hoy', tone: 'today', rank: 3 };
@@ -163,30 +161,16 @@ export function leadPrimaryAlert(client: Client, today = localIsoDate()): LeadAl
   }
 
   const qualification = commercialQualificationState(client);
-  if (qualification.state === 'Falta presupuesto') {
-    return { kind: 'qualification-missing', label: 'Falta presupuesto', tone: 'warning', rank: 6 };
-  }
-  if (qualification.state === 'Falta forma de pago') {
-    return { kind: 'qualification-missing', label: 'Falta forma de pago', tone: 'warning', rank: 7 };
-  }
-  if (isMortgage(client) && !client.creditPossible?.trim()) {
-    return { kind: 'qualification-missing', label: 'Falta confirmar crédito', tone: 'warning', rank: 7 };
-  }
+  if (qualification.state === 'Falta presupuesto') return { kind: 'qualification-missing', label: 'Falta presupuesto', tone: 'warning', rank: 6 };
+  if (qualification.state === 'Falta forma de pago') return { kind: 'qualification-missing', label: 'Falta forma de pago', tone: 'warning', rank: 7 };
+  if (isMortgage(client) && !client.creditPossible?.trim()) return { kind: 'qualification-missing', label: 'Falta confirmar crédito', tone: 'warning', rank: 7 };
   if (qualification.state === 'Falta confirmar capacidad de avance') {
     return { kind: 'qualification-missing', label: 'Falta confirmar capacidad de avance', tone: 'warning', rank: 8 };
   }
-  if (qualification.state === 'No listo todavía') {
-    return { kind: 'qualification-missing', label: 'No listo todavía', tone: 'neutral', rank: 9 };
-  }
-  if (!client.nextAction?.trim() && !client.nextFollowUp) {
-    return { kind: 'no-action', label: 'Sin próxima acción', tone: 'neutral', rank: 10 };
-  }
-  if (qualification.state === 'Calificado' || stage === 'Calificado') {
-    return { kind: 'ready', label: 'Calificado', tone: 'ready', rank: 11 };
-  }
-  if (stage === 'Nuevo') {
-    return { kind: 'neutral', label: 'Información inicial', tone: 'neutral', rank: 12 };
-  }
+  if (qualification.state === 'No listo todavía') return { kind: 'qualification-missing', label: 'No listo todavía', tone: 'neutral', rank: 9 };
+  if (!client.nextAction?.trim() && !client.nextFollowUp) return { kind: 'no-action', label: 'Sin próxima acción', tone: 'neutral', rank: 10 };
+  if (qualification.state === 'Calificado' || stage === 'Calificado') return { kind: 'ready', label: 'Calificado', tone: 'ready', rank: 11 };
+  if (stage === 'Nuevo') return { kind: 'neutral', label: 'Información inicial', tone: 'neutral', rank: 12 };
   return { kind: 'stage-summary', label: stage, tone: 'neutral', rank: 12 };
 }
 
@@ -208,10 +192,32 @@ function urgencyDate(client: Client): number {
   return isoDayNumber(client.nextFollowUp) ?? Number.MAX_SAFE_INTEGER;
 }
 
-function recentTimestamp(client: Client): number {
-  const candidates = [client.qualificationUpdatedAt, client.lastContact, client.nextFollowUp]
-    .map((value) => value ? new Date(value.includes('T') ? value : `${value}T12:00:00Z`).getTime() : Number.NaN)
-    .filter(Number.isFinite);
+function timestamp(value: string | undefined): number {
+  if (!value) return Number.NaN;
+  const date = new Date(value.includes('T') ? value : `${value}T12:00:00`);
+  return date.getTime();
+}
+
+function clientActivities(client: Client): ActivityEntry[] {
+  return activitySource().filter((entry) => entry.entityType === 'Cliente' && entry.entityId === client.id);
+}
+
+export function leadRecentTimestamp(client: Client): number {
+  const activities = clientActivities(client);
+  const created = activities
+    .filter((entry) => entry.action === 'Lead creado')
+    .map((entry) => timestamp(entry.createdAt))
+    .filter(Number.isFinite)
+    .sort((left, right) => right - left)[0];
+  if (created !== undefined) return created;
+
+  const commercialActivity = activities
+    .filter((entry) => !/seguimiento.*programado|pr[oó]xima acci[oó]n programada/i.test(entry.action))
+    .map((entry) => timestamp(entry.createdAt))
+    .filter(Number.isFinite)
+    .sort((left, right) => right - left)[0];
+  const directValues = [timestamp(client.qualificationUpdatedAt), timestamp(client.lastContact)].filter(Number.isFinite);
+  const candidates = [commercialActivity, ...directValues].filter((value): value is number => Number.isFinite(value));
   return candidates.length ? Math.max(...candidates) : client.id;
 }
 
@@ -228,7 +234,7 @@ export function sortLeads(clients: Client[], order: LeadOrder = 'priority', toda
         return result || left.index - right.index;
       }
       if (order === 'recent') {
-        const result = recentTimestamp(right.client) - recentTimestamp(left.client);
+        const result = leadRecentTimestamp(right.client) - leadRecentTimestamp(left.client);
         return result || right.client.id - left.client.id || left.index - right.index;
       }
       if (order === 'follow-up') {
@@ -245,17 +251,6 @@ export function sortLeads(clients: Client[], order: LeadOrder = 'priority', toda
     .map(({ client }) => client);
 }
 
-function technicalIdentity(value: string | undefined): boolean {
-  const identity = normalized(value).replace(/[^a-z0-9]+/g, '');
-  return !identity || identity === 'trvgestioninmobiliaria' || /^usuario\d*$/.test(identity);
-}
-
-function readableEmail(value: string | undefined): string {
-  const local = value?.split('@')[0]?.replace(/[._-]+/g, ' ').trim() || '';
-  if (!local || technicalIdentity(local)) return '';
-  return local.replace(/\b\p{L}/gu, (letter) => letter.toUpperCase());
-}
-
 export function readableLeadAssignee(
   client: Client,
   members: TeamMember[],
@@ -263,10 +258,12 @@ export function readableLeadAssignee(
   profileEmail: string,
 ): string {
   const member = client.assignedToId ? members.find((item) => item.id === client.assignedToId) : undefined;
-  if (member?.name && !technicalIdentity(member.name)) return member.name;
-  if (profileName.trim() && !technicalIdentity(profileName)) return profileName.trim();
-  const emailName = readableEmail(member?.email) || readableEmail(profileEmail);
-  return emailName || 'Sin asignar';
+  const identity = resolveHumanIdentity({
+    member,
+    profileName,
+    profileEmail,
+  });
+  return identity.valid ? identity.fullName : 'Sin asignar';
 }
 
 export function compactBudget(client: Client): string {
@@ -292,6 +289,6 @@ export function compactTimeframe(client: Client): string {
 export function leadUpdatedLabel(client: Client): string {
   const value = client.qualificationUpdatedAt || client.lastContact;
   if (!value) return 'Sin actualización registrada';
-  const date = new Date(value.includes('T') ? value : `${value}T12:00:00Z`);
+  const date = new Date(value.includes('T') ? value : `${value}T12:00:00`);
   return Number.isNaN(date.getTime()) ? value : updatedFormatter.format(date);
 }
