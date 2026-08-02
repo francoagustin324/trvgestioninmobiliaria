@@ -360,6 +360,7 @@ test('B1.3.3 muestra selectores legibles y el lead nuevo arriba sin F5 en Androi
     assert.equal(saved.clients.filter((item) => item.name === 'PRUEBA REAL B1.3.3').length, 1);
     assert.match(await page.locator('#crm.active [data-client-id]').first().innerText(), /PRUEBA REAL B1\.3\.3/);
 
+    await page.locator('.mvp-lead-more-filters').evaluate((element) => { (element as HTMLDetailsElement).open = true; });
     await page.locator('#mvp-lead-order').selectOption('priority');
     assert.equal(await page.locator('#mvp-lead-order').inputValue(), 'priority');
     await assertNoHorizontalScroll(page);
@@ -490,7 +491,7 @@ test('B1.3.3 mantiene roles, bloquea identidad técnica y funciona en escritorio
         const form = await openLeadForm(page);
         await assertReadableSelect(form.locator('select[name="temperature"]'));
         await assertReadableSelect(form.locator('select[name="pipeline"]'));
-        await form.locator('[data-cancel-client-edit]').click();
+        await form.getByRole('button', { name: 'Cancelar', exact: true }).click();
         await page.locator(`#crm.active [data-contact-whatsapp="${roleLead.id}"]`).click();
         const text = await page.locator('[data-whatsapp-message]').inputValue();
         const expected = role === 'Dueño' ? 'Franco' : role === 'Administrador' ? 'Ana' : 'Carla';
