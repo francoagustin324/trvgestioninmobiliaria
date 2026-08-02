@@ -138,7 +138,7 @@ export function buildContextualWhatsAppMessage(input: {
   const reviewReason = contradiction(inbound, input.conversation)
     ? 'El historial contiene información contradictoria o requiere revisión humana.'
     : '';
-  const blockedReason = stopReason || reviewReason;
+  const blockedReason = reviewReason || stopReason;
   if (blockedReason) {
     return {
       message: '',
