@@ -11,6 +11,8 @@ let highlightTimer = 0;
 let pendingNoticeTimer = 0;
 let observedResults: HTMLElement | null = null;
 let resultsObserver: MutationObserver | null = null;
+let observedCrm: HTMLElement | null = null;
+let crmObserver: MutationObserver | null = null;
 let reordering = false;
 const boundOrderSelectors = new WeakSet<HTMLSelectElement>();
 
@@ -59,15 +61,34 @@ function applyRecentDomOrder(): boolean {
 
   order.value = 'recent';
   const cards = new Map(
-    [...results.querySelectorAll<HTMLElement>('[data-client-id]')]
+    [...results.querySelectorAll<HTMLElement>(':scope > [data-client-id]')]
       .map((card) => [Number(card.dataset.clientId), card] as const),
   );
-  reordering = true;
-  sortLeads(visibleClients(), 'recent').forEach((client) => {
-    const card = cards.get(client.id);
-    if (card) results.append(card);
+  const desiredIds = sortLeads(visibleClients(), 'recent')
+    .map((client) => client.id)
+    .filter((id) => cards.has(id));
+  const currentIds = [...results.querySelectorAll<HTMLElement>(':scope > [data-client-id]')]
+    .map((card) => Number(card.dataset.clientId));
+  if (desiredIds.length === currentIds.length && desiredIds.every((id, index) => id === currentIds[index])) return true;
+
+  const content = document.querySelector<HTMLElement>('.mvp-content');
+  const contentTop = content?.scrollTop ?? 0;
+  const windowTop = window.scrollY;
+  const previousAnchor = results.style.overflowAnchor;
+  results.style.overflowAnchor = 'none';
+  const fragment = document.createDocumentFragment();
+  desiredIds.forEach((id) => {
+    const card = cards.get(id);
+    if (card) fragment.append(card);
   });
-  queueMicrotask(() => { reordering = false; });
+  reordering = true;
+  results.append(fragment);
+  window.requestAnimationFrame(() => {
+    if (content) content.scrollTop = contentTop;
+    window.scrollTo({ top: windowTop, left: 0, behavior: 'auto' });
+    results.style.overflowAnchor = previousAnchor;
+    reordering = false;
+  });
   return true;
 }
 
@@ -83,9 +104,19 @@ function ensureResultsObserver(): void {
   resultsObserver.observe(results, { childList: true });
 }
 
+function ensureCrmObserver(): void {
+  const crm = document.querySelector<HTMLElement>('#crm');
+  if (!crm || crm === observedCrm) return;
+  crmObserver?.disconnect();
+  observedCrm = crm;
+  crmObserver = new MutationObserver(() => queueMicrotask(synchronizeUi));
+  crmObserver.observe(crm, { childList: true });
+}
+
 function bootstrapRecentOrder(attempt = 0): void {
   if (applyRecentDomOrder() || attempt >= 120) {
     ensureResultsObserver();
+    ensureCrmObserver();
     notifyLeadsRendered();
     revealPendingLead();
     return;
@@ -135,6 +166,7 @@ function synchronizeUi(): void {
   detectNewClients();
   applyRecentDomOrder();
   ensureResultsObserver();
+  ensureCrmObserver();
   notifyLeadsRendered();
   window.requestAnimationFrame(revealPendingLead);
 }
