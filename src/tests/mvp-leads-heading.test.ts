@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
 const leads = readFileSync('src/mvp-leads-ui.ts', 'utf8');
+const reliability = readFileSync('src/lead-create-reliability.ts', 'utf8');
 const properties = readFileSync('src/mvp-properties-ui.ts', 'utf8');
 const conversations = readFileSync('src/mvp-conversations-ui.ts', 'utf8');
 const agenda = readFileSync('src/agenda-ui.ts', 'utf8');
@@ -34,12 +35,15 @@ test('las descripciones de los demás módulos permanecen disponibles', () => {
   assert.ok(settings.includes('Tu perfil, los datos de la inmobiliaria y las preferencias de la app.'));
 });
 
-test('el cambio conserva búsqueda, matching, visibilidad y guardado de Leads', () => {
+test('el cambio conserva búsqueda, matching, visibilidad y guardado canónico de Leads', () => {
   assert.ok(leads.includes('function leadRows(): Client[]'));
   assert.ok(leads.includes('visibleClients()'));
   assert.ok(leads.includes('matchPropertiesForClient(client, properties)'));
   assert.ok(leads.includes("querySelector<HTMLFormElement>('#mvp-lead-form')?.addEventListener('submit'"));
-  assert.ok(leads.includes('state.crm.clients = upsertClient(state.crm.clients, client)'));
+  assert.ok(leads.includes('submitLeadForm(event as SubmitEvent)'));
+  assert.ok(reliability.includes('state.crm.clients = upsertClient(state.crm.clients, client)'));
+  assert.equal(reliability.includes("document.addEventListener('submit'"), false);
+  assert.equal(reliability.includes('stopImmediatePropagation('), false);
 });
 
 test('el alcance no incorpora React, Tailwind ni dependencias visuales', () => {

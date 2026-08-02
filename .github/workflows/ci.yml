@@ -41,7 +41,19 @@ jobs:
           path: build.log
           retention-days: 1
       - name: Ejecutar pruebas
-        run: npm test --silent
+        run: |
+          set +e
+          npm test --silent > test.log 2>&1
+          code=$?
+          cat test.log
+          exit $code
+      - name: Guardar diagnóstico de pruebas
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-diagnostics
+          path: test.log
+          retention-days: 3
       - name: Adjuntar capturas reales B1.3
         if: always()
         uses: actions/upload-artifact@v4
@@ -56,5 +68,13 @@ jobs:
         with:
           name: b1-3-1-capturas-reales
           path: artifacts/b1-3-1
+          if-no-files-found: ignore
+          retention-days: 14
+      - name: Adjuntar capturas reales B1.3.2
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: b1-3-2-capturas-reales
+          path: artifacts/b1-3-2
           if-no-files-found: ignore
           retention-days: 14

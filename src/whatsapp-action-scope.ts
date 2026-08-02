@@ -1,7 +1,7 @@
 const MODULE_SELECTOR = '#crm, #agenda, #whatsapp, #propiedades, #equipo';
 const ACTIVE_MODULE_SELECTOR = '#crm.active, #agenda.active, #whatsapp.active, #propiedades.active, #equipo.active';
 
-function removeInactiveWhatsAppActions(): void {
+function scopeActionsToActiveModule(): void {
   const activeModule = document.querySelector<HTMLElement>(ACTIVE_MODULE_SELECTOR);
   if (!activeModule) return;
 
@@ -9,10 +9,15 @@ function removeInactiveWhatsAppActions(): void {
     const ownerModule = action.closest<HTMLElement>(MODULE_SELECTOR);
     if (ownerModule && ownerModule !== activeModule) action.remove();
   });
+
+  document.querySelectorAll<HTMLElement>('.agenda-open-client[data-edit-client]').forEach((action) => {
+    const ownerModule = action.closest<HTMLElement>(MODULE_SELECTOR);
+    if (ownerModule && ownerModule !== activeModule) action.remove();
+  });
 }
 
 function scheduleScopeUpdate(): void {
-  queueMicrotask(removeInactiveWhatsAppActions);
+  queueMicrotask(scopeActionsToActiveModule);
 }
 
 document.addEventListener('trv-render', scheduleScopeUpdate);
@@ -21,4 +26,4 @@ document.addEventListener('DOMContentLoaded', scheduleScopeUpdate, { once: true 
 window.addEventListener('pageshow', scheduleScopeUpdate);
 requestAnimationFrame(scheduleScopeUpdate);
 
-export { removeInactiveWhatsAppActions };
+export { scopeActionsToActiveModule, scopeActionsToActiveModule as removeInactiveWhatsAppActions };

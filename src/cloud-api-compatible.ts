@@ -214,7 +214,8 @@ export function queueCloudSave(crm: CrmData): void {
     void pushCloudData(crm)
       .then(() => emitStatus('Guardado seguro en la nube.'))
       .catch((error) => {
-        const message = errorMessage(error) || 'No se pudo guardar en la nube.';
+        const technicalMessage = errorMessage(error) || 'No se pudo guardar en la nube.';
+        const message = `Guardado localmente, sincronización pendiente. ${technicalMessage}`;
         markSyncError(message);
         emitStatus(message, 'error');
       });

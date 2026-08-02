@@ -1,6 +1,4 @@
-import { clientFromFormValues, upsertClient } from './client-editor.js';
 import {
-  activitiesForClientSave,
   commercialStage,
   COMMERCIAL_STAGES,
   completeClientFollowUp,
@@ -27,12 +25,12 @@ import {
   type LeadOrder,
 } from './lead-list-priority.js';
 import { enhanceLeadList } from './lead-list-polish-ui.js';
+import { enhanceLeadForm, submitLeadForm } from './lead-create-reliability.js';
 import type { ActivityEntry, Client, CommercialStage, Temperature } from './models.js';
-import { findDuplicateClient, isPlausiblePhone } from './phone-normalizer.js';
 import { matchPropertiesForClient, type PropertyMatch } from './property-matching.js';
 import { saveData, state } from './store.js';
 import { addActivity, memberName, visibleClients, visibleProperties } from './team-access.js';
-import { escapeHtml, formValues, nextId } from './utils.js';
+import { escapeHtml } from './utils.js';
 
 interface LeadListFilters extends LeadFilters {
   assignee: number | 'Todos';
@@ -367,8 +365,8 @@ function bindFilters(container: HTMLElement): void {
     updateLeadResults(container);
   });
   container.querySelector<HTMLSelectElement>('#mvp-lead-assignee-filter')?.addEventListener('change', (event) => {
-    const value = (event.currentTarget as HTMLSelectElement).value;
-    filters.assignee = value === 'Todos' ? 'Todos' : Number(value);
+    const current = (event.currentTarget as HTMLSelectElement).value;
+    filters.assignee = current === 'Todos' ? 'Todos' : Number(current);
     renderMvpLeads(container);
   });
   container.querySelector<HTMLSelectElement>('#mvp-lead-order')?.addEventListener('change', (event) => {
@@ -416,31 +414,7 @@ export function renderMvpLeads(container: HTMLElement, centerSelectedStage = fal
   syncTerminalInputs();
 
   container.querySelector<HTMLFormElement>('#mvp-lead-form')?.addEventListener('submit', (event) => {
-    event.preventDefault();
-    const form = event.currentTarget as HTMLFormElement;
-    const previous = editing ? structuredClone(editing) : null;
-    const client = clientFromFormValues(editing?.id ?? nextId(state.crm.clients), formValues(form), editing);
-    const error = form.querySelector<HTMLElement>('[data-lead-error]');
-    if (!isPlausiblePhone(client.phone)) {
-      if (error) { error.textContent = 'Ingresá un número de WhatsApp válido.'; error.hidden = false; }
-      return;
-    }
-    const duplicate = findDuplicateClient(state.crm.clients, client.phone, editing?.id ?? null);
-    if (duplicate) {
-      if (error) { error.textContent = `Ese WhatsApp ya pertenece a ${duplicate.name}.`; error.hidden = false; }
-      return;
-    }
-    if (!isTerminalClient(client) && Boolean(client.nextFollowUp) !== Boolean(client.nextAction?.trim())) {
-      if (error) { error.textContent = 'La próxima acción necesita texto y fecha para aparecer correctamente en Agenda.'; error.hidden = false; }
-      return;
-    }
-    if (!editing) { client.assignedToId = state.activeMemberId; client.createdById = state.activeMemberId; }
-    state.crm.clients = upsertClient(state.crm.clients, client);
-    activitiesForClientSave(previous, client).forEach(addActivity);
-    state.editingClientId = null;
-    state.openForms.client = false;
-    saveData(editing ? `Lead actualizado: ${client.name}` : `Lead creado: ${client.name}`);
-    document.dispatchEvent(new CustomEvent('trv-render'));
+    submitLeadForm(event as SubmitEvent);
   });
 
   container.querySelector<HTMLElement>('[data-cancel-client-edit]')?.addEventListener('click', () => {
@@ -450,6 +424,7 @@ export function renderMvpLeads(container: HTMLElement, centerSelectedStage = fal
   });
 
   enhanceLeadList(container, { centerSelectedStage });
+  enhanceLeadForm();
 }
 
 export function resetLeadFiltersForTests(): void {
