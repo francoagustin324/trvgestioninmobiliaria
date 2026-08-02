@@ -1,3 +1,4 @@
+import { isHumanIdentityName } from './human-identity.js';
 import type { Client } from './models.js';
 
 export interface WhatsAppPhoneResult {
@@ -76,8 +77,9 @@ export function normalizeWhatsAppPhone(value: string): WhatsAppPhoneResult {
 }
 
 function naturalIdentity(responsible: string, agency: string): string {
-  if (responsible && agency) return `soy ${responsible} de ${agency}`;
-  if (responsible) return `soy ${responsible}`;
+  const human = isHumanIdentityName(responsible, agency);
+  if (human && agency) return `soy ${responsible} de ${agency}`;
+  if (human) return `soy ${responsible}`;
   if (agency) return `te escribo desde ${agency}`;
   return 'te escribo desde la inmobiliaria';
 }
