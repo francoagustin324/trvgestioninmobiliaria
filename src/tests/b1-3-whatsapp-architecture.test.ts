@@ -5,6 +5,7 @@ import test from 'node:test';
 const core = readFileSync('src/whatsapp-contact-core.ts', 'utf8');
 const domain = readFileSync('src/whatsapp-contact.ts', 'utf8');
 const ui = readFileSync('src/whatsapp-contact-ui.ts', 'utf8');
+const scope = readFileSync('src/whatsapp-action-scope.ts', 'utf8');
 const html = readFileSync('index.html', 'utf8');
 
 test('B1.3 separa mensaje teléfono y sugerencias del estado y el navegador', () => {
@@ -36,8 +37,10 @@ test('B1.3 nunca interpreta abrir WhatsApp como envío confirmado', () => {
   assert.equal(ui.includes('openChannel(); register'), false);
 });
 
-test('B1.3 carga únicamente módulos locales sin proveedor ni credenciales', () => {
-  assert.ok(html.includes('/dist/whatsapp-contact-ui.js'));
+test('B1.3 carga una sola instancia local sin proveedor ni credenciales', () => {
+  assert.ok(html.includes('/dist/whatsapp-action-scope.js'));
+  assert.equal(html.includes('/dist/whatsapp-contact-ui.js'), false);
+  assert.ok(scope.includes("from './whatsapp-contact-ui.js'"));
   assert.equal(`${core}\n${domain}\n${ui}`.match(/Twilio|YCloud|WATI|Cloud API/gi), null);
   assert.equal(`${core}\n${domain}\n${ui}`.match(/api[_-]?key|secret[_-]?key/gi), null);
 });
