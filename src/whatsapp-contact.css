@@ -131,6 +131,10 @@ body.whatsapp-contact-open {
   display: none;
 }
 
+.whatsapp-identity-form .whatsapp-contact-update-phone[hidden] {
+  display: flex !important;
+}
+
 .whatsapp-contact-update-phone input,
 .whatsapp-followup-options input {
   width: 20px;
