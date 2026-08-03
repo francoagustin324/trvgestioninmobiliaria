@@ -5,6 +5,7 @@ import { state } from './store.js';
 
 export const WHATSAPP_IDENTITY_STORAGE_PREFIX = 'propcontrol-whatsapp-human-identity-v1';
 export const WHATSAPP_IDENTITY_CHANGED_EVENT = 'propcontrol-whatsapp-identity-changed';
+export const WHATSAPP_IDENTITY_CHANGED_REASON = 'Tu identidad o usuario activo cambió. Volvé a preparar el mensaje.';
 const CONFIG_VERSION = 1;
 
 interface WhatsAppHumanIdentityConfig {
@@ -171,36 +172,36 @@ export function sameWhatsAppHumanIdentity(
     && expected.fullName === current.fullName;
 }
 
+function failure(reason: string, expected?: WhatsAppHumanIdentitySnapshot | null): WhatsAppHumanIdentityAuthorization {
+  return {
+    valid: false,
+    identity: null,
+    reason: expected ? WHATSAPP_IDENTITY_CHANGED_REASON : reason,
+    changed: Boolean(expected),
+  };
+}
+
 export function assertCurrentWhatsAppHumanIdentity(
   expected?: WhatsAppHumanIdentitySnapshot | null,
 ): WhatsAppHumanIdentityAuthorization {
   const resolved = currentContext();
-  if (!resolved.context) {
-    return { valid: false, identity: null, reason: resolved.reason, changed: Boolean(expected) };
-  }
+  if (!resolved.context) return failure(resolved.reason, expected);
   const config = readConfig(resolved.context);
   if (!config) {
-    return {
-      valid: false,
-      identity: null,
-      reason: 'Configurá “Nombre personal para firmar mensajes” y confirmá que este nombre aparecerá en los mensajes enviados a clientes.',
-      changed: Boolean(expected),
-    };
+    return failure(
+      'Configurá “Nombre personal para firmar mensajes” y confirmá que este nombre aparecerá en los mensajes enviados a clientes.',
+      expected,
+    );
   }
   if (!isHumanIdentityName(config.humanName, resolved.context.organization, resolved.context.organizationId)) {
-    return {
-      valid: false,
-      identity: null,
-      reason: 'La identidad configurada ya no es válida como nombre personal. Volvé a configurarla.',
-      changed: Boolean(expected),
-    };
+    return failure('La identidad configurada ya no es válida como nombre personal. Volvé a configurarla.', expected);
   }
   const current = snapshot(resolved.context, config);
   if (expected && !sameWhatsAppHumanIdentity(expected, current)) {
     return {
       valid: false,
       identity: current,
-      reason: 'Tu identidad o usuario activo cambió. Volvé a preparar el mensaje.',
+      reason: WHATSAPP_IDENTITY_CHANGED_REASON,
       changed: true,
     };
   }
