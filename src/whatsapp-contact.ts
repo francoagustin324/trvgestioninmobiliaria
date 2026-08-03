@@ -1,6 +1,10 @@
 import type { ActivityEntry, Client } from './models.js';
 import { saveData, state } from './store.js';
-import { activeMember, addActivity, memberName, visibleClients } from './team-access.js';
+import { addActivity, visibleClients } from './team-access.js';
+import {
+  assertCurrentWhatsAppHumanIdentity,
+  type WhatsAppHumanIdentitySnapshot,
+} from './whatsapp-human-identity.js';
 import { localIsoDate } from './whatsapp-contact-core.js';
 
 export {
@@ -16,6 +20,7 @@ export const CONTACT_ATTEMPT_TTL_MS = 30 * 60_000;
 const ATTEMPT_STORAGE_PREFIX = 'propcontrol-whatsapp-contact-attempt-v1';
 const ATTEMPT_MARKER = 'Intento:';
 const FOLLOW_UP_MARKER = 'Seguimiento WhatsApp:';
+const registeredAttempts = new Map<string, PendingWhatsAppAttempt>();
 
 export interface PendingWhatsAppAttempt {
   id: string;
@@ -25,7 +30,14 @@ export interface PendingWhatsAppAttempt {
   phone: string;
   createdAt: string;
   expiresAt: string;
+  identity: WhatsAppHumanIdentitySnapshot;
   openedAt?: string;
+}
+
+export interface PendingWhatsAppAttemptLoadResult {
+  attempt: PendingWhatsAppAttempt | null;
+  invalidated: boolean;
+  reason: string;
 }
 
 export interface WhatsAppContactSummary {
@@ -52,20 +64,39 @@ function uniqueAttemptId(now: Date): string {
   return `wa-${now.getTime()}-${random}`;
 }
 
+function requiredIdentity(identity?: WhatsAppHumanIdentitySnapshot): WhatsAppHumanIdentitySnapshot {
+  if (identity) {
+    const authorization = assertCurrentWhatsAppHumanIdentity(identity);
+    if (authorization.valid && authorization.identity) return authorization.identity;
+    throw new Error(authorization.reason || 'La identidad de WhatsApp ya no es válida.');
+  }
+  const authorization = assertCurrentWhatsAppHumanIdentity();
+  if (!authorization.valid || !authorization.identity) {
+    throw new Error(authorization.reason || 'Falta una identidad humana confirmada para WhatsApp.');
+  }
+  return authorization.identity;
+}
+
 export function createPendingWhatsAppAttempt(
   client: Client,
   phone: string,
   message: string,
-  now = new Date(),
+  identityOrNow?: WhatsAppHumanIdentitySnapshot | Date,
+  suppliedNow?: Date,
 ): PendingWhatsAppAttempt {
+  const identity = identityOrNow instanceof Date
+    ? requiredIdentity()
+    : requiredIdentity(identityOrNow);
+  const now = identityOrNow instanceof Date ? identityOrNow : suppliedNow ?? new Date();
   return {
     id: uniqueAttemptId(now),
     clientId: client.id,
-    actorId: activeMember().id,
+    actorId: identity.actorId,
     message,
     phone,
     createdAt: now.toISOString(),
     expiresAt: new Date(now.getTime() + CONTACT_ATTEMPT_TTL_MS).toISOString(),
+    identity: { ...identity, createdAt: now.toISOString() },
   };
 }
 
@@ -83,38 +114,66 @@ export function dismissPendingWhatsAppAttempt(attempt?: PendingWhatsAppAttempt):
   localStorage.removeItem(attemptStorageKey(attempt?.actorId));
 }
 
+export function dismissPendingWhatsAppAttemptForActor(actorId: number): void {
+  localStorage.removeItem(attemptStorageKey(actorId));
+}
+
 function activityAttemptId(entry: ActivityEntry): string {
   const markerIndex = entry.detail.lastIndexOf(`${ATTEMPT_MARKER} `);
   return markerIndex < 0 ? '' : entry.detail.slice(markerIndex + ATTEMPT_MARKER.length + 1).split(/\s|\n/)[0] || '';
+}
+
+function activityResponsible(entry: ActivityEntry): string {
+  const line = entry.detail.split('\n').find((item) => item.startsWith('Responsable: '));
+  return line?.slice('Responsable: '.length).trim() || '';
 }
 
 export function recordedActivityForAttempt(attemptId: string): ActivityEntry | null {
   return state.crm.activityLog.find((entry) => activityAttemptId(entry) === attemptId) ?? null;
 }
 
-export function loadPendingWhatsAppAttempt(now = new Date()): PendingWhatsAppAttempt | null {
+function validAttemptShape(attempt: Partial<PendingWhatsAppAttempt>, now: Date): attempt is PendingWhatsAppAttempt {
+  return Boolean(
+    attempt.id
+    && attempt.actorId === state.activeMemberId
+    && attempt.clientId
+    && attempt.phone
+    && attempt.message
+    && attempt.identity
+    && attempt.identity.actorId === attempt.actorId
+    && attempt.identity.memberId === attempt.actorId
+    && Date.parse(attempt.expiresAt || '') > now.getTime(),
+  );
+}
+
+export function loadPendingWhatsAppAttemptResult(now = new Date()): PendingWhatsAppAttemptLoadResult {
   const key = attemptStorageKey();
   const raw = localStorage.getItem(key);
-  if (!raw) return null;
+  if (!raw) return { attempt: null, invalidated: false, reason: '' };
   try {
-    const attempt = JSON.parse(raw) as PendingWhatsAppAttempt;
-    const valid = Boolean(
-      attempt.id
-      && attempt.actorId === state.activeMemberId
-      && attempt.clientId
-      && attempt.phone
-      && attempt.message
-      && Date.parse(attempt.expiresAt) > now.getTime(),
-    );
-    if (!valid || recordedActivityForAttempt(attempt.id)) {
+    const attempt = JSON.parse(raw) as Partial<PendingWhatsAppAttempt>;
+    if (!validAttemptShape(attempt, now) || recordedActivityForAttempt(attempt.id)) {
       localStorage.removeItem(key);
-      return null;
+      return { attempt: null, invalidated: true, reason: 'El intento pendiente ya no es válido o venció.' };
     }
-    return attempt;
+    const authorization = assertCurrentWhatsAppHumanIdentity(attempt.identity);
+    if (!authorization.valid) {
+      localStorage.removeItem(key);
+      return {
+        attempt: null,
+        invalidated: true,
+        reason: authorization.reason || 'El intento quedó invalidado por un cambio de identidad o usuario.',
+      };
+    }
+    return { attempt, invalidated: false, reason: '' };
   } catch {
     localStorage.removeItem(key);
-    return null;
+    return { attempt: null, invalidated: true, reason: 'El intento pendiente estaba dañado y fue eliminado.' };
   }
+}
+
+export function loadPendingWhatsAppAttempt(now = new Date()): PendingWhatsAppAttempt | null {
+  return loadPendingWhatsAppAttemptResult(now).attempt;
 }
 
 function visibleClient(clientId: number): Client | null {
@@ -125,11 +184,16 @@ export function registerWhatsAppContact(
   attempt: PendingWhatsAppAttempt,
   now = new Date(),
 ): { activity: ActivityEntry; duplicate: boolean; client: Client } | null {
-  if (attempt.actorId !== activeMember().id || Date.parse(attempt.expiresAt) <= now.getTime()) return null;
+  const authorization = assertCurrentWhatsAppHumanIdentity(attempt.identity);
+  if (!authorization.valid || !authorization.identity) return null;
+  if (attempt.actorId !== authorization.identity.actorId || Date.parse(attempt.expiresAt) <= now.getTime()) return null;
   const client = visibleClient(attempt.clientId);
   if (!client) return null;
   const existing = recordedActivityForAttempt(attempt.id);
-  if (existing) return { activity: existing, duplicate: true, client };
+  if (existing) {
+    registeredAttempts.set(attempt.id, attempt);
+    return { activity: existing, duplicate: true, client };
+  }
 
   const activityId = Math.max(0, ...state.crm.activityLog.map((entry) => entry.id)) + 1;
   addActivity({
@@ -141,11 +205,14 @@ export function registerWhatsAppContact(
       `Número: ${attempt.phone}`,
       `Mensaje: ${attempt.message}`,
       'Origen: contacto asistido',
-      `Responsable: ${memberName(attempt.actorId)}`,
+      `Responsable: ${attempt.identity.fullName}`,
+      `Identidad: ${attempt.identity.identityId}`,
+      `Fingerprint: ${attempt.identity.fingerprint}`,
       `${ATTEMPT_MARKER} ${attempt.id}`,
     ].join('\n'),
   });
   client.lastContact = localIsoDate(now);
+  registeredAttempts.set(attempt.id, attempt);
   saveData(`Contacto por WhatsApp registrado: ${client.name}`);
   dismissPendingWhatsAppAttempt(attempt);
   return {
@@ -155,32 +222,43 @@ export function registerWhatsAppContact(
   };
 }
 
+function registeredAttempt(attemptOrId: PendingWhatsAppAttempt | string): PendingWhatsAppAttempt | null {
+  return typeof attemptOrId === 'string'
+    ? registeredAttempts.get(attemptOrId) ?? null
+    : attemptOrId;
+}
+
 export function scheduleWhatsAppFollowUp(
   clientId: number,
-  attemptId: string,
+  attemptOrId: PendingWhatsAppAttempt | string,
   activityId: number,
   date: string,
 ): { client: Client; duplicate: boolean } | null {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return null;
+  const attempt = registeredAttempt(attemptOrId);
+  if (!attempt) return null;
+  const authorization = assertCurrentWhatsAppHumanIdentity(attempt.identity);
+  if (!authorization.valid || !authorization.identity) return null;
+  if (attempt.actorId !== authorization.identity.actorId) return null;
   const client = visibleClient(clientId) as ContactFollowUpClient | null;
-  if (!client || !recordedActivityForAttempt(attemptId)) return null;
-  const duplicate = client.whatsappFollowUpAttemptId === attemptId
+  if (!client || !recordedActivityForAttempt(attempt.id)) return null;
+  const duplicate = client.whatsappFollowUpAttemptId === attempt.id
     && client.nextFollowUp === date
     && client.nextAction === 'Volver a contactar por WhatsApp';
   if (duplicate) return { client, duplicate: true };
 
   client.nextFollowUp = date;
   client.nextAction = 'Volver a contactar por WhatsApp';
-  client.whatsappFollowUpAttemptId = attemptId;
+  client.whatsappFollowUpAttemptId = attempt.id;
   client.whatsappFollowUpActivityId = activityId;
   client.whatsappFollowUpChannel = 'WhatsApp';
 
-  if (!state.crm.activityLog.some((entry) => entry.detail.includes(`${FOLLOW_UP_MARKER} ${attemptId}`))) {
+  if (!state.crm.activityLog.some((entry) => entry.detail.includes(`${FOLLOW_UP_MARKER} ${attempt.id}`))) {
     addActivity({
       action: 'Seguimiento por WhatsApp programado',
       entityType: 'Cliente',
       entityId: client.id,
-      detail: `Volver a contactar por WhatsApp · ${date}\n${FOLLOW_UP_MARKER} ${attemptId}`,
+      detail: `Volver a contactar por WhatsApp · ${date}\n${FOLLOW_UP_MARKER} ${attempt.id}`,
     });
   }
   saveData(`Seguimiento por WhatsApp programado: ${client.name}`);
@@ -196,7 +274,7 @@ export function whatsappContactSummary(client: Client, now = new Date()): WhatsA
   const followUpState = !next ? 'none' : next < today ? 'overdue' : next === today ? 'today' : 'upcoming';
   return {
     lastContactAt: last?.createdAt || '',
-    responsible: last ? memberName(last.actorId) : '',
+    responsible: last ? activityResponsible(last) : '',
     nextFollowUp: next,
     followUpState,
   };

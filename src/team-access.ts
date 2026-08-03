@@ -1,3 +1,4 @@
+import { resolveHumanIdentity } from './human-identity.js';
 import type {
   ActivityEntry,
   Client,
@@ -25,32 +26,18 @@ export function activeMember(): TeamMember {
     ?? state.crm.teamMembers[0]!;
 }
 
-function normalizedIdentity(value: string): string {
-  return value.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, '');
-}
-
-function isTechnicalMemberName(member: TeamMember): boolean {
-  const name = normalizedIdentity(member.name);
-  const organizationId = normalizedIdentity(state.crm.organization.id);
-  const organizationName = normalizedIdentity(state.crm.organization.name);
-  return !name
-    || name === organizationId
-    || name === organizationName
-    || name === 'trvgestioninmobiliaria'
-    || /^usuario\d*$/.test(name);
-}
-
 export function memberName(memberId: number | undefined): string {
   if (!memberId) return 'Sin responsable';
   const member = state.crm.teamMembers.find((item) => item.id === memberId);
   if (!member) return 'Usuario inactivo';
-  if (isTechnicalMemberName(member)) {
-    const profileName = state.crm.settings.profileName.trim();
-    if (member.id === state.activeMemberId && profileName) return profileName;
-    const emailName = member.email.split('@')[0]?.replace(/[._-]+/g, ' ').trim();
-    if (emailName && normalizedIdentity(emailName) !== 'trvgestioninmobiliaria') return emailName.replace(/\b\w/g, (letter) => letter.toUpperCase());
-  }
-  return member.name;
+  const identity = resolveHumanIdentity({
+    member,
+    profileName: member.id === state.activeMemberId ? state.crm.settings.profileName : '',
+    profileEmail: member.id === state.activeMemberId ? state.crm.settings.profileEmail : '',
+    organizationName: state.crm.organization.name,
+    organizationId: state.crm.organization.id,
+  });
+  return identity.valid ? identity.fullName : 'Nombre sin configurar';
 }
 
 export function canManageTeam(member = activeMember()): boolean {
