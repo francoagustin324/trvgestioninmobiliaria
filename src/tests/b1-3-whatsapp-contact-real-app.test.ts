@@ -153,8 +153,11 @@ async function stopServer(server: ChildProcess): Promise<void> {
 
 async function contextFor(browser: Browser, role: TeamRole, viewport: { width: number; height: number }, overdue = false): Promise<BrowserContext> {
   const current = identity(role);
+  const currentMember = member(role);
   const mobile = viewport.width <= 430;
   const marker = `propcontrol-b13-fixture:${current.userId}:${overdue ? 'overdue' : 'normal'}`;
+  const actorKey = `cloud:${current.userId}`;
+  const identityStorageKey = `propcontrol-whatsapp-human-identity-v1:${encodeURIComponent('b13-org')}:${current.memberId}:${encodeURIComponent(actorKey)}`;
   const context = await browser.newContext({
     viewport,
     deviceScaleFactor: 1,
@@ -164,7 +167,7 @@ async function contextFor(browser: Browser, role: TeamRole, viewport: { width: n
     locale: 'es-AR',
     colorScheme: 'dark',
   });
-  await context.addInitScript(({ crm, session, memberId, keys, markerKey }) => {
+  await context.addInitScript(({ crm, session, memberId, keys, markerKey, whatsappIdentity }) => {
     if (!localStorage.getItem(markerKey)) {
       localStorage.setItem(markerKey, '1');
       localStorage.setItem(keys.session, JSON.stringify(session));
@@ -176,6 +179,7 @@ async function contextFor(browser: Browser, role: TeamRole, viewport: { width: n
         lastCloudVersion: '2026-08-01T14:00:00-03:00',
       }));
       localStorage.setItem(keys.activeMember, String(memberId));
+      localStorage.setItem(whatsappIdentity.key, JSON.stringify(whatsappIdentity.value));
     }
     const target = window as unknown as B13Window;
     Object.defineProperty(window, 'open', {
@@ -200,6 +204,17 @@ async function contextFor(browser: Browser, role: TeamRole, viewport: { width: n
     memberId: current.memberId,
     keys: { session: sessionKey, storage: current.storageKey, sync: current.syncKey, activeMember: activeMemberKey },
     markerKey: marker,
+    whatsappIdentity: {
+      key: identityStorageKey,
+      value: {
+        version: 1,
+        organizationId: 'b13-org',
+        memberId: current.memberId,
+        actorKey,
+        humanName: currentMember.name,
+        confirmedAt: '2026-08-01T14:00:00.000Z',
+      },
+    },
   });
   return context;
 }
