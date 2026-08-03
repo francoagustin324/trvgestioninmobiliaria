@@ -4,7 +4,7 @@ export interface HumanIdentityResolution {
   valid: boolean;
   fullName: string;
   firstName: string;
-  source: 'member' | 'profile' | 'none';
+  source: 'member' | 'profile' | 'email' | 'none';
   reason: string;
 }
 
@@ -79,12 +79,24 @@ export function isHumanIdentityName(value: string, organizationName = '', organi
   return true;
 }
 
+function fromEmail(email: string, organizationName: string, organizationId: string): string {
+  const local = email.trim().toLowerCase().split('@')[0] || '';
+  if (!local || /\d/.test(local)) return '';
+  const separated = local.replace(/[._-]+/g, ' ').trim();
+  const tokens = separated.split(/\s+/).filter(Boolean);
+  if (!tokens.length || tokens.some((token) => isTechnicalIdentity(normalized(token)))) return '';
+  if (tokens.length === 1 && tokens[0]!.length > 14) return '';
+  const candidate = titleCase(tokens.join(' '));
+  return isHumanIdentityName(candidate, organizationName, organizationId) ? candidate : '';
+}
+
 export function resolveHumanIdentity(input: {
   member?: Pick<TeamMember, 'name' | 'email'> | null;
   profileName?: string;
   profileEmail?: string;
   organizationName?: string;
   organizationId?: string;
+  allowEmailFallback?: boolean;
 }): HumanIdentityResolution {
   const organizationName = input.organizationName?.trim() || '';
   const organizationId = input.organizationId?.trim() || '';
@@ -105,6 +117,20 @@ export function resolveHumanIdentity(input: {
       source: candidate.source,
       reason: '',
     };
+  }
+
+  if (input.allowEmailFallback !== false) {
+    const emailName = fromEmail(input.member?.email || '', organizationName, organizationId)
+      || fromEmail(input.profileEmail || '', organizationName, organizationId);
+    if (emailName) {
+      return {
+        valid: true,
+        fullName: emailName,
+        firstName: emailName.split(/\s+/)[0] || emailName,
+        source: 'email',
+        reason: '',
+      };
+    }
   }
 
   return {
