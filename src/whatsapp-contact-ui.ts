@@ -80,6 +80,7 @@ function identity() {
     profileEmail: state.crm.settings.profileEmail,
     organizationName: state.crm.organization.name,
     organizationId: state.crm.organization.id,
+    allowEmailFallback: false,
   });
 }
 
