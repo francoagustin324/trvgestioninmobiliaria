@@ -303,14 +303,14 @@ function renderFollowUp(client: Client, attempt: PendingWhatsAppAttempt, activit
       <p class="whatsapp-followup-preview" data-whatsapp-followup-preview aria-live="polite">${escapeHtml(followUpPreview(suggestion.date))}</p>
       <footer class="whatsapp-contact-actions"><button type="button" class="secondary" data-whatsapp-close>Cancelar</button><button type="submit">Guardar seguimiento</button></footer>
     </form>`;
-  queueMicrotask(updateFollowUpSelection);
 }
 
 function saveFollowUp(form: HTMLFormElement): void {
   const client = clientById(Number(panel().dataset.clientId));
   const attemptId = panel().dataset.attemptId || '';
   const activityId = Number(panel().dataset.activityId);
-  const choice = new FormData(form).get('follow-up-choice')?.toString() || '';
+  const data = new FormData(form);
+  const choice = data.get('follow-up-choice')?.toString() || '';
   if (!client || !attemptId || !activityId) {
     close();
     return;
@@ -321,8 +321,7 @@ function saveFollowUp(form: HTMLFormElement): void {
     document.dispatchEvent(new CustomEvent('trv-render'));
     return;
   }
-  updateFollowUpSelection();
-  const date = new FormData(form).get('selected-date')?.toString() || '';
+  const date = data.get('selected-date')?.toString() || '';
   if (!date) return;
   if (!scheduleWhatsAppFollowUp(client.id, attemptId, activityId, date)) {
     close();
