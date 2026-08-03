@@ -114,10 +114,28 @@
   color: #ffe8e8;
 }
 
+.whatsapp-followup-form {
+  display: flex;
+  flex-direction: column;
+}
+
 .whatsapp-followup-preview {
-  margin: 4px 0 2px;
+  order: -1;
+  margin: 0 0 10px;
   border-color: rgba(95, 201, 146, 0.52);
   background: rgba(28, 101, 71, 0.18);
+}
+
+.whatsapp-followup-options {
+  order: 0;
+}
+
+.whatsapp-custom-date {
+  order: 1;
+}
+
+.whatsapp-followup-form > .whatsapp-contact-actions {
+  order: 2;
 }
 
 @media (max-width: 720px) {
