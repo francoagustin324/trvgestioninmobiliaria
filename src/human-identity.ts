@@ -9,6 +9,7 @@ export interface HumanIdentityResolution {
 }
 
 const TECHNICAL_IDENTITIES = new Set([
+  'trv',
   'trvgestion',
   'trvgestioninmobiliaria',
   'propcontrol',
@@ -36,6 +37,27 @@ const TECHNICAL_IDENTITIES = new Set([
   'ventas',
   'sistema',
   'system',
+  'gerencia',
+  'equipo',
+  'atencion',
+  'servicio',
+  'recepcion',
+  'cobranzas',
+  'administracion',
+  'departamento',
+  'area',
+]);
+
+const NON_PERSONAL_TOKENS = new Set([
+  ...TECHNICAL_IDENTITIES,
+  'gestion',
+  'clientes',
+  'cliente',
+  'corporativo',
+  'corporativa',
+  'oficina',
+  'secretaria',
+  'operaciones',
 ]);
 
 function normalized(value: string): string {
@@ -46,7 +68,16 @@ function normalized(value: string): string {
     .replace(/[^a-z0-9]+/g, '');
 }
 
-function titleCase(value: string): string {
+function normalizedTokens(value: string): string[] {
+  return value
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .split(/[^a-z]+/)
+    .filter(Boolean);
+}
+
+export function normalizeHumanIdentityName(value: string): string {
   return value
     .trim()
     .replace(/\s+/g, ' ')
@@ -63,19 +94,22 @@ export function isHumanIdentityName(value: string, organizationName = '', organi
   const trimmed = value.trim().replace(/\s+/g, ' ');
   if (trimmed.length < 2 || trimmed.length > 80) return false;
   if (trimmed.includes('@') || /https?:\/\//i.test(trimmed)) return false;
-  if (/^[0-9._-]+$/.test(trimmed)) return false;
+  if (/\d/.test(trimmed) || /^[0-9._-]+$/.test(trimmed)) return false;
+  if (/^[a-z0-9]+(?:[-_][a-z0-9]+)+$/.test(trimmed)) return false;
   if (/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(trimmed)) return false;
   if (!/\p{L}/u.test(trimmed)) return false;
 
   const compact = normalized(trimmed);
-  if (!compact || isTechnicalIdentity(compact)) return false;
+  const tokens = normalizedTokens(trimmed);
+  if (!compact || !tokens.length || tokens.length > 6 || isTechnicalIdentity(compact)) return false;
+  if (tokens.some((token) => NON_PERSONAL_TOKENS.has(token) || isTechnicalIdentity(token))) return false;
   if (/^(?:propcontrol|trvgestion|trvgestioninmobiliaria)/.test(compact)) return false;
 
   const organizationCompact = normalized(organizationName);
   const organizationIdCompact = normalized(organizationId);
   if (compact === organizationCompact || compact === organizationIdCompact) return false;
-  if (compact.length >= 6 && organizationCompact && organizationCompact.startsWith(compact)) return false;
-  if (compact.length >= 6 && organizationIdCompact && organizationIdCompact.startsWith(compact)) return false;
+  if (compact.length >= 3 && organizationCompact && organizationCompact.includes(compact)) return false;
+  if (compact.length >= 3 && organizationIdCompact && organizationIdCompact.includes(compact)) return false;
   return true;
 }
 
@@ -86,7 +120,7 @@ function fromEmail(email: string, organizationName: string, organizationId: stri
   const tokens = separated.split(/\s+/).filter(Boolean);
   if (!tokens.length || tokens.some((token) => isTechnicalIdentity(normalized(token)))) return '';
   if (tokens.length === 1 && tokens[0]!.length > 14) return '';
-  const candidate = titleCase(tokens.join(' '));
+  const candidate = normalizeHumanIdentityName(tokens.join(' '));
   return isHumanIdentityName(candidate, organizationName, organizationId) ? candidate : '';
 }
 
@@ -109,7 +143,7 @@ export function resolveHumanIdentity(input: {
   ];
   for (const candidate of candidates) {
     if (!isHumanIdentityName(candidate.value, organizationName, organizationId)) continue;
-    const fullName = titleCase(candidate.value);
+    const fullName = normalizeHumanIdentityName(candidate.value);
     return {
       valid: true,
       fullName,
@@ -138,7 +172,7 @@ export function resolveHumanIdentity(input: {
     fullName: '',
     firstName: '',
     source: 'none',
-    reason: 'Configurá “Nombre para mensajes” con el nombre real de una persona. No se usan correos, empresas ni cuentas técnicas.',
+    reason: 'Configurá “Nombre personal para firmar mensajes” y confirmá que aparecerá ante clientes. No se usan correos, empresas, equipos ni cuentas técnicas.',
   };
 }
 
