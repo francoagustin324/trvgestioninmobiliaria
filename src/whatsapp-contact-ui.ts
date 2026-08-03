@@ -1,8 +1,13 @@
-import { resolveHumanIdentity, safeOrganizationName } from './human-identity.js';
 import type { Client, WhatsAppConversation } from './models.js';
 import { saveData, state } from './store.js';
 import { visibleClients, visibleConversations } from './team-access.js';
 import { escapeHtml } from './utils.js';
+import {
+  assertCurrentWhatsAppHumanIdentity,
+  configureCurrentWhatsAppHumanIdentity,
+  WHATSAPP_IDENTITY_CHANGED_EVENT,
+  type WhatsAppHumanIdentitySnapshot,
+} from './whatsapp-human-identity.js';
 import { buildContextualWhatsAppMessage } from './whatsapp-message-context.js';
 import {
   followUpDateForChoice,
@@ -12,7 +17,8 @@ import {
   addLocalDaysIso,
   createPendingWhatsAppAttempt,
   dismissPendingWhatsAppAttempt,
-  loadPendingWhatsAppAttempt,
+  dismissPendingWhatsAppAttemptForActor,
+  loadPendingWhatsAppAttemptResult,
   markPendingAttemptOpened,
   normalizeWhatsAppPhone,
   registerWhatsAppContact,
@@ -29,6 +35,8 @@ const RETURN_DELAY_MS = 650;
 let installed = false;
 let promptedAttemptId = '';
 let currentAttempt: PendingWhatsAppAttempt | null = null;
+let panelIdentity: WhatsAppHumanIdentitySnapshot | null = null;
+let lastActiveMemberId = state.activeMemberId;
 
 function clientById(clientId: number): Client | null {
   return visibleClients().find((client) => client.id === clientId) ?? null;
@@ -70,22 +78,23 @@ function close(): void {
   root().hidden = true;
   document.body.classList.remove('whatsapp-contact-open');
   currentAttempt = null;
+  panelIdentity = null;
 }
 
-function identity() {
-  const member = state.crm.teamMembers.find((item) => item.id === state.activeMemberId);
-  return resolveHumanIdentity({
-    member,
-    profileName: state.crm.settings.profileName,
-    profileEmail: state.crm.settings.profileEmail,
-    organizationName: state.crm.organization.name,
-    organizationId: state.crm.organization.id,
-    allowEmailFallback: false,
-  });
-}
-
-function agency(): string {
-  return safeOrganizationName(state.crm.settings.agencyName.trim() || state.crm.organization.name.trim());
+function identityConfigurationHtml(reason: string): string {
+  return `<form class="whatsapp-identity-form" data-whatsapp-identity-form>
+    <div class="whatsapp-context-note blocked" role="alert">
+      <strong>Configuración personal requerida</strong>
+      <p>${escapeHtml(reason)}</p>
+    </div>
+    <label class="whatsapp-contact-field">Nombre personal para firmar mensajes
+      <input name="human-name" autocomplete="name" placeholder="Ejemplo: Franco Agustín" required>
+      <small>Este nombre aparecerá en los mensajes enviados a clientes.</small>
+    </label>
+    <label class="whatsapp-contact-update-phone"><input type="checkbox" name="confirmed" required> Confirmo que es mi nombre personal real y que se usará como firma humana.</label>
+    <button type="submit">Guardar nombre personal</button>
+    <small data-whatsapp-identity-feedback aria-live="polite"></small>
+  </form>`;
 }
 
 function phonePreview(value: string): string {
@@ -95,29 +104,74 @@ function phonePreview(value: string): string {
     : `<span class="whatsapp-phone-error">${escapeHtml(result.reason)}</span>`;
 }
 
+function invalidatePanel(reason: string, attempt = currentAttempt): void {
+  if (attempt) dismissPendingWhatsAppAttempt(attempt);
+  currentAttempt = null;
+  panelIdentity = null;
+  const element = panel();
+  element.dataset.contactBlocked = 'true';
+  element.dataset.identityFingerprint = '';
+  const note = element.querySelector<HTMLElement>('[data-whatsapp-context-note]');
+  if (note) {
+    note.classList.add('blocked');
+    note.setAttribute('role', 'alert');
+    note.innerHTML = `<strong>Contacto bloqueado para revisión</strong><p>${escapeHtml(reason)}</p>`;
+  }
+  const message = element.querySelector<HTMLTextAreaElement>('[data-whatsapp-message]');
+  if (message) {
+    message.value = '';
+    message.disabled = true;
+  }
+  element.querySelectorAll<HTMLInputElement>('[data-whatsapp-phone], [data-whatsapp-save-phone]')
+    .forEach((input) => { input.disabled = true; });
+  element.querySelectorAll<HTMLButtonElement>('[data-whatsapp-open], [data-whatsapp-manual-register], [data-whatsapp-copy], [data-whatsapp-confirm-sent], [data-whatsapp-followup-form] button[type="submit"]')
+    .forEach((button) => { button.disabled = true; });
+}
+
+function assertPanelIdentity(): WhatsAppHumanIdentitySnapshot | null {
+  if (!panelIdentity) {
+    invalidatePanel('Tu identidad o usuario activo cambió. Volvé a preparar el mensaje.');
+    return null;
+  }
+  const authorization = assertCurrentWhatsAppHumanIdentity(panelIdentity);
+  if (!authorization.valid || !authorization.identity) {
+    invalidatePanel(authorization.reason || 'Tu identidad o usuario activo cambió. Volvé a preparar el mensaje.');
+    return null;
+  }
+  if (panel().dataset.identityFingerprint !== authorization.identity.fingerprint) {
+    invalidatePanel('Tu identidad o usuario activo cambió. Volvé a preparar el mensaje.');
+    return null;
+  }
+  return authorization.identity;
+}
+
 function renderContact(client: Client, phone = client.phone, message?: string): void {
-  const human = identity();
-  const context = human.valid
+  const authorization = assertCurrentWhatsAppHumanIdentity();
+  const human = authorization.identity;
+  const context = authorization.valid && human
     ? buildContextualWhatsAppMessage({
       client,
       responsibleFirstName: human.firstName,
-      agency: agency(),
+      agency: human.organization,
       conversation: conversationForClient(client.id),
     })
     : {
       message: '',
       question: '',
-      contextNote: 'No se generó un mensaje porque falta una identidad humana válida.',
+      contextNote: 'No se generó un mensaje porque falta una identidad humana confirmada.',
       blocked: true,
-      reason: human.reason,
+      reason: authorization.reason,
       source: 'fallback' as const,
     };
   const text = message ?? context.message;
-  const blocked = context.blocked;
+  const blocked = context.blocked || !authorization.valid || !human;
+  panelIdentity = blocked && !human ? null : human;
+  currentAttempt = null;
 
   show();
   panel().dataset.clientId = String(client.id);
   panel().dataset.contactBlocked = String(blocked);
+  panel().dataset.identityFingerprint = human?.fingerprint || '';
   panel().innerHTML = `<header class="whatsapp-contact-heading">
       <div><span class="eyebrow">Contacto asistido</span><h2 id="whatsapp-contact-title">Contactar por WhatsApp</h2><p>Revisá el número y el mensaje antes de abrir WhatsApp.</p></div>
       <button type="button" class="quiet-button" data-whatsapp-close aria-label="Cerrar">×</button>
@@ -127,6 +181,7 @@ function renderContact(client: Client, phone = client.phone, message?: string): 
       <strong>${blocked ? 'Contacto bloqueado para revisión' : context.source === 'conversation' ? 'Contexto disponible' : 'Sin historial disponible'}</strong>
       <p>${escapeHtml(blocked ? context.reason : context.contextNote)}</p>
     </div>
+    ${!authorization.valid ? identityConfigurationHtml(authorization.reason) : ''}
     <label class="whatsapp-contact-field">Teléfono registrado
       <input data-whatsapp-phone value="${escapeHtml(phone)}" inputmode="tel" autocomplete="tel"${blocked ? ' disabled' : ''}>
       <small data-whatsapp-phone-preview>${phonePreview(phone)}</small>
@@ -143,7 +198,7 @@ function renderContact(client: Client, phone = client.phone, message?: string): 
     </footer>`;
   validateContact();
   queueMicrotask(() => {
-    if (blocked) panel().querySelector<HTMLButtonElement>('[data-whatsapp-close]')?.focus({ preventScroll: true });
+    if (blocked) panel().querySelector<HTMLInputElement>('[data-whatsapp-identity-form] input[name="human-name"]')?.focus({ preventScroll: true });
     else panel().querySelector<HTMLTextAreaElement>('[data-whatsapp-message]')?.focus({ preventScroll: true });
   });
 }
@@ -159,6 +214,10 @@ function contactFields(): { client: Client | null; phone: HTMLInputElement | nul
 function validateContact(): void {
   const { client, phone, message } = contactFields();
   if (!client || !phone || !message) return;
+  if (panelIdentity && !assertCurrentWhatsAppHumanIdentity(panelIdentity).valid) {
+    invalidatePanel('Tu identidad o usuario activo cambió. Volvé a preparar el mensaje.');
+    return;
+  }
   const blocked = panel().dataset.contactBlocked === 'true';
   const normalized = normalizeWhatsAppPhone(phone.value);
   const preview = panel().querySelector<HTMLElement>('[data-whatsapp-phone-preview]');
@@ -174,7 +233,8 @@ function validateContact(): void {
 }
 
 function attemptFromPanel(): PendingWhatsAppAttempt | null {
-  if (panel().dataset.contactBlocked === 'true') return null;
+  const identity = assertPanelIdentity();
+  if (!identity || panel().dataset.contactBlocked === 'true') return null;
   const { client, phone, message } = contactFields();
   if (!client || !phone || !message) return null;
   const normalized = normalizeWhatsAppPhone(phone.value);
@@ -187,12 +247,18 @@ function attemptFromPanel(): PendingWhatsAppAttempt | null {
     client.phone = phone.value.trim();
     saveData(`Teléfono de lead actualizado: ${client.name}`);
   }
-  const attempt = createPendingWhatsAppAttempt(client, normalized.normalized, text);
-  savePendingWhatsAppAttempt(attempt);
-  return attempt;
+  try {
+    const attempt = createPendingWhatsAppAttempt(client, normalized.normalized, text, identity);
+    savePendingWhatsAppAttempt(attempt);
+    return attempt;
+  } catch (error) {
+    invalidatePanel(error instanceof Error ? error.message : 'La identidad de WhatsApp dejó de ser válida.');
+    return null;
+  }
 }
 
 async function copyMessage(): Promise<void> {
+  if (!assertPanelIdentity()) return;
   const message = panel().querySelector<HTMLTextAreaElement>('[data-whatsapp-message]')?.value || '';
   const status = panel().querySelector<HTMLElement>('[data-whatsapp-copy-status]');
   if (!message.trim()) return;
@@ -217,6 +283,12 @@ async function copyMessage(): Promise<void> {
 function openChannel(): void {
   const attempt = attemptFromPanel();
   if (!attempt) return;
+  const authorization = assertCurrentWhatsAppHumanIdentity(attempt.identity);
+  if (!authorization.valid) {
+    dismissPendingWhatsAppAttempt(attempt);
+    invalidatePanel(authorization.reason || 'Tu identidad cambió antes de abrir WhatsApp.', attempt);
+    return;
+  }
   const opened = markPendingAttemptOpened(attempt);
   promptedAttemptId = '';
   window.open(whatsappUrl(opened.phone, opened.message), '_blank', 'noopener,noreferrer');
@@ -224,11 +296,17 @@ function openChannel(): void {
 }
 
 function register(attempt: PendingWhatsAppAttempt): void {
+  const authorization = assertCurrentWhatsAppHumanIdentity(attempt.identity);
+  if (!authorization.valid) {
+    dismissPendingWhatsAppAttempt(attempt);
+    invalidatePanel(authorization.reason || 'Tu identidad cambió antes de registrar el contacto.', attempt);
+    return;
+  }
   const result = registerWhatsAppContact(attempt);
   if (!result) {
     dismissPendingWhatsAppAttempt(attempt);
     close();
-    notify('No se pudo registrar el contacto porque el permiso o el intento ya no son válidos.');
+    notify('No se pudo registrar el contacto porque el permiso, usuario o identidad ya no son válidos.');
     return;
   }
   renderFollowUp(result.client, attempt, result.activity.id);
@@ -236,15 +314,20 @@ function register(attempt: PendingWhatsAppAttempt): void {
 }
 
 function renderConfirmation(attempt: PendingWhatsAppAttempt): void {
+  const authorization = assertCurrentWhatsAppHumanIdentity(attempt.identity);
   const client = clientById(attempt.clientId);
-  if (!client) {
+  if (!authorization.valid || !authorization.identity || !client) {
     dismissPendingWhatsAppAttempt(attempt);
+    notify(authorization.reason || 'El intento pendiente fue invalidado por un cambio de usuario o identidad.');
     return;
   }
   currentAttempt = attempt;
+  panelIdentity = attempt.identity;
   promptedAttemptId = attempt.id;
   show();
   panel().dataset.clientId = String(client.id);
+  panel().dataset.contactBlocked = 'false';
+  panel().dataset.identityFingerprint = attempt.identity.fingerprint;
   panel().innerHTML = `<header class="whatsapp-contact-heading">
       <div><span class="eyebrow">Confirmación</span><h2 id="whatsapp-contact-title">¿Enviaste el mensaje a ${escapeHtml(client.name)}?</h2><p>PropControl nunca lo registra automáticamente.</p></div>
       <button type="button" class="quiet-button" data-whatsapp-not-yet aria-label="Cerrar">×</button>
@@ -256,7 +339,14 @@ function renderConfirmation(attempt: PendingWhatsAppAttempt): void {
 
 function maybeConfirmReturn(): void {
   if (document.visibilityState === 'hidden') return;
-  const attempt = loadPendingWhatsAppAttempt();
+  const loaded = loadPendingWhatsAppAttemptResult();
+  if (loaded.invalidated) {
+    currentAttempt = null;
+    promptedAttemptId = '';
+    notify(loaded.reason || 'El intento pendiente fue invalidado por un cambio de identidad o usuario.');
+    return;
+  }
+  const attempt = loaded.attempt;
   if (!attempt?.openedAt || promptedAttemptId === attempt.id) return;
   if (Date.now() - Date.parse(attempt.openedAt) < RETURN_DELAY_MS) return;
   renderConfirmation(attempt);
@@ -283,12 +373,22 @@ function updateFollowUpSelection(): void {
 }
 
 function renderFollowUp(client: Client, attempt: PendingWhatsAppAttempt, activityId: number): void {
+  const authorization = assertCurrentWhatsAppHumanIdentity(attempt.identity);
+  if (!authorization.valid || !authorization.identity) {
+    notify(authorization.reason || 'La identidad cambió y no se puede programar el seguimiento.');
+    close();
+    return;
+  }
   const conversationOpen = state.crm.conversations.some((conversation) => conversation.clientId === client.id && conversation.mode !== 'Pausada');
   const suggestion = suggestedFollowUp(client, conversationOpen);
+  currentAttempt = attempt;
+  panelIdentity = attempt.identity;
   show();
   panel().dataset.clientId = String(client.id);
   panel().dataset.attemptId = attempt.id;
   panel().dataset.activityId = String(activityId);
+  panel().dataset.contactBlocked = 'false';
+  panel().dataset.identityFingerprint = attempt.identity.fingerprint;
   panel().innerHTML = `<header class="whatsapp-contact-heading">
       <div><span class="eyebrow">Próximo paso</span><h2 id="whatsapp-contact-title">¿Cuándo querés volver a contactar a ${escapeHtml(client.name)}?</h2><p>La fecha visible será exactamente la fecha guardada.</p></div>
       <button type="button" class="quiet-button" data-whatsapp-close aria-label="Cerrar">×</button>
@@ -310,10 +410,12 @@ function saveFollowUp(form: HTMLFormElement): void {
   const client = clientById(Number(panel().dataset.clientId));
   const attemptId = panel().dataset.attemptId || '';
   const activityId = Number(panel().dataset.activityId);
+  const attempt = currentAttempt;
   const data = new FormData(form);
   const choice = data.get('follow-up-choice')?.toString() || '';
-  if (!client || !attemptId || !activityId) {
-    close();
+  if (!client || !attempt || attempt.id !== attemptId || !activityId || !assertPanelIdentity()) {
+    if (attempt) dismissPendingWhatsAppAttempt(attempt);
+    invalidatePanel('Tu identidad o usuario activo cambió. No se programó ningún seguimiento.', attempt);
     return;
   }
   if (choice === 'none') {
@@ -324,9 +426,9 @@ function saveFollowUp(form: HTMLFormElement): void {
   }
   const date = data.get('selected-date')?.toString() || '';
   if (!date) return;
-  if (!scheduleWhatsAppFollowUp(client.id, attemptId, activityId, date)) {
+  if (!scheduleWhatsAppFollowUp(client.id, attempt, activityId, date)) {
     close();
-    notify('No se pudo programar el seguimiento porque el permiso cambió.');
+    notify('No se pudo programar el seguimiento porque el permiso, usuario o identidad cambió.');
     return;
   }
   close();
@@ -389,6 +491,43 @@ export function enhanceWhatsAppContactFlow(): void {
   });
 }
 
+function configureIdentity(form: HTMLFormElement): void {
+  const client = clientById(Number(panel().dataset.clientId));
+  const phone = panel().querySelector<HTMLInputElement>('[data-whatsapp-phone]')?.value || client?.phone || '';
+  const data = new FormData(form);
+  const result = configureCurrentWhatsAppHumanIdentity({
+    humanName: data.get('human-name')?.toString() || '',
+    confirmed: data.get('confirmed') === 'on',
+  });
+  const feedback = form.querySelector<HTMLElement>('[data-whatsapp-identity-feedback]');
+  if (!result.valid || !result.identity) {
+    if (feedback) feedback.textContent = result.reason;
+    return;
+  }
+  if (!client) {
+    close();
+    return;
+  }
+  renderContact(client, phone);
+}
+
+function invalidateStaleState(): void {
+  if (lastActiveMemberId !== state.activeMemberId) {
+    dismissPendingWhatsAppAttemptForActor(lastActiveMemberId);
+    lastActiveMemberId = state.activeMemberId;
+  }
+  if (!root().hidden && panelIdentity) {
+    const authorization = assertCurrentWhatsAppHumanIdentity(panelIdentity);
+    if (!authorization.valid) invalidatePanel(authorization.reason || 'Tu identidad o usuario activo cambió. Volvé a preparar el mensaje.');
+  }
+  if (currentAttempt) {
+    const authorization = assertCurrentWhatsAppHumanIdentity(currentAttempt.identity);
+    if (!authorization.valid) invalidatePanel(authorization.reason || 'El intento fue invalidado por un cambio de identidad o usuario.', currentAttempt);
+  }
+  const loaded = loadPendingWhatsAppAttemptResult();
+  if (loaded.invalidated) notify(loaded.reason || 'El intento pendiente fue invalidado por un cambio de identidad o usuario.');
+}
+
 function bindPanelEvents(): void {
   const element = root();
   element.addEventListener('input', (event) => {
@@ -418,6 +557,12 @@ function bindPanelEvents(): void {
     }
   });
   element.addEventListener('submit', (event) => {
+    const identityForm = (event.target as HTMLElement).closest<HTMLFormElement>('[data-whatsapp-identity-form]');
+    if (identityForm) {
+      event.preventDefault();
+      configureIdentity(identityForm);
+      return;
+    }
     const form = (event.target as HTMLElement).closest<HTMLFormElement>('[data-whatsapp-followup-form]');
     if (!form) return;
     event.preventDefault();
@@ -440,11 +585,18 @@ function bindGlobalEvents(): void {
     }
     renderContact(client);
   }, true);
-  document.addEventListener('trv-render', () => queueMicrotask(enhanceWhatsAppContactFlow));
-  document.addEventListener('propcontrol-cloud-status', () => queueMicrotask(enhanceWhatsAppContactFlow));
-  window.addEventListener('focus', maybeConfirmReturn);
-  window.addEventListener('pageshow', maybeConfirmReturn);
-  document.addEventListener('visibilitychange', maybeConfirmReturn);
+  document.addEventListener('trv-render', () => queueMicrotask(() => {
+    invalidateStaleState();
+    enhanceWhatsAppContactFlow();
+  }));
+  document.addEventListener('propcontrol-cloud-status', () => queueMicrotask(() => {
+    invalidateStaleState();
+    enhanceWhatsAppContactFlow();
+  }));
+  document.addEventListener(WHATSAPP_IDENTITY_CHANGED_EVENT, () => queueMicrotask(invalidateStaleState));
+  window.addEventListener('focus', () => { invalidateStaleState(); maybeConfirmReturn(); });
+  window.addEventListener('pageshow', () => { invalidateStaleState(); maybeConfirmReturn(); });
+  document.addEventListener('visibilitychange', () => { invalidateStaleState(); maybeConfirmReturn(); });
   document.addEventListener('keydown', (event) => {
     if (event.key === 'Escape' && !root().hidden) close();
   });
@@ -464,6 +616,7 @@ export function installWhatsAppContactFlow(): void {
   bindGlobalEvents();
   queueMicrotask(() => {
     enhanceWhatsAppContactFlow();
+    invalidateStaleState();
     maybeConfirmReturn();
   });
 }
