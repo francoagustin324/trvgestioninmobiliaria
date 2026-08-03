@@ -18,27 +18,6 @@
   overflow-wrap: anywhere;
 }
 
-.b133-postproduction-modal-close {
-  display: grid;
-  flex: 0 0 44px;
-  place-items: center;
-  width: 44px;
-  min-width: 44px;
-  height: 44px;
-  min-height: 44px;
-  margin-left: auto;
-  padding: 0;
-  border-radius: 999px;
-  font-size: 28px;
-  font-weight: 700;
-  line-height: 1;
-  touch-action: manipulation;
-}
-
-body:has(#mvp-lead-form.b131-lead-form:not(.collapsed)) #crm .mvp-page-heading > [data-toggle="client-form"] {
-  display: none !important;
-}
-
 #crm .b131-lead-form-fields {
   min-width: 0;
   max-width: 100%;
@@ -67,33 +46,25 @@ body:has(#mvp-lead-form.b131-lead-form:not(.collapsed)) #crm .mvp-page-heading >
 }
 
 @media (max-width: 720px) {
-  :root {
-    --pc-hotfix-modal-top: max(56px, calc(env(safe-area-inset-top) + 50px));
-    --pc-hotfix-modal-bottom: max(8px, env(safe-area-inset-bottom));
-  }
-
   body:has(#mvp-lead-form.b131-lead-form:not(.collapsed)) {
     overflow: hidden;
     overscroll-behavior: none;
   }
 
   #crm .b131-lead-form {
-    top: calc(var(--pc-visual-viewport-offset-top, 0px) + var(--pc-hotfix-modal-top));
-    right: max(8px, env(safe-area-inset-right));
-    bottom: auto;
-    left: max(8px, env(safe-area-inset-left));
-    width: auto;
-    height: auto;
-    max-height: calc(var(--pc-visual-viewport-height, 100dvh) - var(--pc-hotfix-modal-top) - var(--pc-hotfix-modal-bottom) - 8px);
-    padding: 12px 12px 0;
-    border-radius: 20px;
+    max-height: calc(100dvh - max(72px, calc(env(safe-area-inset-top) + 62px)) - var(--pc-mobile-nav-height, 76px) - var(--pc-mobile-nav-edge, 8px) - env(safe-area-inset-bottom) - 16px);
+    padding-bottom: 0;
     overflow: hidden;
     overscroll-behavior: contain;
   }
 
   #crm .b131-lead-form > .mvp-form-heading {
     flex: 0 0 auto;
-    padding-right: 0;
+    padding-right: 56px;
+  }
+
+  #crm .b131-lead-form > .mvp-form-heading [data-cancel-client-edit] {
+    display: none !important;
   }
 
   #crm .b131-lead-form-fields {
@@ -113,8 +84,8 @@ body:has(#mvp-lead-form.b131-lead-form:not(.collapsed)) #crm .mvp-page-heading >
     inset: auto;
     z-index: 3;
     flex: 0 0 auto;
-    margin: 0 -12px;
-    padding: 10px 12px calc(10px + env(safe-area-inset-bottom));
+    margin: 0 -14px;
+    padding: 10px 14px calc(10px + env(safe-area-inset-bottom));
   }
 
   #crm .b131-lead-form-actions {
@@ -128,18 +99,6 @@ body:has(#mvp-lead-form.b131-lead-form:not(.collapsed)) #crm .mvp-page-heading >
     min-height: 48px;
     padding-inline: 8px;
     white-space: normal;
-  }
-
-  #crm .b131-lead-form-backdrop {
-    z-index: 1000;
-  }
-
-  #crm .b131-lead-form {
-    z-index: 1001;
-  }
-
-  .mobile-bottom-nav {
-    z-index: 90;
   }
 }
 
