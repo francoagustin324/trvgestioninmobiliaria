@@ -172,7 +172,7 @@ export function resolveHumanIdentity(input: {
     fullName: '',
     firstName: '',
     source: 'none',
-    reason: 'Configurá “Nombre personal para firmar mensajes” y confirmá que aparecerá ante clientes. No se usan correos, empresas, equipos ni cuentas técnicas.',
+    reason: 'Nombre para mensajes: configurá “Nombre personal para firmar mensajes” y confirmá que aparecerá ante clientes. No se usan correos, empresas, equipos ni cuentas técnicas.',
   };
 }
 
