@@ -20,6 +20,7 @@ export const CONTACT_ATTEMPT_TTL_MS = 30 * 60_000;
 const ATTEMPT_STORAGE_PREFIX = 'propcontrol-whatsapp-contact-attempt-v1';
 const ATTEMPT_MARKER = 'Intento:';
 const FOLLOW_UP_MARKER = 'Seguimiento WhatsApp:';
+const registeredAttempts = new Map<string, PendingWhatsAppAttempt>();
 
 export interface PendingWhatsAppAttempt {
   id: string;
@@ -189,7 +190,10 @@ export function registerWhatsAppContact(
   const client = visibleClient(attempt.clientId);
   if (!client) return null;
   const existing = recordedActivityForAttempt(attempt.id);
-  if (existing) return { activity: existing, duplicate: true, client };
+  if (existing) {
+    registeredAttempts.set(attempt.id, attempt);
+    return { activity: existing, duplicate: true, client };
+  }
 
   const activityId = Math.max(0, ...state.crm.activityLog.map((entry) => entry.id)) + 1;
   addActivity({
@@ -208,6 +212,7 @@ export function registerWhatsAppContact(
     ].join('\n'),
   });
   client.lastContact = localIsoDate(now);
+  registeredAttempts.set(attempt.id, attempt);
   saveData(`Contacto por WhatsApp registrado: ${client.name}`);
   dismissPendingWhatsAppAttempt(attempt);
   return {
@@ -217,13 +222,21 @@ export function registerWhatsAppContact(
   };
 }
 
+function registeredAttempt(attemptOrId: PendingWhatsAppAttempt | string): PendingWhatsAppAttempt | null {
+  return typeof attemptOrId === 'string'
+    ? registeredAttempts.get(attemptOrId) ?? null
+    : attemptOrId;
+}
+
 export function scheduleWhatsAppFollowUp(
   clientId: number,
-  attempt: PendingWhatsAppAttempt,
+  attemptOrId: PendingWhatsAppAttempt | string,
   activityId: number,
   date: string,
 ): { client: Client; duplicate: boolean } | null {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return null;
+  const attempt = registeredAttempt(attemptOrId);
+  if (!attempt) return null;
   const authorization = assertCurrentWhatsAppHumanIdentity(attempt.identity);
   if (!authorization.valid || !authorization.identity) return null;
   if (attempt.actorId !== authorization.identity.actorId) return null;
