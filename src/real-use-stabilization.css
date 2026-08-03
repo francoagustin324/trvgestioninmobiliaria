@@ -11,6 +11,12 @@
   opacity: 1;
 }
 
+@media (min-width: 721px) {
+  #crm .mvp-lead-filter-panel select {
+    min-height: 40px;
+  }
+}
+
 #crm select:hover:not(:disabled) {
   border-color: rgba(239, 210, 146, 0.82);
   background-color: #104235;
@@ -120,6 +126,7 @@
   #crm .mvp-lead-filter-panel select {
     width: 100%;
     max-width: 100%;
+    min-height: 44px;
     font-size: 16px;
   }
 
