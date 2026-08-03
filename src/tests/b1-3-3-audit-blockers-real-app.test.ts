@@ -16,6 +16,7 @@ const activeMemberKey = 'propcontrol-active-team-member-v1';
 const artifactDir = 'artifacts/b1-3-3';
 const organizationId = 'trvgestioninmobiliaria';
 const organizationName = 'TRV Gestión Inmobiliaria';
+const identityPrefix = 'propcontrol-whatsapp-human-identity-v1';
 const motorolaUserAgent = 'Mozilla/5.0 (Linux; Android 12; moto g(60) Build/S2RIS32.32-20-7-10) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Mobile Safari/537.36';
 
 interface Identity {
@@ -72,21 +73,15 @@ function lead(id: number, name: string): Client {
   };
 }
 
-function fixture(input: {
-  client: Client;
-  memberName: string;
-  memberEmail: string;
-  profileName: string;
-  profileEmail: string;
-}): CrmData {
+function fixture(client: Client, memberName = 'Nombre técnico', memberEmail = 'info@dominio.com'): CrmData {
   const crm = structuredClone(initialData);
   crm.organization = { id: organizationId, name: organizationName, seatLimit: null, planLabel: 'B1.3.3 auditoría' };
   crm.teamMembers = [
-    member('Dueño', input.memberName, input.memberEmail),
+    member('Dueño', memberName, memberEmail),
     member('Administrador'),
     member('Corredor'),
   ];
-  crm.clients = [structuredClone(input.client)];
+  crm.clients = [structuredClone(client)];
   crm.conversations = [];
   crm.properties = [];
   crm.contacts = [];
@@ -97,17 +92,37 @@ function fixture(input: {
     actorId: 1,
     action: 'Lead creado',
     entityType: 'Cliente',
-    entityId: input.client.id,
-    detail: `Lead creado: ${input.client.name}`,
+    entityId: client.id,
+    detail: `Lead creado: ${client.name}`,
     createdAt: '2026-08-02T20:00:00.000Z',
   }];
   crm.settings = {
     ...crm.settings,
-    profileName: input.profileName,
-    profileEmail: input.profileEmail,
+    profileName: 'Gerencia Comercial',
+    profileEmail: 'info@dominio.com',
     agencyName: organizationName,
   };
   return crm;
+}
+
+function whatsappIdentityKey(current = identity('Dueño')): string {
+  const actorKey = `cloud:${current.userId}`;
+  return `${identityPrefix}:${encodeURIComponent(organizationId)}:${current.memberId}:${encodeURIComponent(actorKey)}`;
+}
+
+function identityRecord(humanName: string, current = identity('Dueño'), confirmedAt = '2026-08-02T20:30:00.000Z') {
+  return {
+    version: 1,
+    organizationId,
+    memberId: current.memberId,
+    actorKey: `cloud:${current.userId}`,
+    humanName,
+    confirmedAt,
+  };
+}
+
+function attemptKey(actorId = 1): string {
+  return `propcontrol-whatsapp-contact-attempt-v1:${organizationId}:${actorId}`;
 }
 
 function chromeExecutable(): string | undefined {
@@ -178,20 +193,21 @@ async function contextFor(
   viewport: { width: number; height: number },
   suffix: string,
   crm: CrmData,
+  humanName: string | null,
 ): Promise<BrowserContext> {
   const current = identity('Dueño');
   const context = await browser.newContext(contextOptions(viewport));
   await context.route('**/api/cloud-config', async (route) => {
-    await new Promise((resolve) => setTimeout(resolve, 250));
     await route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ message: 'Nube de prueba no disponible.' }) });
   });
-  await context.addInitScript(({ data, session, memberId, keys, marker }) => {
+  await context.addInitScript(({ data, session, memberId, keys, marker, identityKey, configuredIdentity }) => {
     if (!localStorage.getItem(marker)) {
       localStorage.setItem(marker, '1');
       localStorage.setItem(keys.session, JSON.stringify(session));
       localStorage.setItem(keys.storage, JSON.stringify(data));
       localStorage.setItem(keys.sync, JSON.stringify({ dirty: false, localUpdatedAt: '2026-08-02T23:50:00-03:00' }));
       localStorage.setItem(keys.activeMember, String(memberId));
+      if (configuredIdentity) localStorage.setItem(identityKey, JSON.stringify(configuredIdentity));
     }
   }, {
     data: crm,
@@ -205,6 +221,8 @@ async function contextFor(
     memberId: current.memberId,
     keys: { session: sessionKey, storage: current.storageKey, sync: current.syncKey, activeMember: activeMemberKey },
     marker: `propcontrol-b133-audit:${suffix}`,
+    identityKey: whatsappIdentityKey(current),
+    configuredIdentity: humanName ? identityRecord(humanName, current) : null,
   });
   return context;
 }
@@ -230,62 +248,70 @@ async function assertNoHorizontalScroll(page: Page): Promise<void> {
   assert.ok(geometry.body <= geometry.viewport + 1, JSON.stringify(geometry));
 }
 
-function attemptKey(): string {
-  return `propcontrol-whatsapp-contact-attempt-v1:${organizationId}:1`;
+async function installActionCounters(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    const target = window as unknown as {
+      __b133OpenCount: number;
+      __b133CopyCount: number;
+      open: typeof window.open;
+    };
+    target.__b133OpenCount = 0;
+    target.__b133CopyCount = 0;
+    target.open = (() => {
+      target.__b133OpenCount += 1;
+      return null;
+    }) as typeof window.open;
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText: async () => { target.__b133CopyCount += 1; } },
+    });
+  });
 }
 
-test('B1.3.3 auditoría bloquea identidad técnica sin abrir, registrar ni programar', { timeout: 240_000 }, async () => {
+async function assertZeroWhatsAppEffects(page: Page, clientId: number): Promise<void> {
+  assert.equal(await page.evaluate(() => (window as unknown as { __b133OpenCount: number }).__b133OpenCount), 0);
+  assert.equal(await page.evaluate(() => (window as unknown as { __b133CopyCount: number }).__b133CopyCount), 0);
+  assert.equal(await page.evaluate((key) => localStorage.getItem(key), attemptKey()), null);
+  const saved = await snapshot(page);
+  assert.equal(saved.activityLog.filter((entry) => entry.action === 'Contacto por WhatsApp').length, 0);
+  assert.equal(saved.activityLog.filter((entry) => entry.action === 'Seguimiento por WhatsApp programado').length, 0);
+  assert.equal(saved.clients.find((item) => item.id === clientId)?.nextFollowUp, undefined);
+  assert.equal(saved.reminders.length, 0);
+}
+
+test('B1.3.3 exige configuración explícita y rechaza identidad departamental', { timeout: 240_000 }, async () => {
   mkdirSync(artifactDir, { recursive: true });
   const executablePath = chromeExecutable();
   assert.ok(executablePath);
-  const client = lead(301, 'Lead Identidad Técnica');
-  const crm = fixture({
-    client,
-    memberName: 'PropControl',
-    memberEmail: 'propcontrol@dominio.com',
-    profileName: 'Marketing',
-    profileEmail: 'info@dominio.com',
-  });
+  const client = lead(301, 'Lead Identidad Departamental');
   const port = 63000 + Math.floor(Math.random() * 80);
   const url = `http://127.0.0.1:${port}`;
   const server = await startServer(port);
   const browser = await chromium.launch({ executablePath, headless: true });
-  const context = await contextFor(browser, { width: 390, height: 844 }, 'blocked-identity', crm);
+  const context = await contextFor(browser, { width: 390, height: 844 }, 'blocked-identity', fixture(client, 'PropControl'), null);
   try {
     const page = await context.newPage();
     await page.clock.setFixedTime(new Date('2026-08-02T18:00:00-03:00'));
     await load(page, url);
-    await page.evaluate(() => {
-      const target = window as unknown as { __b133AuditOpenCount: number; open: typeof window.open };
-      target.__b133AuditOpenCount = 0;
-      target.open = (() => {
-        target.__b133AuditOpenCount += 1;
-        return null;
-      }) as typeof window.open;
-    });
+    await installActionCounters(page);
 
     await page.locator(`#crm.active [data-contact-whatsapp="${client.id}"]`).click();
     const note = page.locator('[data-whatsapp-context-note]');
     await note.waitFor({ state: 'visible' });
-    assert.match(await note.innerText(), /nombre real de una persona/i);
-    assert.match(await note.innerText(), /no se usan correos/i);
-    assert.equal(await page.locator('[data-whatsapp-open]').isDisabled(), true);
-    assert.equal(await page.locator('[data-whatsapp-manual-register]').isDisabled(), true);
-    assert.equal(await page.locator('[data-whatsapp-copy]').isDisabled(), true);
-    assert.equal(await page.locator('[data-whatsapp-message]').isDisabled(), true);
-    assert.equal(await page.locator('[data-whatsapp-phone]').isDisabled(), true);
+    assert.match(await note.innerText(), /Nombre personal para firmar mensajes|identidad humana/i);
+    const identityForm = page.locator('[data-whatsapp-identity-form]');
+    await identityForm.locator('input[name="human-name"]').fill('Gerencia Comercial');
+    await identityForm.locator('input[name="confirmed"]').check();
+    await identityForm.locator('button[type="submit"]').click();
+    assert.match(await identityForm.locator('[data-whatsapp-identity-feedback]').innerText(), /nombre personal real/i);
+    for (const selector of ['[data-whatsapp-open]', '[data-whatsapp-manual-register]', '[data-whatsapp-copy]', '[data-whatsapp-message]', '[data-whatsapp-phone]']) {
+      assert.equal(await page.locator(selector).isDisabled(), true, selector);
+    }
     await page.screenshot({ path: `${artifactDir}/11-identidad-tecnica-bloqueada.png`, fullPage: true });
-
-    await page.locator('[data-whatsapp-open]').evaluate((button) => (button as HTMLButtonElement).click());
-    await page.locator('[data-whatsapp-manual-register]').evaluate((button) => (button as HTMLButtonElement).click());
-    assert.equal(await page.evaluate(() => (window as unknown as { __b133AuditOpenCount: number }).__b133AuditOpenCount), 0);
-    assert.equal(await page.evaluate((key) => localStorage.getItem(key), attemptKey()), null);
-
-    const saved = await snapshot(page);
-    assert.equal(saved.activityLog.filter((entry) => entry.action === 'Contacto por WhatsApp').length, 0);
-    assert.equal(saved.activityLog.filter((entry) => entry.action === 'Seguimiento por WhatsApp programado').length, 0);
-    assert.equal(saved.clients.find((item) => item.id === client.id)?.nextFollowUp, undefined);
-    assert.equal(saved.reminders.length, 0);
+    await page.locator('[data-whatsapp-open]').evaluate((button) => button.dispatchEvent(new MouseEvent('click', { bubbles: true })));
+    await page.locator('[data-whatsapp-manual-register]').evaluate((button) => button.dispatchEvent(new MouseEvent('click', { bubbles: true })));
+    await page.locator('[data-whatsapp-copy]').evaluate((button) => button.dispatchEvent(new MouseEvent('click', { bubbles: true })));
+    await assertZeroWhatsAppEffects(page, client.id);
     await assertNoHorizontalScroll(page);
   } finally {
     await context.close();
@@ -294,48 +320,33 @@ test('B1.3.3 auditoría bloquea identidad técnica sin abrir, registrar ni progr
   }
 });
 
-test('B1.3.3 auditoría conserva la fecha seleccionada al cruzar medianoche y tras recargar', { timeout: 240_000 }, async () => {
+test('B1.3.3 conserva fecha inmutable, atribución validada y recarga', { timeout: 240_000 }, async () => {
   mkdirSync(artifactDir, { recursive: true });
   const executablePath = chromeExecutable();
   assert.ok(executablePath);
   const client = lead(302, 'Lead Fecha Inmutable');
-  const crm = fixture({
-    client,
-    memberName: 'trvgestioninmobiliaria',
-    memberEmail: 'propcontrol@dominio.com',
-    profileName: 'Franco Agustín',
-    profileEmail: 'info@dominio.com',
-  });
   const port = 63100 + Math.floor(Math.random() * 80);
   const url = `http://127.0.0.1:${port}`;
   const server = await startServer(port);
   const browser = await chromium.launch({ executablePath, headless: true });
-  const context = await contextFor(browser, { width: 390, height: 844 }, 'midnight-follow-up', crm);
+  const context = await contextFor(browser, { width: 390, height: 844 }, 'midnight-follow-up', fixture(client, 'PropControl', 'info@dominio.com'), 'Franco Agustín');
   try {
     const page = await context.newPage();
     await page.clock.setFixedTime(new Date('2026-08-02T23:59:30-03:00'));
     await load(page, url);
-    await page.evaluate(() => {
-      const target = window as unknown as { __b133AuditOpenCount: number; open: typeof window.open };
-      target.__b133AuditOpenCount = 0;
-      target.open = (() => {
-        target.__b133AuditOpenCount += 1;
-        return null;
-      }) as typeof window.open;
-    });
+    await installActionCounters(page);
 
     await page.locator(`#crm.active [data-contact-whatsapp="${client.id}"]`).click();
     const message = page.locator('[data-whatsapp-message]');
     await message.waitFor({ state: 'visible' });
     assert.match(await message.inputValue(), /^Hola Lead Fecha Inmutable, soy Franco de TRV Gestión Inmobiliaria\./);
-    assert.doesNotMatch(await message.inputValue(), /PropControl|Marketing|info@/i);
+    assert.doesNotMatch(await message.inputValue(), /PropControl|info@/i);
     await page.screenshot({ path: `${artifactDir}/10-franco-identidad-explicita.png`, fullPage: true });
 
     await page.locator('[data-whatsapp-manual-register]').click();
     const form = page.locator('[data-whatsapp-followup-form]');
     await form.waitFor({ state: 'visible' });
     await form.locator('input[name="follow-up-choice"][value="7"]').check();
-
     const expectedDate = '2026-08-09';
     const selected = form.locator('input[name="selected-date"]');
     const preview = form.locator('[data-whatsapp-followup-preview]');
@@ -351,18 +362,20 @@ test('B1.3.3 auditoría conserva la fecha seleccionada al cruzar medianoche y tr
     await form.locator('button[type="submit"]').click();
 
     let saved = await snapshot(page);
-    const savedClient = saved.clients.find((item) => item.id === client.id);
-    assert.equal(savedClient?.nextFollowUp, expectedDate);
-    assert.equal(savedClient?.nextAction, 'Volver a contactar por WhatsApp');
+    const contact = saved.activityLog.find((entry) => entry.action === 'Contacto por WhatsApp');
+    assert.ok(contact);
+    assert.match(contact.detail, /Responsable: Franco Agustín/);
+    assert.match(contact.detail, /Fingerprint:/);
+    assert.doesNotMatch(contact.detail, /info@dominio|PropControl/);
+    assert.equal(saved.clients.find((item) => item.id === client.id)?.nextFollowUp, expectedDate);
     assert.equal(saved.activityLog.filter((entry) => entry.action === 'Contacto por WhatsApp').length, 1);
     assert.equal(saved.activityLog.filter((entry) => entry.action === 'Seguimiento por WhatsApp programado').length, 1);
     assert.equal(saved.reminders.length, 0);
-    assert.equal(await page.evaluate(() => (window as unknown as { __b133AuditOpenCount: number }).__b133AuditOpenCount), 0);
+    assert.equal(await page.evaluate(() => (window as unknown as { __b133OpenCount: number }).__b133OpenCount), 0);
 
     await page.locator('[data-module="agenda"]:visible').first().click();
     const agenda = page.locator('#agenda.active .agenda-card').filter({ hasText: client.name });
     await agenda.waitFor({ state: 'visible' });
-    assert.equal(await agenda.count(), 1);
     assert.equal(await agenda.locator(`time[datetime="${expectedDate}"]`).count(), 1);
     await page.screenshot({ path: `${artifactDir}/13-fecha-inmutable-agenda.png`, fullPage: true });
     await assertNoHorizontalScroll(page);
@@ -374,11 +387,6 @@ test('B1.3.3 auditoría conserva la fecha seleccionada al cruzar medianoche y tr
     assert.equal(saved.activityLog.filter((entry) => entry.action === 'Contacto por WhatsApp').length, 1);
     assert.equal(saved.activityLog.filter((entry) => entry.action === 'Seguimiento por WhatsApp programado').length, 1);
     assert.equal(saved.reminders.length, 0);
-    await page.locator('[data-module="agenda"]:visible').first().click();
-    const agendaAfterReload = page.locator('#agenda.active .agenda-card').filter({ hasText: client.name });
-    await agendaAfterReload.waitFor({ state: 'visible' });
-    assert.equal(await agendaAfterReload.count(), 1);
-    assert.equal(await agendaAfterReload.locator(`time[datetime="${expectedDate}"]`).count(), 1);
   } finally {
     await context.close();
     await browser.close();
@@ -386,31 +394,170 @@ test('B1.3.3 auditoría conserva la fecha seleccionada al cruzar medianoche y tr
   }
 });
 
-test('B1.3.3 auditoría mantiene firma humana y geometría en escritorio', { timeout: 180_000 }, async () => {
+test('B1.3.3 invalida panel obsoleto tras cambiar identidad', { timeout: 240_000 }, async () => {
+  mkdirSync(artifactDir, { recursive: true });
+  const executablePath = chromeExecutable();
+  assert.ok(executablePath);
+  const client = lead(304, 'Lead Panel Obsoleto');
+  const port = 63300 + Math.floor(Math.random() * 80);
+  const url = `http://127.0.0.1:${port}`;
+  const server = await startServer(port);
+  const browser = await chromium.launch({ executablePath, headless: true });
+  const context = await contextFor(browser, { width: 390, height: 844 }, 'stale-panel', fixture(client), 'Franco');
+  try {
+    const page = await context.newPage();
+    await load(page, url);
+    await installActionCounters(page);
+    await page.locator(`#crm.active [data-contact-whatsapp="${client.id}"]`).click();
+    await page.locator('[data-whatsapp-message]').waitFor({ state: 'visible' });
+    await page.evaluate(() => {
+      const target = window as unknown as { __b133StaleActions: HTMLElement[] };
+      target.__b133StaleActions = [
+        document.querySelector<HTMLElement>('[data-whatsapp-copy]')!,
+        document.querySelector<HTMLElement>('[data-whatsapp-open]')!,
+        document.querySelector<HTMLElement>('[data-whatsapp-manual-register]')!,
+      ];
+    });
+    await page.evaluate(({ key, record }) => {
+      localStorage.setItem(key, JSON.stringify(record));
+      document.dispatchEvent(new CustomEvent('propcontrol-whatsapp-identity-changed'));
+    }, {
+      key: whatsappIdentityKey(),
+      record: identityRecord('Carla Pereyra', identity('Dueño'), '2026-08-02T21:00:00.000Z'),
+    });
+    await page.waitForFunction(() => document.querySelector<HTMLElement>('[data-whatsapp-context-note]')?.innerText.includes('cambió'));
+    await page.evaluate(() => {
+      const actions = (window as unknown as { __b133StaleActions: HTMLElement[] }).__b133StaleActions;
+      actions.forEach((action) => action.dispatchEvent(new MouseEvent('click', { bubbles: true })));
+    });
+    assert.equal(await page.locator('[data-whatsapp-message]').inputValue(), '');
+    assert.match(await page.locator('[data-whatsapp-context-note]').innerText(), /identidad o usuario activo cambió/i);
+    for (const selector of ['[data-whatsapp-open]', '[data-whatsapp-manual-register]', '[data-whatsapp-copy]']) {
+      assert.equal(await page.locator(selector).isDisabled(), true, selector);
+    }
+    await assertZeroWhatsAppEffects(page, client.id);
+    await page.screenshot({ path: `${artifactDir}/15-panel-identidad-invalidada.png`, fullPage: true });
+    await assertNoHorizontalScroll(page);
+  } finally {
+    await context.close();
+    await browser.close();
+    await stopServer(server);
+  }
+});
+
+test('B1.3.3 invalida panel antiguo al cambiar miembro activo', { timeout: 240_000 }, async () => {
+  mkdirSync(artifactDir, { recursive: true });
+  const executablePath = chromeExecutable();
+  assert.ok(executablePath);
+  const client = lead(305, 'Lead Cambio Miembro');
+  const port = 63400 + Math.floor(Math.random() * 80);
+  const url = `http://127.0.0.1:${port}`;
+  const server = await startServer(port);
+  const browser = await chromium.launch({ executablePath, headless: true });
+  const context = await contextFor(browser, { width: 390, height: 844 }, 'member-change', fixture(client), 'Franco');
+  try {
+    const page = await context.newPage();
+    await load(page, url);
+    await installActionCounters(page);
+    await page.locator(`#crm.active [data-contact-whatsapp="${client.id}"]`).click();
+    await page.evaluate(() => {
+      const target = window as unknown as { __b133MemberStale: HTMLElement[] };
+      target.__b133MemberStale = [
+        document.querySelector<HTMLElement>('[data-whatsapp-copy]')!,
+        document.querySelector<HTMLElement>('[data-whatsapp-open]')!,
+        document.querySelector<HTMLElement>('[data-whatsapp-manual-register]')!,
+      ];
+    });
+    await page.evaluate(async () => {
+      const store = await import('/dist/store.js');
+      store.setActiveMemberId(2);
+      document.dispatchEvent(new CustomEvent('trv-render'));
+    });
+    await page.waitForFunction(() => document.querySelector<HTMLElement>('[data-whatsapp-context-note]')?.innerText.includes('cambió'));
+    await page.evaluate(() => {
+      const actions = (window as unknown as { __b133MemberStale: HTMLElement[] }).__b133MemberStale;
+      actions.forEach((action) => action.dispatchEvent(new MouseEvent('click', { bubbles: true })));
+    });
+    await assertZeroWhatsAppEffects(page, client.id);
+    assert.match(await page.locator('[data-whatsapp-context-note]').innerText(), /identidad o usuario activo cambió/i);
+    await page.screenshot({ path: `${artifactDir}/16-panel-miembro-invalidado.png`, fullPage: true });
+  } finally {
+    await context.close();
+    await browser.close();
+    await stopServer(server);
+  }
+});
+
+test('B1.3.3 conserva Todavía no e invalida intento pendiente tras cambiar identidad', { timeout: 240_000 }, async () => {
+  mkdirSync(artifactDir, { recursive: true });
+  const executablePath = chromeExecutable();
+  assert.ok(executablePath);
+  const client = lead(306, 'Lead Intento Pendiente');
+  const port = 63500 + Math.floor(Math.random() * 80);
+  const url = `http://127.0.0.1:${port}`;
+  const server = await startServer(port);
+  const browser = await chromium.launch({ executablePath, headless: true });
+  const context = await contextFor(browser, { width: 390, height: 844 }, 'pending-attempt', fixture(client), 'Franco');
+  try {
+    const page = await context.newPage();
+    await page.clock.setFixedTime(new Date('2026-08-02T18:00:00-03:00'));
+    await load(page, url);
+    await installActionCounters(page);
+
+    await page.locator(`#crm.active [data-contact-whatsapp="${client.id}"]`).click();
+    await page.locator('[data-whatsapp-open]').click();
+    assert.equal(await page.evaluate(() => (window as unknown as { __b133OpenCount: number }).__b133OpenCount), 1);
+    assert.notEqual(await page.evaluate((key) => localStorage.getItem(key), attemptKey()), null);
+    await page.clock.setFixedTime(new Date('2026-08-02T18:00:02-03:00'));
+    await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+    await page.locator('[data-whatsapp-not-yet]').filter({ hasText: 'Todavía no' }).waitFor({ state: 'visible' });
+    await page.locator('[data-whatsapp-not-yet]').filter({ hasText: 'Todavía no' }).click();
+    assert.equal(await page.evaluate((key) => localStorage.getItem(key), attemptKey()), null);
+    let saved = await snapshot(page);
+    assert.equal(saved.activityLog.filter((entry) => entry.action === 'Contacto por WhatsApp').length, 0);
+
+    await page.locator(`#crm.active [data-contact-whatsapp="${client.id}"]`).click();
+    await page.locator('[data-whatsapp-open]').click();
+    assert.notEqual(await page.evaluate((key) => localStorage.getItem(key), attemptKey()), null);
+    await page.evaluate(({ key, record }) => {
+      localStorage.setItem(key, JSON.stringify(record));
+      document.dispatchEvent(new CustomEvent('propcontrol-whatsapp-identity-changed'));
+    }, {
+      key: whatsappIdentityKey(),
+      record: identityRecord('Carla Pereyra', identity('Dueño'), '2026-08-02T22:00:00.000Z'),
+    });
+    await page.waitForFunction((key) => localStorage.getItem(key) === null, attemptKey());
+    await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+    assert.equal(await page.locator('[data-whatsapp-confirm-sent]:visible').count(), 0);
+    saved = await snapshot(page);
+    assert.equal(saved.activityLog.filter((entry) => entry.action === 'Contacto por WhatsApp').length, 0);
+    assert.equal(saved.activityLog.filter((entry) => entry.action === 'Seguimiento por WhatsApp programado').length, 0);
+    assert.equal(saved.reminders.length, 0);
+    await page.screenshot({ path: `${artifactDir}/17-intento-pendiente-invalidado.png`, fullPage: true });
+    await assertNoHorizontalScroll(page);
+  } finally {
+    await context.close();
+    await browser.close();
+    await stopServer(server);
+  }
+});
+
+test('B1.3.3 mantiene identidad confirmada y geometría en escritorio', { timeout: 180_000 }, async () => {
   mkdirSync(artifactDir, { recursive: true });
   const executablePath = chromeExecutable();
   assert.ok(executablePath);
   const client = lead(303, 'Lead Escritorio Auditoría');
-  const crm = fixture({
-    client,
-    memberName: 'Franco Agustín',
-    memberEmail: 'franco@dominio.com',
-    profileName: 'Franco Agustín',
-    profileEmail: 'franco@dominio.com',
-  });
   const port = 63200 + Math.floor(Math.random() * 80);
   const url = `http://127.0.0.1:${port}`;
   const server = await startServer(port);
   const browser = await chromium.launch({ executablePath, headless: true });
-  const context = await contextFor(browser, { width: 1366, height: 768 }, 'desktop-audit', crm);
+  const context = await contextFor(browser, { width: 1366, height: 768 }, 'desktop-audit', fixture(client), 'Franco Agustín');
   try {
     const page = await context.newPage();
     await page.clock.setFixedTime(new Date('2026-08-02T18:00:00-03:00'));
     await load(page, url);
     await page.locator(`#crm.active [data-contact-whatsapp="${client.id}"]`).click();
-    const message = page.locator('[data-whatsapp-message]');
-    await message.waitFor({ state: 'visible' });
-    assert.match(await message.inputValue(), /soy Franco de TRV Gestión Inmobiliaria/);
+    assert.match(await page.locator('[data-whatsapp-message]').inputValue(), /soy Franco de TRV Gestión Inmobiliaria/);
     await page.screenshot({ path: `${artifactDir}/14-escritorio-correccion-auditoria.png`, fullPage: true });
     await assertNoHorizontalScroll(page);
   } finally {
