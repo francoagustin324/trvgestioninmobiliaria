@@ -26,7 +26,7 @@ function scheduleSynchronize(): void {
 function install(): void {
   if (typeof document === 'undefined') return;
   document.addEventListener('trv-render', scheduleSynchronize);
-  document.addEventListener('click', scheduleSynchronize);
+  document.addEventListener('click', scheduleSynchronize, true);
   document.addEventListener('submit', scheduleSynchronize);
   scheduleSynchronize();
 }
