@@ -138,6 +138,23 @@ body.whatsapp-contact-open {
   flex: 0 0 auto;
 }
 
+.whatsapp-identity-form .whatsapp-contact-update-phone input[type="checkbox"] {
+  position: static !important;
+  display: block !important;
+  width: 20px !important;
+  height: 20px !important;
+  min-height: 20px !important;
+  margin: 0;
+  opacity: 1 !important;
+  visibility: visible !important;
+  pointer-events: auto !important;
+}
+
+.whatsapp-identity-form button[type="submit"] {
+  min-height: 44px;
+  margin-bottom: 16px;
+}
+
 .whatsapp-contact-copy-row {
   display: flex;
   align-items: center;
