@@ -226,28 +226,49 @@ async function assertFullyVisible(page: Page, locator: Locator): Promise<void> {
   assert.equal(topElement, true, 'La navegación inferior o una capa no debe tapar el botón.');
 }
 
+async function assertAboveMobileNavigation(page: Page, locator: Locator): Promise<void> {
+  const button = await locator.boundingBox();
+  const navigation = await page.locator('.mobile-bottom-nav').boundingBox();
+  assert.ok(button && navigation, 'Botón y navegación deben tener geometría.');
+  assert.ok(button.y + button.height <= navigation.y + 1, JSON.stringify({ button, navigation }));
+}
+
 async function openLeadForm(page: Page): Promise<Locator> {
   await page.locator('[data-toggle="client-form"]').click();
   const form = page.locator('#mvp-lead-form.b131-lead-form:not(.collapsed)');
   await form.waitFor({ state: 'visible' });
-  await page.waitForFunction(() => document.querySelector('.b133-postproduction-modal-close')?.textContent === '×');
   return form;
 }
 
 async function verifyLeadModal(page: Page, mobile: boolean): Promise<void> {
   const form = await openLeadForm(page);
-  const close = form.locator('.mvp-form-heading .b133-postproduction-modal-close');
+  const pageToggle = page.locator('#crm [data-toggle="client-form"]');
+  const internalClose = form.locator('.mvp-form-heading [data-cancel-client-edit]');
   const cancel = form.getByRole('button', { name: 'Cancelar', exact: true });
   const save = form.getByRole('button', { name: 'Guardar lead', exact: true });
 
-  assert.equal(await close.count(), 1);
-  assert.equal((await close.textContent())?.trim(), '×');
-  assert.equal(await form.getByRole('button', { name: 'Cerrar', exact: true }).count(), 0);
-  assert.equal(await page.locator('#crm .mvp-page-heading [data-toggle="client-form"]').isVisible(), false);
+  if (mobile) {
+    assert.equal(await pageToggle.isVisible(), true);
+    const toggleVisual = await pageToggle.evaluate((element) => ({
+      pseudoContent: getComputedStyle(element, '::after').content,
+      fontSize: getComputedStyle(element).fontSize,
+    }));
+    assert.equal(toggleVisual.pseudoContent.replaceAll('"', ''), '×');
+    assert.equal(toggleVisual.fontSize, '0px');
+    assert.equal(await internalClose.isVisible(), false);
+    assert.equal(await page.getByText('Cerrar', { exact: true }).isVisible().catch(() => false), false);
+  }
+
   await assertFullyVisible(page, cancel);
   await assertFullyVisible(page, save);
+  if (mobile) {
+    await assertAboveMobileNavigation(page, cancel);
+    await assertAboveMobileNavigation(page, save);
+    await page.screenshot({ path: `${artifactDir}/18-hotfix-modal-superior-390x844.png`, fullPage: true });
+  }
 
-  const scrolling = await form.locator('.b131-lead-form-fields').evaluate((element) => ({
+  const fields = form.locator('.b131-lead-form-fields');
+  const scrolling = await fields.evaluate((element) => ({
     clientHeight: element.clientHeight,
     scrollHeight: element.scrollHeight,
     overflowX: getComputedStyle(element).overflowX,
@@ -256,7 +277,7 @@ async function verifyLeadModal(page: Page, mobile: boolean): Promise<void> {
   assert.equal(scrolling.overflowX, 'hidden');
   assert.equal(scrolling.overflowY, 'auto');
   assert.ok(scrolling.scrollHeight >= scrolling.clientHeight);
-  await form.locator('.b131-lead-form-fields').evaluate((element) => {
+  await fields.evaluate((element) => {
     element.scrollTop = element.scrollHeight;
   });
   await assertFullyVisible(page, cancel);
@@ -264,12 +285,16 @@ async function verifyLeadModal(page: Page, mobile: boolean): Promise<void> {
   await assertNoHorizontalScroll(page);
 
   if (mobile) {
-    await page.screenshot({ path: `${artifactDir}/18-hotfix-modal-completo-390x844.png`, fullPage: true });
+    await assertAboveMobileNavigation(page, cancel);
+    await assertAboveMobileNavigation(page, save);
+    await page.screenshot({ path: `${artifactDir}/19-hotfix-modal-inferior-390x844.png`, fullPage: true });
     await form.locator('input[name="email"]').focus();
     await page.setViewportSize({ width: 390, height: 560 });
     await page.waitForTimeout(120);
     await assertFullyVisible(page, cancel);
     await assertFullyVisible(page, save);
+    await assertAboveMobileNavigation(page, cancel);
+    await assertAboveMobileNavigation(page, save);
     await page.setViewportSize({ width: 390, height: 844 });
     await page.waitForTimeout(120);
   }
@@ -278,11 +303,13 @@ async function verifyLeadModal(page: Page, mobile: boolean): Promise<void> {
   await form.locator('input[name="phone"]').fill('03515110069');
   await form.locator('input[name="interest"]').fill('Dúplex en Docta');
   await save.click();
-  await form.getByText('Este WhatsApp ya pertenece al lead Lead WhatsApp existente.').waitFor({ state: 'visible' });
+  await form.locator('[data-lead-status][data-kind="duplicate"]').waitFor({ state: 'visible' });
   assert.equal(await form.getByRole('button', { name: 'Abrir lead existente', exact: true }).isVisible(), true);
   assert.equal(await form.getByRole('button', { name: 'Corregir número', exact: true }).isVisible(), true);
-  await close.click();
-  await form.waitFor({ state: 'detached' });
+
+  if (mobile) await pageToggle.click();
+  else await internalClose.click();
+  await page.waitForFunction(() => document.querySelector('#mvp-lead-form')?.classList.contains('collapsed'));
 }
 
 async function verifyIdentityPanel(page: Page, screenshot: boolean): Promise<void> {
@@ -294,7 +321,7 @@ async function verifyIdentityPanel(page: Page, screenshot: boolean): Promise<voi
   assert.equal(await panel.getByText('Configuración personal requerida', { exact: true }).count(), 1);
   assert.equal(await panel.locator('.whatsapp-context-note').count(), 1);
   assert.equal(await panel.locator('[data-whatsapp-identity-form] .whatsapp-context-note').count(), 0);
-  assert.equal(await panel.getByLabel('Nombre personal para firmar mensajes').isVisible(), true);
+  assert.equal(await panel.locator('[data-whatsapp-identity-form] input[name="human-name"]').isVisible(), true);
   assert.equal(await panel.locator('[data-whatsapp-identity-form] input[name="confirmed"]').isVisible(), true);
   assert.equal(await panel.locator('[data-whatsapp-phone]').isDisabled(), true);
   assert.equal(await panel.locator('[data-whatsapp-message]').isDisabled(), true);
@@ -303,7 +330,7 @@ async function verifyIdentityPanel(page: Page, screenshot: boolean): Promise<voi
   await assertNoHorizontalScroll(page);
 
   if (screenshot) {
-    await page.screenshot({ path: `${artifactDir}/19-hotfix-identidad-sin-duplicado-390x844.png`, fullPage: true });
+    await page.screenshot({ path: `${artifactDir}/20-hotfix-identidad-sin-duplicado-390x844.png`, fullPage: true });
   }
   await panel.locator('[data-whatsapp-close]').click();
 }
@@ -318,9 +345,10 @@ test('hotfix B1.3.3 conserva el alcance visual y la carga responsive', () => {
   assert.match(index, /interactive-widget=resizes-content/);
   assert.match(index, /b1-3-3-mobile-postproduction-hotfix\.css\?v=20260803-1/);
   assert.match(index, /b1-3-3-mobile-postproduction-hotfix\.js\?v=20260803-1/);
-  assert.match(hotfix, /b133-postproduction-modal-close/);
+  assert.doesNotMatch(hotfix, /MutationObserver/);
   assert.match(hotfix, /Configuración personal requerida/);
-  assert.match(css, /--pc-visual-viewport-height/);
+  assert.match(css, /\[data-cancel-client-edit\]/);
+  assert.match(css, /var\(--pc-mobile-nav-height/);
   assert.match(css, /env\(safe-area-inset-bottom\)/);
   assert.match(leadLogic, /findDuplicateClient/);
   assert.match(leadLogic, /Abrir lead existente/);
@@ -353,7 +381,7 @@ test('hotfix B1.3.3 valida Motorola 390x844 y escritorio 1366x768 sin regresione
       await load(page, url);
       await verifyLeadModal(page, false);
       await verifyIdentityPanel(page, false);
-      await page.screenshot({ path: `${artifactDir}/20-hotfix-escritorio-1366x768.png`, fullPage: true });
+      await page.screenshot({ path: `${artifactDir}/21-hotfix-escritorio-1366x768.png`, fullPage: true });
     } finally {
       await desktopContext.close();
     }
