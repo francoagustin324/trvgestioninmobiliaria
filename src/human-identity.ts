@@ -56,11 +56,7 @@ function titleCase(value: string): string {
 
 function isTechnicalIdentity(compact: string): boolean {
   if (TECHNICAL_IDENTITIES.has(compact)) return true;
-  return /^(?:
-    usuario|user|admin|administrador|owner|agente|agent|corredor|broker|
-    cuenta|account|crm|soporte|support|sistema|system|
-    propcontrol|info|informacion|contacto|noreply|marketing|comercial|ventas
-  )\d*$/x.test(compact);
+  return /^(?:usuario|user|admin|administrador|owner|agente|agent|corredor|broker|cuenta|account|crm|soporte|support|sistema|system|propcontrol|info|informacion|contacto|noreply|marketing|comercial|ventas)\d*$/.test(compact);
 }
 
 export function isHumanIdentityName(value: string, organizationName = '', organizationId = ''): boolean {
