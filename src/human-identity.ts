@@ -4,12 +4,20 @@ export interface HumanIdentityResolution {
   valid: boolean;
   fullName: string;
   firstName: string;
-  source: 'member' | 'profile' | 'email' | 'none';
+  source: 'member' | 'profile' | 'none';
   reason: string;
 }
 
 const TECHNICAL_IDENTITIES = new Set([
+  'trvgestion',
   'trvgestioninmobiliaria',
+  'propcontrol',
+  'info',
+  'informacion',
+  'contacto',
+  'noreply',
+  'marketing',
+  'comercial',
   'usuario',
   'user',
   'admin',
@@ -46,6 +54,15 @@ function titleCase(value: string): string {
     .replace(/(^|[\s'-])\p{L}/gu, (match) => match.toLocaleUpperCase('es-AR'));
 }
 
+function isTechnicalIdentity(compact: string): boolean {
+  if (TECHNICAL_IDENTITIES.has(compact)) return true;
+  return /^(?:
+    usuario|user|admin|administrador|owner|agente|agent|corredor|broker|
+    cuenta|account|crm|soporte|support|sistema|system|
+    propcontrol|info|informacion|contacto|noreply|marketing|comercial|ventas
+  )\d*$/x.test(compact);
+}
+
 export function isHumanIdentityName(value: string, organizationName = '', organizationId = ''): boolean {
   const trimmed = value.trim().replace(/\s+/g, ' ');
   if (trimmed.length < 2 || trimmed.length > 80) return false;
@@ -55,21 +72,15 @@ export function isHumanIdentityName(value: string, organizationName = '', organi
   if (!/\p{L}/u.test(trimmed)) return false;
 
   const compact = normalized(trimmed);
-  if (!compact || TECHNICAL_IDENTITIES.has(compact)) return false;
-  if (/^(usuario|user|admin|agente|agent|corredor|broker|cuenta|account|crm|soporte|support|sistema|system)\d*$/.test(compact)) return false;
-  if (compact === normalized(organizationName) || compact === normalized(organizationId)) return false;
-  return true;
-}
+  if (!compact || isTechnicalIdentity(compact)) return false;
+  if (/^(?:propcontrol|trvgestion|trvgestioninmobiliaria)/.test(compact)) return false;
 
-function fromEmail(email: string, organizationName: string, organizationId: string): string {
-  const local = email.trim().toLowerCase().split('@')[0] || '';
-  if (!local || /\d/.test(local)) return '';
-  const separated = local.replace(/[._-]+/g, ' ').trim();
-  const tokens = separated.split(/\s+/).filter(Boolean);
-  if (!tokens.length || tokens.some((token) => TECHNICAL_IDENTITIES.has(normalized(token)))) return '';
-  if (tokens.length === 1 && tokens[0]!.length > 14) return '';
-  const candidate = titleCase(tokens.join(' '));
-  return isHumanIdentityName(candidate, organizationName, organizationId) ? candidate : '';
+  const organizationCompact = normalized(organizationName);
+  const organizationIdCompact = normalized(organizationId);
+  if (compact === organizationCompact || compact === organizationIdCompact) return false;
+  if (compact.length >= 6 && organizationCompact && organizationCompact.startsWith(compact)) return false;
+  if (compact.length >= 6 && organizationIdCompact && organizationIdCompact.startsWith(compact)) return false;
+  return true;
 }
 
 export function resolveHumanIdentity(input: {
@@ -84,7 +95,7 @@ export function resolveHumanIdentity(input: {
   const memberName = input.member?.name?.trim() || '';
   const profileName = input.profileName?.trim() || '';
 
-  const candidates: Array<{ value: string; source: HumanIdentityResolution['source'] }> = [
+  const candidates: Array<{ value: string; source: 'member' | 'profile' }> = [
     { value: memberName, source: 'member' },
     { value: profileName, source: 'profile' },
   ];
@@ -100,24 +111,12 @@ export function resolveHumanIdentity(input: {
     };
   }
 
-  const emailName = fromEmail(input.member?.email || '', organizationName, organizationId)
-    || fromEmail(input.profileEmail || '', organizationName, organizationId);
-  if (emailName) {
-    return {
-      valid: true,
-      fullName: emailName,
-      firstName: emailName.split(/\s+/)[0] || emailName,
-      source: 'email',
-      reason: '',
-    };
-  }
-
   return {
     valid: false,
     fullName: '',
     firstName: '',
     source: 'none',
-    reason: 'Configurá “Nombre para mensajes” con un nombre humano antes de contactar por WhatsApp.',
+    reason: 'Configurá “Nombre para mensajes” con el nombre real de una persona. No se usan correos, empresas ni cuentas técnicas.',
   };
 }
 
