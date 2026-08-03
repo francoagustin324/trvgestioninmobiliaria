@@ -43,19 +43,30 @@ test('B1.3.3 auditoría bloquea nombres técnicos, empresariales y departamental
   }
 });
 
-test('B1.3.3 auditoría nunca deriva una firma desde el correo', () => {
-  for (const email of blockedEmails) {
+test('B1.3.3 auditoría nunca deriva una firma de WhatsApp desde el correo', () => {
+  for (const email of [...blockedEmails, 'franco.agustin@dominio.com']) {
     const result = resolveHumanIdentity({
       member: { name: '', email },
       profileName: '',
       profileEmail: email,
       organizationName,
       organizationId,
+      allowEmailFallback: false,
     });
-    assert.equal(result.valid, false, `El correo no debe producir identidad: ${email}`);
+    assert.equal(result.valid, false, `El correo no debe producir firma: ${email}`);
     assert.equal(result.source, 'none');
     assert.equal(result.fullName, '');
   }
+});
+
+test('B1.3.3 auditoría mantiene compatibilidad de presentación fuera de WhatsApp', () => {
+  const result = resolveHumanIdentity({
+    member: { name: 'usuario', email: 'franco.solis@dominio.com' },
+    profileName: '',
+  });
+  assert.equal(result.valid, true);
+  assert.equal(result.source, 'email');
+  assert.equal(result.fullName, 'Franco Solis');
 });
 
 test('B1.3.3 auditoría utiliza el nombre humano explícito de Franco', () => {
@@ -65,6 +76,7 @@ test('B1.3.3 auditoría utiliza el nombre humano explícito de Franco', () => {
     profileEmail: 'info@dominio.com',
     organizationName,
     organizationId,
+    allowEmailFallback: false,
   });
   assert.equal(result.valid, true);
   assert.equal(result.source, 'profile');
@@ -79,6 +91,7 @@ test('B1.3.3 auditoría conserva nombres humanos explícitos de otros corredores
       profileName: '',
       organizationName,
       organizationId,
+      allowEmailFallback: false,
     });
     assert.equal(result.valid, true, name);
     assert.equal(result.source, 'member');
@@ -93,6 +106,7 @@ test('B1.3.3 auditoría aplica fail-closed cuando falta nombre humano explícito
     profileEmail: 'franco.agustin@dominio.com',
     organizationName,
     organizationId,
+    allowEmailFallback: false,
   });
   assert.equal(result.valid, false);
   assert.equal(result.source, 'none');
