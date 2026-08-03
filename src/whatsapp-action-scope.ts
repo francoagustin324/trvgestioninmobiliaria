@@ -3,7 +3,20 @@ import { enhanceWhatsAppContactFlow } from './whatsapp-contact-ui.js';
 const MODULE_SELECTOR = '#crm, #agenda, #whatsapp, #propiedades, #equipo';
 const ACTIVE_MODULE_SELECTOR = '#crm.active, #agenda.active, #whatsapp.active, #propiedades.active, #equipo.active';
 
+function ensureBackdropCloseSemantics(): void {
+  const backdrop = document.querySelector<HTMLElement>('.whatsapp-contact-backdrop[data-whatsapp-close]');
+  if (!backdrop) return;
+  backdrop.removeAttribute('data-whatsapp-close');
+  backdrop.dataset.whatsappBackdropClose = '';
+  if (backdrop.dataset.whatsappBackdropBound === 'true') return;
+  backdrop.dataset.whatsappBackdropBound = 'true';
+  backdrop.addEventListener('click', () => {
+    document.querySelector<HTMLButtonElement>('#propcontrol-whatsapp-contact button[data-whatsapp-close]')?.click();
+  });
+}
+
 function scopeActionsToActiveModule(): void {
+  ensureBackdropCloseSemantics();
   const activeModule = document.querySelector<HTMLElement>(ACTIVE_MODULE_SELECTOR);
   if (!activeModule) return;
 
