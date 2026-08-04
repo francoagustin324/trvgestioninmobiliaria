@@ -5,7 +5,6 @@ const boundFilterDetails = new WeakSet<HTMLDetailsElement>();
 let filterPanelOpen = false;
 let synchronizationScheduled = false;
 let suppressFilterToggle = false;
-let stageScrollScheduled = false;
 
 interface BlockingFixWindow extends Window {
   [INSTALL_FLAG]?: boolean;
@@ -39,7 +38,6 @@ function synchronizeFilterPanel(crm: HTMLElement): void {
     boundFilterDetails.add(details);
     details.addEventListener('toggle', () => {
       if (suppressFilterToggle) return;
-      filterPanelOpen = isMobile() && details.open;
       synchronizeFilterPanel(crm);
     });
   }
@@ -89,13 +87,10 @@ function synchronizeRedesign(): void {
   const crm = document.querySelector<HTMLElement>('#crm');
   if (!crm) return;
 
-  const leadsVisible = crm.classList.contains('active') && Boolean(crm.querySelector('#mvp-lead-results'));
-  crm.classList.toggle('pc-leads-redesign', leadsVisible);
-  if (!leadsVisible) {
-    filterPanelOpen = false;
-    return;
-  }
+  const hasLeads = Boolean(crm.querySelector('#mvp-lead-results'));
+  if (!hasLeads) return;
 
+  crm.classList.add('pc-leads-redesign');
   synchronizeFilterPanel(crm);
   synchronizeSelectedStage(crm);
   synchronizeFormGeometry(crm);
@@ -117,16 +112,6 @@ function closeMobileFilters(): void {
   }
 }
 
-function preserveStageScrollBehavior(): void {
-  if (!isMobile() || stageScrollScheduled) return;
-  stageScrollScheduled = true;
-  window.requestAnimationFrame(() => {
-    stageScrollScheduled = false;
-    window.scrollBy({ top: 0, left: 0, behavior: 'instant' });
-    scheduleSynchronization();
-  });
-}
-
 function install(): void {
   if (typeof document === 'undefined') return;
   const globalWindow = window as BlockingFixWindow;
@@ -140,7 +125,11 @@ function install(): void {
   }, true);
   document.addEventListener('click', (event) => {
     const target = event.target as HTMLElement;
-    if (target.closest('[data-stage-quick]')) preserveStageScrollBehavior();
+    const summary = target.closest<HTMLElement>('.mvp-lead-more-filters > summary');
+    if (summary && isMobile()) {
+      const details = summary.parentElement as HTMLDetailsElement;
+      filterPanelOpen = !details.open;
+    }
     if (target.closest('[data-pc-apply-filters]')) filterPanelOpen = false;
     scheduleSynchronization();
   });
