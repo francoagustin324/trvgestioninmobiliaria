@@ -48,26 +48,39 @@
 @media (min-width: 721px) {
   body:has(#mvp-lead-form.b131-lead-form:not(.collapsed)) {
     overflow: hidden;
+    overscroll-behavior: none;
   }
 
   #crm .b131-lead-form:not(.collapsed) {
     position: fixed;
     z-index: 102;
-    top: clamp(84px, 8vh, 112px);
+    top: 50%;
     left: 50%;
     width: min(920px, calc(100vw - 64px));
     max-width: 920px;
-    max-height: calc(100dvh - clamp(84px, 8vh, 112px) - 32px);
+    max-height: min(680px, calc(100dvh - 40px));
     margin: 0;
-    transform: translateX(-50%);
+    transform: translate(-50%, -50%);
+    overflow: hidden;
+    overscroll-behavior: contain;
     box-shadow: 0 28px 80px rgba(0, 0, 0, 0.5);
+  }
+
+  #crm .b131-lead-form:not(.collapsed) > .mvp-form-heading,
+  #crm .b131-lead-form:not(.collapsed) > .b131-lead-form-fields,
+  #crm .b131-lead-form:not(.collapsed) > .b131-lead-form-footer {
+    width: 100%;
+    margin-inline: auto;
+    box-sizing: border-box;
   }
 
   #crm .b131-lead-form-fields {
     flex: 1 1 auto;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
     min-height: 0;
     overflow-x: hidden;
     overflow-y: auto;
+    overscroll-behavior-y: contain;
   }
 
   #crm .b131-lead-form-footer {
