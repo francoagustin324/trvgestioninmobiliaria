@@ -34,10 +34,44 @@ function clearCoreFiltersFallback(crm: HTMLElement): void {
   setSelectValue(currentCrm.querySelector<HTMLSelectElement>('#mvp-lead-stage-filter'), 'Todas');
 }
 
+function rebuildOptionalSummary(summary: HTMLElement): void {
+  summary.textContent = '';
+  const label = document.createElement('span');
+  label.textContent = 'Preferencias y datos opcionales';
+  const badge = document.createElement('small');
+  badge.textContent = 'Opcional';
+  summary.append(label, badge);
+}
+
+function normalizeFormSections(crm: HTMLElement): void {
+  const fields = crm.querySelector<HTMLElement>('#mvp-lead-form.pc-lead-dialog:not(.collapsed) .b131-lead-form-fields');
+  if (!fields) return;
+
+  const qualification = fields.querySelector<HTMLDetailsElement>('details.lead-form-essential:not(.lead-form-secondary)');
+  const optional = fields.querySelector<HTMLDetailsElement>('details.lead-form-secondary');
+
+  if (qualification) {
+    qualification.classList.remove('pc-lead-form-optional');
+    qualification.classList.add('pc-lead-form-section', 'pc-lead-form-qualification');
+    qualification.open = true;
+    const summary = qualification.querySelector<HTMLElement>(':scope > summary');
+    if (summary) summary.textContent = 'Calificación comercial';
+  }
+
+  if (optional) {
+    optional.classList.remove('pc-lead-form-qualification');
+    optional.classList.add('pc-lead-form-section', 'pc-lead-form-optional');
+    const summary = optional.querySelector<HTMLElement>(':scope > summary');
+    if (summary && summary.querySelector('small')?.textContent !== 'Opcional') rebuildOptionalSummary(summary);
+  }
+}
+
 function synchronizeLeadRedesignState(): void {
   scheduled = false;
   const crm = document.querySelector<HTMLElement>('#crm.pc-leads-redesign');
   if (!crm) return;
+
+  normalizeFormSections(crm);
 
   const activeCoreFilters = hasCoreFilters(crm);
   const activeAttention = Boolean(crm.querySelector('.pc-attention-chip.active'));
