@@ -16,6 +16,7 @@ concurrency:
 jobs:
   build-and-test:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     env:
       PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
     steps:
@@ -43,7 +44,7 @@ jobs:
       - name: Ejecutar pruebas
         run: |
           set +e
-          npm test --silent > test.log 2>&1
+          node --test --test-concurrency=1 dist/tests/*.test.js > test.log 2>&1
           code=$?
           cat test.log
           exit $code
