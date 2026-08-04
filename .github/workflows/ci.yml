@@ -34,9 +34,13 @@ jobs:
           git fetch origin "$BRANCH"
           git checkout -B "$BRANCH" "origin/$BRANCH"
           node scripts/apply-pr137-render-integration.mjs
+          git checkout "origin/$BRANCH" -- .github/workflows/ci.yml scripts/apply-pr137-render-integration.mjs
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -A
+          git add src/leads-professional-redesign.ts src/leads-professional-redesign-blocking-fix.ts src/leads-professional-redesign-final-fix.css src/mvp-leads-ui.ts src/tests/leads-professional-redesign.test.ts
+          if git diff --cached --quiet; then
+            exit 0
+          fi
           git commit -m "Integrar render determinístico y corregir regresiones de Leads"
           git push origin HEAD:"$BRANCH"
       - name: Adjuntar snapshot temporal del PR
