@@ -16,7 +16,6 @@ concurrency:
 jobs:
   build-and-test:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
     env:
       PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
     steps:
@@ -44,7 +43,7 @@ jobs:
       - name: Ejecutar pruebas
         run: |
           set +e
-          node --test --test-concurrency=1 dist/tests/*.test.js > test.log 2>&1
+          npm test --silent > test.log 2>&1
           code=$?
           cat test.log
           exit $code
@@ -87,11 +86,16 @@ jobs:
           path: artifacts/b1-3-3
           if-no-files-found: ignore
           retention-days: 14
+      - name: Verificar capturas rediseño profesional de Leads
+        if: always()
+        run: |
+          test -d artifacts/leads-redesign
+          test "$(find artifacts/leads-redesign -maxdepth 1 -type f -name '*.png' | wc -l)" -eq 10
       - name: Adjuntar capturas rediseño profesional de Leads
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: leads-professional-redesign-capturas
           path: artifacts/leads-redesign
-          if-no-files-found: ignore
+          if-no-files-found: error
           retention-days: 14
