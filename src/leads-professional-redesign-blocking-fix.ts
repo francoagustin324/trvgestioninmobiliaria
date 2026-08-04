@@ -6,6 +6,7 @@ const programmaticToggles = new WeakSet<HTMLDetailsElement>();
 let filterPanelOpen = false;
 let synchronizationScheduled = false;
 let initialPreparationFrame: number | null = null;
+let initialEnhancementSignalSent = false;
 
 interface BlockingFixWindow extends Window {
   [INSTALL_FLAG]?: boolean;
@@ -105,8 +106,17 @@ function scheduleSynchronization(): void {
 
 function prepareInitialLeadsBeforePaint(): void {
   initialPreparationFrame = null;
-  if (synchronizeRedesign()) return;
-  if (location.pathname !== '/' && location.pathname !== '') return;
+  const crm = document.querySelector<HTMLElement>('#crm');
+  if (crm?.querySelector('#mvp-lead-results')) {
+    prepareLeadsProfessionalRedesign(crm);
+    if (!initialEnhancementSignalSent) {
+      initialEnhancementSignalSent = true;
+      document.dispatchEvent(new CustomEvent('trv-render'));
+    }
+    if (crm.querySelector('[data-pc-attention-section]')) return;
+  } else if (location.pathname !== '/' && location.pathname !== '') {
+    return;
+  }
   initialPreparationFrame = window.requestAnimationFrame(prepareInitialLeadsBeforePaint);
 }
 
