@@ -4,6 +4,7 @@ const boundFilterDetails = new WeakSet<HTMLDetailsElement>();
 const programmaticToggles = new WeakSet<HTMLDetailsElement>();
 
 let filterPanelOpen = false;
+let userFilterTogglePending = false;
 let synchronizationScheduled = false;
 let initialPreparationFrame: number | null = null;
 let initialEnhancementSignalSent = false;
@@ -29,6 +30,23 @@ function setDetailsOpen(details: HTMLDetailsElement, open: boolean): void {
   details.open = open;
 }
 
+function applyFilterInteractionState(details: HTMLDetailsElement, enabled: boolean): void {
+  setInteractiveRegion(details.querySelector<HTMLElement>('.mvp-lead-filter-grid'), enabled);
+  setInteractiveRegion(details.querySelector<HTMLElement>('.mvp-lead-filter-toggles'), enabled);
+  setInteractiveRegion(details.querySelector<HTMLElement>('[data-pc-filter-actions]'), enabled);
+  details.classList.toggle('pc-filter-panel-open', isMobile() && enabled);
+  details.querySelector<HTMLElement>(':scope > summary')?.setAttribute('aria-expanded', String(enabled));
+}
+
+function closeTransientProgrammaticPanel(details: HTMLDetailsElement, crm: HTMLElement): void {
+  window.requestAnimationFrame(() => {
+    if (!details.isConnected || filterPanelOpen || !isMobile()) return;
+    setDetailsOpen(details, false);
+    applyFilterInteractionState(details, false);
+    synchronizeFilterPanel(crm);
+  });
+}
+
 function synchronizeFilterPanel(crm: HTMLElement): void {
   const details = crm.querySelector<HTMLDetailsElement>('.mvp-lead-more-filters');
   if (!details) return;
@@ -38,22 +56,24 @@ function synchronizeFilterPanel(crm: HTMLElement): void {
     details.addEventListener('toggle', () => {
       details.querySelector<HTMLElement>(':scope > summary')?.setAttribute('aria-expanded', String(details.open));
       if (programmaticToggles.delete(details)) return;
-      filterPanelOpen = isMobile() && details.open;
-      synchronizeFilterPanel(crm);
+
+      if (userFilterTogglePending) {
+        userFilterTogglePending = false;
+        filterPanelOpen = isMobile() && details.open;
+        synchronizeFilterPanel(crm);
+        return;
+      }
+
+      const enabled = !isMobile() || details.open;
+      applyFilterInteractionState(details, enabled);
+      if (isMobile() && details.open) closeTransientProgrammaticPanel(details, crm);
     });
   }
 
   const mobile = isMobile();
   if (!mobile) filterPanelOpen = false;
   setDetailsOpen(details, mobile ? filterPanelOpen : true);
-
-  const interactive = !mobile || details.open;
-  setInteractiveRegion(details.querySelector<HTMLElement>('.mvp-lead-filter-grid'), interactive);
-  setInteractiveRegion(details.querySelector<HTMLElement>('.mvp-lead-filter-toggles'), interactive);
-  setInteractiveRegion(details.querySelector<HTMLElement>('[data-pc-filter-actions]'), interactive);
-
-  details.classList.toggle('pc-filter-panel-open', mobile && details.open);
-  details.querySelector<HTMLElement>(':scope > summary')?.setAttribute('aria-expanded', String(details.open));
+  applyFilterInteractionState(details, !mobile || details.open);
 }
 
 function synchronizeSelectedStage(crm: HTMLElement): void {
@@ -123,10 +143,11 @@ function prepareInitialLeadsBeforePaint(): void {
 function closeMobileFilters(): void {
   if (!isMobile()) return;
   filterPanelOpen = false;
+  userFilterTogglePending = false;
   const details = document.querySelector<HTMLDetailsElement>('#crm .mvp-lead-more-filters');
   if (!details) return;
   setDetailsOpen(details, false);
-  synchronizeFilterPanel(details.closest<HTMLElement>('#crm') ?? document.body);
+  applyFilterInteractionState(details, false);
 }
 
 function install(): void {
@@ -138,6 +159,7 @@ function install(): void {
   document.addEventListener('trv-render', scheduleSynchronization);
   document.addEventListener('click', (event) => {
     const target = event.target as HTMLElement;
+    if (target.closest('.mvp-lead-more-filters > summary')) userFilterTogglePending = true;
     if (target.closest('[data-account-toggle]')) closeMobileFilters();
   }, true);
   document.addEventListener('click', (event) => {
@@ -150,6 +172,7 @@ function install(): void {
   window.addEventListener('resize', scheduleSynchronization);
   window.matchMedia(MOBILE_QUERY).addEventListener('change', () => {
     filterPanelOpen = false;
+    userFilterTogglePending = false;
     scheduleSynchronization();
   });
 
