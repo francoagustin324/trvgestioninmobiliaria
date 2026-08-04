@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync } from 'node:fs';
+import { createServer as createNetServer } from 'node:net';
 import test from 'node:test';
 import {
   chromium,
@@ -87,9 +88,32 @@ function chromeExecutable(): string | undefined {
   return ['/usr/bin/google-chrome', '/usr/bin/google-chrome-stable', '/usr/bin/chromium', '/usr/bin/chromium-browser'].find(existsSync);
 }
 
-async function waitForServer(url: string): Promise<void> {
+async function portIsFree(port: number): Promise<boolean> {
+  return new Promise<boolean>((resolve) => {
+    const probe = createNetServer();
+    probe.unref();
+    probe.once('error', () => resolve(false));
+    probe.listen(port, '127.0.0.1', () => {
+      probe.close(() => resolve(true));
+    });
+  });
+}
+
+async function findFreePort(): Promise<number> {
+  const first = Math.floor(Math.random() * 80);
+  for (let offset = 0; offset < 80; offset += 1) {
+    const port = 62900 + ((first + offset) % 80);
+    if (await portIsFree(port)) return port;
+  }
+  throw new Error('No hay un puerto libre entre 62900 y 62979 para la prueba del hotfix.');
+}
+
+async function waitForServer(url: string, server: ChildProcess): Promise<void> {
   let lastError: unknown;
   for (let attempt = 0; attempt < 120; attempt += 1) {
+    if (server.exitCode !== null) {
+      throw new Error(`El servidor del hotfix terminó prematuramente con código ${server.exitCode}.`);
+    }
     try {
       if ((await fetch(`${url}/health`)).ok) return;
     } catch (error) {
@@ -100,39 +124,68 @@ async function waitForServer(url: string): Promise<void> {
   throw new Error(`Servidor de hotfix no disponible: ${String(lastError ?? 'sin respuesta')}`);
 }
 
-async function startServer(port: number): Promise<ChildProcess> {
-  const server = spawn(process.execPath, ['dist/server.js'], {
-    cwd: process.cwd(),
-    env: {
-      ...process.env,
-      PORT: String(port),
-      SUPABASE_URL: '',
-      SUPABASE_PUBLISHABLE_KEY: '',
-      SUPABASE_SECRET_KEY: '',
-      SUPABASE_SERVICE_ROLE_KEY: '',
-      LEAD_QUALIFICATION_AI_ENDPOINT: '',
-      LEAD_QUALIFICATION_AI_KEY: '',
-      LEAD_QUALIFICATION_AI_MODEL: '',
-    },
-    stdio: ['ignore', 'pipe', 'pipe'],
-  });
-  await waitForServer(`http://127.0.0.1:${port}`);
-  return server;
-}
-
 async function stopServer(server: ChildProcess): Promise<void> {
   if (server.exitCode !== null) return;
-  server.kill('SIGTERM');
   await new Promise<void>((resolve) => {
-    const timer = setTimeout(() => {
-      if (server.exitCode === null) server.kill('SIGKILL');
+    let settled = false;
+    let killTimer: ReturnType<typeof setTimeout> | undefined;
+    const finish = (): void => {
+      if (settled) return;
+      settled = true;
+      if (killTimer) clearTimeout(killTimer);
+      server.off('exit', finish);
+      server.off('error', finish);
       resolve();
+    };
+    server.once('exit', finish);
+    server.once('error', finish);
+    killTimer = setTimeout(() => {
+      if (server.exitCode === null) {
+        try {
+          server.kill('SIGKILL');
+        } catch {
+          // El proceso terminó entre la comprobación y la señal.
+        }
+      }
+      finish();
     }, 2_000);
-    server.once('exit', () => {
-      clearTimeout(timer);
-      resolve();
-    });
+    try {
+      server.kill('SIGTERM');
+    } catch {
+      finish();
+    }
   });
+}
+
+async function startServer(): Promise<{ server: ChildProcess; url: string }> {
+  let lastError: unknown;
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    const port = await findFreePort();
+    const url = `http://127.0.0.1:${port}`;
+    const server = spawn(process.execPath, ['dist/server.js'], {
+      cwd: process.cwd(),
+      env: {
+        ...process.env,
+        PORT: String(port),
+        SUPABASE_URL: '',
+        SUPABASE_PUBLISHABLE_KEY: '',
+        SUPABASE_SECRET_KEY: '',
+        SUPABASE_SERVICE_ROLE_KEY: '',
+        LEAD_QUALIFICATION_AI_ENDPOINT: '',
+        LEAD_QUALIFICATION_AI_KEY: '',
+        LEAD_QUALIFICATION_AI_MODEL: '',
+      },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    try {
+      await waitForServer(url, server);
+      return { server, url };
+    } catch (error) {
+      lastError = error;
+      await stopServer(server);
+    }
+  }
+  throw new Error(`No se pudo iniciar el servidor del hotfix en un puerto libre: ${String(lastError ?? 'sin detalle')}`);
 }
 
 function contextOptions(viewport: { width: number; height: number }): BrowserContextOptions {
@@ -240,7 +293,47 @@ async function openLeadForm(page: Page): Promise<Locator> {
   return form;
 }
 
-async function verifyLeadModal(page: Page, mobile: boolean): Promise<void> {
+async function assertDesktopGeometry(page: Page, form: Locator): Promise<void> {
+  const geometry = await form.evaluate((element) => {
+    const rect = element.getBoundingClientRect();
+    const fields = element.querySelector<HTMLElement>('.b131-lead-form-fields');
+    const name = element.querySelector<HTMLElement>('input[name="name"]')?.getBoundingClientRect();
+    const phone = element.querySelector<HTMLElement>('input[name="phone"]')?.getBoundingClientRect();
+    return {
+      left: rect.left,
+      right: rect.right,
+      top: rect.top,
+      bottom: rect.bottom,
+      width: rect.width,
+      centerX: rect.left + rect.width / 2,
+      centerY: rect.top + rect.height / 2,
+      viewportCenterX: innerWidth / 2,
+      viewportCenterY: innerHeight / 2,
+      leftGutter: rect.left,
+      rightGutter: innerWidth - rect.right,
+      overflowX: fields ? getComputedStyle(fields).overflowX : '',
+      overflowY: fields ? getComputedStyle(fields).overflowY : '',
+      clientHeight: fields?.clientHeight ?? 0,
+      scrollHeight: fields?.scrollHeight ?? 0,
+      nameWidth: name?.width ?? 0,
+      phoneWidth: phone?.width ?? 0,
+    };
+  });
+  const viewport = page.viewportSize();
+  assert.ok(viewport);
+  assert.ok(Math.abs(geometry.centerX - geometry.viewportCenterX) <= 1, JSON.stringify(geometry));
+  assert.ok(Math.abs(geometry.centerY - geometry.viewportCenterY) <= 1, JSON.stringify(geometry));
+  assert.ok(Math.abs(geometry.leftGutter - geometry.rightGutter) <= 2, JSON.stringify(geometry));
+  assert.ok(geometry.left >= 20 && geometry.right <= viewport.width - 20, JSON.stringify(geometry));
+  assert.ok(geometry.top >= 20 && geometry.bottom <= viewport.height - 20, JSON.stringify(geometry));
+  assert.ok(geometry.width <= 921, JSON.stringify(geometry));
+  assert.equal(geometry.overflowX, 'hidden');
+  assert.equal(geometry.overflowY, 'auto');
+  assert.ok(geometry.scrollHeight >= geometry.clientHeight, JSON.stringify(geometry));
+  assert.ok(Math.abs(geometry.nameWidth - geometry.phoneWidth) <= 1, JSON.stringify(geometry));
+}
+
+async function verifyLeadModal(page: Page, mobile: boolean, screenshotName?: string): Promise<void> {
   const form = await openLeadForm(page);
   const pageToggle = page.locator('#crm [data-toggle="client-form"]');
   const internalClose = form.locator('.mvp-form-heading [data-cancel-client-edit]');
@@ -257,15 +350,14 @@ async function verifyLeadModal(page: Page, mobile: boolean): Promise<void> {
     assert.equal(toggleVisual.fontSize, '0px');
     assert.equal(await internalClose.isVisible(), false);
     assert.equal(await page.getByText('Cerrar', { exact: true }).isVisible().catch(() => false), false);
+  } else {
+    assert.equal(await internalClose.isVisible(), true);
+    await assertDesktopGeometry(page, form);
+    await assertFullyVisible(page, internalClose);
   }
 
   await assertFullyVisible(page, cancel);
   await assertFullyVisible(page, save);
-  if (mobile) {
-    await assertAboveMobileNavigation(page, cancel);
-    await assertAboveMobileNavigation(page, save);
-    await page.screenshot({ path: `${artifactDir}/18-hotfix-modal-superior-390x844.png`, fullPage: true });
-  }
 
   const fields = form.locator('.b131-lead-form-fields');
   const scrolling = await fields.evaluate((element) => ({
@@ -277,6 +369,11 @@ async function verifyLeadModal(page: Page, mobile: boolean): Promise<void> {
   assert.equal(scrolling.overflowX, 'hidden');
   assert.equal(scrolling.overflowY, 'auto');
   assert.ok(scrolling.scrollHeight >= scrolling.clientHeight);
+
+  if (screenshotName) {
+    await page.screenshot({ path: `${artifactDir}/${screenshotName}`, fullPage: false });
+  }
+
   await fields.evaluate((element) => {
     element.scrollTop = element.scrollHeight;
   });
@@ -287,7 +384,6 @@ async function verifyLeadModal(page: Page, mobile: boolean): Promise<void> {
   if (mobile) {
     await assertAboveMobileNavigation(page, cancel);
     await assertAboveMobileNavigation(page, save);
-    await page.screenshot({ path: `${artifactDir}/19-hotfix-modal-inferior-390x844.png`, fullPage: true });
     await form.locator('input[name="email"]').focus();
     await page.setViewportSize({ width: 390, height: 560 });
     await page.waitForTimeout(120);
@@ -312,7 +408,7 @@ async function verifyLeadModal(page: Page, mobile: boolean): Promise<void> {
   await page.waitForFunction(() => document.querySelector('#mvp-lead-form')?.classList.contains('collapsed'));
 }
 
-async function verifyIdentityPanel(page: Page, screenshot: boolean): Promise<void> {
+async function verifyIdentityPanel(page: Page, screenshotName?: string): Promise<void> {
   await page.locator('#crm.active [data-contact-whatsapp="41"]').click();
   const panel = page.locator('#propcontrol-whatsapp-contact .whatsapp-contact-panel');
   await panel.waitFor({ state: 'visible' });
@@ -329,8 +425,8 @@ async function verifyIdentityPanel(page: Page, screenshot: boolean): Promise<voi
   assert.equal(await panel.locator('[data-whatsapp-manual-register]').isDisabled(), true);
   await assertNoHorizontalScroll(page);
 
-  if (screenshot) {
-    await page.screenshot({ path: `${artifactDir}/20-hotfix-identidad-sin-duplicado-390x844.png`, fullPage: true });
+  if (screenshotName) {
+    await page.screenshot({ path: `${artifactDir}/${screenshotName}`, fullPage: false });
   }
   await panel.locator('[data-whatsapp-close]').click();
 }
@@ -343,50 +439,63 @@ test('hotfix B1.3.3 conserva el alcance visual y la carga responsive', () => {
   const whatsappLogic = readFileSync('src/whatsapp-contact.ts', 'utf8');
 
   assert.match(index, /interactive-widget=resizes-content/);
-  assert.match(index, /b1-3-3-mobile-postproduction-hotfix\.css\?v=20260803-1/);
+  assert.match(index, /b1-3-3-mobile-postproduction-hotfix\.css\?v=20260804-1/);
   assert.match(index, /b1-3-3-mobile-postproduction-hotfix\.js\?v=20260803-1/);
+  assert.doesNotMatch(index, /b1-3-3-desktop-modal-centering-hotfix\.css/);
   assert.doesNotMatch(hotfix, /MutationObserver/);
   assert.match(hotfix, /Configuración personal requerida/);
   assert.match(css, /\[data-cancel-client-edit\]/);
   assert.match(css, /var\(--pc-mobile-nav-height/);
   assert.match(css, /env\(safe-area-inset-bottom\)/);
+  assert.match(css, /transform:\s*translate\(-50%, -50%\)/);
   assert.match(leadLogic, /findDuplicateClient/);
   assert.match(leadLogic, /Abrir lead existente/);
   assert.match(whatsappLogic, /assertCurrentWhatsAppHumanIdentity/);
   assert.match(whatsappLogic, /fingerprint/);
 });
 
-test('hotfix B1.3.3 valida Motorola 390x844 y escritorio 1366x768 sin regresiones', { timeout: 300_000 }, async () => {
+test('hotfix B1.3.3 valida Motorola 390x844, laptop 1280x720 y escritorio 1366x768 sin regresiones', { timeout: 300_000 }, async () => {
   mkdirSync(artifactDir, { recursive: true });
   const executablePath = chromeExecutable();
   assert.ok(executablePath, 'Chrome o Chromium debe estar disponible.');
-  const port = 62900 + Math.floor(Math.random() * 80);
-  const url = `http://127.0.0.1:${port}`;
-  const server = await startServer(port);
-  const browser = await chromium.launch({ executablePath, headless: true });
+
+  let server: ChildProcess | undefined;
+  let browser: Browser | undefined;
   try {
-    const mobileContext = await contextFor(browser, { width: 390, height: 844 }, 'propcontrol-b133-hotfix-mobile');
-    try {
-      const page = await mobileContext.newPage();
-      await load(page, url);
-      await verifyLeadModal(page, true);
-      await verifyIdentityPanel(page, true);
-    } finally {
-      await mobileContext.close();
-    }
+    const started = await startServer();
+    server = started.server;
+    browser = await chromium.launch({ executablePath, headless: true });
 
     const desktopContext = await contextFor(browser, { width: 1366, height: 768 }, 'propcontrol-b133-hotfix-desktop');
     try {
       const page = await desktopContext.newPage();
-      await load(page, url);
-      await verifyLeadModal(page, false);
-      await verifyIdentityPanel(page, false);
-      await page.screenshot({ path: `${artifactDir}/21-hotfix-escritorio-1366x768.png`, fullPage: true });
+      await load(page, started.url);
+      await verifyLeadModal(page, false, '22-hotfix-modal-centrado-1366x768.png');
+      await verifyIdentityPanel(page);
     } finally {
       await desktopContext.close();
     }
+
+    const laptopContext = await contextFor(browser, { width: 1280, height: 720 }, 'propcontrol-b133-hotfix-laptop');
+    try {
+      const page = await laptopContext.newPage();
+      await load(page, started.url);
+      await verifyLeadModal(page, false, '23-hotfix-modal-centrado-1280x720.png');
+    } finally {
+      await laptopContext.close();
+    }
+
+    const mobileContext = await contextFor(browser, { width: 390, height: 844 }, 'propcontrol-b133-hotfix-mobile');
+    try {
+      const page = await mobileContext.newPage();
+      await load(page, started.url);
+      await verifyLeadModal(page, true, '24-hotfix-mobile-sin-regresion-390x844.png');
+      await verifyIdentityPanel(page, '25-hotfix-mobile-identidad-unica-390x844.png');
+    } finally {
+      await mobileContext.close();
+    }
   } finally {
-    await browser.close();
-    await stopServer(server);
+    if (browser) await browser.close().catch(() => undefined);
+    if (server) await stopServer(server);
   }
 });

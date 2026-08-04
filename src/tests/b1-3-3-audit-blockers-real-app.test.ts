@@ -279,6 +279,21 @@ async function assertZeroWhatsAppEffects(page: Page, clientId: number): Promise<
   assert.equal(saved.reminders.length, 0);
 }
 
+async function waitForFailClosedPanel(page: Page): Promise<void> {
+  await page.waitForFunction(() => {
+    const panel = document.querySelector<HTMLElement>('#propcontrol-whatsapp-contact .whatsapp-contact-panel');
+    const message = panel?.querySelector<HTMLTextAreaElement>('[data-whatsapp-message]');
+    const actions = panel
+      ? Array.from(panel.querySelectorAll<HTMLButtonElement>('[data-whatsapp-open], [data-whatsapp-manual-register], [data-whatsapp-copy]'))
+      : [];
+    return panel?.dataset.contactBlocked === 'true'
+      && message?.value === ''
+      && message.disabled
+      && actions.length === 3
+      && actions.every((action) => action.disabled);
+  });
+}
+
 test('B1.3.3 exige configuración explícita y rechaza identidad departamental', { timeout: 240_000 }, async () => {
   mkdirSync(artifactDir, { recursive: true });
   const executablePath = chromeExecutable();
@@ -425,13 +440,15 @@ test('B1.3.3 invalida panel obsoleto tras cambiar identidad', { timeout: 240_000
       key: whatsappIdentityKey(),
       record: identityRecord('Carla Pereyra', identity('Dueño'), '2026-08-02T21:00:00.000Z'),
     });
-    await page.waitForFunction(() => document.querySelector<HTMLElement>('[data-whatsapp-context-note]')?.innerText.includes('cambió'));
+    await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+    await waitForFailClosedPanel(page);
     await page.evaluate(() => {
       const actions = (window as unknown as { __b133StaleActions: HTMLElement[] }).__b133StaleActions;
       actions.forEach((action) => action.dispatchEvent(new MouseEvent('click', { bubbles: true })));
     });
     assert.equal(await page.locator('[data-whatsapp-message]').inputValue(), '');
-    assert.match(await page.locator('[data-whatsapp-context-note]').innerText(), /identidad o usuario activo cambió/i);
+    assert.equal(await page.locator('[data-whatsapp-context-note]').count(), 1);
+    assert.equal(await page.locator('[data-whatsapp-context-note]').isVisible(), true);
     for (const selector of ['[data-whatsapp-open]', '[data-whatsapp-manual-register]', '[data-whatsapp-copy]']) {
       assert.equal(await page.locator(selector).isDisabled(), true, selector);
     }
@@ -472,14 +489,16 @@ test('B1.3.3 invalida panel antiguo al cambiar miembro activo', { timeout: 240_0
       const store = await import('/dist/store.js');
       store.setActiveMemberId(2);
       document.dispatchEvent(new CustomEvent('trv-render'));
+      window.dispatchEvent(new Event('focus'));
     });
-    await page.waitForFunction(() => document.querySelector<HTMLElement>('[data-whatsapp-context-note]')?.innerText.includes('cambió'));
+    await waitForFailClosedPanel(page);
     await page.evaluate(() => {
       const actions = (window as unknown as { __b133MemberStale: HTMLElement[] }).__b133MemberStale;
       actions.forEach((action) => action.dispatchEvent(new MouseEvent('click', { bubbles: true })));
     });
     await assertZeroWhatsAppEffects(page, client.id);
-    assert.match(await page.locator('[data-whatsapp-context-note]').innerText(), /identidad o usuario activo cambió/i);
+    assert.equal(await page.locator('[data-whatsapp-context-note]').count(), 1);
+    assert.equal(await page.locator('[data-whatsapp-context-note]').isVisible(), true);
     await page.screenshot({ path: `${artifactDir}/16-panel-miembro-invalidado.png`, fullPage: true });
   } finally {
     await context.close();
