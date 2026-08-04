@@ -5,6 +5,7 @@ const programmaticToggles = new WeakSet<HTMLDetailsElement>();
 
 let filterPanelOpen = false;
 let synchronizationScheduled = false;
+let initialPreparationFrame: number | null = null;
 
 interface BlockingFixWindow extends Window {
   [INSTALL_FLAG]?: boolean;
@@ -88,16 +89,25 @@ export function prepareLeadsProfessionalRedesign(crm: HTMLElement): void {
   synchronizeFormGeometry(crm);
 }
 
-function synchronizeRedesign(): void {
+function synchronizeRedesign(): boolean {
   synchronizationScheduled = false;
   const crm = document.querySelector<HTMLElement>('#crm');
-  if (crm) prepareLeadsProfessionalRedesign(crm);
+  if (!crm?.querySelector('#mvp-lead-results')) return false;
+  prepareLeadsProfessionalRedesign(crm);
+  return true;
 }
 
 function scheduleSynchronization(): void {
   if (synchronizationScheduled) return;
   synchronizationScheduled = true;
   window.requestAnimationFrame(synchronizeRedesign);
+}
+
+function prepareInitialLeadsBeforePaint(): void {
+  initialPreparationFrame = null;
+  if (synchronizeRedesign()) return;
+  if (location.pathname !== '/' && location.pathname !== '') return;
+  initialPreparationFrame = window.requestAnimationFrame(prepareInitialLeadsBeforePaint);
 }
 
 function closeMobileFilters(): void {
@@ -133,7 +143,9 @@ function install(): void {
     scheduleSynchronization();
   });
 
-  scheduleSynchronization();
+  if (initialPreparationFrame === null) {
+    initialPreparationFrame = window.requestAnimationFrame(prepareInitialLeadsBeforePaint);
+  }
 }
 
 install();
