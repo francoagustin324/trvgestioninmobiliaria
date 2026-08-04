@@ -363,7 +363,14 @@ async function verifyMobile(page: Page, url: string): Promise<void> {
   for (const stage of stageNames) {
     assert.equal(await page.locator(`[data-stage-quick="${stage}"]`).isVisible(), true, stage);
   }
-  assert.equal(await page.locator('[data-stage-quick="Calificado"]').isVisible(), false);
+  assert.equal(await page.locator('[data-stage-quick="Calificado"]').isVisible(), true);
+  const collapsedPipeline = await page.locator('.mvp-stage-counters').evaluate((element) => ({
+    flexWrap: getComputedStyle(element).flexWrap,
+    scrollWidth: element.scrollWidth,
+    clientWidth: element.clientWidth,
+  }));
+  assert.equal(collapsedPipeline.flexWrap, 'nowrap');
+  assert.ok(collapsedPipeline.scrollWidth > collapsedPipeline.clientWidth);
 
   const filterDetails = page.locator('.mvp-lead-more-filters');
   await filterDetails.locator('> summary').click();
@@ -379,6 +386,7 @@ async function verifyMobile(page: Page, url: string): Promise<void> {
   await page.locator('[data-pc-toggle-stages]').click();
   await page.waitForFunction(() => document.querySelector('.pc-stage-summary')?.getAttribute('data-expanded') === 'true');
   assert.equal(await page.locator('[data-stage-quick="Calificado"]').isVisible(), true);
+  assert.equal(await page.locator('.mvp-stage-counters').evaluate((element) => getComputedStyle(element).flexWrap), 'wrap');
   await screenshot(page, '05-resumen-etapas-mobile-expandido-390x844.png');
 
   await page.getByRole('button', { name: 'Crear nuevo lead' }).click();
@@ -401,6 +409,11 @@ async function verifyMobile(page: Page, url: string): Promise<void> {
   assert.ok(actions && navigation);
   assert.ok(actions.y + actions.height <= navigation.y + 1, JSON.stringify({ actions, navigation }));
   await screenshot(page, '10-nuevo-lead-mobile-teclado-footer-accesible.png');
+  await assertNoHorizontalScroll(page);
+
+  await page.setViewportSize({ width: 390, height: 430 });
+  await page.waitForTimeout(120);
+  await assertFullyVisible(page, form.locator('.b131-lead-form-actions'));
   await assertNoHorizontalScroll(page);
 
   await page.setViewportSize({ width: 390, height: 844 });
