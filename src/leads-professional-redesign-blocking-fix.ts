@@ -1,10 +1,10 @@
 const MOBILE_QUERY = '(max-width: 720px)';
 const INSTALL_FLAG = '__pcLeadsBlockingFixInstalled';
 const boundFilterDetails = new WeakSet<HTMLDetailsElement>();
+const programmaticToggles = new WeakSet<HTMLDetailsElement>();
 
 let filterPanelOpen = false;
 let synchronizationScheduled = false;
-let suppressFilterToggle = false;
 
 interface BlockingFixWindow extends Window {
   [INSTALL_FLAG]?: boolean;
@@ -23,11 +23,8 @@ function setInteractiveRegion(element: HTMLElement | null, enabled: boolean): vo
 
 function setDetailsOpen(details: HTMLDetailsElement, open: boolean): void {
   if (details.open === open) return;
-  suppressFilterToggle = true;
+  programmaticToggles.add(details);
   details.open = open;
-  queueMicrotask(() => {
-    suppressFilterToggle = false;
-  });
 }
 
 function synchronizeFilterPanel(crm: HTMLElement): void {
@@ -37,7 +34,9 @@ function synchronizeFilterPanel(crm: HTMLElement): void {
   if (!boundFilterDetails.has(details)) {
     boundFilterDetails.add(details);
     details.addEventListener('toggle', () => {
-      if (suppressFilterToggle) return;
+      details.querySelector<HTMLElement>(':scope > summary')?.setAttribute('aria-expanded', String(details.open));
+      if (programmaticToggles.delete(details)) return;
+      filterPanelOpen = isMobile() && details.open;
       synchronizeFilterPanel(crm);
     });
   }
@@ -52,8 +51,7 @@ function synchronizeFilterPanel(crm: HTMLElement): void {
   setInteractiveRegion(details.querySelector<HTMLElement>('[data-pc-filter-actions]'), interactive);
 
   details.classList.toggle('pc-filter-panel-open', mobile && details.open);
-  const summary = details.querySelector<HTMLElement>(':scope > summary');
-  summary?.setAttribute('aria-expanded', String(details.open));
+  details.querySelector<HTMLElement>(':scope > summary')?.setAttribute('aria-expanded', String(details.open));
 }
 
 function synchronizeSelectedStage(crm: HTMLElement): void {
@@ -82,18 +80,18 @@ function synchronizeFormGeometry(crm: HTMLElement): void {
   form.querySelector<HTMLElement>('.b131-lead-form-fields')?.setAttribute('tabindex', '-1');
 }
 
-function synchronizeRedesign(): void {
-  synchronizationScheduled = false;
-  const crm = document.querySelector<HTMLElement>('#crm');
-  if (!crm) return;
-
-  const hasLeads = Boolean(crm.querySelector('#mvp-lead-results'));
-  if (!hasLeads) return;
-
+export function prepareLeadsProfessionalRedesign(crm: HTMLElement): void {
+  if (!crm.querySelector('#mvp-lead-results')) return;
   crm.classList.add('pc-leads-redesign');
   synchronizeFilterPanel(crm);
   synchronizeSelectedStage(crm);
   synchronizeFormGeometry(crm);
+}
+
+function synchronizeRedesign(): void {
+  synchronizationScheduled = false;
+  const crm = document.querySelector<HTMLElement>('#crm');
+  if (crm) prepareLeadsProfessionalRedesign(crm);
 }
 
 function scheduleSynchronization(): void {
@@ -106,10 +104,9 @@ function closeMobileFilters(): void {
   if (!isMobile()) return;
   filterPanelOpen = false;
   const details = document.querySelector<HTMLDetailsElement>('#crm .mvp-lead-more-filters');
-  if (details) {
-    setDetailsOpen(details, false);
-    synchronizeFilterPanel(details.closest<HTMLElement>('#crm') ?? document.body);
-  }
+  if (!details) return;
+  setDetailsOpen(details, false);
+  synchronizeFilterPanel(details.closest<HTMLElement>('#crm') ?? document.body);
 }
 
 function install(): void {
@@ -125,12 +122,7 @@ function install(): void {
   }, true);
   document.addEventListener('click', (event) => {
     const target = event.target as HTMLElement;
-    const summary = target.closest<HTMLElement>('.mvp-lead-more-filters > summary');
-    if (summary && isMobile()) {
-      const details = summary.parentElement as HTMLDetailsElement;
-      filterPanelOpen = !details.open;
-    }
-    if (target.closest('[data-pc-apply-filters]')) filterPanelOpen = false;
+    if (target.closest('[data-pc-apply-filters]')) closeMobileFilters();
     scheduleSynchronization();
   });
   document.addEventListener('change', scheduleSynchronization);
