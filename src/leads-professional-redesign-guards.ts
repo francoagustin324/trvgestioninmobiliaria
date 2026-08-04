@@ -13,6 +13,27 @@ function hasCoreFilters(crm: HTMLElement): boolean {
   );
 }
 
+function setInputValue(input: HTMLInputElement | null, value: string): void {
+  if (!input || input.value === value) return;
+  input.value = value;
+  input.dispatchEvent(new Event('input', { bubbles: true }));
+}
+
+function setSelectValue(select: HTMLSelectElement | null, value: string): void {
+  if (!select || select.value === value) return;
+  select.value = value;
+  select.dispatchEvent(new Event('change', { bubbles: true }));
+}
+
+function clearCoreFiltersFallback(crm: HTMLElement): void {
+  setInputValue(crm.querySelector<HTMLInputElement>('#mvp-lead-search'), '');
+  setSelectValue(crm.querySelector<HTMLSelectElement>('#mvp-lead-temperature-filter'), 'Todas');
+  setSelectValue(crm.querySelector<HTMLSelectElement>('#mvp-lead-order'), 'priority');
+  setSelectValue(crm.querySelector<HTMLSelectElement>('#mvp-lead-assignee-filter'), 'Todos');
+  const currentCrm = document.querySelector<HTMLElement>('#crm.pc-leads-redesign') ?? crm;
+  setSelectValue(currentCrm.querySelector<HTMLSelectElement>('#mvp-lead-stage-filter'), 'Todas');
+}
+
 function synchronizeLeadRedesignState(): void {
   scheduled = false;
   const crm = document.querySelector<HTMLElement>('#crm.pc-leads-redesign');
@@ -40,6 +61,12 @@ function scheduleSynchronize(): void {
 function install(): void {
   if (typeof document === 'undefined') return;
   document.addEventListener('trv-render', scheduleSynchronize);
+  document.addEventListener('click', (event) => {
+    const target = event.target as HTMLElement;
+    if (!target.closest('[data-pc-clear-filters]')) return;
+    const crm = target.closest<HTMLElement>('#crm.pc-leads-redesign');
+    if (crm && !crm.querySelector('[data-clear-lead-filters]')) clearCoreFiltersFallback(crm);
+  }, true);
   document.addEventListener('click', scheduleSynchronize, true);
   document.addEventListener('input', scheduleSynchronize);
   document.addEventListener('change', scheduleSynchronize);
