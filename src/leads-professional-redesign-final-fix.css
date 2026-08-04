@@ -1,5 +1,16 @@
 /* Ajustes finales de geometría para el rediseño de Leads. */
 @media (max-width: 720px) {
+  #crm.pc-leads-redesign .pc-lead-controls :is(input, select) {
+    color: #eef4f0;
+    border-color: rgba(222, 197, 147, 0.34);
+    background: #0b3024;
+  }
+
+  #crm.pc-leads-redesign .pc-lead-controls input::placeholder {
+    color: #b6c8be;
+    opacity: 1;
+  }
+
   #crm.pc-leads-redesign .mvp-stage-counters {
     display: flex;
     flex-wrap: nowrap;
@@ -8,6 +19,13 @@
     overflow-y: hidden;
     scroll-snap-type: x proximity;
     scrollbar-width: thin;
+  }
+
+  #crm.pc-leads-redesign .mvp-stage-counters::after {
+    content: "";
+    flex: 0 0 72px;
+    width: 72px;
+    height: 1px;
   }
 
   #crm.pc-leads-redesign .mvp-stage-counter {
@@ -19,6 +37,41 @@
 
   #crm.pc-leads-redesign [data-stage-quick="Visita coordinada"] {
     min-width: 156px;
+  }
+
+  #crm.pc-leads-redesign .pc-professional-lead-card {
+    gap: 7px;
+    padding: 10px 12px;
+  }
+
+  #crm.pc-leads-redesign .mvp-lead-compact-header {
+    gap: 8px;
+  }
+
+  #crm.pc-leads-redesign .mvp-lead-statuses {
+    width: 100%;
+    max-width: 100%;
+    justify-content: flex-start;
+  }
+
+  #crm.pc-leads-redesign .mvp-lead-interest {
+    margin: 2px 0 4px;
+  }
+
+  #crm.pc-leads-redesign .mvp-lead-quick-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+
+  #crm.pc-leads-redesign .mvp-lead-quick-actions .mvp-auto-qualify-button {
+    width: auto;
+    min-width: 0;
+    flex: 1 1 160px;
+  }
+
+  #crm.pc-leads-redesign .mvp-lead-full-sheet > summary {
+    padding-block: 4px;
   }
 
   #crm.pc-leads-redesign .pc-lead-dialog:not(.collapsed) {
