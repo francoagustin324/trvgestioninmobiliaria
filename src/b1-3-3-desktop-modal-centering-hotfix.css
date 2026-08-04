@@ -1,0 +1,65 @@
+/* Hotfix postpublicación B1.3.3: centra exclusivamente el modal Nuevo lead en desktop. */
+
+@media (min-width: 721px) {
+  body:has(#mvp-lead-form.b131-lead-form:not(.collapsed)) {
+    overflow: hidden;
+    overscroll-behavior: none;
+  }
+
+  #crm .b131-lead-form-backdrop {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 101;
+    background: rgba(1, 15, 11, 0.58);
+    -webkit-backdrop-filter: blur(3px);
+    backdrop-filter: blur(3px);
+  }
+
+  #crm .b131-lead-form {
+    position: fixed;
+    z-index: 102;
+    top: 50%;
+    left: 50%;
+    width: min(920px, calc(100vw - 80px));
+    max-width: 920px;
+    max-height: min(680px, calc(100dvh - 64px));
+    margin: 0;
+    padding: 20px;
+    transform: translate(-50%, -50%);
+    overflow: hidden;
+    border-radius: 22px;
+    box-shadow: 0 28px 84px rgba(0, 0, 0, 0.52);
+    overscroll-behavior: contain;
+  }
+
+  #crm .b131-lead-form > .mvp-form-heading,
+  #crm .b131-lead-form-fields,
+  #crm .b131-lead-form-footer {
+    width: 100%;
+    margin-inline: auto;
+  }
+
+  #crm .b131-lead-form-fields {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    padding-right: 4px;
+    overflow-x: hidden;
+    overflow-y: auto;
+  }
+
+  #crm .b131-lead-form-footer {
+    margin-inline: 0;
+  }
+}
+
+@media (min-width: 721px) and (max-height: 760px) {
+  #crm .b131-lead-form {
+    max-height: calc(100dvh - 40px);
+  }
+}
+
+@media (min-width: 721px) and (max-width: 860px) {
+  #crm .b131-lead-form {
+    width: calc(100vw - 40px);
+  }
+}
