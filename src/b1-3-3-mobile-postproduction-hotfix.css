@@ -1,4 +1,4 @@
-/* Hotfix postproducción B1.3.3: corrige únicamente presentación móvil. */
+/* Hotfix postproducción B1.3.3: corrige presentación responsive del modal Nuevo lead. */
 
 #crm .b131-lead-form {
   box-sizing: border-box;
@@ -43,6 +43,36 @@
 
 .whatsapp-identity-form > .whatsapp-contact-field:first-child {
   margin-top: 0;
+}
+
+@media (min-width: 721px) {
+  body:has(#mvp-lead-form.b131-lead-form:not(.collapsed)) {
+    overflow: hidden;
+  }
+
+  #crm .b131-lead-form:not(.collapsed) {
+    position: fixed;
+    z-index: 102;
+    top: clamp(84px, 8vh, 112px);
+    left: 50%;
+    width: min(920px, calc(100vw - 64px));
+    max-width: 920px;
+    max-height: calc(100dvh - clamp(84px, 8vh, 112px) - 32px);
+    margin: 0;
+    transform: translateX(-50%);
+    box-shadow: 0 28px 80px rgba(0, 0, 0, 0.5);
+  }
+
+  #crm .b131-lead-form-fields {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-x: hidden;
+    overflow-y: auto;
+  }
+
+  #crm .b131-lead-form-footer {
+    flex: 0 0 auto;
+  }
 }
 
 @media (max-width: 720px) {
