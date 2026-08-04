@@ -86,3 +86,11 @@ jobs:
           path: artifacts/b1-3-3
           if-no-files-found: ignore
           retention-days: 14
+      - name: Adjuntar capturas rediseño profesional de Leads
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: leads-professional-redesign-capturas
+          path: artifacts/leads-redesign
+          if-no-files-found: ignore
+          retention-days: 14
