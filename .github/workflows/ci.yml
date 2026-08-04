@@ -23,6 +23,19 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+      - name: Adjuntar snapshot temporal del PR
+        uses: actions/upload-artifact@v4
+        with:
+          name: pr-source-snapshot
+          path: |
+            src
+            index.html
+            package.json
+            package-lock.json
+            tsconfig.json
+            .github/workflows/ci.yml
+          if-no-files-found: error
+          retention-days: 1
       - name: Instalar dependencias
         run: npm install --silent
       - name: Compilar TypeScript
