@@ -425,6 +425,7 @@ test('B1.3.3 invalida panel obsoleto tras cambiar identidad', { timeout: 240_000
       key: whatsappIdentityKey(),
       record: identityRecord('Carla Pereyra', identity('Dueño'), '2026-08-02T21:00:00.000Z'),
     });
+    await page.evaluate(() => window.dispatchEvent(new Event('focus')));
     await page.waitForFunction(() => document.querySelector<HTMLElement>('[data-whatsapp-context-note]')?.innerText.includes('cambió'));
     await page.evaluate(() => {
       const actions = (window as unknown as { __b133StaleActions: HTMLElement[] }).__b133StaleActions;
@@ -472,6 +473,7 @@ test('B1.3.3 invalida panel antiguo al cambiar miembro activo', { timeout: 240_0
       const store = await import('/dist/store.js');
       store.setActiveMemberId(2);
       document.dispatchEvent(new CustomEvent('trv-render'));
+      window.dispatchEvent(new Event('focus'));
     });
     await page.waitForFunction(() => document.querySelector<HTMLElement>('[data-whatsapp-context-note]')?.innerText.includes('cambió'));
     await page.evaluate(() => {
