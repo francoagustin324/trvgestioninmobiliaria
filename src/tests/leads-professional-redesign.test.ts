@@ -318,9 +318,9 @@ async function assertInitialHierarchy(page: Page): Promise<void> {
 
 async function verifyDesktop(page: Page, url: string): Promise<void> {
   await load(page, url);
+  await screenshot(page, '01-leads-desktop-1366x768-inicial.png');
   await assertInitialHierarchy(page);
   await assertNoHorizontalScroll(page);
-  await screenshot(page, '01-leads-desktop-1366x768-inicial.png');
 
   await page.locator('[data-pc-attention="overdue"]').click();
   await page.waitForFunction(() => document.querySelector('#mvp-lead-count')?.textContent?.includes('de 8 leads'));

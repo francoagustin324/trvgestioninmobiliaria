@@ -256,7 +256,7 @@ function enhanceHeading(container: HTMLElement): void {
   heading.classList.add('pc-leads-heading');
   text(heading.querySelector('h1'), 'Leads');
   text(heading.querySelector('p'), 'Contactá primero a los leads que requieren atención.');
-  const create = heading.querySelector<HTMLButtonElement>('[data-toggle="client-form"]');
+  const create = container.querySelector<HTMLButtonElement>('[data-toggle="client-form"]');
   if (create && !create.closest('#mvp-lead-form')) {
     create.textContent = 'Nuevo lead';
     create.setAttribute('aria-label', 'Crear nuevo lead');
@@ -272,10 +272,7 @@ function enhanceLeadCards(container: HTMLElement): void {
   });
 }
 
-function enhanceLeads(): void {
-  scheduled = false;
-  const container = document.querySelector<HTMLElement>('#crm');
-  if (!container) return;
+export function enhanceLeadsProfessionalRedesign(container: HTMLElement): void {
   container.classList.add('pc-leads-redesign');
   enhanceHeading(container);
   enhanceFilterPanel(container);
@@ -283,6 +280,13 @@ function enhanceLeads(): void {
   enhanceLeadCards(container);
   organizeLeadForm();
   applyAttention(container);
+}
+
+function enhanceLeads(): void {
+  scheduled = false;
+  const container = document.querySelector<HTMLElement>('#crm');
+  if (!container) return;
+  enhanceLeadsProfessionalRedesign(container);
 }
 
 function scheduleEnhance(): void {
