@@ -1,11 +1,24 @@
 let scheduled = false;
 
+function hasCoreFilters(crm: HTMLElement): boolean {
+  const search = crm.querySelector<HTMLInputElement>('#mvp-lead-search')?.value.trim();
+  const stage = crm.querySelector<HTMLSelectElement>('#mvp-lead-stage-filter')?.value;
+  const temperature = crm.querySelector<HTMLSelectElement>('#mvp-lead-temperature-filter')?.value;
+  const assignee = crm.querySelector<HTMLSelectElement>('#mvp-lead-assignee-filter')?.value;
+  return Boolean(
+    search
+    || (stage && stage !== 'Todas')
+    || (temperature && temperature !== 'Todas')
+    || (assignee && assignee !== 'Todos')
+  );
+}
+
 function synchronizeLeadRedesignState(): void {
   scheduled = false;
   const crm = document.querySelector<HTMLElement>('#crm.pc-leads-redesign');
   if (!crm) return;
 
-  const activeCoreFilters = Boolean(crm.querySelector('.mvp-lead-active-filters'));
+  const activeCoreFilters = hasCoreFilters(crm);
   const activeAttention = Boolean(crm.querySelector('.pc-attention-chip.active'));
   const clear = crm.querySelector<HTMLButtonElement>('[data-pc-clear-filters]');
   if (clear) clear.hidden = !activeCoreFilters && !activeAttention;
