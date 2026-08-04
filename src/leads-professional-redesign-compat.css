@@ -20,4 +20,9 @@
   #crm.pc-leads-redesign .pc-stage-summary[data-expanded="false"] [data-stage-quick="Visita coordinada"] {
     display: flex;
   }
+
+  #crm.pc-leads-redesign .pc-lead-dialog .pc-lead-form-section-grid,
+  #crm.pc-leads-redesign .pc-lead-dialog .pc-lead-form-section .lead-form-more-grid {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
 }
