@@ -1,0 +1,29 @@
+name: PR 137 publicación puntual
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: pr137-publicacion-puntual-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  aplicar-correccion:
+    if: github.event.pull_request.number == 137 && github.event.pull_request.head.ref == 'agent/leads-ux-ui-professional-redesign'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/leads-ux-ui-professional-redesign
+          fetch-depth: 0
+      - name: Aplicar corrección puntual
+        run: |
+          if [[ -f scripts/apply-pr137-b122-fix.sh ]]; then
+            bash scripts/apply-pr137-b122-fix.sh
+          else
+            echo "La corrección ya está aplicada."
+          fi

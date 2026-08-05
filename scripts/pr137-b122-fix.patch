@@ -1,0 +1,12 @@
+--- a/src/tests/b1-2-2-mobile-leads-real-app.test.ts
++++ b/src/tests/b1-2-2-mobile-leads-real-app.test.ts
+@@ -536,6 +536,9 @@
+     assert.ok(contrastRatio(item.foreground, item.background) >= 4.5,
+       `Contraste insuficiente en ${width}px: ${JSON.stringify(item)}`);
+   }
++  if (width <= 520) {
++    await page.locator('#crm .mvp-lead-more-filters').evaluate((details: HTMLDetailsElement) => { details.open = false; });
++  }
+ }
+ 
+ async function openAndAnalyzePanel(page: Page, width: number): Promise<void> {
