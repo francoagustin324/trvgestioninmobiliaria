@@ -1,0 +1,135 @@
+/* Correcciones bloqueantes CI #818: interacción, targets y geometría responsive. */
+
+#crm.pc-leads-redesign .mvp-lead-more-filters:not([open]) > :not(summary),
+#crm.pc-leads-redesign .mvp-lead-more-filters > [hidden] {
+  display: none !important;
+  visibility: hidden !important;
+  pointer-events: none !important;
+}
+
+#crm.pc-leads-redesign .mvp-lead-more-filters[open] > :not(summary):not([hidden]) {
+  visibility: visible;
+  pointer-events: auto;
+}
+
+#crm.pc-leads-redesign .mvp-stage-counter.active,
+#crm.pc-leads-redesign .mvp-stage-counter[aria-pressed="true"],
+#crm.pc-leads-redesign .mvp-stage-counter.pc-selected-stage {
+  display: flex;
+  min-width: 1px;
+  min-height: 44px;
+  border-style: solid;
+  outline: 1px solid rgba(239, 204, 118, 0.34);
+  outline-offset: 1px;
+}
+
+#crm.pc-leads-redesign .mvp-lead-quick-actions :is(a, button),
+#crm.pc-leads-redesign .mvp-lead-full-sheet > summary,
+#crm.pc-leads-redesign .mvp-lead-followup-menu > summary,
+#crm.pc-leads-redesign .mvp-stage-counter,
+#crm.pc-leads-redesign [data-pc-toggle-stages],
+#crm.pc-leads-redesign .mvp-lead-more-filters > summary,
+#crm.pc-leads-redesign [data-pc-clear-filters],
+#crm.pc-leads-redesign [data-pc-apply-filters],
+#crm.pc-leads-redesign .pc-lead-dialog-close,
+#crm.pc-leads-redesign .pc-leads-heading > button,
+#crm.pc-leads-redesign .b131-lead-form-actions > button,
+#crm.pc-leads-redesign [data-whatsapp-manual-register] {
+  min-width: 44px;
+  min-height: 44px;
+  touch-action: manipulation;
+}
+
+#crm.pc-leads-redesign .mvp-lead-quick-actions :is(a, button),
+#crm.pc-leads-redesign [data-whatsapp-manual-register] {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.whatsapp-contact-lead > :is(strong, small) {
+  pointer-events: none;
+}
+
+[data-whatsapp-manual-register] {
+  position: relative;
+  z-index: 3;
+  pointer-events: auto;
+}
+
+@media (max-width: 720px) {
+  #crm.pc-leads-redesign .mvp-lead-more-filters[open] {
+    top: calc(max(env(safe-area-inset-top), 0px) + 58px);
+    right: 8px;
+    bottom: calc(var(--pc-mobile-nav-height, 76px) + env(safe-area-inset-bottom) + 12px);
+    left: 8px;
+    max-height: none;
+    overflow-x: hidden;
+    overflow-y: auto;
+    isolation: isolate;
+    z-index: 130;
+  }
+
+  #crm.pc-leads-redesign .mvp-lead-more-filters[open]::before {
+    pointer-events: none;
+  }
+
+  #crm.pc-leads-redesign .mvp-account-trigger,
+  #crm.pc-leads-redesign [data-account-toggle] {
+    position: relative;
+    z-index: 150;
+  }
+
+  #crm.pc-leads-redesign .pc-stage-summary[data-expanded="false"] [data-pc-secondary-stage]:not(.active):not([aria-pressed="true"]):not(.pc-selected-stage) {
+    display: flex;
+  }
+
+  #crm.pc-leads-redesign .pc-stage-summary[data-expanded="false"] [data-pc-secondary-stage]:is(.active, [aria-pressed="true"], .pc-selected-stage) {
+    display: flex;
+  }
+
+  #crm.pc-leads-redesign .pc-stage-summary[data-expanded="false"] [data-stage-quick="Calificado"]:is(.active, [aria-pressed="true"], .pc-selected-stage) {
+    display: flex;
+  }
+
+  #crm.pc-leads-redesign .pc-lead-dialog:not(.collapsed) {
+    inset: max(env(safe-area-inset-top), 0px) 0 calc(var(--pc-mobile-nav-height, 76px) + env(safe-area-inset-bottom) + 12px) 0 !important;
+    display: grid !important;
+    grid-template-rows: auto minmax(0, 1fr) auto;
+    min-height: 0 !important;
+    overflow: hidden !important;
+  }
+
+  #crm.pc-leads-redesign .pc-lead-dialog > .mvp-form-heading {
+    grid-row: 1;
+  }
+
+  #crm.pc-leads-redesign .pc-lead-dialog .b131-lead-form-fields {
+    grid-row: 2;
+    min-height: 0;
+    overflow-x: hidden;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    scroll-padding-block: 12px 112px;
+  }
+
+  #crm.pc-leads-redesign .pc-lead-dialog .b131-lead-form-footer {
+    position: relative;
+    grid-row: 3;
+    z-index: 5;
+    flex: 0 0 auto;
+    padding-bottom: 10px;
+  }
+
+  #crm.pc-leads-redesign #mvp-lead-results {
+    padding-bottom: calc(var(--pc-mobile-nav-height, 76px) + env(safe-area-inset-bottom) + 28px);
+  }
+
+  #crm.pc-leads-redesign .mvp-lead-full-sheet[open] {
+    scroll-margin-bottom: calc(var(--pc-mobile-nav-height, 76px) + env(safe-area-inset-bottom) + 24px);
+  }
+
+  body:has(#mvp-lead-form.pc-lead-dialog:not(.collapsed)) .mobile-bottom-nav {
+    z-index: 100;
+  }
+}

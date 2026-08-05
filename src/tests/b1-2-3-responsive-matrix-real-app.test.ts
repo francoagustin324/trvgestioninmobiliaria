@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync } from 'node:fs';
 import { join } from 'node:path';
+import { createServer as createNetServer } from 'node:net';
 import test from 'node:test';
 import { chromium, type Browser, type BrowserContext, type Page } from 'playwright';
 import { localIsoDate } from '../lead-pipeline.js';
@@ -129,6 +130,24 @@ function responsiveCrm(): CrmData {
     agencyName: 'TRV Gestión Inmobiliaria',
   };
   return crm;
+}
+
+
+async function findAvailablePort(): Promise<number> {
+  return await new Promise<number>((resolve, reject) => {
+    const probe = createNetServer();
+    probe.once('error', reject);
+    probe.listen(0, '127.0.0.1', () => {
+      const address = probe.address();
+      if (!address || typeof address === 'string') {
+        probe.close();
+        reject(new Error('No se pudo reservar un puerto local para la prueba visual.'));
+        return;
+      }
+      const port = address.port;
+      probe.close((error) => error ? reject(error) : resolve(port));
+    });
+  });
 }
 
 function chromeExecutable(): string | undefined {
@@ -370,7 +389,7 @@ test('B1.2.3 valida la matriz responsive completa con la aplicación real', { ti
 
   rmSync(artifactDirectory, { recursive: true, force: true });
   mkdirSync(artifactDirectory, { recursive: true });
-  const port = 47_000 + Math.floor(Math.random() * 1_000);
+  const port = await findAvailablePort();
   const baseUrl = `http://127.0.0.1:${port}`;
   const server = await startServer(port);
   const browser = await chromium.launch({ executablePath: executable, headless: true, args: ['--no-sandbox'] });

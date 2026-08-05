@@ -1,0 +1,25 @@
+@media (min-width: 721px) {
+  #crm.pc-leads-redesign .mvp-lead-more-filters > summary {
+    display: none;
+  }
+
+  #crm.pc-leads-redesign .mvp-lead-filter-grid {
+    margin-top: 0;
+  }
+
+  #crm.pc-leads-redesign .pc-lead-dialog:not(.collapsed) {
+    max-height: min(680px, calc(100dvh - 40px));
+  }
+}
+
+@media (max-width: 720px) {
+  #crm.pc-leads-redesign .pc-stage-summary[data-expanded="false"] .mvp-stage-counter {
+    display: flex;
+  }
+
+
+  #crm.pc-leads-redesign .pc-lead-dialog .pc-lead-form-section-grid,
+  #crm.pc-leads-redesign .pc-lead-dialog .pc-lead-form-section .lead-form-more-grid {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+}

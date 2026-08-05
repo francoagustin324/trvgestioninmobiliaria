@@ -1,0 +1,284 @@
+/* Ajustes finales de geometría para el rediseño de Leads. */
+
+@media (min-width: 901px) {
+  #crm.pc-leads-redesign .pc-lead-controls {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    grid-auto-flow: row;
+    gap: 8px 12px;
+    min-height: 0;
+    padding: 10px 12px;
+  }
+
+  #crm.pc-leads-redesign .mvp-lead-filter-primary,
+  #crm.pc-leads-redesign .mvp-lead-active-filters,
+  #crm.pc-leads-redesign .mvp-lead-more-filters {
+    grid-column: 1 / -1;
+  }
+
+  #crm.pc-leads-redesign .mvp-lead-filter-primary {
+    grid-template-columns: minmax(280px, 1fr) auto auto;
+    order: 1;
+  }
+
+  #crm.pc-leads-redesign .mvp-lead-more-filters {
+    order: 2;
+  }
+
+  #crm.pc-leads-redesign .mvp-lead-active-filters {
+    order: 4;
+  }
+
+  #crm.pc-leads-redesign .mvp-lead-more-filters {
+    display: grid;
+    gap: 8px;
+  }
+
+  #crm.pc-leads-redesign .mvp-lead-more-filters > summary,
+  #crm.pc-leads-redesign .pc-filter-actions {
+    display: none;
+  }
+
+  #crm.pc-leads-redesign .mvp-lead-filter-grid {
+    grid-template-columns: repeat(4, minmax(145px, 1fr));
+    gap: 8px;
+    margin: 0;
+  }
+
+  #crm.pc-leads-redesign .pc-attention-section {
+    grid-column: 1;
+    align-self: start;
+    order: 3;
+    padding: 0;
+  }
+
+  #crm.pc-leads-redesign .pc-stage-summary {
+    grid-column: 2;
+    align-self: start;
+    order: 3;
+    padding: 0;
+  }
+
+  #crm.pc-leads-redesign .pc-attention-grid {
+    display: flex;
+    flex-wrap: nowrap;
+    gap: 6px;
+    overflow-x: auto;
+    padding-bottom: 2px;
+    scrollbar-width: thin;
+  }
+
+  #crm.pc-leads-redesign .pc-attention-chip {
+    flex: 1 0 112px;
+    min-width: 112px;
+    gap: 4px;
+  }
+
+  #crm.pc-leads-redesign .pc-attention-chip span {
+    overflow-wrap: normal;
+    word-break: normal;
+    font-size: 0.74rem;
+  }
+
+  #crm.pc-leads-redesign .pc-attention-chip b {
+    min-width: 24px;
+    height: 24px;
+    padding-inline: 5px;
+  }
+
+  #crm.pc-leads-redesign .pc-attention-chip {
+    min-height: 44px;
+    padding: 6px 9px;
+  }
+
+  #crm.pc-leads-redesign .pc-stage-heading,
+  #crm.pc-leads-redesign .pc-attention-section .pc-section-heading {
+    min-height: 24px;
+  }
+
+  #crm.pc-leads-redesign .mvp-stage-counters {
+    gap: 6px;
+    padding-bottom: 2px;
+  }
+}
+
+@media (max-width: 720px) {
+  #crm.pc-leads-redesign .pc-lead-controls :is(input, select) {
+    color: #eef4f0;
+    border-color: rgba(222, 197, 147, 0.34);
+    background: #0b3024;
+  }
+
+  #crm.pc-leads-redesign .pc-lead-controls input::placeholder {
+    color: #b6c8be;
+    opacity: 1;
+  }
+
+  #crm.pc-leads-redesign .mvp-stage-counters {
+    display: flex;
+    flex-wrap: nowrap;
+    gap: 8px;
+    overflow-x: auto;
+    overflow-y: hidden;
+    scroll-snap-type: x proximity;
+    scrollbar-width: thin;
+  }
+
+  #crm.pc-leads-redesign .pc-stage-summary[data-expanded="false"] [data-pc-secondary-stage] {
+    display: flex;
+  }
+
+  #crm.pc-leads-redesign .pc-stage-summary[data-expanded="true"] .mvp-stage-counters {
+    flex-wrap: wrap;
+    overflow-x: visible;
+  }
+
+  #crm.pc-leads-redesign .mvp-stage-counters::after {
+    content: "";
+    flex: 0 0 72px;
+    width: 72px;
+    height: 1px;
+  }
+
+  #crm.pc-leads-redesign .pc-stage-summary[data-expanded="true"] .mvp-stage-counters::after {
+    display: none;
+  }
+
+  #crm.pc-leads-redesign .mvp-stage-counter {
+    width: auto;
+    min-width: 108px;
+    flex: 0 0 auto;
+    scroll-snap-align: start;
+  }
+
+  #crm.pc-leads-redesign .pc-stage-summary[data-expanded="true"] .mvp-stage-counter {
+    flex: 1 1 calc(50% - 8px);
+  }
+
+  #crm.pc-leads-redesign [data-stage-quick="Visita coordinada"] {
+    min-width: 156px;
+  }
+
+  #crm.pc-leads-redesign .pc-professional-lead-card {
+    gap: 7px;
+    padding: 10px 12px;
+  }
+
+  #crm.pc-leads-redesign .mvp-lead-compact-header {
+    gap: 8px;
+  }
+
+  #crm.pc-leads-redesign .mvp-lead-statuses {
+    width: 100%;
+    max-width: 100%;
+    justify-content: flex-start;
+  }
+
+  #crm.pc-leads-redesign .mvp-lead-interest {
+    margin: 2px 0 4px;
+  }
+
+  #crm.pc-leads-redesign .mvp-lead-quick-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+
+  #crm.pc-leads-redesign .mvp-lead-quick-actions .mvp-auto-qualify-button {
+    width: auto;
+    min-width: 0;
+    flex: 1 1 160px;
+  }
+
+  #crm.pc-leads-redesign .mvp-lead-full-sheet > summary {
+    padding-block: 4px;
+  }
+
+  #crm.pc-leads-redesign .pc-lead-dialog:not(.collapsed) {
+    display: grid !important;
+    grid-template-rows: minmax(58px, auto) minmax(0, 1fr) minmax(0, auto) !important;
+    height: calc(100dvh - max(env(safe-area-inset-top), 0px) - var(--pc-mobile-nav-height, 76px) - env(safe-area-inset-bottom) - 12px) !important;
+    min-height: 0 !important;
+    max-height: calc(100dvh - max(env(safe-area-inset-top), 0px) - var(--pc-mobile-nav-height, 76px) - env(safe-area-inset-bottom) - 12px) !important;
+    overflow: hidden !important;
+  }
+
+  #crm.pc-leads-redesign .pc-lead-dialog .b131-lead-form-fields {
+    width: 100%;
+    height: 100%;
+    min-height: 0 !important;
+    max-height: 100%;
+    overflow-x: hidden !important;
+    overflow-y: auto !important;
+  }
+
+  #crm.pc-leads-redesign .pc-lead-dialog .b131-lead-form-footer {
+    min-height: 0;
+  }
+}
+
+/* PR #137: correcciones causales finales */
+@media (max-width: 720px) {
+  #crm .mvp-lead-filter-panel :is(input, select) {
+    color: #eef4f0;
+    border-color: rgba(222, 197, 147, 0.34);
+    background: #0b3024;
+  }
+
+  #crm .mvp-lead-filter-panel input::placeholder {
+    color: #b6c8be;
+    opacity: 1;
+  }
+
+  #crm.pc-leads-redesign .pc-stage-summary[data-expanded="false"] [data-pc-secondary-stage]:not(.active):not([aria-pressed="true"]):not(.pc-selected-stage) {
+    display: flex;
+  }
+}
+
+/* PR #137: resumen móvil colapsado en 2x2, con etapas restantes desplazables. */
+@media (max-width: 720px) {
+  #crm.pc-leads-redesign .pc-stage-summary[data-expanded="false"] .mvp-stage-counters {
+    display: grid;
+    grid-template-rows: repeat(2, minmax(44px, auto));
+    grid-auto-flow: column;
+    grid-auto-columns: calc((100% - 8px) / 2);
+    gap: 8px;
+    overflow-x: auto;
+    overflow-y: hidden;
+    scroll-snap-type: x proximity;
+  }
+
+  #crm.pc-leads-redesign .pc-stage-summary[data-expanded="false"] .mvp-stage-counter {
+    width: 100%;
+    min-width: 0;
+    min-height: 44px;
+    scroll-snap-align: start;
+  }
+
+  #crm.pc-leads-redesign .pc-stage-summary[data-expanded="false"] .mvp-stage-counters::after {
+    display: none;
+  }
+
+  #crm.pc-leads-redesign .pc-stage-summary[data-expanded="true"] .mvp-stage-counters {
+    display: flex;
+  }
+}
+
+@media (max-width: 720px) {
+  #crm.pc-leads-redesign .pc-stage-summary[data-expanded="false"] .mvp-stage-counters {
+    grid-template-columns: none;
+  }
+}
+
+/* El menú de cuenta supera las capas del módulo solo durante su estado abierto real. */
+body.account-menu-open .app-topbar {
+  z-index: 160;
+}
+
+body.account-menu-open #cloud-account {
+  z-index: 161;
+}
+
+body.account-menu-open .mvp-account-menu.is-open {
+  z-index: 162;
+}

@@ -81,8 +81,8 @@ function accountMenuRoot(): HTMLElement | null {
   return document.querySelector<HTMLElement>('.mvp-account-menu');
 }
 
-function updateAccountScrollLock(open: boolean): void {
-  document.body.classList.toggle('account-menu-open', open && window.innerWidth <= 520);
+function updateAccountMenuState(open: boolean): void {
+  document.body.classList.toggle('account-menu-open', open);
 }
 
 function setAccountMenuOpen(
@@ -94,7 +94,7 @@ function setAccountMenuOpen(
   const panel = root?.querySelector<HTMLElement>('.mvp-account-panel');
   const backdrop = root?.querySelector<HTMLElement>('[data-account-backdrop]');
   if (!root || !trigger || !panel || !backdrop) {
-    updateAccountScrollLock(false);
+    updateAccountMenuState(false);
     return;
   }
 
@@ -102,7 +102,7 @@ function setAccountMenuOpen(
   trigger.setAttribute('aria-expanded', String(open));
   panel.hidden = !open;
   backdrop.hidden = !open;
-  updateAccountScrollLock(open);
+  updateAccountMenuState(open);
 
   if (open) {
     queueMicrotask(() => {
@@ -148,9 +148,9 @@ function bindAccountMenuEvents(): void {
   });
 
   window.addEventListener('resize', () => {
-    updateAccountScrollLock(Boolean(document.querySelector('.mvp-account-menu.is-open')));
+    updateAccountMenuState(Boolean(document.querySelector('.mvp-account-menu.is-open')));
   });
-  window.addEventListener('pagehide', () => updateAccountScrollLock(false));
+  window.addEventListener('pagehide', () => updateAccountMenuState(false));
 }
 
 async function hydrateAfterAuth(): Promise<void> {

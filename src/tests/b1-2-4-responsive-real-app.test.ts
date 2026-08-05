@@ -309,9 +309,11 @@ async function captureScenarios(page: Page, version: Version, viewport: Viewport
 
   const details = page.locator('#crm .mvp-lead-more-filters');
   const summary = details.locator(':scope > summary');
-  if (await summary.isVisible() && !(await details.evaluate((element: HTMLDetailsElement) => element.open))) await summary.click();
+  const mobileFilterPanel = await summary.isVisible();
+  if (mobileFilterPanel && !(await details.evaluate((element: HTMLDetailsElement) => element.open))) await summary.click();
   await panel.scrollIntoViewIfNeeded();
   await capture(page, version, 'filtros', viewport);
+  if (mobileFilterPanel) await details.evaluate((element: HTMLDetailsElement) => { element.open = false; });
 
   const sheet = complete.locator('.mvp-lead-full-sheet');
   if (!(await sheet.evaluate((element: HTMLDetailsElement) => element.open))) await sheet.locator(':scope > summary').click();
@@ -520,6 +522,7 @@ async function validateKeyboardAndQualification(page: Page): Promise<void> {
   const details = page.locator('#crm .mvp-lead-more-filters');
   if (!(await details.evaluate((element: HTMLDetailsElement) => element.open))) await details.locator(':scope > summary').click();
   await page.locator('#mvp-lead-stage-filter').focus();
+  await details.evaluate((element: HTMLDetailsElement) => { element.open = false; });
 
   const overdue = exactCard(page, 'Seguimiento vencido');
   await overdue.locator('.mvp-lead-followup-menu > summary').click();
