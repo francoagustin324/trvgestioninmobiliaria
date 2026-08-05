@@ -1,0 +1,46 @@
+name: Temporary PR137 contrast match fix
+
+on:
+  push:
+    branches:
+      - agent/leads-ux-ui-professional-redesign
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/leads-ux-ui-professional-redesign
+      - name: Validate captured color group
+        shell: bash
+        run: |
+          python3 <<'PY'
+          from pathlib import Path
+          path = Path('src/tests/leads-professional-redesign.test.ts')
+          text = path.read_text()
+          old = """      const match = value.match(/rgba?\\(([^)]+)\\)/);
+                if (!match) throw new Error(`Color no interpretable: ${value}`);
+                const parts = match[1].split(/[ ,/]+/).filter(Boolean).map(Number);
+          """
+          new = """      const match = value.match(/rgba?\\(([^)]+)\\)/);
+                const captured = match?.[1];
+                if (!captured) throw new Error(`Color no interpretable: ${value}`);
+                const parts = captured.split(/[ ,/]+/).filter(Boolean).map(Number);
+          """
+          if old not in text:
+              raise SystemExit('No se encontró el grupo de color exacto.')
+          path.write_text(text.replace(old, new, 1))
+          PY
+      - name: Commit correction
+        shell: bash
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add src/tests/leads-professional-redesign.test.ts
+          git commit -m "Validar grupo RGB computado"
+          git push origin HEAD:agent/leads-ux-ui-professional-redesign
