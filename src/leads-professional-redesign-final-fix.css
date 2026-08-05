@@ -269,3 +269,16 @@
     grid-template-columns: none;
   }
 }
+
+/* El menú de cuenta supera las capas del módulo solo durante su estado abierto real. */
+body.account-menu-open .app-topbar {
+  z-index: 160;
+}
+
+body.account-menu-open #cloud-account {
+  z-index: 161;
+}
+
+body.account-menu-open .mvp-account-menu.is-open {
+  z-index: 162;
+}
