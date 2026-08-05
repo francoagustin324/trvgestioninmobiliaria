@@ -21,4 +21,17 @@ jobs:
           ref: agent/leads-ux-ui-professional-redesign
           fetch-depth: 0
       - name: Aplicar correcciones finales verificadas
-        run: bash scripts/apply-pr137-final.sh
+        run: |
+          set +e
+          bash -x scripts/apply-pr137-final.sh > apply-pr137.log 2>&1
+          code=$?
+          cat apply-pr137.log
+          exit $code
+      - name: Adjuntar diagnóstico de finalización
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pr137-finalizacion-diagnostico
+          path: apply-pr137.log
+          if-no-files-found: error
+          retention-days: 1
