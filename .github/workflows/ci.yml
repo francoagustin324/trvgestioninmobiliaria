@@ -40,6 +40,18 @@ jobs:
           name: build-diagnostics
           path: build.log
           retention-days: 1
+      - name: Empaquetar workspace técnico temporal PR 137
+        if: always()
+        run: |
+          tar --exclude=.git --exclude=artifacts --exclude='*.log' -czf pr137-workspace.tgz .
+      - name: Adjuntar workspace técnico temporal PR 137
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pr137-workspace-temporal
+          path: pr137-workspace.tgz
+          if-no-files-found: error
+          retention-days: 1
       - name: Ejecutar pruebas
         run: |
           set +e
