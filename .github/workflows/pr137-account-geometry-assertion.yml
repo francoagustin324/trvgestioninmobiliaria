@@ -1,8 +1,8 @@
 name: PR 137 ajustar aserción causal del menú
 
 on:
-  pull_request:
-    branches: [main]
+  push:
+    branches: [agent/leads-ux-ui-professional-redesign]
 
 permissions:
   contents: write
@@ -13,7 +13,7 @@ concurrency:
 
 jobs:
   ajustar-asercion:
-    if: github.event.pull_request.number == 137 && github.head_ref == 'agent/leads-ux-ui-professional-redesign'
+    if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -27,16 +27,10 @@ jobs:
 
           path = Path('src/tests/b1-2-8-account-menu-responsive-real-app.test.ts')
           text = path.read_text(encoding='utf-8')
-          old_geometry = """      bodyLocked: document.body.classList.contains('account-menu-open'),
-      nameWordBreak:"""
-          new_geometry = """      bodyMenuOpen: document.body.classList.contains('account-menu-open'),
-      bodyOverflowY: getComputedStyle(document.body).overflowY,
-      nameWordBreak:"""
-          old_assertion = """  assert.equal(geometry.bodyLocked, viewport.width <= 520);
-  if (viewport.width === 320)"""
-          new_assertion = """  assert.equal(geometry.bodyMenuOpen, true);
-  assert.equal(geometry.bodyOverflowY === 'hidden', viewport.width <= 520);
-  if (viewport.width === 320)"""
+          old_geometry = "      bodyLocked: document.body.classList.contains('account-menu-open'),\n      nameWordBreak:"
+          new_geometry = "      bodyMenuOpen: document.body.classList.contains('account-menu-open'),\n      bodyOverflowY: getComputedStyle(document.body).overflowY,\n      nameWordBreak:"
+          old_assertion = "  assert.equal(geometry.bodyLocked, viewport.width <= 520);\n  if (viewport.width === 320)"
+          new_assertion = "  assert.equal(geometry.bodyMenuOpen, true);\n  assert.equal(geometry.bodyOverflowY === 'hidden', viewport.width <= 520);\n  if (viewport.width === 320)"
           if text.count(old_geometry) != 1 or text.count(old_assertion) != 1:
               raise SystemExit('No se encontraron exactamente las aserciones geométricas esperadas.')
           text = text.replace(old_geometry, new_geometry)
