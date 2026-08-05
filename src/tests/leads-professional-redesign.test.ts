@@ -330,7 +330,11 @@ async function stageContrastResults(page: Page): Promise<StageContrastResult[]> 
       const match = value.match(/rgba?\(([^)]+)\)/);
       if (!match) throw new Error(`Color no interpretable: ${value}`);
       const parts = match[1].split(/[ ,/]+/).filter(Boolean).map(Number);
-      return { r: parts[0], g: parts[1], b: parts[2], a: parts.length > 3 ? parts[3] : 1 };
+      if (parts.length < 3 || parts.some((part) => !Number.isFinite(part))) {
+        throw new Error(`Color incompleto o inválido: ${value}`);
+      }
+      const [r = 0, g = 0, b = 0, alpha = 1] = parts;
+      return { r, g, b, a: alpha };
     };
     const blend = (top: Rgba, bottom: Rgba): Rgba => {
       const a = top.a + bottom.a * (1 - top.a);
