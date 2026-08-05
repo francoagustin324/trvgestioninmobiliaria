@@ -405,7 +405,8 @@ async function validatePanelGeometry(
       navTop: navRect?.top ?? null,
       menuZ: Number.parseInt(getComputedStyle(menu).zIndex, 10) || 0,
       navZ: nav ? Number.parseInt(getComputedStyle(nav).zIndex, 10) || 0 : 0,
-      bodyLocked: document.body.classList.contains('account-menu-open'),
+      bodyMenuOpen: document.body.classList.contains('account-menu-open'),
+      bodyOverflowY: getComputedStyle(document.body).overflowY,
       nameWordBreak: getComputedStyle(name).wordBreak,
       detailWordBreak: getComputedStyle(detail).wordBreak,
     };
@@ -420,7 +421,8 @@ async function validatePanelGeometry(
   assert.ok(geometry.bodyWidth <= geometry.viewportWidth + 1, `Scroll horizontal del body: ${JSON.stringify(geometry)}`);
   assert.notEqual(geometry.nameWordBreak, 'break-all');
   assert.notEqual(geometry.detailWordBreak, 'break-all');
-  assert.equal(geometry.bodyLocked, viewport.width <= 520);
+  assert.equal(geometry.bodyMenuOpen, true);
+  assert.equal(geometry.bodyOverflowY === 'hidden', viewport.width <= 520);
   if (viewport.width === 320) assert.ok(geometry.panel.width >= 295);
   if (viewport.width > 520) assert.ok(geometry.panel.width >= 299 && geometry.panel.width <= 341);
 
