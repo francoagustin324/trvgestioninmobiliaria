@@ -1,0 +1,50 @@
+name: PR 137 sincronizar estado del menú
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: pr137-account-state-sync-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  sincronizar-estado:
+    if: github.event.pull_request.number == 137 && github.head_ref == 'agent/leads-ux-ui-professional-redesign'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/leads-ux-ui-professional-redesign
+          fetch-depth: 0
+      - name: Sincronizar clase del body con el estado real del menú
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('src/mvp-auth.ts')
+          text = path.read_text(encoding='utf-8')
+          old = """function updateAccountScrollLock(open: boolean): void {
+            document.body.classList.toggle('account-menu-open', open && window.innerWidth <= 520);
+          }"""
+          new = """function updateAccountMenuState(open: boolean): void {
+            document.body.classList.toggle('account-menu-open', open);
+          }"""
+          if text.count(old) != 1:
+              raise SystemExit('No se encontró exactamente una implementación esperada de updateAccountScrollLock.')
+          text = text.replace(old, new)
+          text = text.replace('updateAccountScrollLock(', 'updateAccountMenuState(')
+          path.write_text(text, encoding='utf-8')
+          PY
+          git diff --check
+          git diff -- src/mvp-auth.ts
+      - name: Publicar corrección causal
+        run: |
+          git config user.name "francoagustin324"
+          git config user.email "francoagustinsolis@gmail.com"
+          git add src/mvp-auth.ts
+          git commit -m "Sincronizar estado real del menú de cuenta"
+          git push origin HEAD:agent/leads-ux-ui-professional-redesign
