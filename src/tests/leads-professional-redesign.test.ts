@@ -328,8 +328,9 @@ async function stageContrastResults(page: Page): Promise<StageContrastResult[]> 
     type Rgba = { r: number; g: number; b: number; a: number };
     const parse = (value: string): Rgba => {
       const match = value.match(/rgba?\(([^)]+)\)/);
-      if (!match) throw new Error(`Color no interpretable: ${value}`);
-      const parts = match[1].split(/[ ,/]+/).filter(Boolean).map(Number);
+      const captured = match?.[1];
+      if (!captured) throw new Error(`Color no interpretable: ${value}`);
+      const parts = captured.split(/[ ,/]+/).filter(Boolean).map(Number);
       if (parts.length < 3 || parts.some((part) => !Number.isFinite(part))) {
         throw new Error(`Color incompleto o inválido: ${value}`);
       }
