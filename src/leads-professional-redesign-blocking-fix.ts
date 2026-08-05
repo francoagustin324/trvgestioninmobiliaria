@@ -1,10 +1,8 @@
 const MOBILE_QUERY = '(max-width: 720px)';
 const INSTALL_FLAG = '__pcLeadsBlockingFixInstalled';
 const boundFilterDetails = new WeakSet<HTMLDetailsElement>();
-const programmaticToggles = new WeakSet<HTMLDetailsElement>();
 
 let filterPanelOpen = false;
-let userFilterTogglePending = false;
 let synchronizationScheduled = false;
 let initialPreparationFrame: number | null = null;
 let initialEnhancementSignalSent = false;
@@ -24,27 +22,12 @@ function setInteractiveRegion(element: HTMLElement | null, enabled: boolean): vo
   (element as HTMLElement & { inert: boolean }).inert = !enabled;
 }
 
-function setDetailsOpen(details: HTMLDetailsElement, open: boolean): void {
-  if (details.open === open) return;
-  programmaticToggles.add(details);
-  details.open = open;
-}
-
 function applyFilterInteractionState(details: HTMLDetailsElement, enabled: boolean): void {
   setInteractiveRegion(details.querySelector<HTMLElement>('.mvp-lead-filter-grid'), enabled);
   setInteractiveRegion(details.querySelector<HTMLElement>('.mvp-lead-filter-toggles'), enabled);
   setInteractiveRegion(details.querySelector<HTMLElement>('[data-pc-filter-actions]'), enabled);
   details.classList.toggle('pc-filter-panel-open', isMobile() && enabled);
   details.querySelector<HTMLElement>(':scope > summary')?.setAttribute('aria-expanded', String(enabled));
-}
-
-function closeTransientProgrammaticPanel(details: HTMLDetailsElement, crm: HTMLElement): void {
-  window.requestAnimationFrame(() => {
-    if (!details.isConnected || filterPanelOpen || !isMobile()) return;
-    setDetailsOpen(details, false);
-    applyFilterInteractionState(details, false);
-    synchronizeFilterPanel(crm);
-  });
 }
 
 function synchronizeFilterPanel(crm: HTMLElement): void {
@@ -54,26 +37,21 @@ function synchronizeFilterPanel(crm: HTMLElement): void {
   if (!boundFilterDetails.has(details)) {
     boundFilterDetails.add(details);
     details.addEventListener('toggle', () => {
-      details.querySelector<HTMLElement>(':scope > summary')?.setAttribute('aria-expanded', String(details.open));
-      if (programmaticToggles.delete(details)) return;
-
-      if (userFilterTogglePending) {
-        userFilterTogglePending = false;
-        filterPanelOpen = isMobile() && details.open;
-        synchronizeFilterPanel(crm);
-        return;
-      }
-
-      const enabled = !isMobile() || details.open;
-      applyFilterInteractionState(details, enabled);
-      if (isMobile() && details.open) closeTransientProgrammaticPanel(details, crm);
+      if (!details.isConnected) return;
+      if (isMobile()) filterPanelOpen = details.open;
+      applyFilterInteractionState(details, !isMobile() || details.open);
     });
   }
 
-  const mobile = isMobile();
-  if (!mobile) filterPanelOpen = false;
-  setDetailsOpen(details, mobile ? filterPanelOpen : true);
-  applyFilterInteractionState(details, !mobile || details.open);
+  if (!isMobile()) {
+    filterPanelOpen = false;
+    details.open = true;
+    applyFilterInteractionState(details, true);
+    return;
+  }
+
+  if (details.open !== filterPanelOpen) details.open = filterPanelOpen;
+  applyFilterInteractionState(details, details.open);
 }
 
 function synchronizeSelectedStage(crm: HTMLElement): void {
@@ -143,10 +121,9 @@ function prepareInitialLeadsBeforePaint(): void {
 function closeMobileFilters(): void {
   if (!isMobile()) return;
   filterPanelOpen = false;
-  userFilterTogglePending = false;
   const details = document.querySelector<HTMLDetailsElement>('#crm .mvp-lead-more-filters');
   if (!details) return;
-  setDetailsOpen(details, false);
+  details.open = false;
   applyFilterInteractionState(details, false);
 }
 
@@ -159,20 +136,13 @@ function install(): void {
   document.addEventListener('trv-render', scheduleSynchronization);
   document.addEventListener('click', (event) => {
     const target = event.target as HTMLElement;
-    if (target.closest('.mvp-lead-more-filters > summary')) userFilterTogglePending = true;
-    if (target.closest('[data-account-toggle]')) closeMobileFilters();
+    if (target.closest('[data-account-toggle], [data-pc-apply-filters]')) closeMobileFilters();
   }, true);
-  document.addEventListener('click', (event) => {
-    const target = event.target as HTMLElement;
-    if (target.closest('[data-pc-apply-filters]')) closeMobileFilters();
-    scheduleSynchronization();
-  });
   document.addEventListener('change', scheduleSynchronization);
   document.addEventListener('input', scheduleSynchronization);
   window.addEventListener('resize', scheduleSynchronization);
   window.matchMedia(MOBILE_QUERY).addEventListener('change', () => {
     filterPanelOpen = false;
-    userFilterTogglePending = false;
     scheduleSynchronization();
   });
 

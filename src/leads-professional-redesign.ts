@@ -236,11 +236,36 @@ function enhanceStageSummary(container: HTMLElement): void {
     shell.prepend(heading);
   }
 
+  const initiallyVisibleStages = new Set(['Todas', 'Nuevo', 'Contactado', 'Visita coordinada']);
   const buttons = Array.from(counters.querySelectorAll<HTMLButtonElement>('[data-stage-quick]'));
-  buttons.forEach((button, index) => {
-    button.toggleAttribute('data-pc-secondary-stage', index > 3);
+  buttons.forEach((button) => {
+    const stage = button.dataset.stageQuick ?? '';
+    button.toggleAttribute('data-pc-secondary-stage', !initiallyVisibleStages.has(stage));
     button.setAttribute('aria-pressed', String(button.classList.contains('active')));
   });
+
+  const standardOrder = ['Todas', 'Nuevo', 'Contactado', 'Calificado', 'Visita coordinada', 'Negociación', 'Reservado', 'Ganado', 'Perdido'];
+  const collapsedOrder = ['Todas', 'Nuevo', 'Contactado', 'Visita coordinada', 'Calificado', 'Negociación', 'Reservado', 'Ganado', 'Perdido'];
+  const desiredOrder = isMobile() && !stagesExpanded ? collapsedOrder : standardOrder;
+  const buttonByStage = new Map(buttons.map((button) => [button.dataset.stageQuick ?? '', button]));
+  desiredOrder.forEach((stage) => {
+    const button = buttonByStage.get(stage);
+    if (button && button.parentElement === counters) counters.append(button);
+  });
+
+  const activeStage = counters.querySelector<HTMLElement>('.mvp-stage-counter.active, [aria-pressed="true"]');
+  const selectedStage = activeStage?.dataset.stageQuick ?? 'Todas';
+  if (shell.dataset.pcSelectedStage !== selectedStage) {
+    shell.dataset.pcSelectedStage = selectedStage;
+    if (activeStage) {
+      const counterRect = counters.getBoundingClientRect();
+      const activeRect = activeStage.getBoundingClientRect();
+      if (activeRect.left < counterRect.left || activeRect.right > counterRect.right) {
+        const centeredLeft = activeStage.offsetLeft - ((counters.clientWidth - activeStage.offsetWidth) / 2);
+        counters.scrollLeft = Math.max(0, centeredLeft);
+      }
+    }
+  }
 
   const toggle = shell.querySelector<HTMLButtonElement>('[data-pc-toggle-stages]');
   if (toggle) {
@@ -258,8 +283,10 @@ function enhanceHeading(container: HTMLElement): void {
   text(heading.querySelector('p'), 'Contactá primero a los leads que requieren atención.');
   const create = container.querySelector<HTMLButtonElement>('[data-toggle="client-form"]');
   if (create && !create.closest('#mvp-lead-form')) {
+    const formOpen = Boolean(container.querySelector('#mvp-lead-form:not(.collapsed)'));
     create.textContent = 'Nuevo lead';
-    create.setAttribute('aria-label', 'Crear nuevo lead');
+    create.setAttribute('aria-label', formOpen ? 'Cerrar formulario' : 'Crear nuevo lead');
+    create.title = formOpen ? 'Cerrar formulario' : 'Nuevo lead';
   }
 }
 

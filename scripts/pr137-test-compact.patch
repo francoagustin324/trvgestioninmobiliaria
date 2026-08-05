@@ -1,0 +1,54 @@
+diff --git a/src/tests/b1-2-3-compact-leads-real-app.test.ts b/src/tests/b1-2-3-compact-leads-real-app.test.ts
+index a8323b9..5abf58c 100644
+--- a/src/tests/b1-2-3-compact-leads-real-app.test.ts
++++ b/src/tests/b1-2-3-compact-leads-real-app.test.ts
+@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
+ import { spawn, type ChildProcess } from 'node:child_process';
+ import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync } from 'node:fs';
+ import { join } from 'node:path';
++import { createServer as createNetServer } from 'node:net';
+ import test from 'node:test';
+ import { chromium, type Browser, type BrowserContext, type Page } from 'playwright';
+ import { localIsoDate } from '../lead-pipeline.js';
+@@ -221,6 +222,24 @@ function visualCrm(): CrmData {
+   return crm;
+ }
+ 
++
++async function findAvailablePort(): Promise<number> {
++  return await new Promise<number>((resolve, reject) => {
++    const probe = createNetServer();
++    probe.once('error', reject);
++    probe.listen(0, '127.0.0.1', () => {
++      const address = probe.address();
++      if (!address || typeof address === 'string') {
++        probe.close();
++        reject(new Error('No se pudo reservar un puerto local para la prueba visual.'));
++        return;
++      }
++      const port = address.port;
++      probe.close((error) => error ? reject(error) : resolve(port));
++    });
++  });
++}
++
+ function chromeExecutable(): string | undefined {
+   return ['/usr/bin/google-chrome', '/usr/bin/google-chrome-stable', '/usr/bin/chromium', '/usr/bin/chromium-browser'].find(existsSync);
+ }
+@@ -380,6 +399,7 @@ async function assertSingleExpandedAndPersistent(page: Page): Promise<void> {
+   assert.equal(await page.locator('#crm .mvp-lead-full-sheet[open]').getAttribute('data-lead-full-sheet'), selectedClient);
+   await page.locator('#crm .mvp-lead-more-filters').evaluate((details: HTMLDetailsElement) => { details.open = true; });
+   await page.locator('#mvp-lead-order').selectOption('priority');
++  await page.locator('#crm .mvp-lead-more-filters').evaluate((details: HTMLDetailsElement) => { details.open = false; });
+ }
+ 
+ async function assertPipelineSelection(page: Page): Promise<void> {
+@@ -541,7 +561,7 @@ test('B1.2.3 valida lista compacta, prioridad y disclosure con la aplicación re
+   assert.ok(index.indexOf('/src/mobile-leads-polish.css') < index.indexOf('/src/lead-list-compact.css'));
+   rmSync(artifactDirectory, { recursive: true, force: true });
+   mkdirSync(artifactDirectory, { recursive: true });
+-  const port = 45_000 + Math.floor(Math.random() * 1_000);
++  const port = await findAvailablePort();
+   const baseUrl = `http://127.0.0.1:${port}`;
+   const server = await startServer(port);
+   const browser = await chromium.launch({ executablePath: executable, headless: true, args: ['--no-sandbox'] });

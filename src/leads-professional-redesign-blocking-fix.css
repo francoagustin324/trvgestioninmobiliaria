@@ -81,7 +81,7 @@
   }
 
   #crm.pc-leads-redesign .pc-stage-summary[data-expanded="false"] [data-pc-secondary-stage]:not(.active):not([aria-pressed="true"]):not(.pc-selected-stage) {
-    display: none;
+    display: flex;
   }
 
   #crm.pc-leads-redesign .pc-stage-summary[data-expanded="false"] [data-pc-secondary-stage]:is(.active, [aria-pressed="true"], .pc-selected-stage) {

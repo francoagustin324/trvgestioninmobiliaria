@@ -219,3 +219,38 @@
     grid-template-columns: repeat(4, minmax(0, 1fr));
   }
 }
+
+/* PR #137: resumen móvil colapsado en 2x2, con etapas restantes desplazables. */
+@media (max-width: 720px) {
+  #crm.pc-leads-redesign .pc-stage-summary[data-expanded="false"] .mvp-stage-counters {
+    display: grid;
+    grid-template-rows: repeat(2, minmax(44px, auto));
+    grid-auto-flow: column;
+    grid-auto-columns: calc((100% - 8px) / 2);
+    gap: 8px;
+    overflow-x: auto;
+    overflow-y: hidden;
+    scroll-snap-type: x proximity;
+  }
+
+  #crm.pc-leads-redesign .pc-stage-summary[data-expanded="false"] .mvp-stage-counter {
+    width: 100%;
+    min-width: 0;
+    min-height: 44px;
+    scroll-snap-align: start;
+  }
+
+  #crm.pc-leads-redesign .pc-stage-summary[data-expanded="false"] .mvp-stage-counters::after {
+    display: none;
+  }
+
+  #crm.pc-leads-redesign .pc-stage-summary[data-expanded="true"] .mvp-stage-counters {
+    display: flex;
+  }
+}
+
+@media (max-width: 720px) {
+  #crm.pc-leads-redesign .pc-stage-summary[data-expanded="false"] .mvp-stage-counters {
+    grid-template-columns: none;
+  }
+}

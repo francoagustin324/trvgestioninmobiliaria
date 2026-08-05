@@ -13,13 +13,10 @@
 }
 
 @media (max-width: 720px) {
-  #crm.pc-leads-redesign .pc-stage-summary[data-expanded="false"] [data-stage-quick="Calificado"] {
-    display: none;
-  }
-
-  #crm.pc-leads-redesign .pc-stage-summary[data-expanded="false"] [data-stage-quick="Visita coordinada"] {
+  #crm.pc-leads-redesign .pc-stage-summary[data-expanded="false"] .mvp-stage-counter {
     display: flex;
   }
+
 
   #crm.pc-leads-redesign .pc-lead-dialog .pc-lead-form-section-grid,
   #crm.pc-leads-redesign .pc-lead-dialog .pc-lead-form-section .lead-form-more-grid {
