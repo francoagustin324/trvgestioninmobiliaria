@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawn, type ChildProcess } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync } from 'node:fs';
 import { createServer as createNetServer } from 'node:net';
 import test from 'node:test';
 import {
@@ -14,6 +14,18 @@ import {
 import { initialData, type Client, type CrmData, type TeamMember } from '../models.js';
 
 const artifactDir = 'artifacts/leads-redesign';
+const expectedScreenshots = [
+  '01-leads-desktop-1366x768-inicial.png',
+  '02-leads-desktop-filtros-activos.png',
+  '03-leads-mobile-390x844-inicial.png',
+  '04-leads-mobile-panel-filtros.png',
+  '05-leads-mobile-etapas-expandidas.png',
+  '06-nuevo-lead-desktop-superior.png',
+  '07-nuevo-lead-desktop-inferior.png',
+  '08-nuevo-lead-mobile-superior.png',
+  '09-nuevo-lead-mobile-calificacion.png',
+  '10-nuevo-lead-mobile-teclado-footer.png',
+] as const;
 const organizationId = 'trvgestioninmobiliaria';
 const userId = 'leads-redesign-owner';
 const memberId = 1;
@@ -309,11 +321,16 @@ async function assertInitialHierarchy(page: Page): Promise<void> {
   assert.equal(await page.locator('.pc-leads-heading p').innerText(), 'Contactá primero a los leads que requieren atención.');
   assert.equal(await page.locator('#mvp-lead-search').getAttribute('placeholder'), 'Buscar por nombre, WhatsApp o interés');
   assert.equal(await page.locator('#mvp-lead-count').innerText(), '8 leads');
-  const firstCard = page.locator('#mvp-lead-results .mvp-lead-card:visible').first();
-  const firstCardBox = await firstCard.boundingBox();
+  const visualHierarchy = await page.locator('#mvp-lead-results .mvp-lead-card:visible').evaluateAll((cards) => {
+    const boxes = cards.map((card) => {
+      const rect = card.getBoundingClientRect();
+      return { y: rect.y, bottom: rect.bottom, height: rect.height };
+    });
+    return boxes.sort((left, right) => left.y - right.y)[0] ?? null;
+  });
   const viewport = page.viewportSize();
-  assert.ok(firstCardBox && viewport);
-  assert.ok(firstCardBox.y < viewport.height - 100, JSON.stringify({ firstCardBox, viewport }));
+  assert.ok(visualHierarchy && viewport);
+  assert.ok(visualHierarchy.y < viewport.height - 100, JSON.stringify({ visualHierarchy, viewport }));
 }
 
 async function verifyDesktop(page: Page, url: string): Promise<void> {
@@ -325,7 +342,7 @@ async function verifyDesktop(page: Page, url: string): Promise<void> {
   await page.locator('[data-pc-attention="overdue"]').click();
   await page.waitForFunction(() => document.querySelector('#mvp-lead-count')?.textContent?.includes('de 8 leads'));
   assert.equal(await page.locator('[data-pc-attention="overdue"]').getAttribute('aria-pressed'), 'true');
-  await screenshot(page, '02-leads-desktop-filtros-activos-1366x768.png');
+  await screenshot(page, '02-leads-desktop-filtros-activos.png');
   await page.locator('[data-pc-attention="overdue"]').click();
 
   await page.getByRole('button', { name: 'Crear nuevo lead' }).click();
@@ -338,11 +355,11 @@ async function verifyDesktop(page: Page, url: string): Promise<void> {
   assert.equal(await form.locator('.pc-lead-form-qualification > summary').innerText(), 'Calificación comercial');
   assert.equal(await form.locator('.pc-lead-form-optional').getAttribute('open'), null);
   await assertFullyVisible(page, form.locator('.b131-lead-form-actions'));
-  await screenshot(page, '06-nuevo-lead-desktop-parte-superior.png');
+  await screenshot(page, '06-nuevo-lead-desktop-superior.png');
 
   await form.locator('.b131-lead-form-fields').evaluate((element) => { element.scrollTop = element.scrollHeight; });
   await form.locator('.pc-lead-form-optional > summary').click();
-  await screenshot(page, '07-nuevo-lead-desktop-parte-inferior.png');
+  await screenshot(page, '07-nuevo-lead-desktop-inferior.png');
   await assertNoHorizontalScroll(page);
 
   await page.keyboard.press('Escape');
@@ -377,7 +394,7 @@ async function verifyMobile(page: Page, url: string): Promise<void> {
   await filterDetails.locator('#mvp-lead-temperature-filter').selectOption('Caliente');
   await page.waitForFunction(() => document.querySelector('.mvp-lead-more-filters > summary span')?.textContent?.includes('Filtros (1)'));
   assert.equal(await filterDetails.locator('[data-pc-clear-filters]').isVisible(), true);
-  await screenshot(page, '04-panel-filtros-mobile-390x844.png');
+  await screenshot(page, '04-leads-mobile-panel-filtros.png');
   await filterDetails.locator('[data-pc-apply-filters]').click();
   assert.equal(await filterDetails.getAttribute('open'), null);
 
@@ -387,18 +404,18 @@ async function verifyMobile(page: Page, url: string): Promise<void> {
   await page.waitForFunction(() => document.querySelector('.pc-stage-summary')?.getAttribute('data-expanded') === 'true');
   assert.equal(await page.locator('[data-stage-quick="Calificado"]').isVisible(), true);
   assert.equal(await page.locator('.mvp-stage-counters').evaluate((element) => getComputedStyle(element).flexWrap), 'wrap');
-  await screenshot(page, '05-resumen-etapas-mobile-expandido-390x844.png');
+  await screenshot(page, '05-leads-mobile-etapas-expandidas.png');
 
   await page.getByRole('button', { name: 'Crear nuevo lead' }).click();
   const form = page.locator('#mvp-lead-form.pc-lead-dialog:not(.collapsed)');
   await form.waitFor({ state: 'visible' });
   assert.equal(await form.locator('.pc-lead-form-section-grid').first().evaluate((element) => getComputedStyle(element).gridTemplateColumns.split(' ').length), 1);
   await assertFullyVisible(page, form.locator('.b131-lead-form-actions'));
-  await screenshot(page, '08-nuevo-lead-mobile-parte-superior.png');
+  await screenshot(page, '08-nuevo-lead-mobile-superior.png');
 
   const fields = form.locator('.b131-lead-form-fields');
   await form.locator('.pc-lead-form-qualification').scrollIntoViewIfNeeded();
-  await screenshot(page, '09-nuevo-lead-mobile-calificacion-comercial.png');
+  await screenshot(page, '09-nuevo-lead-mobile-calificacion.png');
 
   await form.locator('input[name="zones"]').focus();
   await page.setViewportSize({ width: 390, height: 560 });
@@ -408,7 +425,7 @@ async function verifyMobile(page: Page, url: string): Promise<void> {
   const navigation = await page.locator('.mobile-bottom-nav').boundingBox();
   assert.ok(actions && navigation);
   assert.ok(actions.y + actions.height <= navigation.y + 1, JSON.stringify({ actions, navigation }));
-  await screenshot(page, '10-nuevo-lead-mobile-teclado-footer-accesible.png');
+  await screenshot(page, '10-nuevo-lead-mobile-teclado-footer.png');
   await assertNoHorizontalScroll(page);
 
   await page.setViewportSize({ width: 390, height: 430 });
@@ -428,6 +445,17 @@ async function verifyMobile(page: Page, url: string): Promise<void> {
   void fields;
 }
 
+function verifyScreenshots(): void {
+  const actual = readdirSync(artifactDir).filter((name) => name.endsWith('.png')).sort();
+  assert.deepEqual(actual, [...expectedScreenshots].sort());
+  for (const name of actual) {
+    const path = `${artifactDir}/${name}`;
+    const buffer = readFileSync(path);
+    assert.ok(statSync(path).size > 10_000, `${name} parece vacío.`);
+    assert.deepEqual([...buffer.subarray(0, 8)], [137, 80, 78, 71, 13, 10, 26, 10]);
+  }
+}
+
 test('rediseño de Leads permanece aislado de la lógica comercial aprobada', () => {
   const index = readFileSync('index.html', 'utf8');
   const redesign = readFileSync('src/leads-professional-redesign.ts', 'utf8');
@@ -436,9 +464,9 @@ test('rediseño de Leads permanece aislado de la lógica comercial aprobada', ()
   const reliability = readFileSync('src/lead-create-reliability.ts', 'utf8');
   const whatsapp = readFileSync('src/whatsapp-contact.ts', 'utf8');
 
-  assert.match(index, /leads-professional-redesign\.css\?v=20260804-1/);
-  assert.match(index, /leads-professional-redesign\.js\?v=20260804-1/);
-  assert.match(index, /leads-professional-redesign-guards\.js\?v=20260804-1/);
+  assert.match(index, /leads-professional-redesign\.css\?v=20260805-1/);
+  assert.match(index, /leads-professional-redesign\.js\?v=20260805-1/);
+  assert.match(index, /leads-professional-redesign-guards\.js\?v=20260805-1/);
   assert.match(redesign, /Contactá primero a los leads que requieren atención/);
   assert.match(redesign, /Buscar por nombre, WhatsApp o interés/);
   assert.match(redesign, /Atención requerida/);
@@ -455,7 +483,8 @@ test('rediseño de Leads permanece aislado de la lógica comercial aprobada', ()
   assert.match(whatsapp, /fingerprint/);
 });
 
-test('rediseño profesional valida desktop, laptop, tablet, Motorola y teclado reducido', { timeout: 420_000 }, async () => {
+test('rediseño profesional valida desktop, laptop, tablet, Motorola y teclado reducido', { timeout: 120_000 }, async () => {
+  rmSync(artifactDir, { recursive: true, force: true });
   mkdirSync(artifactDir, { recursive: true });
   const executablePath = chromeExecutable();
   assert.ok(executablePath, 'Chrome o Chromium debe estar disponible.');
@@ -504,6 +533,8 @@ test('rediseño profesional valida desktop, laptop, tablet, Motorola y teclado r
     } finally {
       await mobile.close();
     }
+
+    verifyScreenshots();
   } finally {
     if (browser) await browser.close().catch(() => undefined);
     if (server) await stopServer(server);
