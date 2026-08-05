@@ -1,0 +1,47 @@
+name: Temporary PR137 contrast type fix
+
+on:
+  push:
+    branches:
+      - agent/leads-ux-ui-professional-redesign
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/leads-ux-ui-professional-redesign
+      - name: Apply strict parser correction
+        shell: bash
+        run: |
+          python3 <<'PY'
+          from pathlib import Path
+          path = Path('src/tests/leads-professional-redesign.test.ts')
+          text = path.read_text()
+          old = """      const parts = match[1].split(/[ ,/]+/).filter(Boolean).map(Number);
+                return { r: parts[0], g: parts[1], b: parts[2], a: parts.length > 3 ? parts[3] : 1 };
+          """
+          new = """      const parts = match[1].split(/[ ,/]+/).filter(Boolean).map(Number);
+                if (parts.length < 3 || parts.some((part) => !Number.isFinite(part))) {
+                  throw new Error(`Color incompleto o inválido: ${value}`);
+                }
+                const [r = 0, g = 0, b = 0, alpha = 1] = parts;
+                return { r, g, b, a: alpha };
+          """
+          if old not in text:
+              raise SystemExit('No se encontró el parser exacto para corregir.')
+          path.write_text(text.replace(old, new, 1))
+          PY
+      - name: Commit correction
+        shell: bash
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add src/tests/leads-professional-redesign.test.ts
+          git commit -m "Tipar parser de colores computados"
+          git push origin HEAD:agent/leads-ux-ui-professional-redesign
