@@ -8,6 +8,7 @@ import {
   isValidCalendarDate,
 } from '../followup-calendar.js';
 import {
+  canonicalFollowUpPayload,
   followUpDateForChoice,
   followUpPreview,
 } from '../followup-selection.js';
@@ -60,12 +61,46 @@ test('la aritmética calendario no depende de parsear YYYY-MM-DD como UTC', () =
   assert.equal(isValidCalendarDate('2026-13-06'), false);
 });
 
-test('el guardado tiene un único handler, bloqueo doble y verificación local sin Reminder paralelo', () => {
+test('el submit consume la fecha canónica congelada y no recalcula al cambiar el reloj', () => {
+  const beforeMidnight = new Date('2026-08-05T23:59:30-03:00');
+  const afterMidnight = new Date('2026-08-06T00:01:00-03:00');
+  const frozenDate = followUpDateForChoice('1', '', beforeMidnight);
+  assert.equal(frozenDate, '2026-08-06');
+  assert.equal(followUpDateForChoice('1', '', afterMidnight), '2026-08-07');
+
+  assert.equal(canonicalFollowUpPayload({
+    checkedChoice: '1',
+    selectedChoice: '1',
+    selectedDate: frozenDate,
+    hiddenDate: frozenDate,
+    previewDate: frozenDate,
+    previewText: followUpPreview(frozenDate),
+    customDate: '2026-08-19',
+  }), '2026-08-06');
+
+  assert.throws(() => canonicalFollowUpPayload({
+    checkedChoice: '1',
+    selectedChoice: '1',
+    selectedDate: frozenDate,
+    hiddenDate: '2026-08-07',
+    previewDate: frozenDate,
+    previewText: followUpPreview(frozenDate),
+    customDate: '2026-08-19',
+  }), /fecha visible cambió/i);
+});
+
+test('el guardado tiene un único handler, usa estado canónico y verifica local sin Reminder paralelo', () => {
   const ui = readFileSync('src/followup-save-ui.ts', 'utf8');
   const persistence = readFileSync('src/followup-persistence.ts', 'utf8');
+  const saveStart = ui.indexOf('function saveFollowUp');
+  const saveEnd = ui.indexOf('function install', saveStart);
+  const saveBody = ui.slice(saveStart, saveEnd);
+
   assert.ok(ui.includes("document.addEventListener('submit'"));
   assert.ok(ui.includes('event.stopImmediatePropagation()'));
   assert.ok(ui.includes('savingForms.has(form)'));
+  assert.ok(saveBody.includes('readCanonicalSelection(form)'));
+  assert.ok(!saveBody.includes('synchronizeSelection(form)'));
   assert.ok(ui.includes('persistFollowUpSelection'));
   assert.ok(!ui.includes('window.open('));
   assert.ok(persistence.includes('saveData('));
