@@ -5,17 +5,21 @@ import test from 'node:test';
 import { chromium, type Browser, type BrowserContext, type Page } from 'playwright';
 import { initialData, type CrmData, type TeamMember } from '../models.js';
 
-const FIXED_TIME = new Date('2026-08-05T18:46:00-03:00');
+const FIXED_TIME = new Date('2026-08-05T23:59:30-03:00');
+const AFTER_MIDNIGHT = new Date('2026-08-06T00:01:00-03:00');
 const USER_ID = 'followup-owner';
 const SESSION_KEY = 'propcontrol-cloud-session-v1';
 const ACTIVE_MEMBER_KEY = 'propcontrol-active-team-member-v1';
 const STORAGE_KEY = `trv-crm-basico:user:${USER_ID}`;
 const SYNC_KEY = `${STORAGE_KEY}:sync`;
 const ARTIFACT_DIR = 'artifacts/b1-3';
+const EXPECTED_CONFIRMATION = 'Seguimiento de Lucía Martín programado para jueves, 6 de agosto de 2026 (2026-08-06).';
 
 interface FollowUpTestWindow extends Window {
   __followUpWindowOpened?: boolean;
   __followUpOriginalSetItem?: Storage['setItem'];
+  __followUpCloudMessages?: string[];
+  __followUpSnapshotAtClose?: string;
 }
 
 function owner(): TeamMember {
@@ -134,10 +138,12 @@ async function browserContext(browser: Browser): Promise<BrowserContext> {
     colorScheme: 'dark',
   });
   await context.addInitScript(({ data, sessionKey, storageKey, syncKey, activeMemberKey, identityStorageKey }) => {
+    const target = window as FollowUpTestWindow;
+    target.__followUpCloudMessages = [];
     localStorage.setItem(sessionKey, JSON.stringify({
       accessToken: 'followup-access',
       refreshToken: 'followup-refresh',
-      expiresAt: new Date('2026-08-05T22:46:00.000Z').getTime(),
+      expiresAt: new Date('2026-08-06T05:00:00.000Z').getTime(),
       userId: 'followup-owner',
       email: 'franco@propcontrol.test',
     }));
@@ -159,10 +165,20 @@ async function browserContext(browser: Browser): Promise<BrowserContext> {
       humanName: 'Franco Solís',
       confirmedAt: '2026-08-05T21:40:00.000Z',
     }));
+    document.addEventListener('propcontrol-cloud-status', (event) => {
+      const message = (event as CustomEvent<{ message?: string }>).detail?.message;
+      if (message) target.__followUpCloudMessages?.push(message);
+    });
+    document.addEventListener('click', (event) => {
+      const element = event.target as HTMLElement;
+      if (!element.closest('[data-whatsapp-followup-form] [data-whatsapp-close]')) return;
+      const snapshot = JSON.parse(localStorage.getItem(storageKey) || '{}') as CrmData;
+      target.__followUpSnapshotAtClose = snapshot.clients?.find((client) => client.id === 1)?.nextFollowUp;
+    }, true);
     Object.defineProperty(window, 'open', {
       configurable: true,
       value: () => {
-        (window as FollowUpTestWindow).__followUpWindowOpened = true;
+        target.__followUpWindowOpened = true;
         return null;
       },
     });
@@ -202,11 +218,14 @@ async function openFollowUp(page: Page): Promise<void> {
 async function selectPreset(page: Page, value: string, expectedDate: string, expectedPreview: string): Promise<void> {
   const form = page.locator('[data-whatsapp-followup-form]');
   await form.locator(`input[name="follow-up-choice"][value="${value}"]`).check();
-  await page.waitForFunction(({ date, preview }) => {
+  await page.waitForFunction(({ date, preview, value: choice }) => {
     const current = document.querySelector<HTMLFormElement>('[data-whatsapp-followup-form]');
-    const text = current?.querySelector<HTMLElement>('[data-whatsapp-followup-preview]')?.textContent || '';
-    return current?.dataset.followupSelectedDate === date && text === preview;
-  }, { date: expectedDate, preview: expectedPreview });
+    const previewNode = current?.querySelector<HTMLElement>('[data-whatsapp-followup-preview]');
+    return current?.dataset.followupSelectedChoice === choice
+      && current?.dataset.followupSelectedDate === date
+      && previewNode?.dataset.followupPreviewDate === date
+      && previewNode?.textContent === preview;
+  }, { date: expectedDate, preview: expectedPreview, value });
   assert.equal(await form.locator('input[name="selected-date"]').inputValue(), expectedDate);
 }
 
@@ -215,7 +234,7 @@ async function openAgenda(page: Page): Promise<void> {
   await page.waitForSelector('#agenda.active', { state: 'visible' });
 }
 
-test('hotfix persiste presets, evita duplicados y conserva el modal ante error real', { timeout: 240_000 }, async () => {
+test('hotfix congela la fecha al cruzar medianoche, evita duplicados y conserva el modal ante error real', { timeout: 240_000 }, async () => {
   mkdirSync(ARTIFACT_DIR, { recursive: true });
   const executablePath = chromeExecutable();
   assert.ok(executablePath, 'Chrome/Chromium no disponible para probar el hotfix.');
@@ -238,18 +257,39 @@ test('hotfix persiste presets, evita duplicados y conserva el modal ante error r
     );
     await page.screenshot({ path: `${ARTIFACT_DIR}/07-hotfix-manana-seleccion.png`, fullPage: true });
 
-    await page.locator('[data-whatsapp-followup-form]').evaluate((form) => {
-      const followUp = form as HTMLFormElement;
+    const form = page.locator('[data-whatsapp-followup-form]');
+    assert.equal(await form.getAttribute('data-followup-selected-choice'), '1');
+    assert.equal(await form.getAttribute('data-followup-selected-date'), '2026-08-06');
+    assert.equal(await page.locator('#propcontrol-whatsapp-contact').isHidden(), false);
+    await page.clock.setFixedTime(AFTER_MIDNIGHT);
+    assert.equal(await form.getAttribute('data-followup-selected-date'), '2026-08-06');
+    assert.equal(await form.locator('input[name="selected-date"]').inputValue(), '2026-08-06');
+    assert.equal(
+      await form.locator('[data-whatsapp-followup-preview]').textContent(),
+      'Se programará para: jueves, 6 de agosto de 2026',
+    );
+
+    await form.evaluate((current) => {
+      const followUp = current as HTMLFormElement;
       followUp.requestSubmit();
       followUp.requestSubmit();
     });
     await page.waitForFunction(() => document.getElementById('propcontrol-whatsapp-contact')?.hidden === true);
+    await page.waitForFunction((message) => (
+      (window as FollowUpTestWindow).__followUpCloudMessages || []
+    ).includes(message), EXPECTED_CONFIRMATION);
     const tomorrow = await storedCrm(page);
     assert.equal(tomorrow.clients[0]?.nextFollowUp, '2026-08-06');
+    assert.notEqual(tomorrow.clients[0]?.nextFollowUp, '2026-08-07');
     assert.equal(tomorrow.clients[0]?.nextAction, 'Volver a contactar por WhatsApp');
     assert.equal(tomorrow.reminders.length, 0, 'Agenda no debe crear un Reminder paralelo.');
     assert.equal(tomorrow.activityLog.filter((entry) => entry.action === 'Seguimiento por WhatsApp programado').length, 1);
+    assert.equal(await page.evaluate(() => (window as FollowUpTestWindow).__followUpSnapshotAtClose), '2026-08-06');
     assert.equal(await page.evaluate(() => Boolean((window as FollowUpTestWindow).__followUpWindowOpened)), false);
+    assert.equal(
+      await page.evaluate(() => (window as FollowUpTestWindow).__followUpCloudMessages?.at(-1)),
+      EXPECTED_CONFIRMATION,
+    );
     await page.screenshot({ path: `${ARTIFACT_DIR}/08-hotfix-manana-confirmado.png`, fullPage: true });
 
     await openAgenda(page);
