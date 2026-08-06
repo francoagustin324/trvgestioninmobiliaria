@@ -1,5 +1,6 @@
 import { persistFollowUpSelection } from './followup-persistence.js';
 import {
+  canonicalFollowUpPayload,
   followUpDateForChoice,
   followUpPreview,
   localDateLabel,
@@ -10,6 +11,11 @@ const savingForms = new WeakSet<HTMLFormElement>();
 
 interface FollowUpWindow extends Window {
   [INSTALL_FLAG]?: boolean;
+}
+
+interface CanonicalSelection {
+  choice: string;
+  date: string | null;
 }
 
 function selectedChoice(form: HTMLFormElement): string {
@@ -50,6 +56,7 @@ function synchronizeSelection(form: HTMLFormElement, now = new Date()): string {
   if (selected && selected.value !== date) selected.value = date;
   form.dataset.followupSelectedDate = date;
   form.dataset.followupSelectedChoice = choice;
+  form.dataset.followupCanonicalInitialized = 'true';
 
   const custom = form.querySelector<HTMLElement>('.whatsapp-custom-date');
   if (custom) custom.hidden = choice !== 'custom';
@@ -62,9 +69,14 @@ function synchronizeSelection(form: HTMLFormElement, now = new Date()): string {
   return date;
 }
 
-function synchronizeVisibleForms(): void {
+function initializeForm(form: HTMLFormElement, force = false): void {
+  if (!force && form.dataset.followupCanonicalInitialized === 'true') return;
+  synchronizeSelection(form);
+}
+
+function initializeVisibleForms(force = false): void {
   document.querySelectorAll<HTMLFormElement>('[data-whatsapp-followup-form]')
-    .forEach((form) => synchronizeSelection(form));
+    .forEach((form) => initializeForm(form, force));
 }
 
 function synchronizeAfterCurrentEvent(form: HTMLFormElement | null): void {
@@ -72,6 +84,23 @@ function synchronizeAfterCurrentEvent(form: HTMLFormElement | null): void {
   queueMicrotask(() => {
     if (form.isConnected) synchronizeSelection(form);
   });
+}
+
+function readCanonicalSelection(form: HTMLFormElement): CanonicalSelection {
+  const choice = selectedChoice(form);
+  const selected = form.querySelector<HTMLInputElement>('input[name="selected-date"]');
+  const custom = form.querySelector<HTMLInputElement>('input[name="custom-date"]');
+  const preview = form.querySelector<HTMLElement>('[data-whatsapp-followup-preview]');
+  const date = canonicalFollowUpPayload({
+    checkedChoice: choice,
+    selectedChoice: form.dataset.followupSelectedChoice || '',
+    selectedDate: form.dataset.followupSelectedDate || '',
+    hiddenDate: selected?.value || '',
+    previewDate: preview?.dataset.followupPreviewDate || '',
+    previewText: preview?.textContent || '',
+    customDate: custom?.value || '',
+  });
+  return { choice, date };
 }
 
 function setSaving(form: HTMLFormElement, saving: boolean): void {
@@ -99,16 +128,16 @@ function saveFollowUp(event: SubmitEvent, form: HTMLFormElement): void {
   if (savingForms.has(form)) return;
 
   clearError(form);
-  const choice = selectedChoice(form);
-  const date = synchronizeSelection(form);
-  if (!choice) {
-    showError(form, 'Elegí cuándo querés realizar el próximo seguimiento.');
-    return;
-  }
-  if (choice !== 'none' && !date) {
-    showError(form, choice === 'custom'
-      ? 'Elegí una fecha personalizada válida.'
-      : 'No se pudo calcular la fecha seleccionada. Volvé a elegir la opción.');
+  let selection: CanonicalSelection;
+  try {
+    selection = readCanonicalSelection(form);
+  } catch (error) {
+    showError(
+      form,
+      error instanceof Error
+        ? error.message
+        : 'La fecha visible no pudo validarse. Volvé a elegir el seguimiento.',
+    );
     return;
   }
 
@@ -125,7 +154,7 @@ function saveFollowUp(event: SubmitEvent, form: HTMLFormElement): void {
       clientId,
       attemptId,
       activityId,
-      date: choice === 'none' ? null : date,
+      date: selection.date,
     });
     closeAfterSuccess(form);
     document.dispatchEvent(new CustomEvent('trv-render'));
@@ -163,15 +192,15 @@ function install(): void {
   document.addEventListener('click', (event) => {
     const target = event.target as HTMLElement;
     if (!target.closest('[data-whatsapp-confirm-sent], [data-whatsapp-manual-register]')) return;
-    queueMicrotask(synchronizeVisibleForms);
+    queueMicrotask(() => initializeVisibleForms(true));
   });
   document.addEventListener('submit', (event) => {
     const form = (event.target as HTMLElement).closest<HTMLFormElement>('[data-whatsapp-followup-form]');
     if (form) saveFollowUp(event, form);
   }, true);
-  document.addEventListener('trv-render', () => queueMicrotask(synchronizeVisibleForms));
-  window.addEventListener('pageshow', () => queueMicrotask(synchronizeVisibleForms));
-  queueMicrotask(synchronizeVisibleForms);
+  document.addEventListener('trv-render', () => queueMicrotask(() => initializeVisibleForms()));
+  window.addEventListener('pageshow', () => queueMicrotask(() => initializeVisibleForms()));
+  queueMicrotask(() => initializeVisibleForms());
 }
 
 install();
