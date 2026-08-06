@@ -368,7 +368,7 @@ test('B1.3.3 conserva fecha inmutable, atribución validada y recarga', { timeou
     await page.waitForFunction((expected) => document.querySelector<HTMLInputElement>('input[name="selected-date"]')?.value === expected, expectedDate);
     assert.equal(await selected.inputValue(), expectedDate);
     const previewBeforeMidnight = await preview.innerText();
-    assert.match(previewBeforeMidnight, /09 de agosto de 2026/i);
+    assert.match(previewBeforeMidnight, /9 de agosto de 2026/i);
     await page.screenshot({ path: `${artifactDir}/12-fecha-inmutable-seleccionada.png`, fullPage: true });
 
     await page.clock.setFixedTime(new Date('2026-08-03T00:00:30-03:00'));
