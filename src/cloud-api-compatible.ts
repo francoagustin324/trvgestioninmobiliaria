@@ -1,3 +1,4 @@
+import { LatestSerialQueue } from './cloud-save-serial.js';
 import type { CrmData } from './models.js';
 import {
   getCloudSession,
@@ -13,8 +14,13 @@ import {
   assertRemoteIsSafe,
   markCloudHydrated,
   markCloudSaved,
+  getSyncState,
+  hasPendingLocalChanges,
   markSyncError,
+  readLocalSnapshot,
   stableFingerprint,
+  syncSaveToken,
+  type SyncSaveToken,
 } from './sync-safety.js';
 
 export {
@@ -27,7 +33,15 @@ export {
 };
 
 const SNAPSHOT_SOURCE = 'propcontrol_system_snapshot';
-let compatibilitySaveTimer: number | null = null;
+const compatibilitySaveTimers = new Map<string, number>();
+
+interface CloudSaveJob {
+  accountKey: string;
+  snapshot: CrmData;
+  token: SyncSaveToken;
+}
+
+const accountSaveQueues = new Map<string, LatestSerialQueue<CloudSaveJob>>();
 
 interface PublicCloudConfig {
   configured?: boolean;
@@ -77,6 +91,36 @@ function isCrmData(value: unknown): value is CrmData {
     && Array.isArray(record.properties)
     && Array.isArray(record.reminders)
     && Array.isArray(record.fichas);
+}
+
+function remoteComparableCrm(crm: CrmData): unknown {
+  const comparable = structuredClone(crm) as unknown as Record<string, unknown>;
+  const organization = comparable.organization as Record<string, unknown> | undefined;
+  if (organization) delete organization.id;
+
+  // La membresía y las asignaciones son normalizadas por el servidor. La verificación
+  // remota compara el contenido CRM de negocio y no falla por esos campos autoritativos.
+  comparable.teamMembers = [];
+  ['clients', 'properties', 'contacts', 'reminders', 'fichas', 'conversations'].forEach((key) => {
+    const items = comparable[key];
+    if (!Array.isArray(items)) return;
+    items.forEach((item) => {
+      if (!item || typeof item !== 'object' || Array.isArray(item)) return;
+      const record = item as Record<string, unknown>;
+      delete record.assignedToId;
+      delete record.createdById;
+    });
+    items.sort((left, right) => Number((left as Record<string, unknown>)?.id ?? 0) - Number((right as Record<string, unknown>)?.id ?? 0));
+  });
+  const activity = comparable.activityLog;
+  if (Array.isArray(activity)) {
+    activity.forEach((item) => {
+      if (!item || typeof item !== 'object' || Array.isArray(item)) return;
+      delete (item as Record<string, unknown>).actorId;
+    });
+    activity.sort((left, right) => Number((left as Record<string, unknown>)?.id ?? 0) - Number((right as Record<string, unknown>)?.id ?? 0));
+  }
+  return comparable;
 }
 
 async function parseJson(response: Response): Promise<unknown> {
@@ -145,18 +189,22 @@ async function legacySnapshotRow(): Promise<{ row: LegacySnapshotRow | null; mem
 async function pullLegacyCloudData(): Promise<CrmData | null> {
   const { row } = await legacySnapshotRow();
   const crm = row?.internal_data?.crm;
-  markCloudHydrated(row?.updated_at || null);
-  return isCrmData(crm) ? crm : null;
+  if (!isCrmData(crm)) {
+    markCloudHydrated(row?.updated_at || null);
+    return null;
+  }
+  markCloudHydrated(row?.updated_at || null, stableFingerprint(crm));
+  return crm;
 }
 
-async function pushLegacyCloudData(crm: CrmData): Promise<void> {
+async function pushLegacyCloudData(crm: CrmData, token: SyncSaveToken): Promise<void> {
   const { row, membership } = await legacySnapshotRow();
   const localFingerprint = stableFingerprint(crm);
   const remoteFingerprint = stableFingerprint(row?.internal_data?.crm ?? null);
   assertRemoteIsSafe(row?.updated_at || null, localFingerprint, remoteFingerprint);
 
   if (row && localFingerprint === remoteFingerprint) {
-    markCloudSaved(row.updated_at || null);
+    markCloudSaved(row.updated_at || null, token);
     return;
   }
 
@@ -180,7 +228,11 @@ async function pushLegacyCloudData(crm: CrmData): Promise<void> {
     body: JSON.stringify(payload),
   }));
   const refreshed = await legacySnapshotRow();
-  markCloudSaved(refreshed.row?.updated_at || new Date().toISOString());
+  const verifiedCrm = refreshed.row?.internal_data?.crm;
+  if (!isCrmData(verifiedCrm) || stableFingerprint(verifiedCrm) !== localFingerprint) {
+    throw new Error('La verificación remota legacy no coincide con el snapshot que PropControl intentó guardar.');
+  }
+  markCloudSaved(refreshed.row?.updated_at || new Date().toISOString(), token);
 }
 
 export async function pullCloudData(fallback?: CrmData): Promise<CrmData | null> {
@@ -192,13 +244,58 @@ export async function pullCloudData(fallback?: CrmData): Promise<CrmData | null>
   }
 }
 
-export async function pushCloudData(crm: CrmData): Promise<void> {
+async function runCloudPush(job: CloudSaveJob): Promise<void> {
+  const session = getCloudSession();
+  if (!session || session.userId !== job.accountKey) {
+    throw new Error('La cuenta activa cambió durante la sincronización. El guardado quedó pendiente para evitar mezclar inmobiliarias.');
+  }
   try {
-    await pushModernCloudData(crm);
+    // El writer moderno histórico no puede declarar limpio por sí solo porque no
+    // conoce la generación capturada por el coordinador. Después del write,
+    // releemos la nube y recién confirmamos la generación si el CRM es equivalente.
+    await pushModernCloudData(job.snapshot);
+    const verified = await pullModernCloudData(job.snapshot);
+    if (!verified || stableFingerprint(remoteComparableCrm(verified)) !== stableFingerprint(remoteComparableCrm(job.snapshot))) {
+      throw new Error('La verificación remota moderna no coincide con el snapshot que PropControl intentó guardar.');
+    }
+    markCloudSaved(null, job.token);
   } catch (error) {
     if (!isLegacySchemaError(error)) throw error;
-    await pushLegacyCloudData(crm);
+    await pushLegacyCloudData(job.snapshot, job.token);
   }
+}
+
+function latestPendingJob(completed: CloudSaveJob): CloudSaveJob | null {
+  const session = getCloudSession();
+  if (!session || session.userId !== completed.accountKey || !hasPendingLocalChanges()) return null;
+  const local = readLocalSnapshot();
+  if (!local) return null;
+  const token = syncSaveToken(local);
+  if (token.generation === completed.token.generation && token.fingerprint === completed.token.fingerprint) return null;
+  return { accountKey: completed.accountKey, snapshot: structuredClone(local), token };
+}
+
+function accountQueue(accountKey: string): LatestSerialQueue<CloudSaveJob> {
+  const existing = accountSaveQueues.get(accountKey);
+  if (existing) return existing;
+  const created = new LatestSerialQueue<CloudSaveJob>(runCloudPush, latestPendingJob);
+  accountSaveQueues.set(accountKey, created);
+  return created;
+}
+
+export async function pushCloudData(crm: CrmData, expectedAccountKey?: string): Promise<void> {
+  const session = getCloudSession();
+  if (!session) throw new Error('Ingresá a tu cuenta para sincronizar.');
+  if (expectedAccountKey && session.userId !== expectedAccountKey) {
+    throw new Error('La cuenta activa cambió antes de iniciar la sincronización.');
+  }
+  const snapshot = structuredClone(crm);
+  const job: CloudSaveJob = {
+    accountKey: session.userId,
+    snapshot,
+    token: syncSaveToken(snapshot),
+  };
+  await accountQueue(session.userId).enqueue(job);
 }
 
 function emitStatus(message: string, kind: 'success' | 'error' | 'working' = 'success'): void {
@@ -206,13 +303,22 @@ function emitStatus(message: string, kind: 'success' | 'error' | 'working' = 'su
 }
 
 export function queueCloudSave(crm: CrmData): void {
-  if (!getCloudSession()) return;
-  if (compatibilitySaveTimer !== null) window.clearTimeout(compatibilitySaveTimer);
-  compatibilitySaveTimer = window.setTimeout(() => {
-    compatibilitySaveTimer = null;
+  const session = getCloudSession();
+  if (!session) return;
+  const accountKey = session.userId;
+  const previousTimer = compatibilitySaveTimers.get(accountKey);
+  if (previousTimer !== undefined) window.clearTimeout(previousTimer);
+  const snapshot = structuredClone(crm);
+  const timer = window.setTimeout(() => {
+    compatibilitySaveTimers.delete(accountKey);
+    const active = getCloudSession();
+    if (!active || active.userId !== accountKey) return;
+    if (!hasPendingLocalChanges()) return;
     emitStatus('Guardando en la nube…', 'working');
-    void pushCloudData(crm)
-      .then(() => emitStatus('Guardado seguro en la nube.'))
+    void pushCloudData(snapshot, accountKey)
+      .then(() => {
+        if (!getSyncState().dirty) emitStatus('Guardado seguro en la nube.');
+      })
       .catch((error) => {
         const technicalMessage = errorMessage(error) || 'No se pudo guardar en la nube.';
         const message = `Guardado localmente, sincronización pendiente. ${technicalMessage}`;
@@ -220,4 +326,5 @@ export function queueCloudSave(crm: CrmData): void {
         emitStatus(message, 'error');
       });
   }, 700);
+  compatibilitySaveTimers.set(accountKey, timer);
 }
