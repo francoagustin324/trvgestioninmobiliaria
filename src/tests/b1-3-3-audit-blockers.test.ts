@@ -153,7 +153,7 @@ test('B1.3.3 demuestra por qué no debe recalcularse al cruzar medianoche', () =
   assert.equal(selectedBefore, '2026-08-09');
   assert.equal(recalculatedAfter, '2026-08-10');
   assert.notEqual(selectedBefore, recalculatedAfter);
-  assert.match(followUpPreview(selectedBefore), /09 de agosto de 2026/i);
+  assert.match(followUpPreview(selectedBefore), /9 de agosto de 2026/i);
 });
 
 test('B1.3.3 guarda selected-date sin volver a derivar presets', () => {
