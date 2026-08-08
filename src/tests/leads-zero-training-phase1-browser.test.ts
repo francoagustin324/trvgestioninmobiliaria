@@ -68,8 +68,8 @@ async function contextFor(browser: Browser, viewport: { width: number; height: n
   const context = await browser.newContext({ viewport, isMobile: mobile, hasTouch: mobile, locale: 'es-AR', timezoneId: 'America/Argentina/Cordoba', colorScheme: 'dark' });
   await context.addInitScript(({ crm, identityStorageKey }) => {
     localStorage.setItem('propcontrol-cloud-session-v1', JSON.stringify({ accessToken: 'access', refreshToken: 'refresh', expiresAt: Date.now() + 3_600_000, userId: 'zero-training-owner', email: 'franco@propcontrol.test' }));
-    localStorage.setItem('trv-crm-basico:user:zero-training-owner', JSON.stringify(crm));
-    localStorage.setItem('trv-crm-basico:user:zero-training-owner:sync', JSON.stringify({ dirty: false, localUpdatedAt: '2026-08-07T18:00:00.000Z', lastCloudSavedAt: '2026-08-07T18:00:00.000Z', lastCloudVersion: '2026-08-07T18:00:00.000Z' }));
+    if (!localStorage.getItem('trv-crm-basico:user:zero-training-owner')) localStorage.setItem('trv-crm-basico:user:zero-training-owner', JSON.stringify(crm));
+    if (!localStorage.getItem('trv-crm-basico:user:zero-training-owner:sync')) localStorage.setItem('trv-crm-basico:user:zero-training-owner:sync', JSON.stringify({ dirty: false, localUpdatedAt: '2026-08-07T18:00:00.000Z', lastCloudSavedAt: '2026-08-07T18:00:00.000Z', lastCloudVersion: '2026-08-07T18:00:00.000Z' }));
     localStorage.setItem('propcontrol-active-team-member-v1', '1');
     localStorage.setItem(identityStorageKey, JSON.stringify({ version: 1, organizationId: 'zero-training-org', memberId: 1, actorKey: 'cloud:zero-training-owner', humanName: 'Franco Solis', confirmedAt: '2026-08-07T18:00:00.000Z' }));
     Object.defineProperty(window, 'open', { configurable: true, value: (url?: string | URL) => { (window as TestWindow).__zeroTrainingOpenedUrl = String(url || ''); return null; } });
