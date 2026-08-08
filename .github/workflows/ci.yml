@@ -31,6 +31,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          sed -i '/document.querySelector<HTMLElement>.*data-whatsapp-manual-register/s/replace_once/replace_all/' .github/pr140_migrate.py
           python3 .github/pr140_migrate.py
           git diff --check
       - name: Restaurar CI normal y validar compilación
