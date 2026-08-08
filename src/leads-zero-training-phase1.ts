@@ -28,6 +28,9 @@ interface ConfirmedContact {
 let installed = false;
 let patchQueued = false;
 let confirmedContact: ConfirmedContact | null = null;
+let whatsappPanelObserver: MutationObserver | null = null;
+let whatsappRootObserver: MutationObserver | null = null;
+let observedWhatsAppPanel: HTMLElement | null = null;
 
 function clientById(clientId: number): Client | null {
   return visibleClients().find((client) => client.id === clientId) ?? null;
@@ -414,6 +417,27 @@ function queuePatch(): void {
   queueMicrotask(patchAll);
 }
 
+function observeWhatsAppPanel(): void {
+  if (typeof MutationObserver === 'undefined') return;
+  const panelElement = panel();
+  if (!panelElement || observedWhatsAppPanel === panelElement) return;
+  whatsappPanelObserver?.disconnect();
+  observedWhatsAppPanel = panelElement;
+  whatsappPanelObserver = new MutationObserver(() => queuePatch());
+  whatsappPanelObserver.observe(panelElement, { childList: true });
+  whatsappRootObserver?.disconnect();
+  whatsappRootObserver = null;
+  queuePatch();
+}
+
+function installWhatsAppPanelObserver(): void {
+  if (typeof MutationObserver === 'undefined') return;
+  observeWhatsAppPanel();
+  if (observedWhatsAppPanel) return;
+  whatsappRootObserver = new MutationObserver(() => observeWhatsAppPanel());
+  whatsappRootObserver.observe(document.body, { childList: true });
+}
+
 function closeDonePanelForNavigation(target: HTMLElement): void {
   const panelElement = panel();
   if (panelElement?.dataset.zeroTrainingView !== 'done' || overlay()?.hidden || !target.closest('[data-module]')) return;
@@ -516,6 +540,7 @@ function install(): void {
   window.addEventListener('focus', queuePatch);
   window.addEventListener('pageshow', queuePatch);
   document.addEventListener('visibilitychange', queuePatch);
+  installWhatsAppPanelObserver();
   queuePatch();
 }
 
