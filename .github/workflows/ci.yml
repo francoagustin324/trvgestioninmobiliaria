@@ -3,60 +3,116 @@ name: TRV CI
 on:
   pull_request:
     branches: [main]
+  push:
+    branches: [main]
+  schedule:
+    - cron: "0 10 * * *"
   workflow_dispatch:
 
-permissions:
-  contents: write
-
 concurrency:
-  group: pr140-migrate-${{ github.ref }}
+  group: trv-ci-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  migrate-phase1-tests:
+  build-and-test:
     runs-on: ubuntu-latest
+    env:
+      PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
         with:
-          ref: agent/leads-zero-training-ux-phase1
-          fetch-depth: 0
-      - name: Verificar base autorizada
-        shell: bash
+          node-version: 22
+      - name: Instalar dependencias
+        run: npm install --silent
+      - name: Compilar TypeScript
+        id: build
+        run: |
+          set +e
+          npm run build --silent > build.log 2>&1
+          code=$?
+          cat build.log
+          exit $code
+      - name: Guardar diagnóstico de compilación
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-diagnostics
+          path: build.log
+          retention-days: 1
+      - name: Ejecutar pruebas
+        run: |
+          set +e
+          npm test --silent > test.log 2>&1
+          code=$?
+          cat test.log
+          exit $code
+      - name: Guardar diagnóstico de pruebas
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-diagnostics
+          path: test.log
+          retention-days: 3
+      - name: Adjuntar capturas reales B1.3
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: b1-3-capturas-reales
+          path: artifacts/b1-3
+          if-no-files-found: ignore
+          retention-days: 14
+      - name: Adjuntar capturas reales B1.3.1
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: b1-3-1-capturas-reales
+          path: artifacts/b1-3-1
+          if-no-files-found: ignore
+          retention-days: 14
+      - name: Adjuntar capturas reales B1.3.2
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: b1-3-2-capturas-reales
+          path: artifacts/b1-3-2
+          if-no-files-found: ignore
+          retention-days: 14
+      - name: Adjuntar capturas reales B1.3.3
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: b1-3-3-capturas-reales
+          path: artifacts/b1-3-3
+          if-no-files-found: ignore
+          retention-days: 14
+      - name: Verificar capturas rediseño profesional de Leads
+        if: always()
         run: |
           set -euo pipefail
-          git fetch origin main --no-tags
-          test "$(git rev-parse origin/main)" = "06ffe54075e8b1b0fd11eed09bffa5a83f2dfc68"
-      - name: Migrar pruebas históricas al contrato FASE 1
-        shell: bash
-        run: |
-          set -euo pipefail
-          sed -i '/document.querySelector<HTMLElement>.*data-whatsapp-manual-register/s/replace_once/replace_all/' .github/pr140_migrate.py
-          python3 .github/pr140_migrate.py
-          python3 - <<'PY'
-          from pathlib import Path
-          p = Path('src/tests/followup-cloud-persistence-browser.test.ts')
-          text = p.read_text()
-          old = "    assert.equal((await crmFromStorage(page)).clients[0]?.nextFollowUp, FOLLOW_UP_DATE);"
-          new = "    assert.equal(await page.evaluate((key) => (JSON.parse(localStorage.getItem(key) || '{}') as CrmData).clients[0]?.nextFollowUp, STORAGE_KEY), FOLLOW_UP_DATE);"
-          if text.count(old) != 1:
-              raise SystemExit(f'followup cloud local read: esperado 1, encontrado {text.count(old)}')
-          p.write_text(text.replace(old, new, 1))
-          PY
-          git diff --check
-      - name: Validar compilación del árbol migrado
-        shell: bash
-        run: |
-          set -euo pipefail
-          npm install --silent
-          npm run build --silent
-      - name: Guardar sólo pruebas migradas en la rama
-        shell: bash
-        run: |
-          set -euo pipefail
-          test "$(git rev-parse origin/main)" = "06ffe54075e8b1b0fd11eed09bffa5a83f2dfc68"
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add src/tests
-          git diff --cached --check
-          git commit -m "Migrar regresiones a UX cero capacitación"
-          git push origin HEAD:agent/leads-zero-training-ux-phase1
+          directory="artifacts/leads-redesign"
+          test -d "$directory"
+          expected=(
+            01-leads-desktop-1366x768-inicial.png
+            02-leads-desktop-filtros-activos.png
+            03-leads-mobile-390x844-inicial.png
+            04-leads-mobile-panel-filtros.png
+            05-leads-mobile-etapas-expandidas.png
+            06-nuevo-lead-desktop-superior.png
+            07-nuevo-lead-desktop-inferior.png
+            08-nuevo-lead-mobile-superior.png
+            09-nuevo-lead-mobile-calificacion.png
+            10-nuevo-lead-mobile-teclado-footer.png
+          )
+          test "$(find "$directory" -maxdepth 1 -type f -name '*.png' | wc -l)" -eq "${#expected[@]}"
+          for file in "${expected[@]}"; do
+            test -s "$directory/$file"
+          done
+      - name: Adjuntar capturas rediseño profesional de Leads
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: leads-professional-redesign-capturas
+          path: artifacts/leads-redesign
+          if-no-files-found: error
+          retention-days: 14
