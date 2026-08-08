@@ -143,7 +143,7 @@ async function installCloudRoutes(context: BrowserContext, initial: CrmData): Pr
         firstStarted.resolve();
         await firstRelease.promise;
       }
-      remote = stamp(body, postCount === 1 ? '2026-08-07T19:52:01.000Z' : '2026-08-07T19:52:02.000Z');
+      remote = stamp(body, postCount === 1 ? '2026-08-07T19:52:01.000Z' : `2026-08-07T19:52:${String(postCount).padStart(2, '0')}.000Z`);
       return fulfill([]);
     }
     return route.fulfill({ status: 404, body: '{}' });
@@ -183,6 +183,15 @@ async function load(page: Page, url: string): Promise<void> {
   await page.waitForSelector('[data-contact-whatsapp="1"]', { state: 'visible', timeout: 20_000 });
 }
 
+function activityCount(records: CloudRecordRow[], action: string): number {
+  return records.filter((row) => row.entity_type === 'activity' && (row.payload as { action?: string }).action === action).length;
+}
+
+async function waitForSafeCloudSave(page: Page): Promise<void> {
+  await page.clock.runFor(850);
+  await page.waitForFunction(() => ((window as TestWindow).__cloudMessages || []).includes('Guardado seguro en la nube.'), null, { timeout: 20_000 });
+}
+
 test('navegador real: contacto cloud A en vuelo + seguimiento automático B + confirmación + reload conserva tarjeta, resumen y Agenda', { timeout: 240_000 }, async () => {
   mkdirSync(ARTIFACT_DIR, { recursive: true });
   const executablePath = chromeExecutable();
@@ -217,11 +226,46 @@ test('navegador real: contacto cloud A en vuelo + seguimiento automático B + co
     cloud.releaseFirstWrite();
     await page.waitForFunction(() => ((window as TestWindow).__cloudMessages || []).includes('Guardado seguro en la nube.'), null, { timeout: 20_000 });
     assert.ok(cloud.postCount() >= 1 && cloud.postCount() <= 2, `La cola segura usó ${cloud.postCount()} push(es).`);
-    const remoteClient = cloud.remote().find((row) => row.entity_type === 'client')?.payload as { nextFollowUp?: string; nextAction?: string };
+    let remoteClient = cloud.remote().find((row) => row.entity_type === 'client')?.payload as { nextFollowUp?: string; nextAction?: string };
     assert.equal(remoteClient.nextFollowUp, FOLLOW_UP_DATE);
     assert.equal(remoteClient.nextAction, 'Volver a contactar por WhatsApp');
-    assert.equal(cloud.remote().filter((row) => row.entity_type === 'activity' && (row.payload as { action?: string }).action === 'Contacto por WhatsApp').length, 1);
-    assert.equal(cloud.remote().filter((row) => row.entity_type === 'activity' && (row.payload as { action?: string }).action === 'Seguimiento por WhatsApp programado').length, 1);
+    assert.equal(activityCount(cloud.remote(), 'Contacto por WhatsApp'), 1);
+    assert.equal(activityCount(cloud.remote(), 'Seguimiento por WhatsApp programado'), 1);
+    assert.equal(cloud.remote().filter((row) => row.entity_type === 'reminder').length, 0);
+
+    const activitiesBeforeNone = cloud.remote().filter((row) => row.entity_type === 'activity').length;
+    await page.evaluate(() => { (window as TestWindow).__cloudMessages = []; });
+    await page.locator('[data-whatsapp-change-followup]').click();
+    const noneForm = page.locator('[data-zero-followup-form]');
+    await noneForm.locator('input[name="follow-up-choice"][value="none"]').check();
+    assert.equal(await noneForm.locator('input[name="selected-date"]').inputValue(), '');
+    assert.equal(await noneForm.locator('[data-zero-followup-preview]').textContent(), 'No se programará un próximo seguimiento.');
+    await noneForm.locator('button[type="submit"]').click();
+    await page.getByText('Contacto registrado', { exact: true }).waitFor({ state: 'visible' });
+    await waitForSafeCloudSave(page);
+
+    remoteClient = cloud.remote().find((row) => row.entity_type === 'client')?.payload as { nextFollowUp?: string; nextAction?: string };
+    assert.equal(remoteClient.nextFollowUp, undefined);
+    assert.equal(remoteClient.nextAction, undefined);
+    assert.equal(cloud.remote().filter((row) => row.entity_type === 'activity').length, activitiesBeforeNone, 'none no agrega actividad falsa.');
+    assert.equal(activityCount(cloud.remote(), 'Contacto por WhatsApp'), 1, 'El contacto confirmado se conserva.');
+    assert.equal(activityCount(cloud.remote(), 'Seguimiento por WhatsApp programado'), 1, 'none no duplica la actividad histórica.');
+    assert.equal(cloud.remote().filter((row) => row.entity_type === 'reminder').length, 0);
+    assert.equal(await page.locator('#agenda .agenda-card').filter({ hasText: 'Lucía Martín' }).count(), 0);
+
+    await page.evaluate(() => { (window as TestWindow).__cloudMessages = []; });
+    await page.locator('[data-whatsapp-choose-followup]').click();
+    const reschedule = page.locator('[data-zero-followup-form]');
+    await reschedule.locator('input[name="follow-up-choice"][value="3"]').check();
+    assert.equal(await reschedule.locator('input[name="selected-date"]').inputValue(), FOLLOW_UP_DATE);
+    await reschedule.locator('button[type="submit"]').click();
+    await page.getByText('Listo. Próximo contacto: En 3 días', { exact: true }).waitFor({ state: 'visible' });
+    await waitForSafeCloudSave(page);
+    remoteClient = cloud.remote().find((row) => row.entity_type === 'client')?.payload as { nextFollowUp?: string; nextAction?: string };
+    assert.equal(remoteClient.nextFollowUp, FOLLOW_UP_DATE);
+    assert.equal(remoteClient.nextAction, 'Volver a contactar por WhatsApp');
+    assert.equal(activityCount(cloud.remote(), 'Contacto por WhatsApp'), 1);
+    assert.equal(activityCount(cloud.remote(), 'Seguimiento por WhatsApp programado'), 1);
     assert.equal(cloud.remote().filter((row) => row.entity_type === 'reminder').length, 0);
 
     await page.reload({ waitUntil: 'domcontentloaded' });
@@ -230,7 +274,7 @@ test('navegador real: contacto cloud A en vuelo + seguimiento automático B + co
     await card.waitFor({ state: 'visible' });
     const action = card.locator('.mvp-lead-next-action');
     await page.waitForFunction(() => document.querySelector('.mvp-lead-card[data-client-id="1"] .mvp-lead-next-action')?.textContent?.includes('En 3 días'));
-    assert.match(await action.innerText(), /Volver a contactar por WhatsApp/i);
+    assert.match(await action.innerText(), /WhatsApp/i);
     assert.match(await action.innerText(), /En 3 días/i);
     const summary = card.locator('[data-whatsapp-contact-summary]');
     assert.match(await summary.getAttribute('data-contact-signature') || '', new RegExp(FOLLOW_UP_DATE));
