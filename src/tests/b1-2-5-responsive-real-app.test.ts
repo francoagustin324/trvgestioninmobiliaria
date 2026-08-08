@@ -250,7 +250,10 @@ async function validateBottomNavigation(page: Page): Promise<void> {
   assert.ok(await clearance(details) >= 16, 'Ver detalles queda demasiado cerca de la navegación inferior.');
   await details.click();
   assert.ok(await clearance(last.locator('.mvp-lead-full-actions .delete')) >= 16, 'Los botones de la ficha abierta quedan tapados por la navegación inferior.');
+
   const overdue = exactCard(page, 'Lucía Martín');
+  await overdue.locator('.mvp-lead-actions-menu > summary').click();
+  await overdue.getByRole('button', { name: 'Ver detalles', exact: true }).click();
   await overdue.locator('.mvp-lead-followup-menu > summary').click();
   assert.ok(await clearance(overdue.locator('[data-complete-client-follow-up]')) >= 16, 'El popover de seguimiento queda tapado por la navegación inferior.');
   await overdue.locator('.mvp-lead-followup-menu').evaluate((element: HTMLDetailsElement) => { element.open = false; });
