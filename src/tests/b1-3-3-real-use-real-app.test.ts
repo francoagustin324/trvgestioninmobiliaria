@@ -404,7 +404,8 @@ test('B1.3.3 usa contexto, identidad confirmada y fecha visible exacta', { timeo
 
     await page.locator('#crm.active [data-contact-whatsapp="90"]').click();
     const message = page.locator('[data-whatsapp-message]');
-    await message.waitFor({ state: 'visible' });
+    await message.waitFor({ state: 'attached' });
+    assert.equal(await message.isVisible(), false, 'El editor debe permanecer oculto hasta Editar mensaje.');
     const text = await message.inputValue();
     assert.match(text, /^Hola Vilma, soy Franco de TRV Gestión Inmobiliaria\./);
     assert.doesNotMatch(text, /trvgestioninmobiliaria|Gerencia Comercial/i);

@@ -352,7 +352,8 @@ test('B1.3.3 conserva fecha inmutable, atribución validada y recarga', { timeou
 
     await page.locator(`#crm.active [data-contact-whatsapp="${client.id}"]`).click();
     const message = page.locator('[data-whatsapp-message]');
-    await message.waitFor({ state: 'visible' });
+    await message.waitFor({ state: 'attached' });
+    assert.equal(await message.isVisible(), false, 'El editor debe permanecer oculto hasta Editar mensaje.');
     assert.match(await message.inputValue(), /^Hola Lead Fecha Inmutable, soy Franco de TRV Gestión Inmobiliaria\./);
     assert.doesNotMatch(await message.inputValue(), /PropControl|info@/i);
     await page.screenshot({ path: `${artifactDir}/10-franco-identidad-explicita.png`, fullPage: true });
@@ -429,7 +430,9 @@ test('B1.3.3 invalida panel obsoleto tras cambiar identidad', { timeout: 240_000
     await load(page, url);
     await installActionCounters(page);
     await page.locator(`#crm.active [data-contact-whatsapp="${client.id}"]`).click();
-    await page.locator('[data-whatsapp-message]').waitFor({ state: 'visible' });
+    const message = page.locator('[data-whatsapp-message]');
+    await message.waitFor({ state: 'attached' });
+    assert.equal(await message.isVisible(), false, 'El editor debe permanecer oculto antes de editar.');
     await page.evaluate(() => {
       const target = window as unknown as { __b133StaleActions: HTMLElement[] };
       target.__b133StaleActions = [
