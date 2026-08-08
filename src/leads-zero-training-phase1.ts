@@ -3,7 +3,7 @@ import { leadCardAttentionPresentation } from './lead-card-attention.js';
 import { leadFollowUpDisplay } from './lead-list-priority.js';
 import { requestLeadQualification } from './lead-qualification-ui.js';
 import type { Client } from './models.js';
-import { state } from './store.js';
+import { saveData, state } from './store.js';
 import { visibleClients } from './team-access.js';
 import { escapeHtml } from './utils.js';
 import {
@@ -11,12 +11,14 @@ import {
   dismissPendingWhatsAppAttempt,
   loadPendingWhatsAppAttemptResult,
   normalizeWhatsAppPhone,
+  recordedActivityForAttempt,
   registerWhatsAppContact,
   scheduleWhatsAppFollowUp,
   suggestedFollowUp,
   type PendingWhatsAppAttempt,
 } from './whatsapp-contact.js';
 import { followUpDateForChoice, followUpPreview, localDateLabel } from './whatsapp-followup-selection.js';
+import { assertCurrentWhatsAppHumanIdentity } from './whatsapp-human-identity.js';
 
 interface ConfirmedContact {
   clientId: number;
@@ -25,6 +27,12 @@ interface ConfirmedContact {
   recommendedDate: string;
   recommendedDays: number | null;
 }
+
+type WhatsAppFollowUpClient = Client & {
+  whatsappFollowUpAttemptId?: string;
+  whatsappFollowUpActivityId?: number;
+  whatsappFollowUpChannel?: 'WhatsApp';
+};
 
 const RETURN_PROMPT_DELAY_MS = 650;
 let installed = false;
@@ -425,6 +433,7 @@ function showFollowUpSelector(): void {
     <form class="whatsapp-followup-form" data-zero-followup-form data-followup-selected-choice="${escapeHtml(selectedChoice)}" data-followup-selected-date="${escapeHtml(selectedDate)}">
       <div class="whatsapp-followup-options">${followUpOptions(selectedDays)}
         <label><input type="radio" name="follow-up-choice" value="custom"${selectedDays === null ? ' checked' : ''}> <span>Elegir fecha</span></label>
+        <label><input type="radio" name="follow-up-choice" value="none"> <span>Sin seguimiento por ahora</span></label>
       </div>
       <label class="whatsapp-custom-date"${selectedDays === null ? '' : ' hidden'}>Fecha personalizada<input type="date" name="custom-date" value="${escapeHtml(selectedDate)}" min="${addLocalDaysIso(0)}"></label>
       <input type="hidden" name="selected-date" value="${escapeHtml(selectedDate)}">
@@ -465,6 +474,32 @@ function synchronizeChangeSelection(form: HTMLFormElement, now = new Date()): vo
   clearFollowUpSaveError(form);
 }
 
+function confirmedContactStillAuthorized(context: ConfirmedContact): boolean {
+  const authorization = assertCurrentWhatsAppHumanIdentity(context.attempt.identity);
+  const recorded = recordedActivityForAttempt(context.attempt.id);
+  return Boolean(
+    authorization.valid
+    && authorization.identity
+    && authorization.identity.actorId === context.attempt.actorId
+    && recorded
+    && recorded.id === context.activityId
+    && recorded.entityType === 'Cliente'
+    && recorded.entityId === context.clientId,
+  );
+}
+
+function clearConfirmedFollowUp(client: Client, context: ConfirmedContact): boolean {
+  if (!confirmedContactStillAuthorized(context)) return false;
+  const target = client as WhatsAppFollowUpClient;
+  target.nextFollowUp = undefined;
+  target.nextAction = undefined;
+  target.whatsappFollowUpAttemptId = undefined;
+  target.whatsappFollowUpActivityId = undefined;
+  target.whatsappFollowUpChannel = undefined;
+  saveData(`Seguimiento por WhatsApp removido: ${client.name}`);
+  return true;
+}
+
 function saveChangedFollowUp(form: HTMLFormElement): void {
   const context = confirmedContact;
   if (!context) return;
@@ -475,18 +510,20 @@ function saveChangedFollowUp(form: HTMLFormElement): void {
   const canonicalDate = form.dataset.followupSelectedDate || '';
   const preview = form.querySelector<HTMLElement>('[data-zero-followup-preview]')?.textContent?.trim() || '';
   const customDate = form.querySelector<HTMLInputElement>('input[name="custom-date"]')?.value || '';
-  const validChoice = ['1', '3', '7', '14', '30', 'custom'].includes(choice);
+  const validChoice = ['1', '3', '7', '14', '30', 'custom', 'none'].includes(choice);
+  const isNone = choice === 'none';
   const consistent = choice === canonicalChoice
     && selectedDate === canonicalDate
     && preview === followUpPreview(canonicalDate)
-    && (choice !== 'custom' || customDate === canonicalDate);
+    && (choice !== 'custom' || customDate === canonicalDate)
+    && (!isNone || (canonicalDate === '' && selectedDate === ''));
 
-  if (!client || !validChoice || !/^\d{4}-\d{2}-\d{2}$/.test(selectedDate)) {
-    showFollowUpSaveError(form, 'Elegí una fecha válida para el próximo contacto.');
+  if (!client || !validChoice || (!isNone && !/^\d{4}-\d{2}-\d{2}$/.test(selectedDate))) {
+    showFollowUpSaveError(form, isNone ? 'No se pudo confirmar la opción sin seguimiento.' : 'Elegí una fecha válida para el próximo contacto.');
     return;
   }
   if (!consistent) {
-    showFollowUpSaveError(form, 'No se guardó el seguimiento porque la fecha seleccionada quedó inconsistente. Volvé a elegirla.');
+    showFollowUpSaveError(form, 'No se guardó el seguimiento porque la selección quedó inconsistente. Volvé a elegirla.');
     return;
   }
 
@@ -494,10 +531,17 @@ function saveChangedFollowUp(form: HTMLFormElement): void {
   const clientSnapshot = structuredClone(client);
   const activitySnapshot = structuredClone(state.crm.activityLog);
   try {
-    const scheduled = scheduleWhatsAppFollowUp(client.id, context.attempt, context.activityId, selectedDate);
-    if (!scheduled) {
-      showFollowUpSaveError(form, 'No se pudo cambiar el próximo contacto porque el permiso, usuario o identidad cambió.');
-      return;
+    if (isNone) {
+      if (!clearConfirmedFollowUp(client, context)) {
+        showFollowUpSaveError(form, 'No se pudo quitar el próximo contacto porque el permiso, usuario o identidad cambió.');
+        return;
+      }
+    } else {
+      const scheduled = scheduleWhatsAppFollowUp(client.id, context.attempt, context.activityId, selectedDate);
+      if (!scheduled) {
+        showFollowUpSaveError(form, 'No se pudo cambiar el próximo contacto porque el permiso, usuario o identidad cambió.');
+        return;
+      }
     }
   } catch (error) {
     if (clientIndex >= 0) state.crm.clients[clientIndex] = clientSnapshot;
@@ -508,10 +552,10 @@ function saveChangedFollowUp(form: HTMLFormElement): void {
   }
 
   clearFollowUpSaveError(form);
-  context.recommendedDate = selectedDate;
-  context.recommendedDays = /^\d+$/.test(canonicalChoice) ? Number(canonicalChoice) : null;
+  context.recommendedDate = isNone ? '' : selectedDate;
+  context.recommendedDays = !isNone && /^\d+$/.test(canonicalChoice) ? Number(canonicalChoice) : null;
   document.dispatchEvent(new CustomEvent('trv-render'));
-  queueMicrotask(() => showContactResult(context, selectedDate, context.recommendedDays));
+  queueMicrotask(() => showContactResult(context, context.recommendedDate, context.recommendedDays));
 }
 
 function openLeadDetails(button: HTMLElement): void {
