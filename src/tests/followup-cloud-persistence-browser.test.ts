@@ -278,6 +278,10 @@ test('navegador real: contacto cloud A en vuelo + seguimiento automático B + co
     assert.match(await action.innerText(), /En 3 días/i);
     const summary = card.locator('[data-whatsapp-contact-summary]');
     assert.match(await summary.getAttribute('data-contact-signature') || '', new RegExp(FOLLOW_UP_DATE));
+    const actionsMenu = card.locator('.mvp-lead-actions-menu');
+    await actionsMenu.locator('summary').click();
+    await actionsMenu.getByRole('button', { name: 'Ver detalles', exact: true }).click();
+    await summary.waitFor({ state: 'visible' });
     assert.match(await summary.innerText(), /Seguimiento/i);
     assert.doesNotMatch(await summary.innerText(), /Sin seguimiento/i);
     assert.equal(await page.evaluate(() => Boolean((window as TestWindow).__windowOpened)), false);
