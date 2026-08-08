@@ -307,6 +307,19 @@ function scheduleCompactReturnPrompt(): void {
   });
 }
 
+function showPendingReturnOnResume(): void {
+  queuePatch();
+  queueMicrotask(() => {
+    const loaded = loadPendingWhatsAppAttemptResult();
+    const attempt = loaded.attempt;
+    if (!attempt?.openedAt) return;
+    const view = panel()?.dataset.zeroTrainingView || '';
+    if (view === 'done' || view === 'change') return;
+    clearReturnPromptTimer();
+    showCompactReturn(attempt);
+  });
+}
+
 function dismissCompactReturn(): void {
   clearReturnPromptTimer();
   const loaded = loadPendingWhatsAppAttemptResult();
@@ -621,9 +634,12 @@ function install(): void {
   document.addEventListener('trv-render', queuePatch);
   document.addEventListener('propcontrol-leads-rendered', queuePatch);
   document.addEventListener('propcontrol-whatsapp-identity-changed', queuePatch);
-  window.addEventListener('focus', queuePatch);
-  window.addEventListener('pageshow', queuePatch);
-  document.addEventListener('visibilitychange', queuePatch);
+  window.addEventListener('focus', showPendingReturnOnResume);
+  window.addEventListener('pageshow', showPendingReturnOnResume);
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) queuePatch();
+    else showPendingReturnOnResume();
+  });
   installWhatsAppPanelObserver();
   queuePatch();
 }
