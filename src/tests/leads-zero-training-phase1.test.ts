@@ -54,6 +54,15 @@ test('etiquetas de próximo contacto son comprensibles sin capacitación', () =>
   assert.match(uxSource, /return localDateLabel\(date\)/);
 });
 
+test('selector de cambio conserva explícitamente la opción sin seguimiento', () => {
+  assert.match(uxSource, /value="none"/);
+  assert.match(uxSource, /Sin seguimiento por ahora/);
+  assert.match(uxSource, /\['1', '3', '7', '14', '30', 'custom', 'none'\]\.includes\(choice\)/);
+  assert.match(uxSource, /canonicalDate === '' && selectedDate === ''/);
+  assert.match(uxSource, /No se pudo quitar el próximo contacto/);
+  assert.doesNotMatch(uxSource, /reminders\.push|addReminder|createReminder/);
+});
+
 test('selector de cambio guarda el estado canónico y submit no recalcula con reloj nuevo', () => {
   const syncStart = uxSource.indexOf('function synchronizeChangeSelection');
   const saveStart = uxSource.indexOf('function saveChangedFollowUp');
