@@ -5,13 +5,15 @@
 #crm .mvp-lead-card .mvp-lead-interest strong,#crm .mvp-zero-main-facts strong,#crm .mvp-zero-next-copy strong{color:var(--text,#eef4f0);font-size:.96rem;line-height:1.3}
 #crm .mvp-zero-main-facts{display:block!important}
 #crm .mvp-zero-main-facts>.mvp-lead-fact{display:flex;align-items:baseline;gap:6px;min-height:0;padding:0!important;border:0!important;background:transparent!important}
-#crm .mvp-lead-next-action{display:block!important;padding:10px 12px!important}
+#crm .mvp-lead-next-action{display:block!important;padding:10px 12px!important;border:1px solid rgba(255,255,255,.13)!important;background:rgba(255,255,255,.05)!important}
 #crm .mvp-zero-next-copy{display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:baseline;gap:7px}
-#crm .mvp-zero-next-copy small{color:var(--text-muted,#9fb2a8);font-size:.82rem;white-space:nowrap}
-#crm .mvp-lead-quick-actions[data-zero-training-actions="true"]{display:grid!important;grid-template-columns:minmax(0,1.35fr) minmax(0,1fr) 48px;align-items:stretch;gap:8px;margin-top:2px}
+#crm .mvp-zero-next-copy span{color:#b8c8bf!important}
+#crm .mvp-zero-next-copy strong{color:#f4f8f6!important}
+#crm .mvp-zero-next-copy small{color:#b8c8bf!important;font-size:.82rem;white-space:nowrap}
+#crm .mvp-lead-quick-actions[data-zero-training-actions="true"]{display:grid!important;width:100%;min-width:0;grid-template-columns:minmax(0,1.35fr) minmax(0,1fr) 48px;align-items:stretch;gap:8px;margin-top:2px}
 #crm .mvp-lead-quick-actions[data-zero-training-actions="true"]>button,#crm .mvp-lead-quick-actions[data-zero-training-actions="true"]>details>summary{min-height:46px;height:46px;box-sizing:border-box;display:inline-flex;align-items:center;justify-content:center;margin:0;padding:0 14px;line-height:1;font-size:.92rem;font-weight:800;border-radius:12px}
-#crm .mvp-lead-quick-actions .mvp-zero-primary{width:100%;border:1px solid rgba(37,211,102,.42);background:#25d366;color:#062b16;box-shadow:0 8px 22px rgba(37,211,102,.16)}
-#crm .mvp-lead-quick-actions .mvp-zero-edit{width:100%}
+#crm .mvp-lead-quick-actions[data-zero-training-actions="true"]>.mvp-zero-primary{width:100%!important;min-width:0!important;max-width:none!important;overflow:hidden;white-space:nowrap!important;border:1px solid rgba(37,211,102,.42);background:#25d366;color:#062b16;box-shadow:0 8px 22px rgba(37,211,102,.16)}
+#crm .mvp-lead-quick-actions .mvp-zero-edit{width:100%;min-width:0}
 #crm:has(.mvp-lead-actions-menu[open]) .mvp-lead-card{position:relative!important;z-index:0!important}
 #crm:has(.mvp-lead-actions-menu[open]) .mvp-lead-card:not(:has(.mvp-lead-actions-menu[open])){pointer-events:none}
 #crm .mvp-lead-card:has(.mvp-lead-actions-menu[open]){position:relative!important;z-index:520!important;pointer-events:auto}
@@ -37,6 +39,7 @@
 .whatsapp-zero-message-card{display:grid;gap:12px;padding:16px;border:1px solid rgba(255,255,255,.1);border-radius:18px;background:rgba(255,255,255,.04)}
 .whatsapp-zero-message-card>strong{font-size:.9rem}
 .whatsapp-zero-message-preview{margin:0;color:var(--text,#f7fbf8);line-height:1.55;white-space:pre-wrap;overflow-wrap:anywhere}
+.whatsapp-zero-message-preview[hidden],.whatsapp-zero-message-editor[hidden]{display:none!important}
 .whatsapp-zero-message-editor{margin:0}
 .whatsapp-zero-edit-message{justify-self:start;min-height:44px;padding-inline:12px}
 .whatsapp-zero-more-options{margin-top:12px}
@@ -46,6 +49,7 @@
 .whatsapp-contact-actions.whatsapp-zero-single-action{grid-template-columns:1fr}
 .whatsapp-contact-actions.whatsapp-zero-single-action [data-whatsapp-open]{width:100%;min-height:50px;font-size:1rem;font-weight:850}
 .whatsapp-contact-panel[data-zero-training-view="return"],.whatsapp-contact-panel[data-zero-training-view="done"]{width:min(480px,100%);overflow:visible}
+.whatsapp-contact-panel[data-zero-training-view="done"]{background:#10261d!important;backdrop-filter:none!important}
 .whatsapp-zero-return-heading,.whatsapp-zero-done-heading{margin-bottom:4px}
 .whatsapp-zero-return-actions{position:static;grid-template-columns:1fr 1fr;margin:18px 0 0;padding:14px 0 0;background:transparent}
 .whatsapp-zero-done-actions{display:flex;justify-content:flex-start;margin-top:14px}
