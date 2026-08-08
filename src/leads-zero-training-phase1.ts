@@ -8,6 +8,7 @@ import { visibleClients } from './team-access.js';
 import { escapeHtml } from './utils.js';
 import {
   addLocalDaysIso,
+  dismissPendingWhatsAppAttempt,
   loadPendingWhatsAppAttemptResult,
   normalizeWhatsAppPhone,
   registerWhatsAppContact,
@@ -25,12 +26,14 @@ interface ConfirmedContact {
   recommendedDays: number | null;
 }
 
+const RETURN_PROMPT_DELAY_MS = 650;
 let installed = false;
 let patchQueued = false;
 let confirmedContact: ConfirmedContact | null = null;
 let whatsappPanelObserver: MutationObserver | null = null;
 let whatsappRootObserver: MutationObserver | null = null;
 let observedWhatsAppPanel: HTMLElement | null = null;
+let returnPromptTimer: number | null = null;
 
 function clientById(clientId: number): Client | null {
   return visibleClients().find((client) => client.id === clientId) ?? null;
@@ -42,6 +45,24 @@ function panel(): HTMLElement | null {
 
 function overlay(): HTMLElement | null {
   return document.getElementById('propcontrol-whatsapp-contact');
+}
+
+function enterModalMode(): void {
+  overlay()?.classList.remove('whatsapp-zero-done-overlay');
+  panel()?.setAttribute('aria-modal', 'true');
+  document.body.classList.add('whatsapp-contact-open');
+}
+
+function enterDoneMode(): void {
+  overlay()?.classList.add('whatsapp-zero-done-overlay');
+  panel()?.setAttribute('aria-modal', 'false');
+  document.body.classList.remove('whatsapp-contact-open');
+}
+
+function clearReturnPromptTimer(): void {
+  if (returnPromptTimer === null) return;
+  window.clearTimeout(returnPromptTimer);
+  returnPromptTimer = null;
 }
 
 function humanAction(client: Client): string {
@@ -198,6 +219,7 @@ function patchPreparation(panelElement: HTMLElement): void {
   const invalidPhone = !normalized.valid;
   const disabled = blocked || invalidPhone || !message.trim();
 
+  enterModalMode();
   panelElement.dataset.zeroTrainingView = 'preparation';
   panelElement.innerHTML = `<header class="whatsapp-contact-heading whatsapp-zero-heading">
       <div><h2 id="whatsapp-contact-title">Mensaje para ${escapeHtml(client.name)}</h2></div>
@@ -233,12 +255,8 @@ function patchPreparation(panelElement: HTMLElement): void {
     </footer>`;
 }
 
-function patchReturn(panelElement: HTMLElement): void {
-  if (!panelElement.querySelector('[data-whatsapp-confirm-sent]') || panelElement.querySelector('.whatsapp-zero-return-actions')) return;
-  const client = clientById(Number(panelElement.dataset.clientId));
-  if (!client) return;
-  panelElement.dataset.zeroTrainingView = 'return';
-  panelElement.innerHTML = `<header class="whatsapp-contact-heading whatsapp-zero-return-heading">
+function compactReturnMarkup(client: Client): string {
+  return `<header class="whatsapp-contact-heading whatsapp-zero-return-heading">
       <div><h2 id="whatsapp-contact-title">¿Enviaste el mensaje a ${escapeHtml(client.name)}?</h2></div>
       <button type="button" class="quiet-button" data-whatsapp-not-yet aria-label="Cerrar">×</button>
     </header>
@@ -246,6 +264,56 @@ function patchReturn(panelElement: HTMLElement): void {
       <button type="button" class="secondary" data-whatsapp-not-yet>Todavía no</button>
       <button type="button" data-whatsapp-confirm-sent>Sí</button>
     </footer>`;
+}
+
+function showCompactReturn(attempt: PendingWhatsAppAttempt): void {
+  const panelElement = panel();
+  const root = overlay();
+  const client = clientById(attempt.clientId);
+  if (!panelElement || !root || !client || !attempt.openedAt) return;
+  enterModalMode();
+  root.hidden = false;
+  panelElement.dataset.clientId = String(client.id);
+  panelElement.dataset.contactBlocked = 'false';
+  panelElement.dataset.identityFingerprint = attempt.identity.fingerprint;
+  panelElement.dataset.zeroTrainingView = 'return';
+  panelElement.innerHTML = compactReturnMarkup(client);
+}
+
+function patchReturn(panelElement: HTMLElement): void {
+  if (!panelElement.querySelector('[data-whatsapp-confirm-sent]') || panelElement.querySelector('.whatsapp-zero-return-actions')) return;
+  const client = clientById(Number(panelElement.dataset.clientId));
+  if (!client) return;
+  enterModalMode();
+  panelElement.dataset.zeroTrainingView = 'return';
+  panelElement.innerHTML = compactReturnMarkup(client);
+}
+
+function scheduleCompactReturnPrompt(): void {
+  queueMicrotask(() => {
+    const loaded = loadPendingWhatsAppAttemptResult();
+    const attempt = loaded.attempt;
+    if (!attempt?.openedAt) return;
+    clearReturnPromptTimer();
+    const expectedAttemptId = attempt.id;
+    returnPromptTimer = window.setTimeout(() => {
+      returnPromptTimer = null;
+      const latest = loadPendingWhatsAppAttemptResult();
+      if (!latest.attempt?.openedAt || latest.attempt.id !== expectedAttemptId) return;
+      const view = panel()?.dataset.zeroTrainingView || '';
+      if (view === 'done' || view === 'change') return;
+      showCompactReturn(latest.attempt);
+    }, RETURN_PROMPT_DELAY_MS);
+  });
+}
+
+function dismissCompactReturn(): void {
+  clearReturnPromptTimer();
+  const loaded = loadPendingWhatsAppAttemptResult();
+  if (loaded.attempt) dismissPendingWhatsAppAttempt(loaded.attempt);
+  const root = overlay();
+  if (root) root.hidden = true;
+  document.body.classList.remove('whatsapp-contact-open');
 }
 
 function patchWhatsAppPanel(): void {
@@ -268,6 +336,8 @@ function showContactResult(context: ConfirmedContact, date = context.recommended
   const panelElement = panel();
   const client = clientById(context.clientId);
   if (!panelElement || !client) return;
+  clearReturnPromptTimer();
+  enterDoneMode();
   panelElement.dataset.zeroTrainingView = 'done';
   panelElement.dataset.clientId = String(client.id);
   panelElement.innerHTML = `<header class="whatsapp-contact-heading whatsapp-zero-done-heading">
@@ -284,6 +354,7 @@ function emitError(message: string): void {
 }
 
 function confirmWhatsAppSent(): void {
+  clearReturnPromptTimer();
   const loaded = loadPendingWhatsAppAttemptResult();
   const attempt = loaded.attempt;
   if (!attempt?.openedAt) {
@@ -329,6 +400,7 @@ function showFollowUpSelector(): void {
   const panelElement = panel();
   const client = context ? clientById(context.clientId) : null;
   if (!context || !panelElement || !client) return;
+  enterModalMode();
   const selectedDays = context.recommendedDays && [1, 3, 7, 14, 30].includes(context.recommendedDays) ? context.recommendedDays : null;
   const selectedDate = context.recommendedDate || addLocalDaysIso(1);
   panelElement.dataset.zeroTrainingView = 'change';
@@ -461,8 +533,20 @@ function install(): void {
       return;
     }
 
+    const notYet = target.closest<HTMLElement>('[data-whatsapp-not-yet]');
+    if (notYet) {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      dismissCompactReturn();
+      return;
+    }
+
     if (target.closest('[data-contact-whatsapp], .mvp-contact-btn.wa')) {
       queueMicrotask(patchWhatsAppPanel);
+    }
+
+    if (target.closest('[data-whatsapp-open]')) {
+      scheduleCompactReturnPrompt();
     }
 
     const editMessage = target.closest<HTMLElement>('[data-whatsapp-edit-message]');
