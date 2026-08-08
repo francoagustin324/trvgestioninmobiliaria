@@ -39,7 +39,7 @@ jobs:
         run: |
           set -euo pipefail
           git checkout origin/main -- .github/workflows/ci.yml
-          git rm .github/pr140_migrate.py
+          git rm -f .github/pr140_migrate.py
           npm install --silent
           npm run build --silent
       - name: Guardar migración en la rama
