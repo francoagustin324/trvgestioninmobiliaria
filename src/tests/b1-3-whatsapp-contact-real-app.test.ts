@@ -287,15 +287,44 @@ test('B1.3 completa contacto, confirmación, seguimiento, reprogramación y Agen
     await page.locator('[data-whatsapp-change-followup]').click();
     await page.locator('[data-zero-followup-form]').waitFor({ state: 'visible' });
     const choices = await page.locator('input[name="follow-up-choice"]').evaluateAll((nodes) => nodes.map((node) => (node as HTMLInputElement).value));
-    assert.deepEqual(choices, ['1', '3', '7', '14', '30', 'custom']);
+    assert.deepEqual(choices, ['1', '3', '7', '14', '30', 'custom', 'none']);
     await page.screenshot({ path: `${artifactDir}/03-mobile-proximo-seguimiento.png`, fullPage: true });
     await page.locator('input[name="follow-up-choice"][value="3"]').check();
     await page.locator('[data-zero-followup-form] button[type="submit"]').click();
+    await page.locator('[data-whatsapp-change-followup]').waitFor({ state: 'visible' });
 
-    const scheduled = await crmFromStorage(page, 'Dueño');
+    let scheduled = await crmFromStorage(page, 'Dueño');
     assert.equal(scheduled.activityLog.filter((entry) => entry.action === 'Contacto por WhatsApp').length, 1);
     assert.equal(scheduled.activityLog.filter((entry) => entry.action === 'Seguimiento por WhatsApp programado').length, 1);
     assert.equal(scheduled.clients[0]?.nextAction, 'Volver a contactar por WhatsApp');
+
+    await page.locator('[data-whatsapp-change-followup]').click();
+    const noneForm = page.locator('[data-zero-followup-form]');
+    await noneForm.locator('input[name="follow-up-choice"][value="none"]').check();
+    assert.equal(await noneForm.locator('input[name="selected-date"]').inputValue(), '');
+    assert.equal(await noneForm.locator('[data-zero-followup-preview]').textContent(), 'No se programará un próximo seguimiento.');
+    const activitiesBeforeNone = scheduled.activityLog.length;
+    await noneForm.locator('button[type="submit"]').click();
+    await page.getByText('Contacto registrado', { exact: true }).waitFor({ state: 'visible' });
+    const cleared = await crmFromStorage(page, 'Dueño');
+    assert.equal(cleared.clients[0]?.nextFollowUp, undefined, 'Sin seguimiento por ahora limpia la fecha.');
+    assert.equal(cleared.clients[0]?.nextAction, undefined, 'Sin seguimiento por ahora limpia la acción futura.');
+    assert.equal(cleared.reminders.length, 0, 'Sin seguimiento por ahora no crea Reminder.');
+    assert.equal(cleared.activityLog.length, activitiesBeforeNone, 'Sin seguimiento por ahora no crea actividad falsa.');
+    assert.equal(cleared.activityLog.filter((entry) => entry.action === 'Contacto por WhatsApp').length, 1, 'El contacto confirmado se conserva.');
+    assert.equal(cleared.activityLog.filter((entry) => entry.action === 'Seguimiento por WhatsApp programado').length, 1, 'Se conserva el historial sin duplicarlo.');
+    assert.equal(await page.locator('#agenda .agenda-card').filter({ hasText: 'Lucía Martín' }).count(), 0, 'Agenda no muestra seguimiento activo al elegir none.');
+
+    await page.locator('[data-whatsapp-choose-followup]').click();
+    const resumeForm = page.locator('[data-zero-followup-form]');
+    await resumeForm.locator('input[name="follow-up-choice"][value="3"]').check();
+    await resumeForm.locator('button[type="submit"]').click();
+    await page.locator('[data-whatsapp-change-followup]').waitFor({ state: 'visible' });
+    scheduled = await crmFromStorage(page, 'Dueño');
+    assert.equal(scheduled.clients[0]?.nextAction, 'Volver a contactar por WhatsApp');
+    assert.equal(scheduled.activityLog.filter((entry) => entry.action === 'Contacto por WhatsApp').length, 1);
+    assert.equal(scheduled.activityLog.filter((entry) => entry.action === 'Seguimiento por WhatsApp programado').length, 1);
+    assert.equal(scheduled.reminders.length, 0);
 
     await page.reload({ waitUntil: 'domcontentloaded' });
     await page.waitForSelector('[data-contact-whatsapp="1"]', { state: 'visible' });
@@ -321,6 +350,7 @@ test('B1.3 completa contacto, confirmación, seguimiento, reprogramación y Agen
     await page.locator('[data-whatsapp-confirm-sent]').waitFor({ state: 'visible' });
     await page.getByRole('button', { name: 'Todavía no', exact: true }).click();
     assert.equal((await crmFromStorage(page, 'Dueño')).clients[0]?.nextFollowUp, undefined, 'Todavía no no impone fecha.');
+    assert.equal((await crmFromStorage(page, 'Dueño')).activityLog.filter((entry) => entry.action === 'Contacto por WhatsApp').length, 1, 'Todavía no sigue siendo distinto de none y no registra un nuevo contacto.');
     await assertNoHorizontalScroll(page);
   } finally {
     await context.close();
