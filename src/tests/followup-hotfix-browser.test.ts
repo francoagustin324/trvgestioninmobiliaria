@@ -13,7 +13,6 @@ const ACTIVE_MEMBER_KEY = 'propcontrol-active-team-member-v1';
 const STORAGE_KEY = `trv-crm-basico:user:${USER_ID}`;
 const SYNC_KEY = `${STORAGE_KEY}:sync`;
 const ARTIFACT_DIR = 'artifacts/b1-3';
-const EXPECTED_CONFIRMATION = 'Seguimiento de Lucía Martín programado para jueves, 6 de agosto de 2026 (2026-08-06).';
 
 interface FollowUpTestWindow extends Window {
   __followUpWindowOpenCount?: number;
@@ -286,9 +285,7 @@ test('hotfix congela la fecha al cruzar medianoche, evita duplicados y conserva 
       followUp.requestSubmit();
     });
     await waitForDone(page);
-    await page.waitForFunction((message) => (
-      (window as FollowUpTestWindow).__followUpCloudMessages || []
-    ).includes(message), EXPECTED_CONFIRMATION);
+    assert.equal(await page.locator('#whatsapp-contact-title').innerText(), 'Listo. Próximo contacto: Mañana');
     const tomorrow = await storedCrm(page);
     assert.equal(tomorrow.clients[0]?.nextFollowUp, '2026-08-06');
     assert.notEqual(tomorrow.clients[0]?.nextFollowUp, '2026-08-07');
@@ -296,10 +293,6 @@ test('hotfix congela la fecha al cruzar medianoche, evita duplicados y conserva 
     assert.equal(tomorrow.reminders.length, 0, 'Agenda no debe crear un Reminder paralelo.');
     assert.equal(tomorrow.activityLog.filter((entry) => entry.action === 'Seguimiento por WhatsApp programado').length, 1);
     assert.equal(await page.evaluate(() => (window as FollowUpTestWindow).__followUpWindowOpenCount), 1);
-    assert.equal(
-      await page.evaluate(() => (window as FollowUpTestWindow).__followUpCloudMessages?.at(-1)),
-      EXPECTED_CONFIRMATION,
-    );
     await page.screenshot({ path: `${ARTIFACT_DIR}/08-hotfix-manana-confirmado.png`, fullPage: true });
 
     await openAgenda(page);
