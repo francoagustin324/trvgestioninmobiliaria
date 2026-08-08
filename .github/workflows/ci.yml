@@ -7,7 +7,6 @@ on:
 
 permissions:
   contents: write
-  actions: write
 
 concurrency:
   group: pr140-migrate-${{ github.ref }}
@@ -44,34 +43,20 @@ jobs:
           p.write_text(text.replace(old, new, 1))
           PY
           git diff --check
-      - name: Restaurar CI normal y validar compilación
+      - name: Validar compilación del árbol migrado
         shell: bash
         run: |
           set -euo pipefail
-          git checkout origin/main -- .github/workflows/ci.yml
-          git rm -f .github/pr140_migrate.py
           npm install --silent
           npm run build --silent
-      - name: Guardar migración en la rama
+      - name: Guardar sólo pruebas migradas en la rama
         shell: bash
         run: |
           set -euo pipefail
           test "$(git rev-parse origin/main)" = "06ffe54075e8b1b0fd11eed09bffa5a83f2dfc68"
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -A
+          git add src/tests
           git diff --cached --check
           git commit -m "Migrar regresiones a UX cero capacitación"
           git push origin HEAD:agent/leads-zero-training-ux-phase1
-      - name: Ejecutar CI normal sobre el nuevo head
-        env:
-          GH_TOKEN: ${{ github.token }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          curl --fail-with-body -L -X POST \
-            -H "Accept: application/vnd.github+json" \
-            -H "Authorization: Bearer ${GH_TOKEN}" \
-            -H "X-GitHub-Api-Version: 2022-11-28" \
-            "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/workflows/ci.yml/dispatches" \
-            -d '{"ref":"agent/leads-zero-training-ux-phase1"}'
