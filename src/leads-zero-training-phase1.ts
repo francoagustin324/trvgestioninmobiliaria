@@ -416,20 +416,38 @@ function showFollowUpSelector(): void {
   enterModalMode();
   const selectedDays = context.recommendedDays && [1, 3, 7, 14, 30].includes(context.recommendedDays) ? context.recommendedDays : null;
   const selectedDate = context.recommendedDate || addLocalDaysIso(1);
+  const selectedChoice = selectedDays === null ? 'custom' : String(selectedDays);
   panelElement.dataset.zeroTrainingView = 'change';
   panelElement.innerHTML = `<header class="whatsapp-contact-heading">
       <div><h2 id="whatsapp-contact-title">Cambiar próximo contacto</h2><p>${escapeHtml(client.name)}</p></div>
       <button type="button" class="quiet-button" data-whatsapp-close aria-label="Cerrar">×</button>
     </header>
-    <form class="whatsapp-followup-form" data-zero-followup-form>
+    <form class="whatsapp-followup-form" data-zero-followup-form data-followup-selected-choice="${escapeHtml(selectedChoice)}" data-followup-selected-date="${escapeHtml(selectedDate)}">
       <div class="whatsapp-followup-options">${followUpOptions(selectedDays)}
         <label><input type="radio" name="follow-up-choice" value="custom"${selectedDays === null ? ' checked' : ''}> <span>Elegir fecha</span></label>
       </div>
       <label class="whatsapp-custom-date"${selectedDays === null ? '' : ' hidden'}>Fecha personalizada<input type="date" name="custom-date" value="${escapeHtml(selectedDate)}" min="${addLocalDaysIso(0)}"></label>
       <input type="hidden" name="selected-date" value="${escapeHtml(selectedDate)}">
       <p class="whatsapp-followup-preview" data-zero-followup-preview aria-live="polite">${escapeHtml(followUpPreview(selectedDate))}</p>
+      <p class="whatsapp-followup-error" data-followup-save-error role="alert" hidden></p>
       <footer class="whatsapp-contact-actions"><button type="button" class="secondary" data-whatsapp-cancel-change>Cancelar</button><button type="submit">Guardar</button></footer>
     </form>`;
+}
+
+function clearFollowUpSaveError(form: HTMLFormElement): void {
+  const error = form.querySelector<HTMLElement>('[data-followup-save-error]');
+  if (!error) return;
+  error.textContent = '';
+  error.hidden = true;
+}
+
+function showFollowUpSaveError(form: HTMLFormElement, message: string): void {
+  const error = form.querySelector<HTMLElement>('[data-followup-save-error]');
+  if (error) {
+    error.textContent = message;
+    error.hidden = false;
+  }
+  emitError(message);
 }
 
 function synchronizeChangeSelection(form: HTMLFormElement, now = new Date()): void {
@@ -438,10 +456,13 @@ function synchronizeChangeSelection(form: HTMLFormElement, now = new Date()): vo
   const date = followUpDateForChoice(choice, customInput?.value || '', now);
   const selected = form.querySelector<HTMLInputElement>('input[name="selected-date"]');
   if (selected) selected.value = date;
+  form.dataset.followupSelectedChoice = choice;
+  form.dataset.followupSelectedDate = date;
   const custom = form.querySelector<HTMLElement>('.whatsapp-custom-date');
   if (custom) custom.hidden = choice !== 'custom';
   const preview = form.querySelector<HTMLElement>('[data-zero-followup-preview]');
   if (preview) preview.textContent = followUpPreview(date);
+  clearFollowUpSaveError(form);
 }
 
 function saveChangedFollowUp(form: HTMLFormElement): void {
@@ -450,16 +471,45 @@ function saveChangedFollowUp(form: HTMLFormElement): void {
   const client = clientById(context.clientId);
   const selectedDate = form.querySelector<HTMLInputElement>('input[name="selected-date"]')?.value || '';
   const choice = form.querySelector<HTMLInputElement>('input[name="follow-up-choice"]:checked')?.value || '';
-  if (!client || !/^\d{4}-\d{2}-\d{2}$/.test(selectedDate)) {
-    emitError('Elegí una fecha válida para el próximo contacto.');
+  const canonicalChoice = form.dataset.followupSelectedChoice || '';
+  const canonicalDate = form.dataset.followupSelectedDate || '';
+  const preview = form.querySelector<HTMLElement>('[data-zero-followup-preview]')?.textContent?.trim() || '';
+  const customDate = form.querySelector<HTMLInputElement>('input[name="custom-date"]')?.value || '';
+  const validChoice = ['1', '3', '7', '14', '30', 'custom'].includes(choice);
+  const consistent = choice === canonicalChoice
+    && selectedDate === canonicalDate
+    && preview === followUpPreview(canonicalDate)
+    && (choice !== 'custom' || customDate === canonicalDate);
+
+  if (!client || !validChoice || !/^\d{4}-\d{2}-\d{2}$/.test(selectedDate)) {
+    showFollowUpSaveError(form, 'Elegí una fecha válida para el próximo contacto.');
     return;
   }
-  if (!scheduleWhatsAppFollowUp(client.id, context.attempt, context.activityId, selectedDate)) {
-    emitError('No se pudo cambiar el próximo contacto porque el permiso, usuario o identidad cambió.');
+  if (!consistent) {
+    showFollowUpSaveError(form, 'No se guardó el seguimiento porque la fecha seleccionada quedó inconsistente. Volvé a elegirla.');
     return;
   }
+
+  const clientIndex = state.crm.clients.findIndex((item) => item.id === client.id);
+  const clientSnapshot = structuredClone(client);
+  const activitySnapshot = structuredClone(state.crm.activityLog);
+  try {
+    const scheduled = scheduleWhatsAppFollowUp(client.id, context.attempt, context.activityId, selectedDate);
+    if (!scheduled) {
+      showFollowUpSaveError(form, 'No se pudo cambiar el próximo contacto porque el permiso, usuario o identidad cambió.');
+      return;
+    }
+  } catch (error) {
+    if (clientIndex >= 0) state.crm.clients[clientIndex] = clientSnapshot;
+    state.crm.activityLog = activitySnapshot;
+    const detail = error instanceof Error ? error.message : String(error);
+    showFollowUpSaveError(form, `No se pudo guardar el próximo contacto. ${detail}`);
+    return;
+  }
+
+  clearFollowUpSaveError(form);
   context.recommendedDate = selectedDate;
-  context.recommendedDays = /^\d+$/.test(choice) ? Number(choice) : null;
+  context.recommendedDays = /^\d+$/.test(canonicalChoice) ? Number(canonicalChoice) : null;
   document.dispatchEvent(new CustomEvent('trv-render'));
   queueMicrotask(() => showContactResult(context, selectedDate, context.recommendedDays));
 }
