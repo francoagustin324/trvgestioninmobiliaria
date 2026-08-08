@@ -33,6 +33,16 @@ jobs:
           set -euo pipefail
           sed -i '/document.querySelector<HTMLElement>.*data-whatsapp-manual-register/s/replace_once/replace_all/' .github/pr140_migrate.py
           python3 .github/pr140_migrate.py
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('src/tests/followup-cloud-persistence-browser.test.ts')
+          text = p.read_text()
+          old = "    assert.equal((await crmFromStorage(page)).clients[0]?.nextFollowUp, FOLLOW_UP_DATE);"
+          new = "    assert.equal(await page.evaluate((key) => (JSON.parse(localStorage.getItem(key) || '{}') as CrmData).clients[0]?.nextFollowUp, STORAGE_KEY), FOLLOW_UP_DATE);"
+          if text.count(old) != 1:
+              raise SystemExit(f'followup cloud local read: esperado 1, encontrado {text.count(old)}')
+          p.write_text(text.replace(old, new, 1))
+          PY
           git diff --check
       - name: Restaurar CI normal y validar compilación
         shell: bash
