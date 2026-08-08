@@ -13,7 +13,7 @@ const STORAGE_KEY = `trv-crm-basico:user:${USER_ID}`;
 const SYNC_KEY = `${STORAGE_KEY}:sync`;
 const ACTIVE_MEMBER_KEY = 'propcontrol-active-team-member-v1';
 const FIXED_TIME = new Date('2026-08-07T16:52:00-03:00');
-const FOLLOW_UP_DATE = '2026-08-08';
+const FOLLOW_UP_DATE = '2026-08-10';
 const ARTIFACT_DIR = 'artifacts/cloud-followup-hotfix';
 
 interface TestWindow extends Window {
@@ -183,7 +183,7 @@ async function load(page: Page, url: string): Promise<void> {
   await page.waitForSelector('[data-contact-whatsapp="1"]', { state: 'visible', timeout: 20_000 });
 }
 
-test('navegador real: contacto cloud A en vuelo + Mañana B + confirmación + reload conserva tarjeta, resumen y Agenda', { timeout: 240_000 }, async () => {
+test('navegador real: contacto cloud A en vuelo + seguimiento automático B + confirmación + reload conserva tarjeta, resumen y Agenda', { timeout: 240_000 }, async () => {
   mkdirSync(ARTIFACT_DIR, { recursive: true });
   const executablePath = chromeExecutable();
   assert.ok(executablePath, 'Chrome/Chromium no disponible.');
@@ -229,10 +229,11 @@ test('navegador real: contacto cloud A en vuelo + Mañana B + confirmación + re
     const card = page.locator('.mvp-lead-card[data-client-id="1"]');
     await card.waitFor({ state: 'visible' });
     const action = card.locator('.mvp-lead-next-action');
+    await page.waitForFunction(() => document.querySelector('.mvp-lead-card[data-client-id="1"] .mvp-lead-next-action')?.textContent?.includes('En 3 días'));
     assert.match(await action.innerText(), /Volver a contactar por WhatsApp/i);
-    assert.match(await action.innerText(), /Mañana/i);
+    assert.match(await action.innerText(), /En 3 días/i);
     const summary = card.locator('[data-whatsapp-contact-summary]');
-    assert.match(await summary.getAttribute('data-contact-signature') || '', /2026-08-08/);
+    assert.match(await summary.getAttribute('data-contact-signature') || '', new RegExp(FOLLOW_UP_DATE));
     assert.match(await summary.innerText(), /Seguimiento/i);
     assert.doesNotMatch(await summary.innerText(), /Sin seguimiento/i);
     assert.equal(await page.evaluate(() => Boolean((window as TestWindow).__windowOpened)), false);
