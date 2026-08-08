@@ -59,7 +59,7 @@ jobs:
           test "$(git rev-parse origin/main)" = "06ffe54075e8b1b0fd11eed09bffa5a83f2dfc68"
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add .github/workflows/ci.yml .github/pr140_migrate.py src/tests
+          git add -A
           git diff --cached --check
           git commit -m "Migrar regresiones a UX cero capacitación"
           git push origin HEAD:agent/leads-zero-training-ux-phase1
