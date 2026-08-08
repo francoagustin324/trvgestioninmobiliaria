@@ -81,12 +81,6 @@ function moveSecondaryCardContent(card: HTMLElement): void {
 
   const followUpMenu = card.querySelector<HTMLElement>('.mvp-lead-next-action .mvp-lead-followup-menu');
   if (followUpMenu && !content.contains(followUpMenu)) tools.append(followUpMenu);
-
-  const qualification = Array.from(card.children).find((element) => {
-    if (!(element instanceof HTMLElement)) return false;
-    return element.matches('[data-lead-qualification-panel], .mvp-lead-qualification-panel, .lead-qualification-panel, .mvp-qualification-panel');
-  }) as HTMLElement | undefined;
-  if (qualification && !content.contains(qualification)) content.append(qualification);
 }
 
 function renderCardActions(card: HTMLElement, client: Client): void {
@@ -171,8 +165,23 @@ function validPreparation(panelElement: HTMLElement): boolean {
   return Boolean(panelElement.querySelector('[data-whatsapp-open]') && panelElement.querySelector('[data-whatsapp-message]'));
 }
 
+function safetyMarkup(panelElement: HTMLElement, blocked: boolean): { contextNote: string; identityForm: string } {
+  const originalIdentityForm = panelElement.querySelector<HTMLElement>('[data-whatsapp-identity-form]');
+  let identityForm = '';
+  if (originalIdentityForm) {
+    const clone = originalIdentityForm.cloneNode(true) as HTMLElement;
+    clone.querySelector('.whatsapp-context-note')?.remove();
+    identityForm = clone.outerHTML;
+  }
+  const originalContextNote = panelElement.querySelector<HTMLElement>('[data-whatsapp-context-note]');
+  return {
+    contextNote: blocked && originalContextNote ? originalContextNote.outerHTML : '',
+    identityForm,
+  };
+}
+
 function patchPreparation(panelElement: HTMLElement): void {
-  if (!validPreparation(panelElement) || panelElement.dataset.zeroTrainingView === 'preparation') return;
+  if (!validPreparation(panelElement) || panelElement.querySelector('[data-whatsapp-message-preview]')) return;
   const client = clientById(Number(panelElement.dataset.clientId));
   const oldPhone = panelElement.querySelector<HTMLInputElement>('[data-whatsapp-phone]');
   const oldMessage = panelElement.querySelector<HTMLTextAreaElement>('[data-whatsapp-message]');
@@ -182,7 +191,7 @@ function patchPreparation(panelElement: HTMLElement): void {
   const phone = oldPhone.value;
   const normalized = normalizeWhatsAppPhone(phone);
   const blocked = panelElement.dataset.contactBlocked === 'true';
-  const identityForm = panelElement.querySelector<HTMLElement>('[data-whatsapp-identity-form]')?.outerHTML || '';
+  const { contextNote, identityForm } = safetyMarkup(panelElement, blocked);
   const invalidPhone = !normalized.valid;
   const disabled = blocked || invalidPhone || !message.trim();
 
@@ -191,6 +200,7 @@ function patchPreparation(panelElement: HTMLElement): void {
       <div><h2 id="whatsapp-contact-title">Mensaje para ${escapeHtml(client.name)}</h2></div>
       <button type="button" class="quiet-button" data-whatsapp-close aria-label="Cerrar">×</button>
     </header>
+    ${contextNote}
     <section class="whatsapp-zero-message-card">
       <strong>${escapeHtml(client.name)}</strong>
       <p class="whatsapp-zero-message-preview" data-whatsapp-message-preview>${escapeHtml(message)}</p>
@@ -221,7 +231,7 @@ function patchPreparation(panelElement: HTMLElement): void {
 }
 
 function patchReturn(panelElement: HTMLElement): void {
-  if (!panelElement.querySelector('[data-whatsapp-confirm-sent]') || panelElement.dataset.zeroTrainingView === 'return') return;
+  if (!panelElement.querySelector('[data-whatsapp-confirm-sent]') || panelElement.querySelector('.whatsapp-zero-return-actions')) return;
   const client = clientById(Number(panelElement.dataset.clientId));
   if (!client) return;
   panelElement.dataset.zeroTrainingView = 'return';
@@ -404,12 +414,20 @@ function queuePatch(): void {
   queueMicrotask(patchAll);
 }
 
+function closeDonePanelForNavigation(target: HTMLElement): void {
+  const panelElement = panel();
+  if (panelElement?.dataset.zeroTrainingView !== 'done' || overlay()?.hidden || !target.closest('[data-module]')) return;
+  panelElement.querySelector<HTMLButtonElement>('[data-whatsapp-close]')?.click();
+}
+
 function install(): void {
   if (installed || typeof document === 'undefined') return;
   installed = true;
 
   document.addEventListener('click', (event) => {
     const target = event.target as HTMLElement;
+
+    closeDonePanelForNavigation(target);
 
     const confirm = target.closest<HTMLElement>('[data-whatsapp-confirm-sent]');
     if (confirm) {
@@ -494,6 +512,7 @@ function install(): void {
   });
   document.addEventListener('trv-render', queuePatch);
   document.addEventListener('propcontrol-leads-rendered', queuePatch);
+  document.addEventListener('propcontrol-whatsapp-identity-changed', queuePatch);
   window.addEventListener('focus', queuePatch);
   window.addEventListener('pageshow', queuePatch);
   document.addEventListener('visibilitychange', queuePatch);
