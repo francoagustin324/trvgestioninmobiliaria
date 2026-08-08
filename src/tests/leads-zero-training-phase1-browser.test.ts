@@ -11,7 +11,7 @@ const STORAGE_KEY = `trv-crm-basico:user:${USER_ID}`;
 const FIXED_TIME = new Date('2026-08-07T16:00:00-03:00');
 const TOMORROW = '2026-08-08';
 const PLUS_THREE = '2026-08-10';
-const ARTIFACT_DIR = 'artifacts/b1-3';
+const ARTIFACT_DIR = 'artifacts/leads-zero-training-phase1';
 
 interface TestWindow extends Window { __zeroTrainingOpenedUrl?: string; }
 
@@ -130,11 +130,21 @@ test('FASE 1 navegador real: tarjeta simple, WhatsApp seguro, seguimiento autom√
     assert.equal(await menu.getByRole('button', { name: 'Ver detalles', exact: true }).count(), 1);
     assert.equal(await menu.getByRole('button', { name: 'Completar datos con IA', exact: true }).count(), 1);
     assert.equal(await menu.getByRole('button', { name: 'Eliminar', exact: true }).count(), 1);
-    const dialogPromise = page.waitForEvent('dialog');
+    let deleteDialogMessage = '';
+    const deleteDialogHandled = new Promise<void>((resolve, reject) => {
+      page.once('dialog', async (dialog) => {
+        try {
+          deleteDialogMessage = dialog.message();
+          await dialog.dismiss();
+          resolve();
+        } catch (error) {
+          reject(error);
+        }
+      });
+    });
     await menu.getByRole('button', { name: 'Eliminar', exact: true }).click();
-    const dialog = await dialogPromise;
-    assert.match(dialog.message(), /Eliminar este registro/i);
-    await dialog.dismiss();
+    await deleteDialogHandled;
+    assert.match(deleteDialogMessage, /Eliminar este registro/i);
     assert.equal(await card.count(), 1);
     await page.evaluate(() => document.querySelector<HTMLDetailsElement>('.mvp-lead-actions-menu')?.removeAttribute('open'));
 
