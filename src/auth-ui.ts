@@ -5,8 +5,9 @@ import {
   signInCloud,
   signOutCloud,
   signUpCloud,
-} from './cloud-api.js';
+} from './cloud-api-compatible.js';
 import { replaceData, setActiveMemberId, state } from './store.js';
+import { hasPendingLocalChanges } from './sync-safety.js';
 import { escapeHtml } from './utils.js';
 
 let authMode: 'login' | 'signup' = 'login';
@@ -99,6 +100,7 @@ function formText(form: HTMLFormElement, name: string): string {
 }
 
 async function syncAfterLogin(notice: Notice, rerender: Rerender): Promise<void> {
+  if (hasPendingLocalChanges()) await pushCloudData(state.crm);
   const cloudData = await pullCloudData(state.crm);
   if (cloudData) {
     replaceData(cloudData);
@@ -119,6 +121,7 @@ export async function initializeCloudSession(notice: Notice, rerender: Rerender)
   renderCloudAccount();
   if (!getCloudSession()) return;
   try {
+    if (hasPendingLocalChanges()) await pushCloudData(state.crm);
     const cloudData = await pullCloudData(state.crm);
     if (cloudData) {
       replaceData(cloudData);

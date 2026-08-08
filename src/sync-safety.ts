@@ -11,6 +11,10 @@ export interface SyncState {
   localUpdatedAt?: string;
   lastCloudSavedAt?: string;
   lastCloudVersion?: string;
+  localGeneration?: number;
+  localFingerprint?: string;
+  verifiedGeneration?: number;
+  lastCloudFingerprint?: string;
   lastError?: string;
 }
 
@@ -66,6 +70,10 @@ export function getSyncState(storage?: StorageLike): SyncState {
     localUpdatedAt: parsed?.localUpdatedAt ? String(parsed.localUpdatedAt) : undefined,
     lastCloudSavedAt: parsed?.lastCloudSavedAt ? String(parsed.lastCloudSavedAt) : undefined,
     lastCloudVersion: parsed?.lastCloudVersion ? String(parsed.lastCloudVersion) : undefined,
+    localGeneration: Number.isFinite(parsed?.localGeneration) ? Number(parsed?.localGeneration) : undefined,
+    localFingerprint: parsed?.localFingerprint ? String(parsed.localFingerprint) : undefined,
+    verifiedGeneration: Number.isFinite(parsed?.verifiedGeneration) ? Number(parsed?.verifiedGeneration) : undefined,
+    lastCloudFingerprint: parsed?.lastCloudFingerprint ? String(parsed.lastCloudFingerprint) : undefined,
     lastError: parsed?.lastError ? String(parsed.lastError) : undefined,
   };
 }
@@ -123,10 +131,13 @@ export function writeLocalSnapshot(
   target.setItem(key, serialized);
   if (options.markDirty === false) return;
 
+  const previousSync = getSyncState(target);
   writeSyncState({
-    ...getSyncState(target),
+    ...previousSync,
     dirty: true,
     localUpdatedAt: new Date().toISOString(),
+    localGeneration: (previousSync.localGeneration ?? 0) + 1,
+    localFingerprint: stableFingerprint(crm),
     lastError: undefined,
   }, target);
 }
@@ -135,30 +146,94 @@ export function hasPendingLocalChanges(storage?: StorageLike): boolean {
   return getSyncState(storage).dirty;
 }
 
-export function markCloudHydrated(remoteVersion: string | null, storage?: StorageLike): void {
-  const target = activeStorage(storage);
-  const now = new Date().toISOString();
-  writeSyncState({
-    ...getSyncState(target),
-    dirty: false,
-    localUpdatedAt: now,
-    lastCloudSavedAt: now,
-    lastCloudVersion: remoteVersion || undefined,
-    lastError: undefined,
-  }, target);
+export interface SyncSaveToken {
+  generation: number;
+  fingerprint: string;
 }
 
-export function markCloudSaved(remoteVersion: string | null, storage?: StorageLike): void {
-  const target = activeStorage(storage);
+export function syncSaveToken(crm: CrmData, storage?: StorageLike): SyncSaveToken {
+  const sync = getSyncState(storage);
+  return {
+    generation: sync.localGeneration ?? 0,
+    fingerprint: stableFingerprint(crm),
+  };
+}
+
+function localFingerprint(storage: StorageLike): string | undefined {
+  const local = readLocalSnapshot(storage);
+  return local ? stableFingerprint(local) : undefined;
+}
+
+export function markCloudHydrated(remoteVersion: string | null, storage?: StorageLike): boolean;
+export function markCloudHydrated(remoteVersion: string | null, remoteFingerprint?: string, storage?: StorageLike): boolean;
+export function markCloudHydrated(
+  remoteVersion: string | null,
+  remoteFingerprintOrStorage?: string | StorageLike,
+  storage?: StorageLike,
+): boolean {
+  const remoteFingerprint = typeof remoteFingerprintOrStorage === 'string' ? remoteFingerprintOrStorage : undefined;
+  const target = activeStorage(typeof remoteFingerprintOrStorage === 'string' ? storage : remoteFingerprintOrStorage);
+  const previous = getSyncState(target);
+  const currentFingerprint = localFingerprint(target);
+  const remoteMatchesPendingLocal = Boolean(
+    remoteFingerprint
+    && currentFingerprint
+    && remoteFingerprint === currentFingerprint,
+  );
+  if (previous.dirty && !remoteMatchesPendingLocal) return false;
+
   const now = new Date().toISOString();
   writeSyncState({
-    ...getSyncState(target),
+    ...previous,
     dirty: false,
-    localUpdatedAt: now,
+    localUpdatedAt: previous.localUpdatedAt ?? now,
     lastCloudSavedAt: now,
-    lastCloudVersion: remoteVersion || getSyncState(target).lastCloudVersion,
+    lastCloudVersion: remoteVersion || previous.lastCloudVersion,
+    lastCloudFingerprint: remoteFingerprint || previous.lastCloudFingerprint,
+    verifiedGeneration: previous.localGeneration,
     lastError: undefined,
   }, target);
+  return true;
+}
+
+export function markCloudSaved(
+  remoteVersion: string | null,
+  expected?: SyncSaveToken,
+  storage?: StorageLike,
+): boolean {
+  const target = activeStorage(storage);
+  const previous = getSyncState(target);
+
+  // El writer moderno histórico puede informar la versión remota observada, pero
+  // sin un token de generación no existe evidencia suficiente para declarar limpio.
+  // Guardar sólo esa versión permite que la siguiente generación compare contra
+  // el remoto exacto que acabamos de verificar, sin perder dirty.
+  if (!expected) {
+    if (remoteVersion) {
+      writeSyncState({
+        ...previous,
+        lastCloudVersion: remoteVersion,
+      }, target);
+    }
+    return false;
+  }
+
+  const currentFingerprint = localFingerprint(target);
+  const isLatestLocal = previous.localGeneration === expected.generation
+    && currentFingerprint === expected.fingerprint;
+  const now = new Date().toISOString();
+
+  writeSyncState({
+    ...previous,
+    dirty: isLatestLocal ? false : previous.dirty,
+    localUpdatedAt: previous.localUpdatedAt ?? now,
+    lastCloudSavedAt: now,
+    lastCloudVersion: remoteVersion || previous.lastCloudVersion,
+    lastCloudFingerprint: expected.fingerprint,
+    verifiedGeneration: isLatestLocal ? expected.generation : previous.verifiedGeneration,
+    lastError: undefined,
+  }, target);
+  return isLatestLocal;
 }
 
 export function markSyncError(message: string, storage?: StorageLike): void {
@@ -227,10 +302,13 @@ export function restoreLatestBackup(storage?: StorageLike): CrmData | null {
 
   saveBackups(backups, target);
   target.setItem(scopedStorageKey(target), JSON.stringify(latest.crm));
+  const previousSync = getSyncState(target);
   writeSyncState({
-    ...getSyncState(target),
+    ...previousSync,
     dirty: true,
     localUpdatedAt: new Date().toISOString(),
+    localGeneration: (previousSync.localGeneration ?? 0) + 1,
+    localFingerprint: stableFingerprint(latest.crm),
     lastError: undefined,
   }, target);
   return latest.crm;
