@@ -199,8 +199,9 @@ test('FASE 1 navegador real: tarjeta simple, WhatsApp seguro, seguimiento autom�
     await panel.locator('[data-whatsapp-close]').click();
     await page.reload({ waitUntil: 'domcontentloaded' });
     await page.waitForSelector('.mvp-lead-card[data-client-id="1"]', { state: 'visible' });
-    assert.match(await page.locator('.mvp-lead-card[data-client-id="1"] .mvp-lead-next-action').innerText(), /WhatsApp[\s\S]*En 3 días/i);
     assert.equal((await crmFromStorage(page)).clients[0]?.nextFollowUp, PLUS_THREE);
+    await page.waitForFunction(() => document.querySelector('.mvp-lead-card[data-client-id="1"] .mvp-lead-next-action')?.textContent?.includes('En 3 días') === true);
+    assert.match(await page.locator('.mvp-lead-card[data-client-id="1"] .mvp-lead-next-action').innerText(), /WhatsApp[\s\S]*En 3 días/i);
     await noHorizontalScroll(page);
   } finally {
     await context.close(); await browser.close(); await stopServer(server);
