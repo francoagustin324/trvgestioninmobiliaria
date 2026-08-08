@@ -1,0 +1,13 @@
+#crm .mvp-zero-main-facts span,
+#crm .mvp-zero-next-copy span {
+  display: inline !important;
+  text-transform: none !important;
+  letter-spacing: normal !important;
+}
+#crm .mvp-zero-main-facts strong,
+#crm .mvp-zero-next-copy strong {
+  display: inline !important;
+  text-transform: none !important;
+}
+.whatsapp-zero-safety-note[hidden] { display: none !important; }
+.whatsapp-zero-safety-note.blocked { display: block !important; }

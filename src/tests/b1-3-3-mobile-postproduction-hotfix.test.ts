@@ -422,7 +422,7 @@ async function verifyIdentityPanel(page: Page, screenshotName?: string): Promise
   assert.equal(await panel.locator('[data-whatsapp-phone]').isDisabled(), true);
   assert.equal(await panel.locator('[data-whatsapp-message]').isDisabled(), true);
   assert.equal(await panel.locator('[data-whatsapp-open]').isDisabled(), true);
-  assert.equal(await panel.locator('[data-whatsapp-manual-register]').isDisabled(), true);
+  assert.equal(await panel.locator('[data-whatsapp-manual-register]').count(), 0);
   await assertNoHorizontalScroll(page);
 
   if (screenshotName) {

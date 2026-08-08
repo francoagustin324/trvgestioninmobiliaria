@@ -242,13 +242,18 @@ async function clearance(control: Locator): Promise<number> {
 
 async function validateBottomNavigation(page: Page): Promise<void> {
   const last = exactCard(page, 'Juan Ignacio Rodríguez Martínez');
-  const qualify = last.locator('.mvp-auto-qualify-button');
-  const summary = last.locator('.mvp-lead-full-sheet > summary');
-  assert.ok(await clearance(qualify) >= 16, 'Calificar automáticamente queda demasiado cerca de la navegación inferior.');
-  assert.ok(await clearance(summary) >= 16, 'Ver ficha completa queda demasiado cerca de la navegación inferior.');
+  const menu = last.locator('.mvp-lead-actions-menu');
+  const summary = menu.locator(':scope > summary');
+  assert.ok(await clearance(summary) >= 16, 'El menú de acciones queda demasiado cerca de la navegación inferior.');
   await summary.click();
+  const details = menu.getByRole('button', { name: 'Ver detalles', exact: true });
+  assert.ok(await clearance(details) >= 16, 'Ver detalles queda demasiado cerca de la navegación inferior.');
+  await details.click();
   assert.ok(await clearance(last.locator('.mvp-lead-full-actions .delete')) >= 16, 'Los botones de la ficha abierta quedan tapados por la navegación inferior.');
+
   const overdue = exactCard(page, 'Lucía Martín');
+  await overdue.locator('.mvp-lead-actions-menu > summary').click();
+  await overdue.getByRole('button', { name: 'Ver detalles', exact: true }).click();
   await overdue.locator('.mvp-lead-followup-menu > summary').click();
   assert.ok(await clearance(overdue.locator('[data-complete-client-follow-up]')) >= 16, 'El popover de seguimiento queda tapado por la navegación inferior.');
   await overdue.locator('.mvp-lead-followup-menu').evaluate((element: HTMLDetailsElement) => { element.open = false; });

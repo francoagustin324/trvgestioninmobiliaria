@@ -222,7 +222,6 @@ function visualCrm(): CrmData {
   return crm;
 }
 
-
 async function findAvailablePort(): Promise<number> {
   return await new Promise<number>((resolve, reject) => {
     const probe = createNetServer();
@@ -377,17 +376,26 @@ async function assertClosedLayout(page: Page, viewport: { width: number; height:
   assert.ok(metrics.counterWidth <= metrics.shellWidth + 1);
   if (viewport.width === 390) {
     const fullLeadHeight = metrics.heights[0] || 0;
-    assert.ok(fullLeadHeight >= 320 && fullLeadHeight <= 450, `Tarjeta cerrada fuera de 320-450px: ${fullLeadHeight}`);
+    assert.ok(fullLeadHeight >= 230 && fullLeadHeight <= 450, `Tarjeta simplificada fuera de 230-450px: ${fullLeadHeight}`);
     console.log(`B1.2.3 altura tarjeta cerrada 390: ${fullLeadHeight.toFixed(2)}px`);
   }
   return metrics.heights;
 }
 
+async function openZeroTrainingDetails(card: ReturnType<Page['locator']>): Promise<void> {
+  const sheet = card.locator('.mvp-lead-full-sheet');
+  if (await sheet.getAttribute('open') !== null) return;
+  await card.locator('.mvp-lead-actions-menu > summary').click();
+  await card.getByRole('button', { name: 'Ver detalles', exact: true }).click();
+  await sheet.waitFor({ state: 'visible' });
+}
+
 async function assertSingleExpandedAndPersistent(page: Page): Promise<void> {
-  const sheets = page.locator('#crm .mvp-lead-full-sheet');
-  await sheets.nth(0).locator(':scope > summary').click();
+  const firstCard = page.locator('#crm .mvp-lead-compact-card').nth(0);
+  await openZeroTrainingDetails(firstCard);
   assert.equal(await page.locator('#crm .mvp-lead-full-sheet[open]').count(), 1);
-  await sheets.nth(1).locator(':scope > summary').click();
+  const secondCard = page.locator('#crm .mvp-lead-compact-card').nth(1);
+  await openZeroTrainingDetails(secondCard);
   await page.waitForFunction(() => document.querySelectorAll('#crm .mvp-lead-full-sheet[open]').length === 1);
   assert.equal(await page.locator('#crm .mvp-lead-full-sheet[open]').count(), 1);
   const selectedClient = await page.locator('#crm .mvp-lead-full-sheet[open]').getAttribute('data-lead-full-sheet');
@@ -425,19 +433,11 @@ async function assertPipelineSelection(page: Page): Promise<void> {
   await page.locator('#crm [data-stage-quick="Todas"]').click();
 }
 
-async function visibleAlertLabel(card: ReturnType<Page['locator']>): Promise<string> {
-  const alert = card.locator('.mvp-lead-alert:not([hidden])');
-  return alert.evaluate((element) => {
-    const text = element.querySelector<HTMLElement>('.mvp-lead-alert-text');
-    if (text && getComputedStyle(text).display !== 'none') return text.textContent?.trim() || '';
-    return getComputedStyle(element, '::after').content.replace(/^['"]|['"]$/g, '');
-  });
-}
-
 async function assertFollowUpActions(page: Page): Promise<void> {
   const overdueCard = page.locator('#crm .mvp-lead-compact-card').filter({ hasText: 'Seguimiento muy vencido' });
-  assert.equal(await visibleAlertLabel(overdueCard), 'Vencido · 19 días');
-  assert.doesNotMatch(await overdueCard.locator('.mvp-lead-next-action').innerText(), /vencid|19 días/i);
+  assert.equal(await overdueCard.locator('.mvp-lead-alert').isVisible(), false, 'La alerta heredada no compite en el primer nivel de FASE 1.');
+  assert.match(await overdueCard.locator('.mvp-lead-next-action').innerText(), /Llamar para confirmar decisión[\s\S]*Vencido hace 19 días/i);
+  await openZeroTrainingDetails(overdueCard);
   await overdueCard.locator('.mvp-lead-followup-menu > summary').click();
   const form = overdueCard.locator('[data-reprogram-client-follow-up]');
   await form.locator('input[name="date"]').fill(isoOffset(3));
@@ -445,6 +445,7 @@ async function assertFollowUpActions(page: Page): Promise<void> {
   await page.waitForTimeout(100);
   const updatedCard = page.locator('#crm .mvp-lead-compact-card').filter({ hasText: 'Seguimiento muy vencido' });
   assert.match(await updatedCard.locator('.mvp-lead-next-action').innerText(), /En 3 días/);
+  await openZeroTrainingDetails(updatedCard);
   await updatedCard.locator('.mvp-lead-followup-menu > summary').click();
   const completeButton = updatedCard.locator('[data-complete-client-follow-up]');
   const hitTarget = await completeButton.evaluate((button) => {
@@ -471,16 +472,17 @@ async function assertFollowUpActions(page: Page): Promise<void> {
   await page.waitForFunction(() => {
     const cards = [...document.querySelectorAll<HTMLElement>('#crm .mvp-lead-compact-card')];
     const card = cards.find((item) => item.textContent?.includes('Seguimiento muy vencido'));
-    return card?.querySelector('.mvp-lead-next-action')?.textContent?.includes('Definir próxima acción') === true;
+    return card?.querySelector('.mvp-lead-next-action')?.textContent?.includes('Definir próximo paso') === true;
   });
   const completedCard = page.locator('#crm .mvp-lead-compact-card').filter({ hasText: 'Seguimiento muy vencido' });
-  assert.match(await completedCard.locator('.mvp-lead-next-action').innerText(), /Definir próxima acción/);
-  assert.equal(await completedCard.locator('.mvp-lead-alert[data-lead-alert-kind="overdue"]:not([hidden])').count(), 0);
+  assert.match(await completedCard.locator('.mvp-lead-next-action').innerText(), /Definir próximo paso/);
+  assert.equal(await completedCard.locator('.mvp-lead-alert').isVisible(), false);
 }
 
 async function assertAutomaticPanel(page: Page, width: number): Promise<void> {
   const card = page.locator('#crm .mvp-lead-compact-card').filter({ hasText: 'Nuevo casi vacío' });
-  await card.locator('[data-auto-qualify-client]').click();
+  await card.locator('.mvp-lead-actions-menu > summary').click();
+  await card.getByRole('button', { name: 'Completar datos con IA', exact: true }).click();
   const panel = page.locator('#crm .lead-qualification-panel');
   await panel.waitFor({ state: 'visible' });
   const textarea = panel.locator('[data-qualification-text]');

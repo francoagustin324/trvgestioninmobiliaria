@@ -116,3 +116,29 @@ jobs:
           path: artifacts/leads-redesign
           if-no-files-found: error
           retention-days: 14
+      - name: Verificar capturas FASE 1 cero capacitación
+        if: always()
+        run: |
+          set -euo pipefail
+          directory="artifacts/leads-zero-training-phase1"
+          test -d "$directory"
+          expected=(
+            20-zero-training-card-desktop.png
+            21-zero-training-card-mobile.png
+            22-zero-training-whatsapp-un-cta.png
+            23-zero-training-confirmacion-regreso.png
+            24-zero-training-listo-proximo-contacto.png
+            25-zero-training-menu-acciones.png
+          )
+          test "$(find "$directory" -maxdepth 1 -type f -name '*.png' | wc -l)" -eq "${#expected[@]}"
+          for file in "${expected[@]}"; do
+            test -s "$directory/$file"
+          done
+      - name: Adjuntar capturas FASE 1 cero capacitación
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: leads-zero-training-phase1-capturas
+          path: artifacts/leads-zero-training-phase1
+          if-no-files-found: error
+          retention-days: 14

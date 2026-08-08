@@ -285,6 +285,18 @@ function exactCard(page: Page, name: string): Locator {
   });
 }
 
+async function openDetails(card: Locator, version: Version): Promise<void> {
+  const sheet = card.locator('.mvp-lead-full-sheet');
+  if (await sheet.evaluate((element: HTMLDetailsElement) => element.open)) return;
+  if (version === 'after') {
+    await card.locator('.mvp-lead-actions-menu > summary').click();
+    await card.getByRole('button', { name: 'Ver detalles', exact: true }).click();
+  } else {
+    await sheet.locator(':scope > summary').click();
+  }
+  await sheet.evaluate((element: HTMLDetailsElement) => element.open);
+}
+
 function imagePath(version: Version, scenario: Scenario, viewport: Viewport): string {
   return join(artifacts, `${version}-${scenario}-${viewport.width}x${viewport.height}.png`);
 }
@@ -316,12 +328,13 @@ async function captureScenarios(page: Page, version: Version, viewport: Viewport
   if (mobileFilterPanel) await details.evaluate((element: HTMLDetailsElement) => { element.open = false; });
 
   const sheet = complete.locator('.mvp-lead-full-sheet');
-  if (!(await sheet.evaluate((element: HTMLDetailsElement) => element.open))) await sheet.locator(':scope > summary').click();
+  await openDetails(complete, version);
   await complete.scrollIntoViewIfNeeded();
   await capture(page, version, 'ficha', viewport);
-  await sheet.locator(':scope > summary').click();
+  await sheet.evaluate((element: HTMLDetailsElement) => { element.open = false; });
 
   const overdue = exactCard(page, 'Seguimiento vencido');
+  if (version === 'after') await openDetails(overdue, version);
   const menu = overdue.locator('.mvp-lead-followup-menu');
   await menu.locator(':scope > summary').click();
   await overdue.scrollIntoViewIfNeeded();
@@ -392,9 +405,9 @@ async function validateAfter(page: Page, viewport: Viewport): Promise<Metric> {
   assert.ok(data.documentWidth <= data.viewport + 1, `Scroll horizontal: ${JSON.stringify(data)}`);
   assert.ok(data.bodyWidth <= data.viewport + 1);
   assert.equal(data.cardsInside, true);
-  assert.equal(data.summaryCount, 1);
-  assert.equal(data.factCount, 0);
-  assert.equal(data.autoText, 'Calificar automáticamente');
+  assert.equal(data.summaryCount, 0);
+  assert.equal(data.factCount, 1);
+  assert.equal(data.autoText, undefined);
   assert.equal(data.pipelineWrap, 'nowrap');
   assert.ok(data.pipelineWidth <= data.shellWidth + 1);
   assert.ok(data.unusedBottom <= 24, `Espacio vacío excesivo: ${JSON.stringify(data)}`);
@@ -409,8 +422,8 @@ async function validateAfter(page: Page, viewport: Viewport): Promise<Metric> {
   }
 
   if (viewport.width === 390) {
-    assert.ok(data.emptyHeight >= 300 && data.emptyHeight <= 380, `Lead vacío fuera de objetivo: ${JSON.stringify(data)}`);
-    assert.ok(data.completeHeight >= 340 && data.completeHeight <= 460, `Lead normal fuera de objetivo: ${JSON.stringify(data)}`);
+    assert.ok(data.emptyHeight >= 220 && data.emptyHeight <= 380, `Lead vacío fuera de objetivo: ${JSON.stringify(data)}`);
+    assert.ok(data.completeHeight >= 230 && data.completeHeight <= 460, `Lead normal fuera de objetivo: ${JSON.stringify(data)}`);
   }
 
   return {
@@ -481,14 +494,15 @@ async function validatePipeline(page: Page): Promise<void> {
 
 async function validateDisclosureAndPopover(page: Page): Promise<void> {
   const complete = exactCard(page, 'María Fernanda Rodríguez — búsqueda completa');
-  await complete.locator('.mvp-lead-full-sheet > summary').click();
+  await openDetails(complete, 'after');
   assert.equal(await page.locator('#crm .mvp-lead-full-sheet[open]').count(), 1);
   const text = await page.locator('#crm .mvp-lead-full-sheet[open]').innerText();
   assert.match(text, /Franco Solís/);
   assert.match(text, /propiedad compatible/i);
-  await complete.locator('.mvp-lead-full-sheet > summary').click();
+  await complete.locator('.mvp-lead-full-sheet').evaluate((element: HTMLDetailsElement) => { element.open = false; });
 
   const overdue = exactCard(page, 'Seguimiento vencido');
+  await openDetails(overdue, 'after');
   await overdue.locator('.mvp-lead-followup-menu > summary').click();
   const button = overdue.locator('[data-complete-client-follow-up]');
   await button.waitFor({ state: 'visible' });
@@ -525,6 +539,7 @@ async function validateKeyboardAndQualification(page: Page): Promise<void> {
   await details.evaluate((element: HTMLDetailsElement) => { element.open = false; });
 
   const overdue = exactCard(page, 'Seguimiento vencido');
+  await openDetails(overdue, 'after');
   await overdue.locator('.mvp-lead-followup-menu > summary').click();
   const date = overdue.locator('input[type="date"]');
   await date.focus();
@@ -533,15 +548,19 @@ async function validateKeyboardAndQualification(page: Page): Promise<void> {
   await overdue.locator('.mvp-lead-followup-menu').evaluate((element: HTMLDetailsElement) => { element.open = false; });
 
   const complete = exactCard(page, 'María Fernanda Rodríguez — búsqueda completa');
-  await complete.locator('[data-auto-qualify-client]').click();
-  const panel = page.locator('#crm .lead-qualification-panel');
-  await panel.waitFor({ state: 'visible' });
-  const input = panel.locator('textarea, input:not([type="hidden"]), select').first();
+  if (await complete.locator('.mvp-lead-full-sheet').evaluate((element: HTMLDetailsElement) => element.open)) {
+    await complete.locator('.mvp-lead-full-sheet').evaluate((element: HTMLDetailsElement) => { element.open = false; });
+  }
+  await complete.locator('.mvp-lead-actions-menu > summary').click();
+  await complete.getByRole('button', { name: 'Completar datos con IA', exact: true }).click();
+  const qualificationPanel = page.locator('#crm .lead-qualification-panel');
+  await qualificationPanel.waitFor({ state: 'visible' });
+  const input = qualificationPanel.locator('textarea, input:not([type="hidden"]), select').first();
   await input.focus();
   await input.scrollIntoViewIfNeeded();
   assert.equal(await input.evaluate((element) => document.activeElement === element), true);
   assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1));
-  await panel.locator('[data-close-qualification]').click();
+  await qualificationPanel.locator('[data-close-qualification]').click();
   await page.setViewportSize(original);
 }
 
