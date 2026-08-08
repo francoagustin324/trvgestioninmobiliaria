@@ -129,6 +129,7 @@ jobs:
             23-zero-training-confirmacion-regreso.png
             24-zero-training-listo-proximo-contacto.png
             25-zero-training-menu-acciones.png
+            26-zero-training-cambiar-seguimiento.png
           )
           test "$(find "$directory" -maxdepth 1 -type f -name '*.png' | wc -l)" -eq "${#expected[@]}"
           for file in "${expected[@]}"; do
