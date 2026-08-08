@@ -213,15 +213,25 @@ async function openFollowUp(page: Page): Promise<void> {
 async function selectPreset(page: Page, value: string, expectedDate: string, expectedPreview: string): Promise<void> {
   const form = page.locator('[data-zero-followup-form]');
   await form.locator(`input[name="follow-up-choice"][value="${value}"]`).check();
-  await page.waitForFunction(({ date, preview, value: choice }) => {
-    const current = document.querySelector<HTMLFormElement>('[data-zero-followup-form]');
-    const previewNode = current?.querySelector<HTMLElement>('[data-zero-followup-preview]');
-    return current?.querySelector<HTMLInputElement>('input[name="selected-date"]')?.value === date
-      && current?.dataset.followupSelectedChoice === choice
-      && current?.dataset.followupSelectedDate === date
-      && previewNode?.textContent === preview;
-  }, { date: expectedDate, preview: expectedPreview, value });
-  assert.equal(await form.locator('input[name="selected-date"]').inputValue(), expectedDate);
+  await page.waitForFunction((choice) => (
+    document.querySelector<HTMLFormElement>('[data-zero-followup-form]')?.dataset.followupSelectedChoice === choice
+  ), value);
+  const selection = await form.evaluate((current) => {
+    const selectedDate = current.querySelector<HTMLInputElement>('input[name="selected-date"]')?.value || '';
+    const preview = current.querySelector<HTMLElement>('[data-zero-followup-preview]')?.textContent || '';
+    return {
+      choice: current.dataset.followupSelectedChoice || '',
+      canonicalDate: current.dataset.followupSelectedDate || '',
+      selectedDate,
+      preview,
+    };
+  });
+  assert.deepEqual(selection, {
+    choice: value,
+    canonicalDate: expectedDate,
+    selectedDate: expectedDate,
+    preview: expectedPreview,
+  });
 }
 
 async function waitForDone(page: Page): Promise<void> {
@@ -383,10 +393,52 @@ test('hotfix congela la fecha al cruzar medianoche, evita duplicados y conserva 
     assert.equal(recovered.clients[0]?.nextAction, 'Volver a contactar por WhatsApp');
     assert.equal(recovered.reminders.length, 0);
     assert.equal(await reopened.evaluate(() => (window as FollowUpTestWindow).__followUpWindowOpenCount), 2);
-    await openAgenda(reopened);
-    const recoveredAgenda = reopened.locator('#agenda.active .agenda-card').filter({ hasText: 'Lucía Martín' });
+    const recoveredAgenda = reopened.locator('#agenda .agenda-card').filter({ hasText: 'Lucía Martín' });
     assert.equal(await recoveredAgenda.count(), 1);
     assert.equal(await recoveredAgenda.locator('time[datetime="2026-08-08"]').count(), 1);
+
+    await reopened.locator('[data-whatsapp-change-followup]').click();
+    const noneForm = reopened.locator('[data-zero-followup-form]');
+    await noneForm.locator('input[name="follow-up-choice"][value="none"]').check();
+    assert.equal(await noneForm.getAttribute('data-followup-selected-choice'), 'none');
+    assert.equal(await noneForm.getAttribute('data-followup-selected-date'), '');
+    assert.equal(await noneForm.locator('input[name="selected-date"]').inputValue(), '');
+    assert.equal(await noneForm.locator('[data-zero-followup-preview]').textContent(), 'No se programará un próximo seguimiento.');
+    const beforeNoneFailure = await storedCrm(reopened);
+
+    await reopened.evaluate((storageKey) => {
+      const target = window as FollowUpTestWindow;
+      target.__followUpOriginalSetItem = Storage.prototype.setItem;
+      Storage.prototype.setItem = function setItem(key: string, value: string): void {
+        if (key === storageKey) throw new Error('Falla none simulada');
+        target.__followUpOriginalSetItem!.call(this, key, value);
+      };
+    }, STORAGE_KEY);
+    await noneForm.locator('button[type="submit"]').click();
+    const noneError = noneForm.locator('[data-followup-save-error]');
+    await noneError.waitFor({ state: 'visible' });
+    assert.match(await noneError.textContent() || '', /Falla none simulada/i);
+    const afterNoneFailure = await storedCrm(reopened);
+    assert.equal(afterNoneFailure.clients[0]?.nextFollowUp, beforeNoneFailure.clients[0]?.nextFollowUp);
+    assert.equal(afterNoneFailure.clients[0]?.nextAction, beforeNoneFailure.clients[0]?.nextAction);
+    assert.equal(afterNoneFailure.activityLog.length, beforeNoneFailure.activityLog.length);
+    assert.equal(await reopened.locator('#propcontrol-whatsapp-contact').isHidden(), false);
+    assert.equal(await noneForm.getAttribute('data-followup-selected-choice'), 'none');
+    assert.equal(await noneForm.getAttribute('data-followup-selected-date'), '');
+
+    await reopened.evaluate(() => {
+      const target = window as FollowUpTestWindow;
+      if (target.__followUpOriginalSetItem) Storage.prototype.setItem = target.__followUpOriginalSetItem;
+    });
+    await noneForm.locator('button[type="submit"]').click();
+    await reopened.getByText('Contacto registrado', { exact: true }).waitFor({ state: 'visible' });
+    const cleared = await storedCrm(reopened);
+    assert.equal(cleared.clients[0]?.nextFollowUp, undefined);
+    assert.equal(cleared.clients[0]?.nextAction, undefined);
+    assert.equal(cleared.reminders.length, 0);
+    assert.equal(cleared.activityLog.length, beforeNoneFailure.activityLog.length, 'none no agrega actividad al guardar.');
+    await openAgenda(reopened);
+    assert.equal(await reopened.locator('#agenda.active .agenda-card').filter({ hasText: 'Lucía Martín' }).count(), 0);
 
     await reopened.close();
   } finally {
