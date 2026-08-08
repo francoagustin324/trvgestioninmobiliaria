@@ -19,7 +19,7 @@ export function localDateLabel(value: string): string {
   const date = new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]), 12);
   return new Intl.DateTimeFormat('es-AR', {
     weekday: 'long',
-    day: '2-digit',
+    day: 'numeric',
     month: 'long',
     year: 'numeric',
   }).format(date);
