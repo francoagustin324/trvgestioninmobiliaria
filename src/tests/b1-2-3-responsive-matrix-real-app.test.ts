@@ -132,7 +132,6 @@ function responsiveCrm(): CrmData {
   return crm;
 }
 
-
 async function findAvailablePort(): Promise<number> {
   return await new Promise<number>((resolve, reject) => {
     const probe = createNetServer();
@@ -288,21 +287,24 @@ async function validateClosedState(page: Page, viewport: { width: number; height
   return metrics.closedHeight;
 }
 
+async function openZeroTrainingDetails(card: ReturnType<Page['locator']>): Promise<void> {
+  const sheet = card.locator('.mvp-lead-full-sheet');
+  if (await sheet.getAttribute('open') !== null) return;
+  await card.locator('.mvp-lead-actions-menu > summary').click();
+  await card.getByRole('button', { name: 'Ver detalles', exact: true }).click();
+}
+
 async function validateExpandedState(page: Page, closedHeight: number): Promise<void> {
-  const sheets = page.locator('#crm .mvp-lead-full-sheet');
-  const firstMenuCard = page.locator('#crm .mvp-lead-compact-card').nth(0);
-  await firstMenuCard.locator('.mvp-lead-actions-menu > summary').click();
-  await firstMenuCard.getByRole('button', { name: 'Ver detalles', exact: true }).click();
-  await page.waitForFunction(() => document.querySelectorAll('#crm .mvp-lead-full-sheet[open]').length === 1);
   const firstCard = page.locator('#crm .mvp-lead-compact-card').nth(0);
+  await openZeroTrainingDetails(firstCard);
+  await page.waitForFunction(() => document.querySelectorAll('#crm .mvp-lead-full-sheet[open]').length === 1);
   const openText = await page.locator('#crm .mvp-lead-full-sheet[open]').innerText();
   assert.match(openText, /Franco Solís/);
   assert.doesNotMatch(openText, /trvgestioninmobiliaria/i);
   const expandedHeight = await firstCard.evaluate((card) => card.getBoundingClientRect().height);
   assert.ok(expandedHeight > closedHeight + 80, `La ficha abierta no creció lo suficiente: cerrada ${closedHeight}, abierta ${expandedHeight}.`);
-  const secondMenuCard = page.locator('#crm .mvp-lead-compact-card').nth(1);
-  await secondMenuCard.locator('.mvp-lead-actions-menu > summary').click();
-  await secondMenuCard.getByRole('button', { name: 'Ver detalles', exact: true }).click();
+  const secondCard = page.locator('#crm .mvp-lead-compact-card').nth(1);
+  await openZeroTrainingDetails(secondCard);
   await page.waitForFunction(() => document.querySelectorAll('#crm .mvp-lead-full-sheet[open]').length === 1);
   assert.equal(await page.locator('#crm .mvp-lead-full-sheet[open]').getAttribute('data-lead-full-sheet'), '2');
   await page.locator('#crm .mvp-lead-full-sheet[open]').evaluate((element: HTMLDetailsElement) => { element.open = false; });
@@ -311,6 +313,7 @@ async function validateExpandedState(page: Page, closedHeight: number): Promise<
 
 async function validateFollowUpPopover(page: Page): Promise<void> {
   const card = page.locator('#crm .mvp-lead-compact-card').filter({ hasText: 'Seguimiento prioritario' });
+  await openZeroTrainingDetails(card);
   await card.locator('.mvp-lead-followup-menu > summary').click();
   const button = card.locator('[data-complete-client-follow-up]');
   await button.waitFor({ state: 'visible' });
@@ -337,7 +340,7 @@ async function validateBottomClearance(page: Page): Promise<void> {
 }
 
 async function validateFocus(page: Page): Promise<void> {
-  const button = page.locator('#crm .mvp-lead-compact-card').first().locator('.mvp-auto-qualify-button');
+  const button = page.locator('#crm .mvp-lead-compact-card').first().locator('.mvp-lead-actions-menu > summary');
   await button.focus();
   const focus = await button.evaluate((element) => {
     const style = getComputedStyle(element);
@@ -354,7 +357,8 @@ async function validateFocus(page: Page): Promise<void> {
 
 async function validateAutomaticPanel(page: Page): Promise<void> {
   const card = page.locator('#crm .mvp-lead-compact-card').filter({ hasText: 'Cliente calificado' });
-  await card.locator('[data-auto-qualify-client]').click();
+  await card.locator('.mvp-lead-actions-menu > summary').click();
+  await card.getByRole('button', { name: 'Completar datos con IA', exact: true }).click();
   const panel = page.locator('#crm .lead-qualification-panel');
   await panel.waitFor({ state: 'visible' });
   const geometry = await panel.evaluate((element) => {
