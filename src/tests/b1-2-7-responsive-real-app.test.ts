@@ -426,13 +426,13 @@ test('B1.2.7 elimina duplicados visuales con aplicación compilada y CSS real', 
         for (const name of ['Grupo Norte', 'Andrés Vega', 'Lucía Martín']) {
           await expectCard(page, name, {
             alert: 'Vencido · 20 días',
-            action: 'Definir acción',
+            action: 'Definir próximo paso',
             absent: ['fecha vencida', 'Seguimiento vencido'],
           });
           const text = await visualText(exactCard(page, name));
           assert.equal(occurrences(text, 'Vencido'), 1);
           assert.equal(occurrences(text, '20 días'), 1);
-          assert.equal(occurrences(text, 'Definir acción'), 1);
+          assert.equal(occurrences(text, 'Definir próximo paso'), 1);
         }
         await expectCard(page, 'Edgardo', {
           alert: 'Vencido · 20 días',
@@ -441,12 +441,12 @@ test('B1.2.7 elimina duplicados visuales con aplicación compilada y CSS real', 
         });
         await expectCard(page, 'Lead nuevo', {
           alert: 'Nuevo sin contactar',
-          action: 'Contactar por primera vez',
+          action: 'WhatsApp',
           absent: ['Sin próxima acción'],
         });
         await expectCard(page, 'Lead calificado', {
           alert: 'Sin seguimiento',
-          action: 'Programar seguimiento',
+          action: 'Elegir próximo contacto',
           absent: ['Calificado sin seguimiento', 'Sin próxima acción', 'Falta programar seguimiento'],
         });
         await expectCard(page, 'Seguimiento futuro', {

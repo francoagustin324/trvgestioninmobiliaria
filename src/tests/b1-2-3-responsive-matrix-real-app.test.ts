@@ -252,7 +252,7 @@ async function validateClosedState(page: Page, viewport: { width: number; height
         const rect = control.getBoundingClientRect();
         return { label: control.textContent?.trim() || control.getAttribute('aria-label') || '', width: rect.width, height: rect.height };
       });
-    const auto = first.querySelector<HTMLElement>('.mvp-auto-qualify-button')!;
+    const auto = first.querySelector<HTMLElement>('.mvp-lead-actions-menu > summary')!;
     const selected = document.querySelector<HTMLElement>('#crm .mvp-stage-counter.active')!;
     const pipeline = document.querySelector<HTMLElement>('#crm .mvp-stage-counters')!;
     const selectedRect = selected.getBoundingClientRect();
@@ -280,8 +280,8 @@ async function validateClosedState(page: Page, viewport: { width: number; height
   assert.equal(metrics.cardsInside, true);
   assert.equal(metrics.oneAlert, true);
   assert.equal(metrics.openSheets, 0);
-  assert.equal(metrics.autoText, 'Calificar automáticamente');
-  assert.equal(metrics.autoNotClipped, true, `Calificar automáticamente truncado en ${viewport.width}px.`);
+  assert.equal(metrics.autoText, '•••');
+  assert.equal(metrics.autoNotClipped, true, `Menú de acciones truncado en ${viewport.width}px.`);
   assert.equal(metrics.selectedVisible, true);
   assert.equal(metrics.pipelineFlow, 'nowrap');
   assert.ok(metrics.controls.every((control) => control.width >= 43.5 && control.height >= 43.5), `Control menor a 44px en ${viewport.width}px: ${JSON.stringify(metrics.controls)}`);
@@ -290,7 +290,9 @@ async function validateClosedState(page: Page, viewport: { width: number; height
 
 async function validateExpandedState(page: Page, closedHeight: number): Promise<void> {
   const sheets = page.locator('#crm .mvp-lead-full-sheet');
-  await sheets.nth(0).locator(':scope > summary').click();
+  const firstMenuCard = page.locator('#crm .mvp-lead-compact-card').nth(0);
+  await firstMenuCard.locator('.mvp-lead-actions-menu > summary').click();
+  await firstMenuCard.getByRole('button', { name: 'Ver detalles', exact: true }).click();
   await page.waitForFunction(() => document.querySelectorAll('#crm .mvp-lead-full-sheet[open]').length === 1);
   const firstCard = page.locator('#crm .mvp-lead-compact-card').nth(0);
   const openText = await page.locator('#crm .mvp-lead-full-sheet[open]').innerText();
@@ -298,10 +300,12 @@ async function validateExpandedState(page: Page, closedHeight: number): Promise<
   assert.doesNotMatch(openText, /trvgestioninmobiliaria/i);
   const expandedHeight = await firstCard.evaluate((card) => card.getBoundingClientRect().height);
   assert.ok(expandedHeight > closedHeight + 80, `La ficha abierta no creció lo suficiente: cerrada ${closedHeight}, abierta ${expandedHeight}.`);
-  await sheets.nth(1).locator(':scope > summary').click();
+  const secondMenuCard = page.locator('#crm .mvp-lead-compact-card').nth(1);
+  await secondMenuCard.locator('.mvp-lead-actions-menu > summary').click();
+  await secondMenuCard.getByRole('button', { name: 'Ver detalles', exact: true }).click();
   await page.waitForFunction(() => document.querySelectorAll('#crm .mvp-lead-full-sheet[open]').length === 1);
   assert.equal(await page.locator('#crm .mvp-lead-full-sheet[open]').getAttribute('data-lead-full-sheet'), '2');
-  await page.locator('#crm .mvp-lead-full-sheet[open] > summary').click();
+  await page.locator('#crm .mvp-lead-full-sheet[open]').evaluate((element: HTMLDetailsElement) => { element.open = false; });
   assert.equal(await page.locator('#crm .mvp-lead-full-sheet[open]').count(), 0);
 }
 

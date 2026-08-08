@@ -377,7 +377,7 @@ async function assertClosedLayout(page: Page, viewport: { width: number; height:
   assert.ok(metrics.counterWidth <= metrics.shellWidth + 1);
   if (viewport.width === 390) {
     const fullLeadHeight = metrics.heights[0] || 0;
-    assert.ok(fullLeadHeight >= 320 && fullLeadHeight <= 450, `Tarjeta cerrada fuera de 320-450px: ${fullLeadHeight}`);
+    assert.ok(fullLeadHeight >= 230 && fullLeadHeight <= 450, `Tarjeta simplificada fuera de 230-450px: ${fullLeadHeight}`);
     console.log(`B1.2.3 altura tarjeta cerrada 390: ${fullLeadHeight.toFixed(2)}px`);
   }
   return metrics.heights;
@@ -385,9 +385,13 @@ async function assertClosedLayout(page: Page, viewport: { width: number; height:
 
 async function assertSingleExpandedAndPersistent(page: Page): Promise<void> {
   const sheets = page.locator('#crm .mvp-lead-full-sheet');
-  await sheets.nth(0).locator(':scope > summary').click();
+  const firstCard = page.locator('#crm .mvp-lead-compact-card').nth(0);
+  await firstCard.locator('.mvp-lead-actions-menu > summary').click();
+  await firstCard.getByRole('button', { name: 'Ver detalles', exact: true }).click();
   assert.equal(await page.locator('#crm .mvp-lead-full-sheet[open]').count(), 1);
-  await sheets.nth(1).locator(':scope > summary').click();
+  const secondCard = page.locator('#crm .mvp-lead-compact-card').nth(1);
+  await secondCard.locator('.mvp-lead-actions-menu > summary').click();
+  await secondCard.getByRole('button', { name: 'Ver detalles', exact: true }).click();
   await page.waitForFunction(() => document.querySelectorAll('#crm .mvp-lead-full-sheet[open]').length === 1);
   assert.equal(await page.locator('#crm .mvp-lead-full-sheet[open]').count(), 1);
   const selectedClient = await page.locator('#crm .mvp-lead-full-sheet[open]').getAttribute('data-lead-full-sheet');

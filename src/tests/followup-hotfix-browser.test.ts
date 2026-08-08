@@ -171,7 +171,7 @@ async function browserContext(browser: Browser): Promise<BrowserContext> {
     });
     document.addEventListener('click', (event) => {
       const element = event.target as HTMLElement;
-      if (!element.closest('[data-whatsapp-followup-form] [data-whatsapp-close]')) return;
+      if (!element.closest('[data-zero-followup-form] [data-whatsapp-close]')) return;
       const snapshot = JSON.parse(localStorage.getItem(storageKey) || '{}') as CrmData;
       target.__followUpSnapshotAtClose = snapshot.clients?.find((client) => client.id === 1)?.nextFollowUp;
     }, true);
@@ -206,24 +206,23 @@ async function storedCrm(page: Page): Promise<CrmData> {
 
 async function openFollowUp(page: Page): Promise<void> {
   await page.locator('[data-contact-whatsapp="1"]').click();
-  await page.locator('[data-whatsapp-manual-register]').waitFor({ state: 'visible' });
-  await page.locator('[data-whatsapp-manual-register]').click();
-  const form = page.locator('[data-whatsapp-followup-form]');
-  await form.waitFor({ state: 'visible' });
-  await page.waitForFunction(() => Boolean(
-    document.querySelector<HTMLFormElement>('[data-whatsapp-followup-form]')?.dataset.followupSelectedChoice,
-  ));
+  await page.locator('[data-whatsapp-open]').click();
+  await page.clock.runFor(750);
+  await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+  await page.locator('[data-whatsapp-confirm-sent]').waitFor({ state: 'visible' });
+  await page.locator('[data-whatsapp-confirm-sent]').click();
+  await page.locator('[data-whatsapp-change-followup]').waitFor({ state: 'visible' });
+  await page.locator('[data-whatsapp-change-followup]').click();
+  await page.locator('[data-zero-followup-form]').waitFor({ state: 'visible' });
 }
 
 async function selectPreset(page: Page, value: string, expectedDate: string, expectedPreview: string): Promise<void> {
-  const form = page.locator('[data-whatsapp-followup-form]');
+  const form = page.locator('[data-zero-followup-form]');
   await form.locator(`input[name="follow-up-choice"][value="${value}"]`).check();
   await page.waitForFunction(({ date, preview, value: choice }) => {
-    const current = document.querySelector<HTMLFormElement>('[data-whatsapp-followup-form]');
-    const previewNode = current?.querySelector<HTMLElement>('[data-whatsapp-followup-preview]');
-    return current?.dataset.followupSelectedChoice === choice
-      && current?.dataset.followupSelectedDate === date
-      && previewNode?.dataset.followupPreviewDate === date
+    const current = document.querySelector<HTMLFormElement>('[data-zero-followup-form]');
+    const previewNode = current?.querySelector<HTMLElement>('[data-zero-followup-preview]');
+    return current?.querySelector<HTMLInputElement>('input[name="selected-date"]')?.value === date
       && previewNode?.textContent === preview;
   }, { date: expectedDate, preview: expectedPreview, value });
   assert.equal(await form.locator('input[name="selected-date"]').inputValue(), expectedDate);
@@ -257,7 +256,7 @@ test('hotfix congela la fecha al cruzar medianoche, evita duplicados y conserva 
     );
     await page.screenshot({ path: `${ARTIFACT_DIR}/07-hotfix-manana-seleccion.png`, fullPage: true });
 
-    const form = page.locator('[data-whatsapp-followup-form]');
+    const form = page.locator('[data-zero-followup-form]');
     assert.equal(await form.getAttribute('data-followup-selected-choice'), '1');
     assert.equal(await form.getAttribute('data-followup-selected-date'), '2026-08-06');
     assert.equal(await page.locator('#propcontrol-whatsapp-contact').isHidden(), false);
@@ -265,7 +264,7 @@ test('hotfix congela la fecha al cruzar medianoche, evita duplicados y conserva 
     assert.equal(await form.getAttribute('data-followup-selected-date'), '2026-08-06');
     assert.equal(await form.locator('input[name="selected-date"]').inputValue(), '2026-08-06');
     assert.equal(
-      await form.locator('[data-whatsapp-followup-preview]').textContent(),
+      await form.locator('[data-zero-followup-preview]').textContent(),
       'Se programará para: jueves, 6 de agosto de 2026',
     );
 
@@ -309,7 +308,7 @@ test('hotfix congela la fecha al cruzar medianoche, evita duplicados y conserva 
       '2026-08-12',
       'Se programará para: miércoles, 12 de agosto de 2026',
     );
-    await reopened.locator('[data-whatsapp-followup-form] button[type="submit"]').click();
+    await reopened.locator('[data-zero-followup-form] button[type="submit"]').click();
     await reopened.waitForFunction(() => document.getElementById('propcontrol-whatsapp-contact')?.hidden === true);
     const sevenDays = await storedCrm(reopened);
     assert.equal(sevenDays.clients[0]?.nextFollowUp, '2026-08-12');
@@ -335,11 +334,11 @@ test('hotfix congela la fecha al cruzar medianoche, evita duplicados y conserva 
         target.__followUpOriginalSetItem!.call(this, key, value);
       };
     }, STORAGE_KEY);
-    await reopened.locator('[data-whatsapp-followup-form] button[type="submit"]').click();
+    await reopened.locator('[data-zero-followup-form] button[type="submit"]').click();
     const error = reopened.locator('[data-followup-save-error]');
     await error.waitFor({ state: 'visible' });
     assert.match(await error.textContent() || '', /almacenamiento local|Falla local simulada/i);
-    assert.equal(await reopened.locator('[data-whatsapp-followup-form]').getAttribute('data-followup-selected-date'), '2026-08-08');
+    assert.equal(await reopened.locator('[data-zero-followup-form]').getAttribute('data-followup-selected-date'), '2026-08-08');
     assert.equal(await reopened.locator('#propcontrol-whatsapp-contact').isHidden(), false);
     assert.equal((await storedCrm(reopened)).clients[0]?.nextFollowUp, '2026-08-12');
     await reopened.screenshot({ path: `${ARTIFACT_DIR}/10-hotfix-error-persistencia.png`, fullPage: true });
@@ -349,8 +348,8 @@ test('hotfix congela la fecha al cruzar medianoche, evita duplicados y conserva 
       if (target.__followUpOriginalSetItem) Storage.prototype.setItem = target.__followUpOriginalSetItem;
     });
     await reopened.locator('input[name="follow-up-choice"][value="none"]').check();
-    assert.equal(await reopened.locator('[data-whatsapp-followup-preview]').textContent(), 'No se programará un próximo seguimiento.');
-    await reopened.locator('[data-whatsapp-followup-form] button[type="submit"]').click();
+    assert.equal(await reopened.locator('[data-zero-followup-preview]').textContent(), 'No se programará un próximo seguimiento.');
+    await reopened.locator('[data-zero-followup-form] button[type="submit"]').click();
     await reopened.waitForFunction(() => document.getElementById('propcontrol-whatsapp-contact')?.hidden === true);
     const cleared = await storedCrm(reopened);
     assert.equal(cleared.clients[0]?.nextFollowUp, undefined);

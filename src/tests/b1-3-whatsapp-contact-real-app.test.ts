@@ -261,7 +261,9 @@ test('B1.3 completa contacto, confirmación, seguimiento, reprogramación y Agen
     assert.match(await page.locator('[data-whatsapp-message]').inputValue(), /Dúplex en Docta/);
 
     const edited = 'Hola Lucía 👋\n¿Seguís buscando en Nueva Córdoba?';
+    await page.locator('[data-whatsapp-edit-message]').click();
     await page.locator('[data-whatsapp-message]').fill(edited);
+    await page.locator('.whatsapp-zero-more-options > summary').click();
     await page.locator('[data-whatsapp-copy]').click();
     assert.equal(await page.evaluate(() => (window as unknown as B13Window).__b13Copied), edited);
 
@@ -280,12 +282,15 @@ test('B1.3 completa contacto, confirmación, seguimiento, reprogramación y Agen
     await page.locator('[data-contact-whatsapp="1"]').click();
     await openAndReturn(page);
     await page.locator('[data-whatsapp-confirm-sent]').click();
-    await page.locator('[data-whatsapp-followup-form]').waitFor({ state: 'visible' });
+    await page.locator('[data-whatsapp-change-followup]').waitFor({ state: 'visible' });
+    assert.equal(await page.locator('[data-zero-followup-form]').count(), 0);
+    await page.locator('[data-whatsapp-change-followup]').click();
+    await page.locator('[data-zero-followup-form]').waitFor({ state: 'visible' });
     const choices = await page.locator('input[name="follow-up-choice"]').evaluateAll((nodes) => nodes.map((node) => (node as HTMLInputElement).value));
-    assert.deepEqual(choices, ['1', '3', '7', '14', '30', 'custom', 'none']);
+    assert.deepEqual(choices, ['1', '3', '7', '14', '30', 'custom']);
     await page.screenshot({ path: `${artifactDir}/03-mobile-proximo-seguimiento.png`, fullPage: true });
     await page.locator('input[name="follow-up-choice"][value="3"]').check();
-    await page.locator('[data-whatsapp-followup-form] button[type="submit"]').click();
+    await page.locator('[data-zero-followup-form] button[type="submit"]').click();
 
     const scheduled = await crmFromStorage(page, 'Dueño');
     assert.equal(scheduled.activityLog.filter((entry) => entry.action === 'Contacto por WhatsApp').length, 1);
@@ -310,10 +315,12 @@ test('B1.3 completa contacto, confirmación, seguimiento, reprogramación y Agen
 
     await page.locator('[data-module="crm"]:visible').first().click();
     await page.locator('[data-contact-whatsapp="1"]').click();
-    await page.locator('[data-whatsapp-manual-register]').click();
-    await page.locator('input[name="follow-up-choice"][value="none"]').check();
-    await page.locator('[data-whatsapp-followup-form] button[type="submit"]').click();
-    assert.equal((await crmFromStorage(page, 'Dueño')).clients[0]?.nextFollowUp, undefined, 'Sin seguimiento no impone fecha.');
+    await page.locator('[data-whatsapp-open]').click();
+    await page.waitForTimeout(750);
+    await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+    await page.locator('[data-whatsapp-confirm-sent]').waitFor({ state: 'visible' });
+    await page.getByRole('button', { name: 'Todavía no', exact: true }).click();
+    assert.equal((await crmFromStorage(page, 'Dueño')).clients[0]?.nextFollowUp, undefined, 'Todavía no no impone fecha.');
     await assertNoHorizontalScroll(page);
   } finally {
     await context.close();

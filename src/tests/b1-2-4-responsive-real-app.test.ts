@@ -316,10 +316,13 @@ async function captureScenarios(page: Page, version: Version, viewport: Viewport
   if (mobileFilterPanel) await details.evaluate((element: HTMLDetailsElement) => { element.open = false; });
 
   const sheet = complete.locator('.mvp-lead-full-sheet');
-  if (!(await sheet.evaluate((element: HTMLDetailsElement) => element.open))) await sheet.locator(':scope > summary').click();
+  if (!(await sheet.evaluate((element: HTMLDetailsElement) => element.open))) {
+    await complete.locator('.mvp-lead-actions-menu > summary').click();
+    await complete.getByRole('button', { name: 'Ver detalles', exact: true }).click();
+  }
   await complete.scrollIntoViewIfNeeded();
   await capture(page, version, 'ficha', viewport);
-  await sheet.locator(':scope > summary').click();
+  await sheet.evaluate((element: HTMLDetailsElement) => { element.open = false; });
 
   const overdue = exactCard(page, 'Seguimiento vencido');
   const menu = overdue.locator('.mvp-lead-followup-menu');
@@ -392,9 +395,9 @@ async function validateAfter(page: Page, viewport: Viewport): Promise<Metric> {
   assert.ok(data.documentWidth <= data.viewport + 1, `Scroll horizontal: ${JSON.stringify(data)}`);
   assert.ok(data.bodyWidth <= data.viewport + 1);
   assert.equal(data.cardsInside, true);
-  assert.equal(data.summaryCount, 1);
-  assert.equal(data.factCount, 0);
-  assert.equal(data.autoText, 'Calificar automáticamente');
+  assert.equal(data.summaryCount, 0);
+  assert.equal(data.factCount, 1);
+  assert.equal(data.autoText, undefined);
   assert.equal(data.pipelineWrap, 'nowrap');
   assert.ok(data.pipelineWidth <= data.shellWidth + 1);
   assert.ok(data.unusedBottom <= 24, `Espacio vacío excesivo: ${JSON.stringify(data)}`);
@@ -409,8 +412,8 @@ async function validateAfter(page: Page, viewport: Viewport): Promise<Metric> {
   }
 
   if (viewport.width === 390) {
-    assert.ok(data.emptyHeight >= 300 && data.emptyHeight <= 380, `Lead vacío fuera de objetivo: ${JSON.stringify(data)}`);
-    assert.ok(data.completeHeight >= 340 && data.completeHeight <= 460, `Lead normal fuera de objetivo: ${JSON.stringify(data)}`);
+    assert.ok(data.emptyHeight >= 220 && data.emptyHeight <= 380, `Lead vacío fuera de objetivo: ${JSON.stringify(data)}`);
+    assert.ok(data.completeHeight >= 230 && data.completeHeight <= 460, `Lead normal fuera de objetivo: ${JSON.stringify(data)}`);
   }
 
   return {
