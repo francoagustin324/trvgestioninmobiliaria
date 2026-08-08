@@ -9,17 +9,17 @@ function ensureSafetyNote(): void {
   if (!element || document.getElementById('propcontrol-whatsapp-contact')?.hidden) return;
   let note = element.querySelector<HTMLElement>('[data-whatsapp-context-note]');
   if (!note) {
-    note = document.createElement('div');
-    note.className = 'whatsapp-context-note whatsapp-zero-safety-note';
-    note.dataset.whatsappContextNote = '';
-    note.setAttribute('role', 'note');
     const identityBlock = element.querySelector<HTMLElement>('[data-whatsapp-identity-form] .whatsapp-context-note.blocked');
     if (identityBlock) {
-      note.classList.add('blocked');
-      note.setAttribute('role', 'alert');
-      note.innerHTML = identityBlock.innerHTML;
+      note = identityBlock;
+      note.dataset.whatsappContextNote = '';
+    } else {
+      note = document.createElement('div');
+      note.className = 'whatsapp-context-note whatsapp-zero-safety-note';
+      note.dataset.whatsappContextNote = '';
+      note.setAttribute('role', 'note');
+      element.querySelector('.whatsapp-zero-message-card, .whatsapp-contact-field, footer')?.before(note);
     }
-    element.querySelector('.whatsapp-zero-message-card, .whatsapp-contact-field, footer')?.before(note);
   }
   const blocked = element.dataset.contactBlocked === 'true' || note.classList.contains('blocked');
   note.hidden = !blocked;
