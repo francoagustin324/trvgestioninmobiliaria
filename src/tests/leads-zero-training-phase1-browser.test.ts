@@ -88,6 +88,14 @@ async function crmFromStorage(page: Page): Promise<CrmData> {
   return page.evaluate((key) => JSON.parse(localStorage.getItem(key) || '{}') as CrmData, STORAGE_KEY);
 }
 
+async function waitForStoredFollowUp(page: Page, expected: string | null): Promise<void> {
+  await page.waitForFunction(({ key, expectedDate }) => {
+    const crm = JSON.parse(localStorage.getItem(key) || '{}') as CrmData;
+    const value = crm.clients?.[0]?.nextFollowUp;
+    return expectedDate === null ? value === undefined : value === expectedDate;
+  }, { key: STORAGE_KEY, expectedDate: expected });
+}
+
 async function noHorizontalScroll(page: Page): Promise<void> {
   const geometry = await page.evaluate(() => ({ viewport: innerWidth, doc: document.documentElement.scrollWidth, body: document.body.scrollWidth }));
   assert.ok(geometry.doc <= geometry.viewport + 1, JSON.stringify(geometry));
@@ -183,25 +191,56 @@ test('FASE 1 navegador real: tarjeta simple, WhatsApp seguro, seguimiento autom�
     assert.equal(stored.reminders.length, 0);
 
     await panel.getByRole('button', { name: 'Cambiar', exact: true }).click();
-    const change = panel.locator('[data-zero-followup-form]');
+    let change = panel.locator('[data-zero-followup-form]');
     const choices = await change.locator('input[name="follow-up-choice"]').evaluateAll((nodes) => nodes.map((node) => (node as HTMLInputElement).value));
-    assert.deepEqual(choices, ['1', '3', '7', '14', '30', 'custom']);
+    assert.deepEqual(choices, ['1', '3', '7', '14', '30', 'custom', 'none']);
     await change.locator('input[name="follow-up-choice"][value="3"]').check();
     assert.equal(await change.locator('input[name="selected-date"]').inputValue(), PLUS_THREE);
     await change.getByRole('button', { name: 'Guardar', exact: true }).click();
     await panel.getByText('Listo. Próximo contacto: En 3 días', { exact: true }).waitFor({ state: 'visible' });
+    await waitForStoredFollowUp(page, PLUS_THREE);
     stored = await crmFromStorage(page);
     assert.equal(stored.clients[0]?.nextFollowUp, PLUS_THREE);
     assert.equal(stored.activityLog.filter((entry) => entry.action === 'Contacto por WhatsApp').length, 1);
     assert.equal(stored.activityLog.filter((entry) => entry.action === 'Seguimiento por WhatsApp programado').length, 1);
     assert.equal(stored.reminders.length, 0);
 
-    await panel.locator('[data-whatsapp-close]').click();
+    await panel.getByRole('button', { name: 'Cambiar', exact: true }).click();
+    change = panel.locator('[data-zero-followup-form]');
+    await change.locator('input[name="follow-up-choice"][value="none"]').check();
+    assert.equal(await change.locator('input[name="selected-date"]').inputValue(), '');
+    assert.equal(await change.getAttribute('data-followup-selected-choice'), 'none');
+    assert.equal(await change.getAttribute('data-followup-selected-date'), '');
+    assert.equal(await change.locator('[data-zero-followup-preview]').textContent(), 'No se programará un próximo seguimiento.');
+    assert.equal(await change.locator('.whatsapp-custom-date').isHidden(), true);
+    await panel.screenshot({ path: `${ARTIFACT_DIR}/26-zero-training-cambiar-seguimiento.png` });
+    await change.getByRole('button', { name: 'Guardar', exact: true }).click();
+    await panel.getByText('Contacto registrado', { exact: true }).waitFor({ state: 'visible' });
+    await waitForStoredFollowUp(page, null);
+    stored = await crmFromStorage(page);
+    assert.equal(stored.clients[0]?.nextFollowUp, undefined);
+    assert.equal(stored.clients[0]?.nextAction, undefined);
+    assert.equal(stored.activityLog.filter((entry) => entry.action === 'Contacto por WhatsApp').length, 1);
+    assert.equal(stored.activityLog.filter((entry) => entry.action === 'Seguimiento por WhatsApp programado').length, 1);
+    assert.equal(stored.reminders.length, 0);
+
+    await page.locator('[data-module="agenda"]:visible').first().click();
+    await page.waitForSelector('#agenda.active', { state: 'visible' });
+    assert.equal(await page.locator('#agenda.active .agenda-card').filter({ hasText: 'Lucía Martín' }).count(), 0);
+
     await page.reload({ waitUntil: 'domcontentloaded' });
+    await page.waitForSelector('#crm.active', { state: 'visible' });
     await page.waitForSelector('.mvp-lead-card[data-client-id="1"]', { state: 'visible' });
-    assert.equal((await crmFromStorage(page)).clients[0]?.nextFollowUp, PLUS_THREE);
-    await page.waitForFunction(() => document.querySelector('.mvp-lead-card[data-client-id="1"] .mvp-lead-next-action')?.textContent?.includes('En 3 días') === true);
-    assert.match(await page.locator('.mvp-lead-card[data-client-id="1"] .mvp-lead-next-action').innerText(), /WhatsApp[\s\S]*En 3 días/i);
+    await waitForStoredFollowUp(page, null);
+    stored = await crmFromStorage(page);
+    assert.equal(stored.clients[0]?.nextFollowUp, undefined);
+    assert.equal(stored.clients[0]?.nextAction, undefined);
+    assert.equal(stored.activityLog.filter((entry) => entry.action === 'Contacto por WhatsApp').length, 1);
+    assert.equal(stored.reminders.length, 0);
+    assert.doesNotMatch(await page.locator('.mvp-lead-card[data-client-id="1"] .mvp-lead-next-action').innerText(), /En 3 días/i);
+    await page.locator('[data-module="agenda"]:visible').first().click();
+    await page.waitForSelector('#agenda.active', { state: 'visible' });
+    assert.equal(await page.locator('#agenda.active .agenda-card').filter({ hasText: 'Lucía Martín' }).count(), 0);
     await noHorizontalScroll(page);
   } finally {
     await context.close(); await browser.close(); await stopServer(server);
