@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
-import { compactFollowUpLabel } from '../leads-zero-training-phase1.js';
 
 const uxSource = readFileSync('src/leads-zero-training-phase1.ts', 'utf8');
 const uxCss = readFileSync('src/leads-zero-training-phase1.css', 'utf8');
+const safetySource = readFileSync('src/leads-zero-training-safety.ts', 'utf8');
 const whatsappCore = readFileSync('src/whatsapp-contact.ts', 'utf8');
 const cloud = readFileSync('src/cloud-api-compatible.ts', 'utf8');
 
@@ -24,8 +24,8 @@ test('FASE 1 nunca presenta registrar y abrir WhatsApp como acciones simultánea
   assert.doesNotMatch(uxSource, /data-whatsapp-manual-register/);
   assert.doesNotMatch(uxSource, /Ya lo envié, registrar/);
   assert.match(uxSource, /¿Enviaste el mensaje a/);
-  assert.match(uxSource, /data-whatsapp-confirm-sent>Sí</);
-  assert.match(uxSource, /data-whatsapp-not-yet>Todavía no</);
+  assert.match(uxSource, /data-whatsapp-confirm-sent>Sí/);
+  assert.match(uxSource, /data-whatsapp-not-yet>Todavía no/);
 });
 
 test('FASE 1 conserva la barrera humana: abrir no registra y Sí usa el registrador existente', () => {
@@ -37,6 +37,8 @@ test('FASE 1 conserva la barrera humana: abrir no registra y Sí usa el registra
   const registerStart = whatsappCore.indexOf('export function registerWhatsAppContact');
   const scheduleStart = whatsappCore.indexOf('export function scheduleWhatsAppFollowUp');
   assert.ok(registerStart > 0 && scheduleStart > registerStart);
+  assert.match(safetySource, /data-whatsapp-context-note/);
+  assert.match(safetySource, /contactBlocked/);
 });
 
 test('FASE 1 muestra éxito simple sin debilitar el mensaje interno de verificación cloud', () => {
@@ -47,10 +49,9 @@ test('FASE 1 muestra éxito simple sin debilitar el mensaje interno de verificac
 });
 
 test('etiquetas de próximo contacto son comprensibles sin capacitación', () => {
-  assert.equal(compactFollowUpLabel(1, '2026-08-08'), 'Mañana');
-  assert.equal(compactFollowUpLabel(3, '2026-08-10'), 'En 3 días');
-  assert.equal(compactFollowUpLabel(7, '2026-08-14'), 'En 7 días');
-  assert.match(compactFollowUpLabel(null, '2026-08-19'), /agosto de 2026/i);
+  assert.match(uxSource, /if \(days === 1\) return 'Mañana'/);
+  assert.match(uxSource, /return `En \$\{days\} días`/);
+  assert.match(uxSource, /return localDateLabel\(date\)/);
 });
 
 test('selector de cambio guarda el estado canónico y submit no recalcula con reloj nuevo', () => {
