@@ -63,7 +63,6 @@
     min-height: 44px;
     padding-inline: 12px;
     border-radius: 12px;
-    font-size: 0.82rem;
     white-space: nowrap;
   }
 
@@ -205,7 +204,7 @@
     font-size: 0.72rem;
   }
 
-  /* Pipeline: todas las etapas siguen disponibles, pero en una sola fila compacta desplazable. */
+  /* Pipeline colapsado: sólo etapas principales y, si corresponde, el secundario seleccionado. */
   #crm.pc-leads-redesign .pc-stage-summary {
     gap: 4px;
     padding: 0;
@@ -239,6 +238,11 @@
   }
 
   #crm.pc-leads-redesign .pc-stage-summary[data-expanded="false"] [data-pc-secondary-stage] {
+    display: none !important;
+  }
+
+  #crm.pc-leads-redesign .pc-stage-summary[data-expanded="false"] [data-pc-secondary-stage].active,
+  #crm.pc-leads-redesign .pc-stage-summary[data-expanded="false"] [data-pc-secondary-stage][aria-pressed="true"] {
     display: flex !important;
   }
 
@@ -266,6 +270,10 @@
     scroll-snap-align: start;
   }
 
+  #crm.pc-leads-redesign .pc-stage-summary[data-expanded="true"] [data-pc-secondary-stage] {
+    display: flex !important;
+  }
+
   #crm.pc-leads-redesign .pc-stage-summary[data-expanded="true"] .mvp-stage-counters {
     display: flex !important;
     flex-wrap: wrap;
@@ -276,6 +284,7 @@
 
   #crm.pc-leads-redesign .pc-stage-summary[data-expanded="true"] .mvp-stage-counter {
     min-width: 0 !important;
+    min-height: 44px;
     flex: 1 1 calc(50% - 5px) !important;
     white-space: normal;
   }
