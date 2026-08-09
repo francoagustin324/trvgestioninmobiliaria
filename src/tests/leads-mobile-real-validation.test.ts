@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawn, type ChildProcess } from 'node:child_process';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
 import test from 'node:test';
 import { chromium, type Browser, type BrowserContext, type Page } from 'playwright';
 import { initialData, type CrmData, type TeamMember } from '../models.js';
@@ -9,6 +9,8 @@ const USER_ID = 'mobile-real-validation-owner';
 const ORG_ID = 'mobile-real-validation-org';
 const STORAGE_KEY = `trv-crm-basico:user:${USER_ID}`;
 const VIEWPORTS = [320, 360, 375, 390, 412, 430, 520] as const;
+const TOP_CAPTURE_WIDTHS = new Set([320, 390, 430, 520]);
+const CAPTURE_DIR = 'artifacts/leads-mobile-real-validation';
 
 function owner(): TeamMember {
   return {
@@ -112,19 +114,9 @@ async function stopServer(server: ChildProcess): Promise<void> {
   });
 }
 
-async function mobileContext(browser: Browser): Promise<BrowserContext> {
+async function seedContext(context: BrowserContext): Promise<void> {
   const actorKey = `cloud:${USER_ID}`;
   const identityKey = `propcontrol-whatsapp-human-identity-v1:${encodeURIComponent(ORG_ID)}:1:${encodeURIComponent(actorKey)}`;
-  const context = await browser.newContext({
-    viewport: { width: 390, height: 844 },
-    screen: { width: 390, height: 844 },
-    isMobile: true,
-    hasTouch: true,
-    locale: 'es-AR',
-    timezoneId: 'America/Argentina/Cordoba',
-    colorScheme: 'dark',
-    userAgent: 'Mozilla/5.0 (Linux; Android 14; moto g54 5G) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Mobile Safari/537.36',
-  });
   await context.addInitScript(({ crm, identityStorageKey, storageKey }) => {
     localStorage.setItem('propcontrol-cloud-session-v1', JSON.stringify({
       accessToken: 'access',
@@ -150,6 +142,34 @@ async function mobileContext(browser: Browser): Promise<BrowserContext> {
       confirmedAt: '2026-08-09T18:00:00.000Z',
     }));
   }, { crm: fixture(), identityStorageKey: identityKey, storageKey: STORAGE_KEY });
+}
+
+async function mobileContext(browser: Browser): Promise<BrowserContext> {
+  const context = await browser.newContext({
+    viewport: { width: 390, height: 844 },
+    screen: { width: 390, height: 844 },
+    isMobile: true,
+    hasTouch: true,
+    locale: 'es-AR',
+    timezoneId: 'America/Argentina/Cordoba',
+    colorScheme: 'dark',
+    userAgent: 'Mozilla/5.0 (Linux; Android 14; moto g54 5G) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Mobile Safari/537.36',
+  });
+  await seedContext(context);
+  return context;
+}
+
+async function desktopContext(browser: Browser): Promise<BrowserContext> {
+  const context = await browser.newContext({
+    viewport: { width: 1366, height: 768 },
+    screen: { width: 1366, height: 768 },
+    isMobile: false,
+    hasTouch: false,
+    locale: 'es-AR',
+    timezoneId: 'America/Argentina/Cordoba',
+    colorScheme: 'dark',
+  });
+  await seedContext(context);
   return context;
 }
 
@@ -159,6 +179,20 @@ async function load(page: Page, url: string): Promise<void> {
   await page.waitForSelector('.pc-leads-heading', { state: 'visible', timeout: 20_000 });
   await page.waitForSelector('.pc-attention-section', { state: 'visible', timeout: 20_000 });
   await page.waitForSelector('.mvp-lead-card[data-client-id="1"] .mvp-zero-primary', { state: 'visible', timeout: 20_000 });
+}
+
+async function waitForStageSelection(page: Page, stage: string): Promise<void> {
+  await page.waitForFunction((requestedStage) => {
+    const buttons = Array.from(document.querySelectorAll<HTMLElement>('#crm [data-stage-quick]'));
+    const button = buttons.find((candidate) => candidate.dataset.stageQuick === requestedStage);
+    return Boolean(button && (button.classList.contains('active') || button.getAttribute('aria-pressed') === 'true'));
+  }, stage);
+}
+
+async function waitForPipelineExpanded(page: Page, expanded: boolean): Promise<void> {
+  await page.waitForFunction((expected) => {
+    return document.querySelector<HTMLElement>('#crm .pc-stage-summary')?.dataset.expanded === String(expected);
+  }, expanded);
 }
 
 test('postproducción móvil usa una hoja final nueva y cache-busteada', () => {
@@ -172,20 +206,28 @@ test('postproducción móvil usa una hoja final nueva y cache-busteada', () => {
   assert.match(css, /@media \(max-width: 520px\)/);
 });
 
-test('Chrome Android equivalente: CTA y cabecera Leads resisten la matriz móvil real', { timeout: 180_000 }, async () => {
+test('Chrome Android equivalente: CTA, cabecera y pipeline resisten la matriz móvil real', { timeout: 180_000 }, async () => {
   const executablePath = chromeExecutable();
   assert.ok(executablePath, 'Chrome/Chromium no disponible.');
   const port = 61900 + Math.floor(Math.random() * 100);
   const server = await startServer(port);
   const browser = await chromium.launch({ executablePath, headless: true });
   const context = await mobileContext(browser);
+  rmSync(CAPTURE_DIR, { recursive: true, force: true });
+  mkdirSync(CAPTURE_DIR, { recursive: true });
 
   try {
     const page = await context.newPage();
     await load(page, `http://127.0.0.1:${port}`);
 
+    assert.equal(fixture().clients[0]?.pipeline, 'Nuevo');
+    const primaryNuevo = page.locator('#crm [data-stage-quick="Nuevo"]');
+    await primaryNuevo.click();
+    await waitForStageSelection(page, 'Nuevo');
+
     for (const width of VIEWPORTS) {
       await page.setViewportSize({ width, height: width <= 360 ? 800 : 844 });
+      await page.evaluate(() => window.scrollTo(0, 0));
       await page.waitForTimeout(80);
 
       const snapshot = await page.evaluate(() => {
@@ -195,10 +237,11 @@ test('Chrome Android equivalente: CTA y cabecera Leads resisten la matriz móvil
         const card = document.querySelector<HTMLElement>('#crm .mvp-lead-card[data-client-id="1"]');
         const count = document.querySelector<HTMLElement>('#crm #mvp-lead-count');
         const priorities = document.querySelector<HTMLElement>('#crm .pc-attention-grid');
-        const stages = document.querySelector<HTMLElement>('#crm .pc-stage-summary[data-expanded="false"] .mvp-stage-counters');
+        const stageShell = document.querySelector<HTMLElement>('#crm .pc-stage-summary[data-expanded="false"]');
+        const stages = stageShell?.querySelector<HTMLElement>('.mvp-stage-counters');
         const filters = document.querySelector<HTMLDetailsElement>('#crm .mvp-lead-more-filters');
         const crm = document.querySelector<HTMLElement>('#crm');
-        if (!button || !actions || !heading || !card || !count || !priorities || !stages || !filters || !crm) {
+        if (!button || !actions || !heading || !card || !count || !priorities || !stageShell || !stages || !filters || !crm) {
           throw new Error('Faltan elementos de Leads para validar.');
         }
 
@@ -211,6 +254,7 @@ test('Chrome Android equivalente: CTA y cabecera Leads resisten la matriz móvil
             left: rect.left,
             right: rect.right,
             width: rect.width,
+            height: rect.height,
             clientWidth: node.clientWidth,
             scrollWidth: node.scrollWidth,
             text: node.textContent?.trim() || '',
@@ -223,7 +267,9 @@ test('Chrome Android equivalente: CTA y cabecera Leads resisten la matriz móvil
         const prioritiesRect = priorities.getBoundingClientRect();
         const stagesRect = stages.getBoundingClientRect();
         const visibleSecondaryStages = Array.from(stages.querySelectorAll<HTMLElement>('[data-pc-secondary-stage]'))
-          .filter((node) => getComputedStyle(node).display !== 'none').length;
+          .filter((node) => getComputedStyle(node).display !== 'none')
+          .map((node) => node.dataset.stageQuick || '');
+        const selectedStage = stages.querySelector<HTMLElement>('.active, [aria-pressed="true"]')?.dataset.stageQuick || '';
 
         return {
           viewport: innerWidth,
@@ -247,6 +293,7 @@ test('Chrome Android equivalente: CTA y cabecera Leads resisten la matriz móvil
           stagesClientHeight: stages.clientHeight,
           filtersOpen: filters.open,
           visibleSecondaryStages,
+          selectedStage,
         };
       });
 
@@ -260,15 +307,100 @@ test('Chrome Android equivalente: CTA y cabecera Leads resisten la matriz móvil
       assert.ok(snapshot.crmWidth <= snapshot.crmClientWidth + 1, `CRM overflow @${width}: ${JSON.stringify(snapshot)}`);
       assert.ok(snapshot.crmLeft >= -1 && snapshot.crmRight <= snapshot.viewport + 1, `CRM fuera del viewport @${width}: ${JSON.stringify(snapshot)}`);
       assert.deepEqual(snapshot.actionBoxes.map((box) => box.text), ['WhatsApp', 'Editar', '•••'], `acciones @${width}`);
-      assert.ok(snapshot.actionBoxes.every((box) => box.left >= 0 && box.right <= snapshot.viewport + 1 && box.width >= 44), `geometría acciones @${width}: ${JSON.stringify(snapshot.actionBoxes)}`);
+      assert.ok(snapshot.actionBoxes.every((box) => box.left >= 0 && box.right <= snapshot.viewport + 1 && box.width >= 44 && box.height >= 44), `geometría acciones @${width}: ${JSON.stringify(snapshot.actionBoxes)}`);
       assert.ok(snapshot.actionBoxes.every((box) => box.scrollWidth <= box.clientWidth + 1), `texto cortado @${width}: ${JSON.stringify(snapshot.actionBoxes)}`);
       assert.equal(snapshot.filtersOpen, false, `filtros cerrados por defecto @${width}`);
       assert.ok(snapshot.countHeight <= 28, `contador demasiado alto @${width}: ${snapshot.countHeight}`);
       assert.ok(snapshot.prioritiesHeight <= 48, `prioridades demasiado altas @${width}: ${snapshot.prioritiesHeight}`);
       assert.ok(snapshot.stagesHeight <= 48, `pipeline colapsado demasiado alto @${width}: ${snapshot.stagesHeight}`);
       assert.ok(snapshot.stagesScrollHeight <= snapshot.stagesClientHeight + 1, `pipeline colapsado envuelve filas @${width}: ${JSON.stringify(snapshot)}`);
-      assert.ok(snapshot.visibleSecondaryStages >= 1, `debe conservar etapas secundarias accesibles @${width}`);
+      assert.deepEqual(snapshot.visibleSecondaryStages, [], `pipeline principal no debe mostrar etapas secundarias @${width}`);
+      assert.equal(snapshot.selectedStage, 'Nuevo', `etapa principal seleccionada @${width}`);
       assert.ok(snapshot.topRegionHeight <= 430, `primer lead demasiado abajo @${width}: ${snapshot.topRegionHeight}`);
+
+      if (TOP_CAPTURE_WIDTHS.has(width)) {
+        await page.screenshot({ path: `${CAPTURE_DIR}/mobile-${width}-top-leads.png`, fullPage: false });
+      }
+    }
+
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.evaluate(() => window.scrollTo(0, 0));
+    await page.locator('#crm .mvp-lead-card[data-client-id="1"]').screenshot({
+      path: `${CAPTURE_DIR}/mobile-390-first-lead-cta.png`,
+    });
+    await page.locator('#crm .pc-stage-summary[data-expanded="false"]').screenshot({
+      path: `${CAPTURE_DIR}/mobile-390-pipeline-collapsed.png`,
+    });
+
+    const toggle = page.locator('#crm [data-pc-toggle-stages]');
+    await toggle.click();
+    await waitForPipelineExpanded(page, true);
+
+    const expandedSnapshot = await page.evaluate(() => {
+      const shell = document.querySelector<HTMLElement>('#crm .pc-stage-summary[data-expanded="true"]');
+      const counters = shell?.querySelector<HTMLElement>('.mvp-stage-counters');
+      if (!shell || !counters) throw new Error('Pipeline expandido ausente.');
+      const secondary = Array.from(counters.querySelectorAll<HTMLElement>('[data-pc-secondary-stage]'));
+      const visibleSecondary = secondary.filter((node) => getComputedStyle(node).display !== 'none');
+      const targetBoxes = Array.from(counters.querySelectorAll<HTMLElement>('[data-stage-quick]'))
+        .filter((node) => getComputedStyle(node).display !== 'none')
+        .map((node) => {
+          const rect = node.getBoundingClientRect();
+          return { width: rect.width, height: rect.height };
+        });
+      return {
+        totalSecondary: secondary.length,
+        visibleSecondary: visibleSecondary.length,
+        countersClientWidth: counters.clientWidth,
+        countersScrollWidth: counters.scrollWidth,
+        documentWidth: document.documentElement.scrollWidth,
+        viewport: innerWidth,
+        targetBoxes,
+      };
+    });
+    assert.ok(expandedSnapshot.totalSecondary > 0, 'el DOM debe marcar etapas secundarias canónicas');
+    assert.equal(expandedSnapshot.visibleSecondary, expandedSnapshot.totalSecondary, 'expandido debe mostrar todas las etapas secundarias');
+    assert.ok(expandedSnapshot.targetBoxes.every((box) => box.width >= 44 && box.height >= 44), `targets pipeline expandido: ${JSON.stringify(expandedSnapshot.targetBoxes)}`);
+    assert.ok(expandedSnapshot.countersScrollWidth <= expandedSnapshot.countersClientWidth + 1, `pipeline expandido con overflow horizontal: ${JSON.stringify(expandedSnapshot)}`);
+    assert.ok(expandedSnapshot.documentWidth <= expandedSnapshot.viewport + 1, `document overflow con pipeline expandido: ${JSON.stringify(expandedSnapshot)}`);
+    await page.locator('#crm .pc-stage-summary[data-expanded="true"]').screenshot({
+      path: `${CAPTURE_DIR}/mobile-390-pipeline-expanded.png`,
+    });
+
+    const canonicalSecondary = page.locator('#crm [data-pc-secondary-stage]').first();
+    const secondaryStage = await canonicalSecondary.getAttribute('data-stage-quick');
+    assert.ok(secondaryStage, 'la etapa secundaria canónica debe declarar data-stage-quick');
+    await canonicalSecondary.click();
+    await waitForStageSelection(page, secondaryStage);
+    await toggle.click();
+    await waitForPipelineExpanded(page, false);
+
+    const selectedSecondaryCollapsed = await page.evaluate(() => {
+      const stages = document.querySelector<HTMLElement>('#crm .pc-stage-summary[data-expanded="false"] .mvp-stage-counters');
+      if (!stages) throw new Error('Pipeline colapsado ausente tras seleccionar secundario.');
+      return Array.from(stages.querySelectorAll<HTMLElement>('[data-pc-secondary-stage]'))
+        .filter((node) => getComputedStyle(node).display !== 'none')
+        .map((node) => ({
+          stage: node.dataset.stageQuick || '',
+          selected: node.classList.contains('active') || node.getAttribute('aria-pressed') === 'true',
+        }));
+    });
+    assert.deepEqual(selectedSecondaryCollapsed, [{ stage: secondaryStage, selected: true }], 'colapsado debe conservar sólo la etapa secundaria seleccionada');
+
+    const desktop = await desktopContext(browser);
+    try {
+      const desktopPage = await desktop.newPage();
+      await load(desktopPage, `http://127.0.0.1:${port}`);
+      const desktopWidth = await desktopPage.evaluate(() => ({
+        viewport: innerWidth,
+        document: document.documentElement.scrollWidth,
+        body: document.body.scrollWidth,
+      }));
+      assert.ok(desktopWidth.document <= desktopWidth.viewport + 1, `desktop document overflow: ${JSON.stringify(desktopWidth)}`);
+      assert.ok(desktopWidth.body <= desktopWidth.viewport + 1, `desktop body overflow: ${JSON.stringify(desktopWidth)}`);
+      await desktopPage.screenshot({ path: `${CAPTURE_DIR}/desktop-control.png`, fullPage: false });
+    } finally {
+      await desktop.close();
     }
   } finally {
     await context.close();
