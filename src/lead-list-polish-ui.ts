@@ -55,8 +55,13 @@ function updateOverflow(counters: HTMLElement, shell: HTMLElement): void {
   shell.dataset.overflowRight = String(counters.scrollLeft + counters.clientWidth < counters.scrollWidth - 2);
 }
 
+function visibleStageButtons(counters: HTMLElement): HTMLButtonElement[] {
+  return [...counters.querySelectorAll<HTMLButtonElement>('.mvp-stage-counter')]
+    .filter((button) => getComputedStyle(button).display !== 'none' && button.getClientRects().length > 0);
+}
+
 function focusStage(counters: HTMLElement, direction: 1 | -1): void {
-  const buttons = [...counters.querySelectorAll<HTMLButtonElement>('.mvp-stage-counter')];
+  const buttons = visibleStageButtons(counters);
   if (!buttons.length) return;
   const active = document.activeElement instanceof HTMLButtonElement
     ? buttons.indexOf(document.activeElement)
@@ -91,12 +96,12 @@ function bindPipeline(counters: HTMLElement, shell: HTMLElement): void {
     } else if (event.key === 'Home') {
       event.preventDefault();
       counters.scrollTo({ left: 0, behavior: 'smooth' });
-      counters.querySelector<HTMLButtonElement>('.mvp-stage-counter')?.focus();
+      visibleStageButtons(counters)[0]?.focus();
     } else if (event.key === 'End') {
       event.preventDefault();
       counters.scrollTo({ left: counters.scrollWidth, behavior: 'smooth' });
-      const buttons = counters.querySelectorAll<HTMLButtonElement>('.mvp-stage-counter');
-      buttons.item(buttons.length - 1)?.focus();
+      const buttons = visibleStageButtons(counters);
+      buttons.at(-1)?.focus();
     }
   });
 }
