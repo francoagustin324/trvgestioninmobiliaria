@@ -333,3 +333,31 @@
     padding: 0 !important;
   }
 }
+
+/* El placeholder funcional completo se conserva; en anchos estrechos le damos espacio real
+   en vez de permitir que el navegador lo corte visualmente. */
+@media (max-width: 410px) {
+  #crm.pc-leads-redesign #mvp-lead-search {
+    font-size: 0.76rem;
+  }
+}
+
+@media (max-width: 360px) {
+  #crm.pc-leads-redesign .mvp-lead-filter-primary {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 3px;
+  }
+
+  #crm.pc-leads-redesign #mvp-lead-count {
+    max-width: none;
+    justify-self: end;
+    line-height: 1;
+  }
+}
+
+@media (max-width: 340px) {
+  #crm.pc-leads-redesign #mvp-lead-search {
+    padding-inline: 10px;
+    font-size: 0.72rem;
+  }
+}
