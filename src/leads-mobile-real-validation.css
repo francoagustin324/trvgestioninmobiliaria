@@ -2,39 +2,62 @@
    Sólo layout/estilo <= 520px. Se carga al final con URL versionada nueva para evitar CSS obsoleto en dispositivos reales. */
 
 @media (max-width: 520px) {
+  /* Reafirma el layout de navegación inferior al final de la cascada. Evita que una regla
+     histórica del rail lateral reduzca el ancho útil en teléfonos estrechos. */
+  .premium-content,
+  .mvp-content {
+    width: 100% !important;
+    max-width: 100vw !important;
+    margin: 0 !important;
+    padding-right: 10px !important;
+    padding-left: 10px !important;
+    overflow-x: clip !important;
+  }
+
   #crm.pc-leads-redesign {
+    width: 100% !important;
+    max-width: 100% !important;
     min-width: 0;
+    margin-right: 0 !important;
+    margin-left: 0 !important;
     overflow-x: clip;
   }
 
-  /* Cabecera: título y CTA juntos; subtítulo breve sin convertir el botón en una fila completa. */
+  /* Cabecera: título y CTA juntos; el subtítulo usa todo el ancho de la segunda fila. */
   #crm.pc-leads-redesign .pc-leads-heading {
     display: grid;
     grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-rows: auto auto;
     align-items: center;
-    gap: 6px 9px;
+    gap: 3px 9px;
     margin-bottom: 7px;
   }
 
   #crm.pc-leads-redesign .pc-leads-heading > div {
-    display: grid;
-    min-width: 0;
-    gap: 2px;
+    display: contents;
   }
 
   #crm.pc-leads-redesign .pc-leads-heading h1 {
+    grid-column: 1;
+    grid-row: 1;
+    min-width: 0;
+    margin: 0;
     font-size: clamp(1.32rem, 6vw, 1.55rem);
     line-height: 1.04;
   }
 
   #crm.pc-leads-redesign .pc-leads-heading p {
-    margin: 0;
+    grid-column: 1 / -1;
+    grid-row: 2;
     max-width: 34rem;
+    margin: 0;
     font-size: 0.78rem;
-    line-height: 1.28;
+    line-height: 1.26;
   }
 
   #crm.pc-leads-redesign .pc-leads-heading > button {
+    grid-column: 2;
+    grid-row: 1;
     width: auto !important;
     min-width: 0;
     min-height: 44px;
@@ -67,6 +90,7 @@
     min-height: 44px;
     height: 44px;
     padding-inline: 12px;
+    font-size: 0.82rem;
   }
 
   #crm.pc-leads-redesign #mvp-lead-count {
@@ -181,7 +205,7 @@
     font-size: 0.72rem;
   }
 
-  /* Pipeline: resumen de una sola fila; las etapas secundarias aparecen al expandir. */
+  /* Pipeline: todas las etapas siguen disponibles, pero en una sola fila compacta desplazable. */
   #crm.pc-leads-redesign .pc-stage-summary {
     gap: 4px;
     padding: 0;
@@ -214,8 +238,8 @@
     white-space: nowrap;
   }
 
-  #crm.pc-leads-redesign .pc-stage-summary[data-expanded="false"] [data-pc-secondary-stage]:not(.active):not([aria-pressed="true"]):not(.pc-selected-stage) {
-    display: none !important;
+  #crm.pc-leads-redesign .pc-stage-summary[data-expanded="false"] [data-pc-secondary-stage] {
+    display: flex !important;
   }
 
   #crm.pc-leads-redesign .pc-stage-summary[data-expanded="false"] .mvp-stage-counters {
@@ -254,6 +278,28 @@
     min-width: 0 !important;
     flex: 1 1 calc(50% - 5px) !important;
     white-space: normal;
+  }
+
+  /* Acciones: tres controles en una fila aun en 320 px, sin perder targets táctiles. */
+  #crm.pc-leads-redesign .mvp-lead-quick-actions[data-zero-training-actions="true"] {
+    width: 100% !important;
+    max-width: 100% !important;
+    min-width: 0 !important;
+    grid-template-columns: minmax(0, 1.15fr) minmax(0, 0.85fr) 44px !important;
+    gap: 5px !important;
+  }
+
+  #crm.pc-leads-redesign .mvp-lead-quick-actions[data-zero-training-actions="true"] > button,
+  #crm.pc-leads-redesign .mvp-lead-quick-actions[data-zero-training-actions="true"] > details > summary {
+    min-width: 0 !important;
+    padding-inline: 5px !important;
+    font-size: 0.82rem !important;
+  }
+
+  #crm.pc-leads-redesign .mvp-lead-actions-menu,
+  #crm.pc-leads-redesign .mvp-lead-actions-menu > summary {
+    width: 44px !important;
+    min-width: 44px !important;
   }
 
   /* CTA WhatsApp: regla final, específica y cache-busteada. El texto real ya es “WhatsApp”. */

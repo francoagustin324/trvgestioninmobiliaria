@@ -164,7 +164,7 @@ async function load(page: Page, url: string): Promise<void> {
 test('postproducción móvil usa una hoja final nueva y cache-busteada', () => {
   const html = readFileSync('index.html', 'utf8');
   const css = readFileSync('src/leads-mobile-real-validation.css', 'utf8');
-  assert.ok(html.includes('/src/leads-mobile-real-validation.css?v=20260809-1'));
+  assert.ok(html.includes('/src/leads-mobile-real-validation.css?v=20260809-2'));
   assert.ok(html.indexOf('leads-mobile-real-validation.css') > html.indexOf('leads-zero-training-safety.css'));
   assert.match(css, /mvp-zero-primary::before/);
   assert.match(css, /mvp-zero-primary::after/);
@@ -192,13 +192,13 @@ test('Chrome Android equivalente: CTA y cabecera Leads resisten la matriz móvil
         const button = document.querySelector<HTMLElement>('#crm .mvp-zero-primary.mvp-whatsapp-contact-button');
         const actions = document.querySelector<HTMLElement>('#crm .mvp-lead-quick-actions[data-zero-training-actions="true"]');
         const heading = document.querySelector<HTMLElement>('#crm .pc-leads-heading');
-        const controls = document.querySelector<HTMLElement>('#crm .pc-lead-controls');
         const card = document.querySelector<HTMLElement>('#crm .mvp-lead-card[data-client-id="1"]');
         const count = document.querySelector<HTMLElement>('#crm #mvp-lead-count');
         const priorities = document.querySelector<HTMLElement>('#crm .pc-attention-grid');
         const stages = document.querySelector<HTMLElement>('#crm .pc-stage-summary[data-expanded="false"] .mvp-stage-counters');
         const filters = document.querySelector<HTMLDetailsElement>('#crm .mvp-lead-more-filters');
-        if (!button || !actions || !heading || !controls || !card || !count || !priorities || !stages || !filters) {
+        const crm = document.querySelector<HTMLElement>('#crm');
+        if (!button || !actions || !heading || !card || !count || !priorities || !stages || !filters || !crm) {
           throw new Error('Faltan elementos de Leads para validar.');
         }
 
@@ -218,6 +218,7 @@ test('Chrome Android equivalente: CTA y cabecera Leads resisten la matriz móvil
         });
         const headingRect = heading.getBoundingClientRect();
         const cardRect = card.getBoundingClientRect();
+        const crmRect = crm.getBoundingClientRect();
         const countRect = count.getBoundingClientRect();
         const prioritiesRect = priorities.getBoundingClientRect();
         const stagesRect = stages.getBoundingClientRect();
@@ -228,8 +229,10 @@ test('Chrome Android equivalente: CTA y cabecera Leads resisten la matriz móvil
           viewport: innerWidth,
           documentWidth: document.documentElement.scrollWidth,
           bodyWidth: document.body.scrollWidth,
-          crmWidth: document.querySelector<HTMLElement>('#crm')?.scrollWidth || 0,
-          crmClientWidth: document.querySelector<HTMLElement>('#crm')?.clientWidth || 0,
+          crmWidth: crm.scrollWidth,
+          crmClientWidth: crm.clientWidth,
+          crmLeft: crmRect.left,
+          crmRight: crmRect.right,
           text: button.textContent?.trim() || '',
           before: before.content,
           after: after.content,
@@ -240,6 +243,8 @@ test('Chrome Android equivalente: CTA y cabecera Leads resisten la matriz móvil
           countHeight: countRect.height,
           prioritiesHeight: prioritiesRect.height,
           stagesHeight: stagesRect.height,
+          stagesScrollHeight: stages.scrollHeight,
+          stagesClientHeight: stages.clientHeight,
           filtersOpen: filters.open,
           visibleSecondaryStages,
         };
@@ -253,6 +258,7 @@ test('Chrome Android equivalente: CTA y cabecera Leads resisten la matriz móvil
       assert.ok(snapshot.documentWidth <= snapshot.viewport + 1, `document overflow @${width}: ${JSON.stringify(snapshot)}`);
       assert.ok(snapshot.bodyWidth <= snapshot.viewport + 1, `body overflow @${width}: ${JSON.stringify(snapshot)}`);
       assert.ok(snapshot.crmWidth <= snapshot.crmClientWidth + 1, `CRM overflow @${width}: ${JSON.stringify(snapshot)}`);
+      assert.ok(snapshot.crmLeft >= -1 && snapshot.crmRight <= snapshot.viewport + 1, `CRM fuera del viewport @${width}: ${JSON.stringify(snapshot)}`);
       assert.deepEqual(snapshot.actionBoxes.map((box) => box.text), ['WhatsApp', 'Editar', '•••'], `acciones @${width}`);
       assert.ok(snapshot.actionBoxes.every((box) => box.left >= 0 && box.right <= snapshot.viewport + 1 && box.width >= 44), `geometría acciones @${width}: ${JSON.stringify(snapshot.actionBoxes)}`);
       assert.ok(snapshot.actionBoxes.every((box) => box.scrollWidth <= box.clientWidth + 1), `texto cortado @${width}: ${JSON.stringify(snapshot.actionBoxes)}`);
@@ -260,7 +266,8 @@ test('Chrome Android equivalente: CTA y cabecera Leads resisten la matriz móvil
       assert.ok(snapshot.countHeight <= 28, `contador demasiado alto @${width}: ${snapshot.countHeight}`);
       assert.ok(snapshot.prioritiesHeight <= 48, `prioridades demasiado altas @${width}: ${snapshot.prioritiesHeight}`);
       assert.ok(snapshot.stagesHeight <= 48, `pipeline colapsado demasiado alto @${width}: ${snapshot.stagesHeight}`);
-      assert.equal(snapshot.visibleSecondaryStages, 0, `pipeline secundario visible sin expandir @${width}`);
+      assert.ok(snapshot.stagesScrollHeight <= snapshot.stagesClientHeight + 1, `pipeline colapsado envuelve filas @${width}: ${JSON.stringify(snapshot)}`);
+      assert.ok(snapshot.visibleSecondaryStages >= 1, `debe conservar etapas secundarias accesibles @${width}`);
       assert.ok(snapshot.topRegionHeight <= 430, `primer lead demasiado abajo @${width}: ${snapshot.topRegionHeight}`);
     }
   } finally {
