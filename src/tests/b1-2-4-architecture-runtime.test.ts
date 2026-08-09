@@ -247,10 +247,10 @@ async function validatePipelineInputs(page: Page): Promise<void> {
   await refreshed.focus();
   await refreshed.press('End');
   await page.waitForTimeout(60);
-  assert.equal(await page.locator('#crm .mvp-stage-counter').last().evaluate((element) => document.activeElement === element), true);
+  assert.equal(await page.locator('#crm .mvp-stage-counter:visible').last().evaluate((element) => document.activeElement === element), true);
   await refreshed.press('Home');
   await page.waitForTimeout(60);
-  assert.equal(await page.locator('#crm .mvp-stage-counter').first().evaluate((element) => document.activeElement === element), true);
+  assert.equal(await page.locator('#crm .mvp-stage-counter:visible').first().evaluate((element) => document.activeElement === element), true);
 }
 
 test('B1.2.4 inicializa Leads sin observadores globales ni listeners duplicados', { timeout: 180_000 }, async (t) => {
