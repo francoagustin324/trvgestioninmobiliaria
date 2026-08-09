@@ -480,7 +480,15 @@ async function validatePipeline(page: Page): Promise<void> {
     assert.equal(end.rightOpacity, '0');
   }
 
-  await page.locator('#crm [data-stage-quick="Calificado"]').click();
+  const calificado = page.locator('#crm [data-stage-quick="Calificado"]');
+  const toggle = page.locator('#crm [data-pc-toggle-stages]');
+  const expandedForSecondary = !(await calificado.isVisible());
+  if (expandedForSecondary) {
+    assert.equal(await toggle.isVisible(), true, 'El pipeline colapsado debe exponer un control para ver etapas secundarias.');
+    await toggle.click();
+    await page.waitForFunction(() => document.querySelector<HTMLElement>('#crm .pc-stage-summary')?.dataset.expanded === 'true');
+  }
+  await calificado.click();
   await page.waitForFunction(() => document.querySelector('#crm .mvp-stage-counter.active')?.textContent?.includes('Calificado'));
   const visible = await page.evaluate(() => {
     const selected = document.querySelector<HTMLElement>('#crm .mvp-stage-counter.active')!.getBoundingClientRect();
@@ -490,6 +498,10 @@ async function validatePipeline(page: Page): Promise<void> {
   assert.equal(visible, true);
   await page.locator('#crm [data-stage-quick="Todas"]').click();
   await page.waitForFunction(() => document.querySelectorAll('#crm .mvp-lead-compact-card').length === 11);
+  if (expandedForSecondary) {
+    await toggle.click();
+    await page.waitForFunction(() => document.querySelector<HTMLElement>('#crm .pc-stage-summary')?.dataset.expanded === 'false');
+  }
 }
 
 async function validateDisclosureAndPopover(page: Page): Promise<void> {
