@@ -338,7 +338,7 @@
    en vez de permitir que el navegador lo corte visualmente. */
 @media (max-width: 410px) {
   #crm.pc-leads-redesign #mvp-lead-search {
-    font-size: 0.76rem;
+    font-size: 0.74rem;
   }
 }
 
@@ -357,7 +357,7 @@
 
 @media (max-width: 340px) {
   #crm.pc-leads-redesign #mvp-lead-search {
-    padding-inline: 10px;
-    font-size: 0.72rem;
+    padding-inline: 7px;
+    font-size: 0.68rem;
   }
 }
