@@ -542,7 +542,9 @@ async function assertFilterContrast(page: Page, width: number): Promise<void> {
 }
 
 async function openAndAnalyzePanel(page: Page, width: number): Promise<void> {
-  await page.locator('#crm .mvp-lead-card').first().locator('[data-auto-qualify-client]').click();
+  const leadCard = page.locator('#crm .mvp-lead-card').first();
+  await leadCard.locator('.mvp-lead-actions-menu > summary').click();
+  await leadCard.getByRole('button', { name: 'Completar datos con IA', exact: true }).click();
   const panel = page.locator('#crm .lead-qualification-panel').first();
   await panel.waitFor({ state: 'visible' });
   const textarea = panel.locator('[data-qualification-text]');

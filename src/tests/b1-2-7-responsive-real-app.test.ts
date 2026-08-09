@@ -248,7 +248,7 @@ async function load(page: Page, url: string): Promise<void> {
 
 async function visibleAlert(card: Locator): Promise<string> {
   const alert = card.locator('.mvp-lead-alert');
-  if (await alert.getAttribute('hidden') !== null) return '';
+  if (await alert.count() === 0 || !(await alert.isVisible())) return '';
   return alert.evaluate((element) => {
     const text = element.querySelector<HTMLElement>('.mvp-lead-alert-text');
     if (text && getComputedStyle(text).display !== 'none') return text.textContent?.trim() || '';
@@ -257,13 +257,7 @@ async function visibleAlert(card: Locator): Promise<string> {
 }
 
 async function visualText(card: Locator): Promise<string> {
-  const base = (await card.innerText()).replace(/\s+/g, ' ').trim();
-  const alert = card.locator('.mvp-lead-alert:not([hidden])');
-  if (await alert.count() === 0) return base;
-  const hidden = await alert.locator('.mvp-lead-alert-text').evaluate(
-    (element) => getComputedStyle(element).display === 'none',
-  );
-  return hidden ? `${base} ${await visibleAlert(card)}`.trim() : base;
+  return (await card.innerText()).replace(/\s+/g, ' ').trim();
 }
 
 function occurrences(text: string, fragment: string): number {
@@ -271,7 +265,7 @@ function occurrences(text: string, fragment: string): number {
 }
 
 interface ExpectedCard {
-  alert?: string;
+  semanticAlert?: string;
   action?: string;
   date?: string;
   absent?: string[];
@@ -282,11 +276,16 @@ interface ExpectedCard {
 async function expectCard(page: Page, name: string, expected: ExpectedCard): Promise<void> {
   const card = exactCard(page, name);
   assert.equal(await card.count(), 1, `No se encontró una única tarjeta para ${name}.`);
+  assert.equal(await visibleAlert(card), '', `${name} vuelve a mostrar el bloque de alerta heredado.`);
   if (expected.noAlert) {
-    assert.equal(await visibleAlert(card), '', `${name} conserva una alerta visual inesperada.`);
     assert.equal(await card.locator('.mvp-lead-alert:not([hidden])').count(), 0);
   }
-  if (expected.alert) assert.equal(await visibleAlert(card), expected.alert);
+  if (expected.semanticAlert) {
+    const alert = card.locator('.mvp-lead-alert');
+    assert.equal(await alert.count(), 1, `${name} perdió la semántica de alerta.`);
+    assert.equal(await alert.getAttribute('data-mobile-label'), expected.semanticAlert);
+    assert.equal(await alert.isVisible(), false, `${name} duplica visualmente la alerta heredada.`);
+  }
   if (expected.noAction) assert.equal(await card.locator('.mvp-lead-next-action').count(), 0);
   if (expected.action) {
     assert.equal((await card.locator('.mvp-lead-next-action strong').innerText()).trim(), expected.action);
@@ -348,13 +347,15 @@ async function validateStoredData(page: Page): Promise<void> {
 
 async function validateFutureAccessibility(page: Page): Promise<void> {
   const card = exactCard(page, 'Seguimiento futuro');
-  const alert = card.locator('.mvp-lead-alert:not([hidden])');
+  const alert = card.locator('.mvp-lead-alert');
   assert.equal(await alert.getAttribute('aria-label'), 'Falta forma de pago');
   assert.equal(await alert.getAttribute('title'), 'Falta forma de pago');
+  assert.equal(await alert.isVisible(), false, 'La alerta semántica futura no debe competir visualmente en FASE 1.');
   const action = card.locator('.mvp-lead-next-action');
   const expectedAction = `Próxima acción: Confirmar monto de entrega. Programada para ${exactDateLabel(isoOffset(3))}.`;
   assert.equal(await action.getAttribute('aria-label'), expectedAction);
   assert.equal(await action.getAttribute('title'), expectedAction);
+  assert.equal((await action.locator('small').innerText()).trim(), 'En 3 días');
 }
 
 async function validateTerminalSheet(page: Page, name: 'Ganado' | 'Perdido'): Promise<void> {
@@ -425,45 +426,48 @@ test('B1.2.7 elimina duplicados visuales con aplicación compilada y CSS real', 
 
         for (const name of ['Grupo Norte', 'Andrés Vega', 'Lucía Martín']) {
           await expectCard(page, name, {
-            alert: 'Vencido · 20 días',
-            action: 'Definir acción',
-            absent: ['fecha vencida', 'Seguimiento vencido'],
+            semanticAlert: 'Vencido · 20 días',
+            action: 'Definir próximo paso',
+            date: 'Fecha vencida hace 20 días',
+            absent: ['Seguimiento vencido'],
           });
           const text = await visualText(exactCard(page, name));
-          assert.equal(occurrences(text, 'Vencido'), 1);
           assert.equal(occurrences(text, '20 días'), 1);
-          assert.equal(occurrences(text, 'Definir acción'), 1);
+          assert.equal(occurrences(text, 'Definir próximo paso'), 1);
         }
         await expectCard(page, 'Edgardo', {
-          alert: 'Vencido · 20 días',
+          semanticAlert: 'Vencido · 20 días',
           action: 'Confirmar visita',
-          absent: ['fecha vencida', 'Seguimiento vencido'],
+          date: 'Vencido hace 20 días',
+          absent: ['Seguimiento vencido'],
         });
         await expectCard(page, 'Lead nuevo', {
-          alert: 'Nuevo sin contactar',
-          action: 'Contactar por primera vez',
+          semanticAlert: 'Nuevo sin contactar',
+          action: 'WhatsApp',
           absent: ['Sin próxima acción'],
         });
         await expectCard(page, 'Lead calificado', {
-          alert: 'Sin seguimiento',
-          action: 'Programar seguimiento',
+          semanticAlert: 'Sin seguimiento',
+          action: 'Elegir próximo contacto',
           absent: ['Calificado sin seguimiento', 'Sin próxima acción', 'Falta programar seguimiento'],
         });
         await expectCard(page, 'Seguimiento futuro', {
-          alert: 'Falta forma de pago',
+          semanticAlert: 'Falta forma de pago',
           action: 'Confirmar monto de entrega',
           date: 'En 3 días',
         });
         await expectCard(page, 'Seguimiento hoy', {
-          alert: 'Hoy',
+          semanticAlert: 'Hoy',
           action: 'Llamar al cliente',
+          date: 'Hoy',
         });
         await expectCard(page, 'Visita hoy', {
-          alert: 'Visita hoy · 17:30',
+          semanticAlert: 'Visita hoy · 17:30',
           action: 'Confirmar visita',
+          date: 'Hoy',
         });
         assert.equal(occurrences(await visualText(exactCard(page, 'Seguimiento hoy')), 'Hoy'), 1);
-        assert.equal(occurrences(await visualText(exactCard(page, 'Visita hoy')), '17:30'), 1);
+        assert.equal(occurrences(await visualText(exactCard(page, 'Visita hoy')), '17:30'), 0);
 
         await expectCard(page, 'Ganado', { noAlert: true, noAction: true });
         await expectCard(page, 'Perdido', { noAlert: true, noAction: true });

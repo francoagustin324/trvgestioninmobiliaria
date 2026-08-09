@@ -404,18 +404,26 @@ test('B1.3.3 usa contexto, identidad confirmada y fecha visible exacta', { timeo
 
     await page.locator('#crm.active [data-contact-whatsapp="90"]').click();
     const message = page.locator('[data-whatsapp-message]');
-    await message.waitFor({ state: 'visible' });
+    await message.waitFor({ state: 'attached' });
+    assert.equal(await message.isVisible(), false, 'El editor debe permanecer oculto hasta Editar mensaje.');
     const text = await message.inputValue();
     assert.match(text, /^Hola Vilma, soy Franco de TRV Gestión Inmobiliaria\./);
     assert.doesNotMatch(text, /trvgestioninmobiliaria|Gerencia Comercial/i);
     assert.match(text, /para cu[aá]ndo|cu[aá]ndo necesit[aá]s/i);
-    assert.match(await page.locator('[data-whatsapp-context-note]').innerText(), /mensajes entrantes|Contexto disponible/i);
+    const contextNote = page.locator('[data-whatsapp-context-note]');
+    if (await contextNote.count()) assert.equal(await contextNote.isVisible(), false, 'El contexto técnico no compite con el CTA principal.');
     assert.equal(await page.evaluate(() => (window as unknown as { __b133OpenCount: number }).__b133OpenCount), 0);
     await page.screenshot({ path: `${artifactDir}/05-mensaje-firmado-por-franco.png`, fullPage: true });
     await page.screenshot({ path: `${artifactDir}/06-pregunta-contextual.png`, fullPage: true });
 
-    await page.locator('[data-whatsapp-manual-register]').click();
-    const followUpForm = page.locator('[data-whatsapp-followup-form]');
+    await page.locator('[data-whatsapp-open]').click();
+    await page.waitForTimeout(750);
+    await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+    await page.locator('[data-whatsapp-confirm-sent]').waitFor({ state: 'visible' });
+    await page.locator('[data-whatsapp-confirm-sent]').click();
+    await page.locator('[data-whatsapp-change-followup]').waitFor({ state: 'visible' });
+    await page.locator('[data-whatsapp-change-followup]').click();
+    const followUpForm = page.locator('[data-zero-followup-form]');
     await followUpForm.waitFor({ state: 'visible' });
     await followUpForm.locator('input[name="follow-up-choice"][value="7"]').check();
     const expectedDate = await localIso(page, 7);

@@ -284,12 +284,12 @@ async function waitForFailClosedPanel(page: Page): Promise<void> {
     const panel = document.querySelector<HTMLElement>('#propcontrol-whatsapp-contact .whatsapp-contact-panel');
     const message = panel?.querySelector<HTMLTextAreaElement>('[data-whatsapp-message]');
     const actions = panel
-      ? Array.from(panel.querySelectorAll<HTMLButtonElement>('[data-whatsapp-open], [data-whatsapp-manual-register], [data-whatsapp-copy]'))
+      ? Array.from(panel.querySelectorAll<HTMLButtonElement>('[data-whatsapp-open], [data-whatsapp-copy]'))
       : [];
     return panel?.dataset.contactBlocked === 'true'
       && message?.value === ''
       && message.disabled
-      && actions.length === 3
+      && actions.length === 2
       && actions.every((action) => action.disabled);
   });
 }
@@ -319,12 +319,11 @@ test('B1.3.3 exige configuración explícita y rechaza identidad departamental',
     await identityForm.locator('input[name="confirmed"]').check();
     await identityForm.locator('button[type="submit"]').click();
     assert.match(await identityForm.locator('[data-whatsapp-identity-feedback]').innerText(), /nombre personal real/i);
-    for (const selector of ['[data-whatsapp-open]', '[data-whatsapp-manual-register]', '[data-whatsapp-copy]', '[data-whatsapp-message]', '[data-whatsapp-phone]']) {
+    for (const selector of ['[data-whatsapp-open]', '[data-whatsapp-copy]', '[data-whatsapp-message]', '[data-whatsapp-phone]']) {
       assert.equal(await page.locator(selector).isDisabled(), true, selector);
     }
     await page.screenshot({ path: `${artifactDir}/11-identidad-tecnica-bloqueada.png`, fullPage: true });
     await page.locator('[data-whatsapp-open]').evaluate((button) => button.dispatchEvent(new MouseEvent('click', { bubbles: true })));
-    await page.locator('[data-whatsapp-manual-register]').evaluate((button) => button.dispatchEvent(new MouseEvent('click', { bubbles: true })));
     await page.locator('[data-whatsapp-copy]').evaluate((button) => button.dispatchEvent(new MouseEvent('click', { bubbles: true })));
     await assertZeroWhatsAppEffects(page, client.id);
     await assertNoHorizontalScroll(page);
@@ -353,18 +352,25 @@ test('B1.3.3 conserva fecha inmutable, atribución validada y recarga', { timeou
 
     await page.locator(`#crm.active [data-contact-whatsapp="${client.id}"]`).click();
     const message = page.locator('[data-whatsapp-message]');
-    await message.waitFor({ state: 'visible' });
+    await message.waitFor({ state: 'attached' });
+    assert.equal(await message.isVisible(), false, 'El editor debe permanecer oculto hasta Editar mensaje.');
     assert.match(await message.inputValue(), /^Hola Lead Fecha Inmutable, soy Franco de TRV Gestión Inmobiliaria\./);
     assert.doesNotMatch(await message.inputValue(), /PropControl|info@/i);
     await page.screenshot({ path: `${artifactDir}/10-franco-identidad-explicita.png`, fullPage: true });
 
-    await page.locator('[data-whatsapp-manual-register]').click();
-    const form = page.locator('[data-whatsapp-followup-form]');
+    await page.locator('[data-whatsapp-open]').click();
+    await page.clock.runFor(750);
+    await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+    await page.locator('[data-whatsapp-confirm-sent]').waitFor({ state: 'visible' });
+    await page.locator('[data-whatsapp-confirm-sent]').click();
+    await page.locator('[data-whatsapp-change-followup]').waitFor({ state: 'visible' });
+    await page.locator('[data-whatsapp-change-followup]').click();
+    const form = page.locator('[data-zero-followup-form]');
     await form.waitFor({ state: 'visible' });
     await form.locator('input[name="follow-up-choice"][value="7"]').check();
     const expectedDate = '2026-08-09';
     const selected = form.locator('input[name="selected-date"]');
-    const preview = form.locator('[data-whatsapp-followup-preview]');
+    const preview = form.locator('[data-zero-followup-preview]');
     await page.waitForFunction((expected) => document.querySelector<HTMLInputElement>('input[name="selected-date"]')?.value === expected, expectedDate);
     assert.equal(await selected.inputValue(), expectedDate);
     const previewBeforeMidnight = await preview.innerText();
@@ -386,7 +392,7 @@ test('B1.3.3 conserva fecha inmutable, atribución validada y recarga', { timeou
     assert.equal(saved.activityLog.filter((entry) => entry.action === 'Contacto por WhatsApp').length, 1);
     assert.equal(saved.activityLog.filter((entry) => entry.action === 'Seguimiento por WhatsApp programado').length, 1);
     assert.equal(saved.reminders.length, 0);
-    assert.equal(await page.evaluate(() => (window as unknown as { __b133OpenCount: number }).__b133OpenCount), 0);
+    assert.equal(await page.evaluate(() => (window as unknown as { __b133OpenCount: number }).__b133OpenCount), 1);
 
     await page.locator('[data-module="agenda"]:visible').first().click();
     const agenda = page.locator('#agenda.active .agenda-card').filter({ hasText: client.name });
@@ -424,13 +430,14 @@ test('B1.3.3 invalida panel obsoleto tras cambiar identidad', { timeout: 240_000
     await load(page, url);
     await installActionCounters(page);
     await page.locator(`#crm.active [data-contact-whatsapp="${client.id}"]`).click();
-    await page.locator('[data-whatsapp-message]').waitFor({ state: 'visible' });
+    const message = page.locator('[data-whatsapp-message]');
+    await message.waitFor({ state: 'attached' });
+    assert.equal(await message.isVisible(), false, 'El editor debe permanecer oculto antes de editar.');
     await page.evaluate(() => {
       const target = window as unknown as { __b133StaleActions: HTMLElement[] };
       target.__b133StaleActions = [
         document.querySelector<HTMLElement>('[data-whatsapp-copy]')!,
         document.querySelector<HTMLElement>('[data-whatsapp-open]')!,
-        document.querySelector<HTMLElement>('[data-whatsapp-manual-register]')!,
       ];
     });
     await page.evaluate(({ key, record }) => {
@@ -449,7 +456,7 @@ test('B1.3.3 invalida panel obsoleto tras cambiar identidad', { timeout: 240_000
     assert.equal(await page.locator('[data-whatsapp-message]').inputValue(), '');
     assert.equal(await page.locator('[data-whatsapp-context-note]').count(), 1);
     assert.equal(await page.locator('[data-whatsapp-context-note]').isVisible(), true);
-    for (const selector of ['[data-whatsapp-open]', '[data-whatsapp-manual-register]', '[data-whatsapp-copy]']) {
+    for (const selector of ['[data-whatsapp-open]', '[data-whatsapp-copy]']) {
       assert.equal(await page.locator(selector).isDisabled(), true, selector);
     }
     await assertZeroWhatsAppEffects(page, client.id);
@@ -482,7 +489,6 @@ test('B1.3.3 invalida panel antiguo al cambiar miembro activo', { timeout: 240_0
       target.__b133MemberStale = [
         document.querySelector<HTMLElement>('[data-whatsapp-copy]')!,
         document.querySelector<HTMLElement>('[data-whatsapp-open]')!,
-        document.querySelector<HTMLElement>('[data-whatsapp-manual-register]')!,
       ];
     });
     await page.evaluate(async () => {
