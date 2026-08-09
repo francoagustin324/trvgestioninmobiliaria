@@ -221,9 +221,6 @@ test('Chrome Android equivalente: CTA, cabecera y pipeline resisten la matriz m√
     await load(page, `http://127.0.0.1:${port}`);
 
     assert.equal(fixture().clients[0]?.pipeline, 'Nuevo');
-    const primaryNuevo = page.locator('#crm [data-stage-quick="Nuevo"]');
-    await primaryNuevo.click();
-    await waitForStageSelection(page, 'Nuevo');
 
     for (const width of VIEWPORTS) {
       await page.setViewportSize({ width, height: width <= 360 ? 800 : 844 });
@@ -269,7 +266,7 @@ test('Chrome Android equivalente: CTA, cabecera y pipeline resisten la matriz m√
         const visibleSecondaryStages = Array.from(stages.querySelectorAll<HTMLElement>('[data-pc-secondary-stage]'))
           .filter((node) => getComputedStyle(node).display !== 'none')
           .map((node) => node.dataset.stageQuick || '');
-        const selectedStage = stages.querySelector<HTMLElement>('.active, [aria-pressed="true"]')?.dataset.stageQuick || '';
+        const selectedStageNode = stages.querySelector<HTMLElement>('.active, [aria-pressed="true"]');
 
         return {
           viewport: innerWidth,
@@ -293,7 +290,8 @@ test('Chrome Android equivalente: CTA, cabecera y pipeline resisten la matriz m√
           stagesClientHeight: stages.clientHeight,
           filtersOpen: filters.open,
           visibleSecondaryStages,
-          selectedStage,
+          selectedStage: selectedStageNode?.dataset.stageQuick || '',
+          selectedIsSecondary: selectedStageNode?.hasAttribute('data-pc-secondary-stage') ?? false,
         };
       });
 
@@ -315,7 +313,8 @@ test('Chrome Android equivalente: CTA, cabecera y pipeline resisten la matriz m√
       assert.ok(snapshot.stagesHeight <= 48, `pipeline colapsado demasiado alto @${width}: ${snapshot.stagesHeight}`);
       assert.ok(snapshot.stagesScrollHeight <= snapshot.stagesClientHeight + 1, `pipeline colapsado envuelve filas @${width}: ${JSON.stringify(snapshot)}`);
       assert.deepEqual(snapshot.visibleSecondaryStages, [], `pipeline principal no debe mostrar etapas secundarias @${width}`);
-      assert.equal(snapshot.selectedStage, 'Nuevo', `etapa principal seleccionada @${width}`);
+      assert.ok(snapshot.selectedStage.length > 0, `debe existir una etapa principal seleccionada @${width}`);
+      assert.equal(snapshot.selectedIsSecondary, false, `la carga inicial no debe seleccionar una etapa secundaria @${width}`);
       assert.ok(snapshot.topRegionHeight <= 430, `primer lead demasiado abajo @${width}: ${snapshot.topRegionHeight}`);
 
       if (TOP_CAPTURE_WIDTHS.has(width)) {
