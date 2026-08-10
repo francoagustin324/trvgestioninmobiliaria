@@ -180,6 +180,28 @@ async function load(page: Page, url: string): Promise<void> {
   await page.waitForSelector('.mobile-bottom-nav .nav-label', { state: 'visible', timeout: 20_000 });
 }
 
+async function waitForStableGeometry(page: Page): Promise<void> {
+  await page.waitForFunction(() => {
+    const search = document.querySelector<HTMLElement>('#crm #mvp-lead-search');
+    const toggle = document.querySelector<HTMLElement>('#crm [data-pc-toggle-stages]');
+    const navButtons = Array.from(document.querySelectorAll<HTMLElement>('.mobile-bottom-nav .nav-button:not([hidden])'));
+    if (!search || !toggle || navButtons.length !== 5 || document.fonts.status !== 'loaded') return false;
+
+    const searchRect = search.getBoundingClientRect();
+    const toggleRect = toggle.getBoundingClientRect();
+    const navRects = navButtons.map((button) => button.getBoundingClientRect());
+    return document.documentElement.scrollWidth <= innerWidth + 1
+      && document.body.scrollWidth <= innerWidth + 1
+      && searchRect.left >= -1
+      && searchRect.right <= innerWidth + 1
+      && searchRect.height >= 44
+      && toggleRect.left >= -1
+      && toggleRect.right <= innerWidth + 1
+      && toggleRect.height >= 44
+      && navRects.every((rect) => rect.left >= -1 && rect.right <= innerWidth + 1 && rect.height >= 44);
+  }, undefined, { timeout: 5_000 });
+}
+
 async function geometrySnapshot(page: Page) {
   return page.evaluate(() => {
     const search = document.querySelector<HTMLInputElement>('#crm #mvp-lead-search');
@@ -256,7 +278,7 @@ function assertGeometry(snapshot: Awaited<ReturnType<typeof geometrySnapshot>>, 
   assert.ok(snapshot.bodyWidth <= snapshot.viewport + 1, `${label}: body overflow ${JSON.stringify(snapshot)}`);
 
   assert.equal(snapshot.placeholder, 'Buscar por nombre, WhatsApp o interés', `${label}: placeholder`);
-  assert.ok(snapshot.searchLeft >= -1 && snapshot.searchRight <= snapshot.viewport + 1 && snapshot.searchHeight >= 44, `${label}: buscador fuera de viewport`);
+  assert.ok(snapshot.searchLeft >= -1 && snapshot.searchRight <= snapshot.viewport + 1 && snapshot.searchHeight >= 44, `${label}: buscador fuera de viewport ${JSON.stringify(snapshot)}`);
   assert.ok(snapshot.placeholderWidth <= snapshot.searchAvailable + 1, `${label}: placeholder visualmente truncado; texto=${snapshot.placeholderWidth.toFixed(2)} disponible=${snapshot.searchAvailable.toFixed(2)}`);
   if (width <= 390) assert.ok(snapshot.countTop >= snapshot.searchBottom - 1, `${label}: el contador sigue robando ancho crítico al buscador`);
 
@@ -294,8 +316,10 @@ test('Chromium Android: placeholder, bottom nav y toggle no truncan texto en 320
         const page = await context.newPage();
         await load(page, `http://127.0.0.1:${port}`);
         await page.evaluate(() => window.scrollTo(0, 0));
-        await page.waitForTimeout(80);
-        assertGeometry(await geometrySnapshot(page), 'Chromium', width);
+        await waitForStableGeometry(page);
+        const snapshot = await geometrySnapshot(page);
+        if (width === 320) console.log(`# PR142_GEOMETRY_320 ${JSON.stringify(snapshot)}`);
+        assertGeometry(snapshot, 'Chromium', width);
       } finally {
         await context.close();
       }
@@ -318,8 +342,9 @@ test('WebKit: placeholder y navegación conservan texto completo en 375/390/430'
         const page = await context.newPage();
         await load(page, `http://127.0.0.1:${port}`);
         await page.evaluate(() => window.scrollTo(0, 0));
-        await page.waitForTimeout(80);
-        assertGeometry(await geometrySnapshot(page), 'WebKit', width);
+        await waitForStableGeometry(page);
+        const snapshot = await geometrySnapshot(page);
+        assertGeometry(snapshot, 'WebKit', width);
       } finally {
         await context.close();
       }
