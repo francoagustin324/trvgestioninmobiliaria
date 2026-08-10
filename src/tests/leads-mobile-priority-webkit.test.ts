@@ -186,12 +186,12 @@ async function load(page: Page, url: string): Promise<void> {
 
 async function setPriorityCounts(page: Page, counts: Record<string, number>): Promise<void> {
   await page.evaluate(async ({ moduleUrl, values }) => {
+    const module = await import(moduleUrl);
     document.querySelectorAll<HTMLButtonElement>('#crm [data-pc-attention]').forEach((button) => {
       const count = button.querySelector<HTMLElement>('b');
       const id = button.dataset.pcAttention ?? '';
       if (count && Object.prototype.hasOwnProperty.call(values, id)) count.textContent = String(values[id]);
     });
-    const module = await import(moduleUrl);
     module.applyMobilePriorityOrder(document);
   }, { moduleUrl: PRIORITY_MODULE_URL, values: counts });
 }
