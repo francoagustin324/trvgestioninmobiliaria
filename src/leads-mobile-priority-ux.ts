@@ -41,6 +41,16 @@ function setVisible(button: HTMLButtonElement, visible: boolean): void {
   else button.style.display = 'none';
 }
 
+function setCompactSizing(button: HTMLButtonElement, compact: boolean): void {
+  if (compact) {
+    button.style.flex = '0 0 calc(50% - 3px)';
+    button.style.maxWidth = '168px';
+  } else {
+    button.style.removeProperty('flex');
+    button.style.removeProperty('max-width');
+  }
+}
+
 export function applyMobilePriorityOrder(root: ParentNode = document): void {
   const section = root.querySelector<HTMLElement>('#crm [data-pc-attention-section]');
   const grid = section?.querySelector<HTMLElement>('.pc-attention-grid');
@@ -51,6 +61,7 @@ export function applyMobilePriorityOrder(root: ParentNode = document): void {
   grid.querySelector<HTMLElement>('[data-pc-attention-clear]')?.remove();
 
   const compactMobile = typeof window !== 'undefined' && window.matchMedia(COMPACT_MOBILE_QUERY).matches;
+  buttons.forEach((button) => setCompactSizing(button, compactMobile));
   if (!compactMobile) {
     buttons.forEach((button) => setVisible(button, true));
     if (label) label.textContent = 'Prioridades comerciales';
