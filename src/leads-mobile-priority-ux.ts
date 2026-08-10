@@ -13,6 +13,7 @@ const PRIORITY_RANK: Record<MobileAttentionPriorityId, number> = {
   'missing-action': 3,
 };
 let scheduled = false;
+let rerunRequested = false;
 
 export function prioritizeActionableMobileAttention<T extends MobileAttentionPriority>(items: T[]): T[] {
   return items
@@ -101,12 +102,20 @@ export function applyMobilePriorityOrder(root: ParentNode = document): void {
 }
 
 function schedulePriorityOrder(): void {
-  if (scheduled || typeof window === 'undefined') return;
+  if (typeof window === 'undefined') return;
+  if (scheduled) {
+    rerunRequested = true;
+    return;
+  }
   scheduled = true;
   window.requestAnimationFrame(() => {
     window.requestAnimationFrame(() => {
-      scheduled = false;
       applyMobilePriorityOrder(document);
+      scheduled = false;
+      if (rerunRequested) {
+        rerunRequested = false;
+        schedulePriorityOrder();
+      }
     });
   });
 }
