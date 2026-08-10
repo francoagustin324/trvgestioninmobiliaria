@@ -18,6 +18,22 @@
     text-overflow: clip;
     white-space: nowrap;
   }
+
+  /* El control ya era visualmente correcto, pero medía 38px de alto. Se conserva
+     su diseño y se garantiza el target táctil mínimo solicitado por CEREBRO. */
+  #crm.pc-leads-redesign [data-pc-toggle-stages] {
+    min-height: 44px;
+    height: auto;
+    max-width: 100%;
+  }
+}
+
+/* A 320px el texto necesitaba 146px dentro de 142px útiles. Cuatro píxeles
+   adicionales evitan clipping sin cambiar la jerarquía ni el comportamiento. */
+@media (max-width: 360px) {
+  #crm.pc-leads-redesign [data-pc-toggle-stages] {
+    min-width: 150px;
+  }
 }
 
 /* En 375/390 WebKit el contador consumía ancho crítico del input. A partir de
