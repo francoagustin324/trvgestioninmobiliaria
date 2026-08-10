@@ -93,8 +93,10 @@ function schedulePriorityOrder(): void {
   if (scheduled || typeof window === 'undefined') return;
   scheduled = true;
   window.requestAnimationFrame(() => {
-    scheduled = false;
-    applyMobilePriorityOrder(document);
+    window.requestAnimationFrame(() => {
+      scheduled = false;
+      applyMobilePriorityOrder(document);
+    });
   });
 }
 
