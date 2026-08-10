@@ -144,7 +144,22 @@ async function seedContext(context: BrowserContext): Promise<void> {
   }, { crm: fixture(), identityStorageKey: identityKey, storageKey: STORAGE_KEY });
 }
 
-async function contextFor(browser: Browser, width: number): Promise<BrowserContext> {
+async function chromiumAndroidContext(browser: Browser, width: number): Promise<BrowserContext> {
+  const context = await browser.newContext({
+    viewport: { width, height: 844 },
+    screen: { width, height: 844 },
+    isMobile: true,
+    hasTouch: true,
+    locale: 'es-AR',
+    timezoneId: 'America/Argentina/Cordoba',
+    colorScheme: 'dark',
+    userAgent: 'Mozilla/5.0 (Linux; Android 14; moto g54 5G) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Mobile Safari/537.36',
+  });
+  await seedContext(context);
+  return context;
+}
+
+async function webkitContext(browser: Browser, width: number): Promise<BrowserContext> {
   const context = await browser.newContext({
     viewport: { width, height: 844 },
     screen: { width, height: 844 },
@@ -242,7 +257,7 @@ test('Chromium: prioridad accionable queda visible sin swipe y los estados múlt
   const port = 62020 + Math.floor(Math.random() * 80);
   const server = await startServer(port);
   const browser = await chromium.launch({ executablePath, headless: true });
-  const context = await contextFor(browser, 390);
+  const context = await chromiumAndroidContext(browser, 390);
 
   try {
     const page = await context.newPage();
@@ -291,7 +306,7 @@ test('WebKit automatizado: Leads móvil mantiene prioridad, CTA, pipeline y geom
 
   try {
     for (const width of [375, 390, 430]) {
-      const context = await contextFor(browser, width);
+      const context = await webkitContext(browser, width);
       try {
         const page = await context.newPage();
         await load(page, `http://127.0.0.1:${port}`);
