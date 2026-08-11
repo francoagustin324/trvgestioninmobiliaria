@@ -198,3 +198,60 @@ jobs:
           path: artifacts/leads-mobile-real-validation
           if-no-files-found: error
           retention-days: 14
+      - name: Verificar y empaquetar capturas finales PR143
+        if: always()
+        run: |
+          set -euo pipefail
+          directory="artifacts/leads-desktop-zero-training"
+          expected=(
+            desktop-1024-top-leads.png
+            desktop-1280-top-leads.png
+            desktop-1366-top-leads.png
+            desktop-1440-top-leads.png
+            desktop-1920-top-leads.png
+            desktop-1366-filters-open.png
+            desktop-1366-pipeline-expanded.png
+            desktop-1366-first-lead-cta.png
+            mobile-390-regression.png
+          )
+          test -d "$directory"
+          test "$(find "$directory" -maxdepth 1 -type f -name '*.png' | wc -l)" -eq "${#expected[@]}"
+          for file in "${expected[@]}"; do
+            test -s "$directory/$file"
+          done
+          rm -f PROPCONTROL_PR143_CAPTURAS_FINALES.zip
+          (cd "$directory" && zip -q "$GITHUB_WORKSPACE/PROPCONTROL_PR143_CAPTURAS_FINALES.zip" "${expected[@]}")
+          test "$(unzip -Z1 PROPCONTROL_PR143_CAPTURAS_FINALES.zip | wc -l)" -eq "${#expected[@]}"
+          for file in "${expected[@]}"; do
+            unzip -Z1 PROPCONTROL_PR143_CAPTURAS_FINALES.zip | grep -Fx "$file"
+          done
+      - name: Adjuntar ZIP final PR143
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: propcontrol-pr143-capturas-finales
+          path: PROPCONTROL_PR143_CAPTURAS_FINALES.zip
+          if-no-files-found: error
+          retention-days: 14
+      - name: Verificar capturas WebKit PR143
+        if: always()
+        run: |
+          set -euo pipefail
+          directory="artifacts/leads-desktop-zero-training-webkit"
+          expected=(
+            webkit-desktop-1280.png
+            webkit-desktop-1440.png
+          )
+          test -d "$directory"
+          test "$(find "$directory" -maxdepth 1 -type f -name '*.png' | wc -l)" -eq "${#expected[@]}"
+          for file in "${expected[@]}"; do
+            test -s "$directory/$file"
+          done
+      - name: Adjuntar capturas WebKit PR143
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: propcontrol-pr143-webkit-evidencia
+          path: artifacts/leads-desktop-zero-training-webkit
+          if-no-files-found: error
+          retention-days: 14
