@@ -8,7 +8,6 @@ let desktopFilterPanelOpen = false;
 let synchronizationScheduled = false;
 let initialPreparationFrame: number | null = null;
 let initialEnhancementSignalSent = false;
-let initialStablePasses = 0;
 
 interface BlockingFixWindow extends Window {
   [INSTALL_FLAG]?: boolean;
@@ -97,10 +96,9 @@ function synchronizeFilterPanel(crm: HTMLElement): void {
   if (isDesktop()) {
     filterPanelOpen = false;
     const active = activeDesktopFilterCount(crm);
-    const open = active > 0 || desktopFilterPanelOpen;
     synchronizeDesktopFilterSummary(details, active);
-    if (details.open !== open) details.open = open;
-    applyFilterInteractionState(details, open);
+    if (details.open !== desktopFilterPanelOpen) details.open = desktopFilterPanelOpen;
+    applyFilterInteractionState(details, desktopFilterPanelOpen);
     return;
   }
 
@@ -139,9 +137,7 @@ function synchronizeDesktopStageSummary(crm: HTMLElement): void {
 
   const shell = crm.querySelector<HTMLElement>('[data-stage-shell]');
   const counters = shell?.querySelector<HTMLElement>('.mvp-stage-counters');
-  const toggle = shell?.querySelector<HTMLButtonElement>('[data-pc-toggle-stages]');
-  if (!shell || !counters || !toggle) return;
-  toggle.hidden = false;
+  if (!shell || !counters) return;
 
   if (shell.dataset.expanded === 'true') return;
   const collapsedOrder = ['Todas', 'Nuevo', 'Contactado', 'Visita coordinada', 'Calificado', 'Negociación', 'Reservado', 'Ganado', 'Perdido'];
@@ -205,22 +201,25 @@ function prepareInitialLeadsBeforePaint(): void {
       initialEnhancementSignalSent = true;
       document.dispatchEvent(new CustomEvent('trv-render'));
     }
-    const finalControlsPresent = Boolean(crm.querySelector('[data-pc-attention-section]') && crm.querySelector('[data-pc-toggle-stages]'));
-    if (finalControlsPresent) {
-      initialStablePasses += 1;
-      if (initialStablePasses >= 2) return;
-    } else {
-      initialStablePasses = 0;
-    }
-  } else if (location.pathname !== '/' && location.pathname !== '') {
+    scheduleSynchronization();
     return;
   }
+  if (location.pathname !== '/' && location.pathname !== '') return;
   initialPreparationFrame = window.requestAnimationFrame(prepareInitialLeadsBeforePaint);
 }
 
 function closeMobileFilters(): void {
   if (!isMobile()) return;
   filterPanelOpen = false;
+  const details = document.querySelector<HTMLDetailsElement>('#crm .mvp-lead-more-filters');
+  if (!details) return;
+  details.open = false;
+  applyFilterInteractionState(details, false);
+}
+
+function closeDesktopFilters(): void {
+  if (!isDesktop()) return;
+  desktopFilterPanelOpen = false;
   const details = document.querySelector<HTMLDetailsElement>('#crm .mvp-lead-more-filters');
   if (!details) return;
   details.open = false;
@@ -236,8 +235,12 @@ function install(): void {
   document.addEventListener('trv-render', scheduleSynchronization);
   document.addEventListener('click', (event) => {
     const target = event.target as HTMLElement;
-    if (target.closest('[data-account-toggle], [data-pc-apply-filters]')) closeMobileFilters();
-    if (isDesktop() && target.closest('[data-pc-clear-filters], [data-clear-lead-filters]')) desktopFilterPanelOpen = false;
+    if (target.closest('[data-account-toggle]')) closeMobileFilters();
+    if (target.closest('[data-pc-apply-filters]')) {
+      closeMobileFilters();
+      closeDesktopFilters();
+    }
+    if (isDesktop() && target.closest('[data-pc-clear-filters], [data-clear-lead-filters]')) closeDesktopFilters();
     if (target.closest('#crm')) scheduleSynchronizationAfterCurrentEvent();
   }, true);
   document.addEventListener('change', scheduleSynchronization);

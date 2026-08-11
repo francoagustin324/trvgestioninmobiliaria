@@ -10,6 +10,8 @@ const ORG_ID = 'desktop-zero-training-org';
 const STORAGE_KEY = `trv-crm-basico:user:${USER_ID}`;
 const BASELINE_DISTANCE = 504.13;
 const TARGET_1366_DISTANCE = BASELINE_DISTANCE * 0.8;
+const CONTROL_TARGET = 44;
+const CONTROL_EPSILON = 0.01;
 const CHROMIUM_ARTIFACT_DIR = 'artifacts/leads-desktop-zero-training';
 const WEBKIT_ARTIFACT_DIR = 'artifacts/leads-desktop-zero-training-webkit';
 const DESKTOP_VIEWPORTS = [
@@ -220,7 +222,12 @@ async function visibleStages(page: Page): Promise<string[]> {
 }
 
 async function minimumControlHeight(page: Page, selector: string): Promise<number> {
-  return page.locator(selector).evaluate((element) => element.getBoundingClientRect().height);
+  return page.locator(selector).first().evaluate((element) => element.getBoundingClientRect().height);
+}
+
+async function assertControlTarget(page: Page, selector: string, label = selector): Promise<void> {
+  const height = await minimumControlHeight(page, selector);
+  assert.ok(height >= CONTROL_TARGET - CONTROL_EPSILON, `${label} debe medir al menos 44px nominales; recibió ${height}.`);
 }
 
 async function assertDesktopNewLeadPlacement(page: Page): Promise<void> {
@@ -279,7 +286,7 @@ test('PR143 desktop cero capacitación Chromium + regresión móvil', { timeout:
     assert.equal((await heading.locator('p').textContent())?.trim(), 'Contactá primero a los leads que requieren atención.');
     const newLead = page.locator('#crm [data-toggle="client-form"]').first();
     assert.equal(await newLead.isVisible(), true, 'Nuevo lead debe estar visible en cabecera desktop.');
-    assert.ok(await minimumControlHeight(page, '#crm [data-toggle="client-form"]') >= 42);
+    await assertControlTarget(page, '#crm [data-toggle="client-form"]', 'Nuevo lead');
     await assertDesktopNewLeadPlacement(page);
 
     const search = page.locator('#mvp-lead-search');
@@ -290,22 +297,32 @@ test('PR143 desktop cero capacitación Chromium + regresión móvil', { timeout:
     assert.equal(await details.getAttribute('open'), null, 'Filtros secundarios cerrados por defecto en desktop.');
     const filterSummary = details.locator(':scope > summary');
     assert.equal((await filterSummary.locator('span').textContent())?.trim(), 'Filtros');
-    assert.ok(await minimumControlHeight(page, '#crm .mvp-lead-more-filters > summary') >= 42);
+    await assertControlTarget(page, '#crm .mvp-lead-more-filters > summary', 'Summary Filtros');
 
     await filterSummary.click();
     await page.waitForFunction(() => document.querySelector<HTMLDetailsElement>('#crm .mvp-lead-more-filters')?.open === true);
     for (const selector of ['#mvp-lead-stage-filter', '#mvp-lead-temperature-filter', '#mvp-lead-assignee-filter', '#mvp-lead-order']) {
       const control = page.locator(selector);
       assert.equal(await control.isVisible(), true, `${selector} debe estar accesible.`);
-      assert.ok(await minimumControlHeight(page, selector) >= 42, `${selector} debe conservar target usable.`);
+      await assertControlTarget(page, selector);
     }
     assert.equal(await page.locator('[data-pc-clear-filters]').isVisible(), true);
     assert.equal(await page.locator('[data-pc-apply-filters]').isVisible(), true);
+    await assertControlTarget(page, '[data-pc-clear-filters]', 'Limpiar filtros');
+    await assertControlTarget(page, '[data-pc-apply-filters]', 'Aplicar filtros');
 
     await page.locator('#mvp-lead-stage-filter').selectOption('Calificado');
     await page.waitForFunction(() => document.querySelector('#crm .mvp-lead-more-filters > summary span')?.textContent?.includes('Filtros (1)'));
-    assert.equal(await page.locator('#crm .mvp-lead-more-filters').getAttribute('open'), '', 'Un filtro activo debe quedar identificable.');
+    assert.equal(await page.locator('#crm .mvp-lead-more-filters').getAttribute('open'), '', 'Un panel abierto explícitamente debe seguir operativo mientras se edita.');
     assert.match((await page.locator('#crm .mvp-lead-more-filters > summary span').textContent()) ?? '', /Filtros \([1-9]/);
+    await page.locator('[data-pc-apply-filters]').click();
+    await page.waitForFunction(() => document.querySelector<HTMLDetailsElement>('#crm .mvp-lead-more-filters')?.open === false);
+    assert.equal(await page.locator('#mvp-lead-stage-filter').inputValue(), 'Calificado', 'Aplicar no pierde el filtro activo.');
+    assert.match((await page.locator('#crm .mvp-lead-more-filters > summary span').textContent()) ?? '', /Filtros \([1-9]/);
+    await page.evaluate(() => document.dispatchEvent(new CustomEvent('trv-render')));
+    await page.waitForTimeout(120);
+    assert.equal(await page.locator('#crm .mvp-lead-more-filters').getAttribute('open'), null, 'Un rerender con filtros activos no debe autoabrirlos.');
+    assert.equal(await page.locator('#mvp-lead-stage-filter').inputValue(), 'Calificado');
 
     const priorities = page.locator('#crm [data-pc-attention]');
     assert.equal(await priorities.count(), 4, 'Deben conservarse las cuatro prioridades canónicas.');
@@ -315,6 +332,10 @@ test('PR143 desktop cero capacitación Chromium + regresión móvil', { timeout:
     }
     const priorityStates = await priorities.evaluateAll((buttons) => buttons.map((button) => button.getAttribute('data-pc-actionable')));
     assert.ok(priorityStates.every((value) => value === 'true' || value === 'false'));
+    for (let index = 0; index < await priorities.count(); index += 1) {
+      const height = await priorities.nth(index).evaluate((button) => button.getBoundingClientRect().height);
+      assert.ok(height >= CONTROL_TARGET - CONTROL_EPSILON, `Prioridad ${index + 1} menor a 44px: ${height}.`);
+    }
 
     const collapsedWithSecondary = await visibleStages(page);
     for (const expected of ['Todas', 'Nuevo', 'Contactado', 'Visita coordinada', 'Calificado']) {
@@ -325,7 +346,7 @@ test('PR143 desktop cero capacitación Chromium + regresión móvil', { timeout:
     const pipelineToggle = page.locator('#crm [data-pc-toggle-stages]');
     assert.equal(await pipelineToggle.isVisible(), true);
     assert.equal((await pipelineToggle.textContent())?.trim(), 'Ver todas las etapas');
-    assert.ok(await minimumControlHeight(page, '#crm [data-pc-toggle-stages]') >= 42);
+    await assertControlTarget(page, '#crm [data-pc-toggle-stages]', 'Toggle de etapas');
     const collapsedScroll = await page.locator('#crm .mvp-stage-counters').evaluate((node) => ({ scrollWidth: node.scrollWidth, clientWidth: node.clientWidth }));
     assert.ok(collapsedScroll.scrollWidth <= collapsedScroll.clientWidth + 1, 'Pipeline colapsado no debe tener scrollbar horizontal.');
 
@@ -335,6 +356,8 @@ test('PR143 desktop cero capacitación Chromium + regresión móvil', { timeout:
     assert.equal(expandedStages.length, 9, 'Pipeline expandido debe exponer todas las etapas.');
     assert.equal((await pipelineToggle.textContent())?.trim(), 'Ver menos etapas');
 
+    await filterSummary.click();
+    await page.waitForFunction(() => document.querySelector<HTMLDetailsElement>('#crm .mvp-lead-more-filters')?.open === true);
     await page.locator('[data-pc-clear-filters]').click();
     await page.waitForFunction(() => document.querySelector('#crm .mvp-lead-more-filters > summary span')?.textContent?.trim() === 'Filtros');
     assert.equal(await page.locator('#mvp-lead-stage-filter').inputValue(), 'Todas');
@@ -365,9 +388,13 @@ test('PR143 desktop cero capacitación Chromium + regresión móvil', { timeout:
     assert.equal(whatsappVisual.background, 'rgb(27, 112, 69)', 'CTA desktop debe usar verde sobrio aprobado.');
     assert.ok(['none', 'normal', '""'].includes(whatsappVisual.before));
     assert.ok(['none', 'normal', '""'].includes(whatsappVisual.after));
-    assert.ok(whatsappVisual.height >= 42);
-    assert.equal(await page.locator('#crm .mvp-zero-edit').first().isVisible(), true);
-    assert.equal(await page.locator('#crm .mvp-lead-actions-menu > summary').first().isVisible(), true);
+    assert.ok(whatsappVisual.height >= CONTROL_TARGET - CONTROL_EPSILON, `WhatsApp menor a 44px: ${whatsappVisual.height}.`);
+    const edit = page.locator('#crm .mvp-zero-edit').first();
+    const menu = page.locator('#crm .mvp-lead-actions-menu > summary').first();
+    assert.equal(await edit.isVisible(), true);
+    assert.equal(await menu.isVisible(), true);
+    assert.ok(await edit.evaluate((button) => button.getBoundingClientRect().height) >= CONTROL_TARGET - CONTROL_EPSILON, 'Editar debe conservar target 44px.');
+    assert.ok(await menu.evaluate((button) => button.getBoundingClientRect().height) >= CONTROL_TARGET - CONTROL_EPSILON, 'Menú ••• debe conservar target 44px.');
 
     for (const viewport of DESKTOP_VIEWPORTS) {
       await page.setViewportSize({ width: viewport.width, height: viewport.height });
@@ -475,6 +502,7 @@ test('PR143 WebKit desktop 1280/1440', { timeout: 120_000 }, async () => {
       await page.locator('#crm .mvp-lead-more-filters > summary').click();
       await page.waitForFunction(() => document.querySelector<HTMLDetailsElement>('#crm .mvp-lead-more-filters')?.open === true);
       assert.equal(await page.locator('#mvp-lead-stage-filter').isVisible(), true);
+      await assertControlTarget(page, '#mvp-lead-stage-filter', 'Select WebKit');
       await page.locator('#crm .mvp-lead-more-filters > summary').click();
       await page.screenshot({ path: `${WEBKIT_ARTIFACT_DIR}/${viewport.screenshot}`, fullPage: false });
     }
@@ -490,5 +518,7 @@ test('PR143 cache bust: todo runtime modificado cambia URL servida', () => {
   assert.match(index, /\/src\/leads-desktop-zero-training\.css\?v=20260811-1/);
   assert.match(index, /\/dist\/leads-professional-redesign-blocking-fix\.js\?v=20260811-1/);
   assert.doesNotMatch(index, /\/dist\/leads-professional-redesign-blocking-fix\.js\?v=20260805-1/);
+  assert.match(index, /\/dist\/leads-professional-redesign\.js\?v=20260811-1/);
+  assert.doesNotMatch(index, /\/dist\/leads-professional-redesign\.js\?v=20260805-1/);
   assert.match(index, /\/dist\/mvp-main\.js\?v=20260802-1/);
 });
