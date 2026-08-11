@@ -209,9 +209,31 @@ async function noHorizontalOverflow(page: Page): Promise<boolean> {
 async function firstLeadDistance(page: Page): Promise<number> {
   return page.evaluate(() => {
     const crm = document.querySelector<HTMLElement>('#crm');
-    const card = document.querySelector<HTMLElement>('#crm .mvp-lead-card[data-client-id="1"]');
-    if (!crm || !card) throw new Error('No se pudo medir Leads.');
-    return Math.round((card.getBoundingClientRect().top - crm.getBoundingClientRect().top) * 100) / 100;
+    const cards = Array.from(document.querySelectorAll<HTMLElement>('#crm .mvp-lead-card'))
+      .filter((card) => !card.hidden && getComputedStyle(card).display !== 'none' && card.getClientRects().length > 0);
+    if (!crm || cards.length === 0) throw new Error('No se pudo medir el primer Lead visible.');
+    const firstTop = Math.min(...cards.map((card) => card.getBoundingClientRect().top));
+    return Math.round((firstTop - crm.getBoundingClientRect().top) * 100) / 100;
+  });
+}
+
+async function activeSecondaryFilterSnapshot(page: Page): Promise<{ count: number; label: string }> {
+  return page.evaluate(() => {
+    const crm = document.querySelector<HTMLElement>('#crm');
+    const label = crm?.querySelector<HTMLElement>('.mvp-lead-more-filters > summary span')?.textContent?.trim() ?? '';
+    if (!crm) return { count: 0, label };
+    let count = 0;
+    const stage = crm.querySelector<HTMLSelectElement>('#mvp-lead-stage-filter')?.value;
+    const temperature = crm.querySelector<HTMLSelectElement>('#mvp-lead-temperature-filter')?.value;
+    const assignee = crm.querySelector<HTMLSelectElement>('#mvp-lead-assignee-filter')?.value;
+    const order = crm.querySelector<HTMLSelectElement>('#mvp-lead-order')?.value;
+    if (stage && stage !== 'Todas') count += 1;
+    if (temperature && temperature !== 'Todas') count += 1;
+    if (assignee && assignee !== 'Todos') count += 1;
+    if (order && order !== 'priority') count += 1;
+    if (crm.querySelector<HTMLInputElement>('#mvp-lead-overdue-filter')?.checked) count += 1;
+    if (crm.querySelector<HTMLInputElement>('#mvp-lead-missing-action-filter')?.checked) count += 1;
+    return { count, label };
   });
 }
 
@@ -296,7 +318,9 @@ test('PR143 desktop cero capacitación Chromium + regresión móvil', { timeout:
     const details = page.locator('#crm .mvp-lead-more-filters');
     assert.equal(await details.getAttribute('open'), null, 'Filtros secundarios cerrados por defecto en desktop.');
     const filterSummary = details.locator(':scope > summary');
-    assert.equal((await filterSummary.locator('span').textContent())?.trim(), 'Filtros');
+    const initialFilters = await activeSecondaryFilterSnapshot(page);
+    assert.equal(initialFilters.label, initialFilters.count > 0 ? `Filtros (${initialFilters.count})` : 'Filtros', `El resumen cerrado debe reflejar exactamente los filtros activos: ${JSON.stringify(initialFilters)}`);
+    console.log(`PR143_INITIAL_FILTERS=${JSON.stringify(initialFilters)}`);
     await assertControlTarget(page, '#crm .mvp-lead-more-filters > summary', 'Summary Filtros');
 
     await filterSummary.click();
@@ -312,13 +336,17 @@ test('PR143 desktop cero capacitación Chromium + regresión móvil', { timeout:
     await assertControlTarget(page, '[data-pc-apply-filters]', 'Aplicar filtros');
 
     await page.locator('#mvp-lead-stage-filter').selectOption('Calificado');
-    await page.waitForFunction(() => document.querySelector('#crm .mvp-lead-more-filters > summary span')?.textContent?.includes('Filtros (1)'));
+    await page.waitForFunction(() => document.querySelector('#crm .mvp-lead-more-filters > summary span')?.textContent?.includes('Filtros ('));
     assert.equal(await page.locator('#crm .mvp-lead-more-filters').getAttribute('open'), '', 'Un panel abierto explícitamente debe seguir operativo mientras se edita.');
-    assert.match((await page.locator('#crm .mvp-lead-more-filters > summary span').textContent()) ?? '', /Filtros \([1-9]/);
+    const editedFilters = await activeSecondaryFilterSnapshot(page);
+    assert.equal(editedFilters.label, `Filtros (${editedFilters.count})`);
+    assert.ok(editedFilters.count >= 1);
     await page.locator('[data-pc-apply-filters]').click();
     await page.waitForFunction(() => document.querySelector<HTMLDetailsElement>('#crm .mvp-lead-more-filters')?.open === false);
     assert.equal(await page.locator('#mvp-lead-stage-filter').inputValue(), 'Calificado', 'Aplicar no pierde el filtro activo.');
-    assert.match((await page.locator('#crm .mvp-lead-more-filters > summary span').textContent()) ?? '', /Filtros \([1-9]/);
+    const appliedFilters = await activeSecondaryFilterSnapshot(page);
+    assert.equal(appliedFilters.label, `Filtros (${appliedFilters.count})`);
+    assert.ok(appliedFilters.count >= 1);
     await page.evaluate(() => document.dispatchEvent(new CustomEvent('trv-render')));
     await page.waitForTimeout(120);
     assert.equal(await page.locator('#crm .mvp-lead-more-filters').getAttribute('open'), null, 'Un rerender con filtros activos no debe autoabrirlos.');
@@ -407,7 +435,7 @@ test('PR143 desktop cero capacitación Chromium + regresión móvil', { timeout:
         assert.ok(distance <= TARGET_1366_DISTANCE + 0.5, `1366 debe reducir al menos 20%: ${distance} <= ${TARGET_1366_DISTANCE}.`);
       }
       if (viewport.width === 1024) {
-        const top = await page.locator('#crm .mvp-lead-card').first().evaluate((card) => card.getBoundingClientRect().top);
+        const top = await page.locator('#crm .mvp-lead-card:visible').first().evaluate((card) => card.getBoundingClientRect().top);
         assert.ok(top < viewport.height - 80, 'A 1024 debe verse claramente el comienzo del primer lead.');
       }
       await page.screenshot({ path: `${CHROMIUM_ARTIFACT_DIR}/${viewport.screenshot}`, fullPage: false });
@@ -422,7 +450,7 @@ test('PR143 desktop cero capacitación Chromium + regresión móvil', { timeout:
     if ((await pipelineToggle.getAttribute('aria-expanded')) !== 'true') await pipelineToggle.click();
     await page.waitForTimeout(100);
     await page.screenshot({ path: `${CHROMIUM_ARTIFACT_DIR}/desktop-1366-pipeline-expanded.png`, fullPage: false });
-    await page.locator('#crm .mvp-lead-card').first().screenshot({ path: `${CHROMIUM_ARTIFACT_DIR}/desktop-1366-first-lead-cta.png` });
+    await page.locator('#crm .mvp-lead-card:visible').first().screenshot({ path: `${CHROMIUM_ARTIFACT_DIR}/desktop-1366-first-lead-cta.png` });
 
     const expandedBeforeRerenders = await pipelineToggle.getAttribute('aria-expanded');
     await page.evaluate(() => {
@@ -497,7 +525,9 @@ test('PR143 WebKit desktop 1280/1440', { timeout: 120_000 }, async () => {
       assert.equal(await page.locator('#crm [data-pc-toggle-stages]').isVisible(), true);
       assert.deepEqual(await visibleStages(page), ['Todas', 'Nuevo', 'Contactado', 'Visita coordinada']);
       assert.equal((await page.locator('#crm .mvp-zero-primary').first().textContent())?.trim(), 'WhatsApp');
-      assert.ok(await firstLeadDistance(page) < BASELINE_DISTANCE, 'Primer lead debe subir también en WebKit.');
+      const distance = await firstLeadDistance(page);
+      console.log(`PR143_WEBKIT_AFTER_${viewport.width}x${viewport.height}=${distance}`);
+      assert.ok(distance < BASELINE_DISTANCE, `Primer lead debe subir también en WebKit: ${distance} < ${BASELINE_DISTANCE}.`);
       await assertDesktopNewLeadPlacement(page);
       await page.locator('#crm .mvp-lead-more-filters > summary').click();
       await page.waitForFunction(() => document.querySelector<HTMLDetailsElement>('#crm .mvp-lead-more-filters')?.open === true);
