@@ -8,6 +8,7 @@ let desktopFilterPanelOpen = false;
 let synchronizationScheduled = false;
 let initialPreparationFrame: number | null = null;
 let initialEnhancementSignalSent = false;
+let initialStablePasses = 0;
 
 interface BlockingFixWindow extends Window {
   [INSTALL_FLAG]?: boolean;
@@ -73,6 +74,10 @@ function bindFilterDisclosure(details: HTMLDetailsElement): void {
   });
   details.addEventListener('toggle', () => {
     if (!details.isConnected) return;
+    if (!details.open) {
+      if (isMobile()) filterPanelOpen = false;
+      if (isDesktop()) desktopFilterPanelOpen = false;
+    }
     applyFilterInteractionState(details, (!isMobile() && !isDesktop()) || details.open);
   });
 }
@@ -200,7 +205,13 @@ function prepareInitialLeadsBeforePaint(): void {
       initialEnhancementSignalSent = true;
       document.dispatchEvent(new CustomEvent('trv-render'));
     }
-    if (crm.querySelector('[data-pc-attention-section]')) return;
+    const finalControlsPresent = Boolean(crm.querySelector('[data-pc-attention-section]') && crm.querySelector('[data-pc-toggle-stages]'));
+    if (finalControlsPresent) {
+      initialStablePasses += 1;
+      if (initialStablePasses >= 2) return;
+    } else {
+      initialStablePasses = 0;
+    }
   } else if (location.pathname !== '/' && location.pathname !== '') {
     return;
   }
