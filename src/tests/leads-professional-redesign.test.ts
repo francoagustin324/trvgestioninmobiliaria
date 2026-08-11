@@ -312,7 +312,6 @@ async function assertFullyVisible(page: Page, locator: Locator): Promise<void> {
   assert.ok(box.y + box.height <= viewport.height + 1, JSON.stringify({ box, viewport }));
 }
 
-
 interface StageContrastResult {
   stage: string;
   active: boolean;
@@ -526,7 +525,8 @@ async function verifyMobile(page: Page, url: string): Promise<void> {
   for (const stage of stageNames) {
     assert.equal(await page.locator(`[data-stage-quick="${stage}"]`).isVisible(), true, stage);
   }
-  assert.equal(await page.locator('[data-stage-quick="Calificado"]').isVisible(), true);
+  assert.equal(await page.locator('[data-stage-quick="Calificado"]').isVisible(), false, 'Calificado es secundario y debe quedar oculto con el pipeline colapsado.');
+  assert.equal(await page.locator('[data-pc-toggle-stages]').getAttribute('aria-expanded'), 'false');
   const collapsedPipeline = await page.locator('.mvp-stage-counters').evaluate((element) => ({
     flexWrap: getComputedStyle(element).flexWrap,
     scrollWidth: element.scrollWidth,

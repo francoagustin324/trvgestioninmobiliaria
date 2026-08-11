@@ -1,0 +1,54 @@
+/* Corrección final CEREBRO PR #142 — geometría de texto móvil.
+   Capa exclusivamente visual <=520px. No modifica lógica, datos ni interacción. */
+
+@media (max-width: 520px) {
+  /* La navegación conserva las cinco etiquetas completas. El tamaño se adapta al
+     ancho disponible sin abreviaturas y sin sacrificar el target táctil. */
+  .mobile-bottom-nav .nav-button {
+    padding-right: 1px;
+    padding-left: 1px;
+  }
+
+  .mobile-bottom-nav .nav-label {
+    width: 100%;
+    max-width: 100%;
+    overflow: visible;
+    font-size: clamp(0.52rem, 2.35vw, 0.58rem);
+    letter-spacing: -0.015em;
+    text-overflow: clip;
+    white-space: nowrap;
+  }
+
+  /* El rediseño base usa .pc-stage-heading button { min-height: 38px }.
+     Esta regla final es deliberadamente más específica y conserva el diseño,
+     garantizando el target táctil mínimo solicitado por CEREBRO. */
+  #crm.pc-leads-redesign .pc-stage-heading [data-pc-toggle-stages] {
+    min-height: 44px;
+    height: auto;
+    max-width: 100%;
+  }
+}
+
+/* A 320px el texto necesitaba 146px dentro de 142px útiles. Cuatro píxeles
+   adicionales evitan clipping sin cambiar la jerarquía ni el comportamiento. */
+@media (max-width: 360px) {
+  #crm.pc-leads-redesign .pc-stage-heading [data-pc-toggle-stages] {
+    min-width: 150px;
+  }
+}
+
+/* En 375/390 WebKit el contador consumía ancho crítico del input. A partir de
+   este breakpoint el buscador toma una fila completa y el contador queda como
+   dato secundario compacto debajo, manteniendo casi intacta la altura total. */
+@media (max-width: 390px) {
+  #crm.pc-leads-redesign .mvp-lead-filter-primary {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 3px;
+  }
+
+  #crm.pc-leads-redesign #mvp-lead-count {
+    max-width: none;
+    justify-self: end;
+    line-height: 1;
+  }
+}

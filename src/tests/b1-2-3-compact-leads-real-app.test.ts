@@ -412,6 +412,13 @@ async function assertSingleExpandedAndPersistent(page: Page): Promise<void> {
 
 async function assertPipelineSelection(page: Page): Promise<void> {
   const chip = page.locator('#crm [data-stage-quick="Calificado"]');
+  const toggle = page.locator('#crm [data-pc-toggle-stages]');
+  const expandedForSecondary = !(await chip.isVisible());
+  if (expandedForSecondary) {
+    assert.equal(await toggle.isVisible(), true, 'El pipeline colapsado debe permitir expandir etapas secundarias.');
+    await toggle.click();
+    await page.waitForFunction(() => document.querySelector<HTMLElement>('#crm .pc-stage-summary')?.dataset.expanded === 'true');
+  }
   await chip.click();
   await page.waitForTimeout(100);
   const geometry = await page.evaluate(() => {
@@ -431,6 +438,10 @@ async function assertPipelineSelection(page: Page): Promise<void> {
   assert.ok(geometry.selectedLeft >= geometry.containerLeft - 2 && geometry.selectedRight <= geometry.containerRight + 2, JSON.stringify(geometry));
   assert.ok(geometry.documentWidth <= geometry.viewport + 1);
   await page.locator('#crm [data-stage-quick="Todas"]').click();
+  if (expandedForSecondary) {
+    await toggle.click();
+    await page.waitForFunction(() => document.querySelector<HTMLElement>('#crm .pc-stage-summary')?.dataset.expanded === 'false');
+  }
 }
 
 async function assertFollowUpActions(page: Page): Promise<void> {

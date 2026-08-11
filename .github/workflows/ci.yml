@@ -25,6 +25,10 @@ jobs:
           node-version: 22
       - name: Instalar dependencias
         run: npm install --silent
+      - name: Provisionar WebKit Playwright
+        run: |
+          unset PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD
+          npx playwright install --with-deps webkit
       - name: Compilar TypeScript
         id: build
         run: |
@@ -54,6 +58,29 @@ jobs:
           name: test-diagnostics
           path: test.log
           retention-days: 3
+      - name: Verificar capturas WebKit PR142
+        if: always()
+        run: |
+          set -euo pipefail
+          directory="artifacts/leads-mobile-webkit-validation"
+          test -d "$directory"
+          expected=(
+            webkit-375-top-leads.png
+            webkit-390-top-leads.png
+            webkit-430-top-leads.png
+          )
+          test "$(find "$directory" -maxdepth 1 -type f -name '*.png' | wc -l)" -eq "${#expected[@]}"
+          for file in "${expected[@]}"; do
+            test -s "$directory/$file"
+          done
+      - name: Adjuntar capturas WebKit PR142
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: propcontrol-pr142-webkit-evidencia
+          path: artifacts/leads-mobile-webkit-validation
+          if-no-files-found: error
+          retention-days: 14
       - name: Adjuntar capturas reales B1.3
         if: always()
         uses: actions/upload-artifact@v4
@@ -141,5 +168,33 @@ jobs:
         with:
           name: leads-zero-training-phase1-capturas
           path: artifacts/leads-zero-training-phase1
+          if-no-files-found: error
+          retention-days: 14
+      - name: Verificar capturas finales PR142
+        if: always()
+        run: |
+          set -euo pipefail
+          directory="artifacts/leads-mobile-real-validation"
+          test -d "$directory"
+          expected=(
+            mobile-320-top-leads.png
+            mobile-390-top-leads.png
+            mobile-430-top-leads.png
+            mobile-520-top-leads.png
+            mobile-390-first-lead-cta.png
+            mobile-390-pipeline-collapsed.png
+            mobile-390-pipeline-expanded.png
+            desktop-control.png
+          )
+          test "$(find "$directory" -maxdepth 1 -type f -name '*.png' | wc -l)" -eq "${#expected[@]}"
+          for file in "${expected[@]}"; do
+            test -s "$directory/$file"
+          done
+      - name: Adjuntar capturas finales PR142
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: propcontrol-pr142-capturas-finales
+          path: artifacts/leads-mobile-real-validation
           if-no-files-found: error
           retention-days: 14

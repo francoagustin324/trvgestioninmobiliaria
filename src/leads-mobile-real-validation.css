@@ -1,0 +1,363 @@
+/* Validación física móvil postproducción — capa final de presentación de Leads.
+   Sólo layout/estilo <= 520px. Se carga al final con URL versionada nueva para evitar CSS obsoleto en dispositivos reales. */
+
+@media (max-width: 520px) {
+  /* Reafirma el layout de navegación inferior al final de la cascada. Evita que una regla
+     histórica del rail lateral reduzca el ancho útil en teléfonos estrechos. */
+  .premium-content,
+  .mvp-content {
+    width: 100% !important;
+    max-width: 100vw !important;
+    margin: 0 !important;
+    padding-right: 10px !important;
+    padding-left: 10px !important;
+    overflow-x: clip !important;
+  }
+
+  #crm.pc-leads-redesign {
+    width: 100% !important;
+    max-width: 100% !important;
+    min-width: 0;
+    margin-right: 0 !important;
+    margin-left: 0 !important;
+    overflow-x: clip;
+  }
+
+  /* Cabecera: título y CTA juntos; el subtítulo usa todo el ancho de la segunda fila. */
+  #crm.pc-leads-redesign .pc-leads-heading {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-rows: auto auto;
+    align-items: center;
+    gap: 3px 9px;
+    margin-bottom: 7px;
+  }
+
+  #crm.pc-leads-redesign .pc-leads-heading > div {
+    display: contents;
+  }
+
+  #crm.pc-leads-redesign .pc-leads-heading h1 {
+    grid-column: 1;
+    grid-row: 1;
+    min-width: 0;
+    margin: 0;
+    font-size: clamp(1.32rem, 6vw, 1.55rem);
+    line-height: 1.04;
+  }
+
+  #crm.pc-leads-redesign .pc-leads-heading p {
+    grid-column: 1 / -1;
+    grid-row: 2;
+    max-width: 34rem;
+    margin: 0;
+    font-size: 0.78rem;
+    line-height: 1.26;
+  }
+
+  #crm.pc-leads-redesign .pc-leads-heading > button {
+    grid-column: 2;
+    grid-row: 1;
+    width: auto !important;
+    min-width: 0;
+    min-height: 44px;
+    padding-inline: 12px;
+    border-radius: 12px;
+    white-space: nowrap;
+  }
+
+  /* Buscador + contador + filtros: una sola superficie compacta. */
+  #crm.pc-leads-redesign .pc-lead-controls {
+    gap: 6px;
+    margin-bottom: 7px;
+    padding: 8px;
+    border-radius: 14px;
+    box-shadow: 0 10px 24px rgba(0, 0, 0, 0.1);
+  }
+
+  #crm.pc-leads-redesign .mvp-lead-filter-primary {
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 7px;
+  }
+
+  #crm.pc-leads-redesign .mvp-lead-search-field > span {
+    display: none;
+  }
+
+  #crm.pc-leads-redesign #mvp-lead-search {
+    min-height: 44px;
+    height: 44px;
+    padding-inline: 12px;
+    font-size: 0.82rem;
+  }
+
+  #crm.pc-leads-redesign #mvp-lead-count {
+    min-width: 0;
+    max-width: 68px;
+    padding: 0;
+    color: #b8c8bf;
+    background: transparent;
+    border: 0;
+    box-shadow: none;
+    font-size: 0.69rem;
+    font-weight: 750;
+    line-height: 1.15;
+    text-align: right;
+    white-space: normal;
+  }
+
+  #crm.pc-leads-redesign .mvp-lead-more-filters {
+    border-top: 0;
+  }
+
+  #crm.pc-leads-redesign .mvp-lead-more-filters > summary {
+    min-height: 44px;
+    padding: 0 9px;
+    border: 1px solid rgba(255, 255, 255, 0.11);
+    border-radius: 11px;
+    background: rgba(255, 255, 255, 0.035);
+  }
+
+  #crm.pc-leads-redesign .mvp-lead-more-filters > summary span {
+    font-size: 0.75rem;
+  }
+
+  #crm.pc-leads-redesign .mvp-lead-more-filters > summary small {
+    display: none;
+  }
+
+  #crm.pc-leads-redesign .mvp-lead-active-filters {
+    gap: 6px;
+    padding: 7px 8px;
+  }
+
+  #crm.pc-leads-redesign .mvp-lead-filter-grid {
+    gap: 7px;
+    margin-top: 6px;
+  }
+
+  #crm.pc-leads-redesign .pc-filter-actions {
+    gap: 6px;
+    margin-top: 7px;
+  }
+
+  /* Prioridades: una fila táctil desplazable, no otro bloque alto 2x2. */
+  #crm.pc-leads-redesign .pc-attention-section {
+    gap: 4px;
+    padding: 0;
+  }
+
+  #crm.pc-leads-redesign .pc-attention-section .pc-section-heading {
+    display: block;
+    min-height: 0;
+  }
+
+  #crm.pc-leads-redesign .pc-attention-section .pc-section-heading span {
+    margin: 0;
+    font-size: 0.65rem;
+    line-height: 1.15;
+  }
+
+  #crm.pc-leads-redesign .pc-attention-section .pc-section-heading h2 {
+    display: none;
+  }
+
+  #crm.pc-leads-redesign .pc-attention-grid {
+    display: flex;
+    width: 100%;
+    max-width: 100%;
+    gap: 5px;
+    overflow-x: auto;
+    overflow-y: hidden;
+    padding: 0 0 1px;
+    scroll-snap-type: x proximity;
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  #crm.pc-leads-redesign .pc-attention-grid::-webkit-scrollbar,
+  #crm.pc-leads-redesign .mvp-stage-counters::-webkit-scrollbar {
+    display: none;
+  }
+
+  #crm.pc-leads-redesign .pc-attention-chip {
+    flex: 0 0 auto;
+    min-width: 116px;
+    min-height: 44px;
+    gap: 6px;
+    padding: 6px 8px;
+    border-radius: 10px;
+    scroll-snap-align: start;
+  }
+
+  #crm.pc-leads-redesign .pc-attention-chip span {
+    font-size: 0.69rem;
+    line-height: 1.14;
+    overflow-wrap: normal;
+  }
+
+  #crm.pc-leads-redesign .pc-attention-chip b {
+    min-width: 24px;
+    height: 24px;
+    padding-inline: 5px;
+    font-size: 0.72rem;
+  }
+
+  /* Pipeline colapsado: sólo etapas principales y, si corresponde, el secundario seleccionado. */
+  #crm.pc-leads-redesign .pc-stage-summary {
+    gap: 4px;
+    padding: 0;
+  }
+
+  #crm.pc-leads-redesign .pc-stage-heading {
+    min-height: 44px;
+    align-items: center;
+  }
+
+  #crm.pc-leads-redesign .pc-stage-heading > div {
+    min-width: 0;
+  }
+
+  #crm.pc-leads-redesign .pc-stage-heading span {
+    margin: 0;
+    font-size: 0.65rem;
+    line-height: 1.15;
+  }
+
+  #crm.pc-leads-redesign .pc-stage-heading h2 {
+    display: none;
+  }
+
+  #crm.pc-leads-redesign [data-pc-toggle-stages] {
+    min-width: 44px;
+    min-height: 44px;
+    padding-inline: 8px;
+    font-size: 0.69rem;
+    white-space: nowrap;
+  }
+
+  #crm.pc-leads-redesign .pc-stage-summary[data-expanded="false"] [data-pc-secondary-stage] {
+    display: none !important;
+  }
+
+  #crm.pc-leads-redesign .pc-stage-summary[data-expanded="false"] [data-pc-secondary-stage].active,
+  #crm.pc-leads-redesign .pc-stage-summary[data-expanded="false"] [data-pc-secondary-stage][aria-pressed="true"] {
+    display: flex !important;
+  }
+
+  #crm.pc-leads-redesign .pc-stage-summary[data-expanded="false"] .mvp-stage-counters {
+    display: flex !important;
+    grid-template: none !important;
+    flex-wrap: nowrap;
+    gap: 5px;
+    width: 100%;
+    max-width: 100%;
+    overflow-x: auto;
+    overflow-y: hidden;
+    padding: 0 0 1px;
+    scroll-snap-type: x proximity;
+    scrollbar-width: none;
+  }
+
+  #crm.pc-leads-redesign .pc-stage-summary[data-expanded="false"] .mvp-stage-counter {
+    width: auto !important;
+    min-width: max-content !important;
+    min-height: 44px;
+    flex: 0 0 auto !important;
+    padding: 6px 9px;
+    font-size: 0.72rem;
+    scroll-snap-align: start;
+  }
+
+  #crm.pc-leads-redesign .pc-stage-summary[data-expanded="true"] [data-pc-secondary-stage] {
+    display: flex !important;
+  }
+
+  #crm.pc-leads-redesign .pc-stage-summary[data-expanded="true"] .mvp-stage-counters {
+    display: flex !important;
+    flex-wrap: wrap;
+    gap: 5px;
+    overflow-x: visible;
+    padding: 0;
+  }
+
+  #crm.pc-leads-redesign .pc-stage-summary[data-expanded="true"] .mvp-stage-counter {
+    min-width: 0 !important;
+    min-height: 44px;
+    flex: 1 1 calc(50% - 5px) !important;
+    white-space: normal;
+  }
+
+  /* Acciones: tres controles en una fila aun en 320 px, sin perder targets táctiles. */
+  #crm.pc-leads-redesign .mvp-lead-quick-actions[data-zero-training-actions="true"] {
+    width: 100% !important;
+    max-width: 100% !important;
+    min-width: 0 !important;
+    grid-template-columns: minmax(0, 1.15fr) minmax(0, 0.85fr) 44px !important;
+    gap: 5px !important;
+  }
+
+  #crm.pc-leads-redesign .mvp-lead-quick-actions[data-zero-training-actions="true"] > button,
+  #crm.pc-leads-redesign .mvp-lead-quick-actions[data-zero-training-actions="true"] > details > summary {
+    min-width: 0 !important;
+    padding-inline: 5px !important;
+    font-size: 0.82rem !important;
+  }
+
+  #crm.pc-leads-redesign .mvp-lead-actions-menu,
+  #crm.pc-leads-redesign .mvp-lead-actions-menu > summary {
+    width: 44px !important;
+    min-width: 44px !important;
+  }
+
+  /* CTA WhatsApp: regla final, específica y cache-busteada. El texto real ya es “WhatsApp”. */
+  #crm.pc-leads-redesign .mvp-lead-quick-actions[data-zero-training-actions="true"] > button.mvp-whatsapp-contact-button.mvp-zero-primary {
+    border-color: rgba(111, 199, 154, 0.34) !important;
+    background: #1b7045 !important;
+    background-image: none !important;
+    color: #f7fff9 !important;
+    box-shadow: 0 4px 11px rgba(5, 54, 30, 0.18) !important;
+    filter: none !important;
+    text-shadow: none !important;
+    gap: 0 !important;
+  }
+
+  #crm.pc-leads-redesign .mvp-lead-quick-actions[data-zero-training-actions="true"] > button.mvp-whatsapp-contact-button.mvp-zero-primary::before,
+  #crm.pc-leads-redesign .mvp-lead-quick-actions[data-zero-training-actions="true"] > button.mvp-whatsapp-contact-button.mvp-zero-primary::after {
+    content: none !important;
+    display: none !important;
+    width: 0 !important;
+    height: 0 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+  }
+}
+
+/* El placeholder funcional completo se conserva; en anchos estrechos le damos espacio real
+   en vez de permitir que el navegador lo corte visualmente. */
+@media (max-width: 410px) {
+  #crm.pc-leads-redesign #mvp-lead-search {
+    font-size: 0.74rem;
+  }
+}
+
+@media (max-width: 360px) {
+  #crm.pc-leads-redesign .mvp-lead-filter-primary {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 3px;
+  }
+
+  #crm.pc-leads-redesign #mvp-lead-count {
+    max-width: none;
+    justify-self: end;
+    line-height: 1;
+  }
+}
+
+@media (max-width: 340px) {
+  #crm.pc-leads-redesign #mvp-lead-search {
+    padding-inline: 7px;
+    font-size: 0.68rem;
+  }
+}
