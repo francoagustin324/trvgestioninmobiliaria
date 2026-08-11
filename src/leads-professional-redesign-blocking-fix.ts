@@ -21,17 +21,7 @@ function isDesktop(): boolean {
   return window.matchMedia(DESKTOP_QUERY).matches;
 }
 
-function setInteractiveRegion(element: HTMLElement | null, enabled: boolean): void {
-  if (!element) return;
-  element.hidden = !enabled;
-  element.toggleAttribute('aria-hidden', !enabled);
-  (element as HTMLElement & { inert: boolean }).inert = !enabled;
-}
-
 function applyFilterInteractionState(details: HTMLDetailsElement, enabled: boolean): void {
-  setInteractiveRegion(details.querySelector<HTMLElement>('.mvp-lead-filter-grid'), enabled);
-  setInteractiveRegion(details.querySelector<HTMLElement>('.mvp-lead-filter-toggles'), enabled);
-  setInteractiveRegion(details.querySelector<HTMLElement>('[data-pc-filter-actions]'), enabled);
   details.classList.toggle('pc-filter-panel-open', isMobile() && enabled);
   details.querySelector<HTMLElement>(':scope > summary')?.setAttribute('aria-expanded', String(enabled));
 }
