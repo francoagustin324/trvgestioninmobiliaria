@@ -198,6 +198,17 @@ async function load(page: Page, url: string): Promise<void> {
   await page.waitForTimeout(120);
 }
 
+async function waitForFilterPanelVisible(page: Page): Promise<void> {
+  await page.waitForFunction(() => {
+    const details = document.querySelector<HTMLDetailsElement>('#crm .mvp-lead-more-filters');
+    const stage = document.querySelector<HTMLElement>('#mvp-lead-stage-filter');
+    const clear = document.querySelector<HTMLElement>('[data-pc-clear-filters]');
+    const apply = document.querySelector<HTMLElement>('[data-pc-apply-filters]');
+    const visible = (element: HTMLElement | null): boolean => Boolean(element && getComputedStyle(element).display !== 'none' && getComputedStyle(element).visibility !== 'hidden' && element.getClientRects().length > 0);
+    return Boolean(details?.open && visible(stage) && visible(clear) && visible(apply));
+  }, undefined, { timeout: 5_000 });
+}
+
 async function noHorizontalOverflow(page: Page): Promise<boolean> {
   return page.evaluate(() => {
     const html = document.documentElement;
@@ -324,14 +335,14 @@ test('PR143 desktop cero capacitación Chromium + regresión móvil', { timeout:
     await assertControlTarget(page, '#crm .mvp-lead-more-filters > summary', 'Summary Filtros');
 
     await filterSummary.click();
-    await page.waitForFunction(() => document.querySelector<HTMLDetailsElement>('#crm .mvp-lead-more-filters')?.open === true);
+    await waitForFilterPanelVisible(page);
     for (const selector of ['#mvp-lead-stage-filter', '#mvp-lead-temperature-filter', '#mvp-lead-assignee-filter', '#mvp-lead-order']) {
       const control = page.locator(selector);
       assert.equal(await control.isVisible(), true, `${selector} debe estar accesible.`);
       await assertControlTarget(page, selector);
     }
-    assert.equal(await page.locator('[data-pc-clear-filters]').isVisible(), true);
-    assert.equal(await page.locator('[data-pc-apply-filters]').isVisible(), true);
+    assert.equal(await page.locator('[data-pc-clear-filters]').isVisible(), true, 'Limpiar debe estar visible al abrir Filtros.');
+    assert.equal(await page.locator('[data-pc-apply-filters]').isVisible(), true, 'Aplicar filtros debe estar visible al abrir Filtros.');
     await assertControlTarget(page, '[data-pc-clear-filters]', 'Limpiar filtros');
     await assertControlTarget(page, '[data-pc-apply-filters]', 'Aplicar filtros');
 
@@ -385,7 +396,7 @@ test('PR143 desktop cero capacitación Chromium + regresión móvil', { timeout:
     assert.equal((await pipelineToggle.textContent())?.trim(), 'Ver menos etapas');
 
     await filterSummary.click();
-    await page.waitForFunction(() => document.querySelector<HTMLDetailsElement>('#crm .mvp-lead-more-filters')?.open === true);
+    await waitForFilterPanelVisible(page);
     await page.locator('[data-pc-clear-filters]').click();
     await page.waitForFunction(() => document.querySelector('#crm .mvp-lead-more-filters > summary span')?.textContent?.trim() === 'Filtros');
     assert.equal(await page.locator('#mvp-lead-stage-filter').inputValue(), 'Todas');
@@ -444,7 +455,7 @@ test('PR143 desktop cero capacitación Chromium + regresión móvil', { timeout:
     await page.setViewportSize({ width: 1366, height: 768 });
     await page.waitForTimeout(120);
     await page.locator('#crm .mvp-lead-more-filters > summary').click();
-    await page.waitForFunction(() => document.querySelector<HTMLDetailsElement>('#crm .mvp-lead-more-filters')?.open === true);
+    await waitForFilterPanelVisible(page);
     await page.screenshot({ path: `${CHROMIUM_ARTIFACT_DIR}/desktop-1366-filters-open.png`, fullPage: false });
     await page.locator('#crm .mvp-lead-more-filters > summary').click();
     if ((await pipelineToggle.getAttribute('aria-expanded')) !== 'true') await pipelineToggle.click();
@@ -530,8 +541,8 @@ test('PR143 WebKit desktop 1280/1440', { timeout: 120_000 }, async () => {
       assert.ok(distance < BASELINE_DISTANCE, `Primer lead debe subir también en WebKit: ${distance} < ${BASELINE_DISTANCE}.`);
       await assertDesktopNewLeadPlacement(page);
       await page.locator('#crm .mvp-lead-more-filters > summary').click();
-      await page.waitForFunction(() => document.querySelector<HTMLDetailsElement>('#crm .mvp-lead-more-filters')?.open === true);
-      assert.equal(await page.locator('#mvp-lead-stage-filter').isVisible(), true);
+      await waitForFilterPanelVisible(page);
+      assert.equal(await page.locator('#mvp-lead-stage-filter').isVisible(), true, 'Etapa debe estar visible cuando el disclosure está abierto.');
       await assertControlTarget(page, '#mvp-lead-stage-filter', 'Select WebKit');
       await page.locator('#crm .mvp-lead-more-filters > summary').click();
       await page.screenshot({ path: `${WEBKIT_ARTIFACT_DIR}/${viewport.screenshot}`, fullPage: false });
