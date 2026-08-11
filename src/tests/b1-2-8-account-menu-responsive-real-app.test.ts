@@ -8,6 +8,7 @@ import {
   rmSync,
   statSync,
 } from 'node:fs';
+import { createServer as createNetServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
@@ -179,9 +180,33 @@ function chromeExecutable(): string | undefined {
   ].find(existsSync);
 }
 
-async function waitForServer(url: string): Promise<void> {
+async function reserveFreePort(): Promise<number> {
+  return new Promise<number>((resolve, reject) => {
+    const probe = createNetServer();
+    probe.unref();
+    probe.once('error', reject);
+    probe.listen(0, '127.0.0.1', () => {
+      const address = probe.address();
+      if (!address || typeof address === 'string') {
+        probe.close();
+        reject(new Error('No se pudo resolver un puerto local libre para B1.2.8.'));
+        return;
+      }
+      const port = address.port;
+      probe.close((error) => {
+        if (error) reject(error);
+        else resolve(port);
+      });
+    });
+  });
+}
+
+async function waitForServer(url: string, server: ChildProcess, stderr: () => string): Promise<void> {
   let lastError: unknown;
   for (let attempt = 0; attempt < 100; attempt += 1) {
+    if (server.exitCode !== null) {
+      throw new Error(`Servidor B1.2.8 terminó antes de health (code=${server.exitCode}): ${stderr().trim() || 'sin stderr'}`);
+    }
     try {
       if ((await fetch(`${url}/health`)).ok) return;
     } catch (error) {
@@ -189,10 +214,12 @@ async function waitForServer(url: string): Promise<void> {
     }
     await new Promise((resolve) => setTimeout(resolve, 250));
   }
-  throw new Error(`Servidor B1.2.8 no disponible: ${String(lastError ?? 'sin respuesta')}`);
+  throw new Error(`Servidor B1.2.8 no disponible: ${String(lastError ?? 'sin respuesta')} · proceso=${server.exitCode === null ? 'activo' : `exit ${server.exitCode}`} · stderr=${stderr().trim() || 'vacío'}`);
 }
 
-async function startServer(port: number): Promise<ChildProcess> {
+async function startServer(): Promise<{ server: ChildProcess; url: string }> {
+  const port = await reserveFreePort();
+  const url = `http://127.0.0.1:${port}`;
   const server = spawn(process.execPath, ['dist/server.js'], {
     cwd: process.cwd(),
     env: {
@@ -208,8 +235,16 @@ async function startServer(port: number): Promise<ChildProcess> {
     },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
-  await waitForServer(`http://127.0.0.1:${port}`);
-  return server;
+  let stderrBuffer = '';
+  server.stderr?.setEncoding('utf8');
+  server.stderr?.on('data', (chunk: string) => { stderrBuffer += chunk; });
+  try {
+    await waitForServer(url, server, () => stderrBuffer);
+    return { server, url };
+  } catch (error) {
+    if (server.exitCode === null) server.kill('SIGTERM');
+    throw error;
+  }
 }
 
 async function stopServer(server: ChildProcess): Promise<void> {
@@ -499,9 +534,7 @@ test(
   async () => {
     const executablePath = chromeExecutable();
     assert.ok(executablePath, 'Chrome/Chromium no disponible para B1.2.8.');
-    const port = 47000 + Math.floor(Math.random() * 1000);
-    const url = `http://127.0.0.1:${port}`;
-    const server = await startServer(port);
+    const { server, url } = await startServer();
     const browser = await chromium.launch({ executablePath, headless: true });
     try {
       for (const viewport of viewports) {
@@ -532,9 +565,7 @@ test(
   async () => {
     const executablePath = chromeExecutable();
     assert.ok(executablePath, 'Chrome/Chromium no disponible para B1.2.8.');
-    const port = 48000 + Math.floor(Math.random() * 1000);
-    const url = `http://127.0.0.1:${port}`;
-    const server = await startServer(port);
+    const { server, url } = await startServer();
     const browser = await chromium.launch({ executablePath, headless: true });
     const context = await createContext(browser, { width: 390, height: 844 });
     try {
@@ -606,9 +637,7 @@ test(
   async () => {
     const executablePath = chromeExecutable();
     assert.ok(executablePath, 'Chrome/Chromium no disponible para B1.2.8.');
-    const port = 48500 + Math.floor(Math.random() * 1000);
-    const url = `http://127.0.0.1:${port}`;
-    const server = await startServer(port);
+    const { server, url } = await startServer();
     const browser = await chromium.launch({ executablePath, headless: true });
     try {
       const ownerContext = await createContext(browser, { width: 390, height: 844 }, 'Dueño');
@@ -697,10 +726,8 @@ test(
   async () => {
     const executablePath = chromeExecutable();
     assert.ok(executablePath, 'Chrome/Chromium no disponible para B1.2.8.');
-    const port = 49000 + Math.floor(Math.random() * 1000);
-    const url = `http://127.0.0.1:${port}`;
+    const { server, url } = await startServer();
     const screenshots = mkdtempSync(join(tmpdir(), 'propcontrol-b128-product-'));
-    const server = await startServer(port);
     const browser = await chromium.launch({ executablePath, headless: true });
     let captured = 0;
     try {
@@ -783,9 +810,7 @@ test(
   async () => {
     const executablePath = chromeExecutable();
     assert.ok(executablePath, 'Chrome/Chromium no disponible para B1.2.8.');
-    const port = 49500 + Math.floor(Math.random() * 1000);
-    const url = `http://127.0.0.1:${port}`;
-    const server = await startServer(port);
+    const { server, url } = await startServer();
     const browser = await chromium.launch({ executablePath, headless: true });
     const context = await createContext(browser, { width: 390, height: 844 });
     try {
