@@ -172,12 +172,17 @@
   }
 
   #crm.pc-leads-redesign .pc-stage-summary {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 8px;
     order: 4;
     padding: 0;
     margin: 0;
   }
 
-  #crm.pc-leads-redesign .pc-attention-section .pc-section-heading {
+  #crm.pc-leads-redesign .pc-attention-section .pc-section-heading,
+  #crm.pc-leads-redesign .pc-stage-heading > div {
     position: absolute;
     width: 1px;
     height: 1px;
@@ -190,9 +195,7 @@
   }
 
   #crm.pc-leads-redesign .pc-stage-heading {
-    min-height: 44px;
-    margin: 0;
-    align-items: center;
+    display: contents;
   }
 
   #crm.pc-leads-redesign .pc-section-heading > div > span {
@@ -248,13 +251,9 @@
   #crm.pc-leads-redesign [data-pc-attention="new-uncontacted"] { order: 3; }
   #crm.pc-leads-redesign [data-pc-attention="missing-action"] { order: 4; }
 
-  #crm.pc-leads-redesign .pc-stage-heading {
-    display: flex;
-    justify-content: space-between;
-    gap: 12px;
-  }
-
   #crm.pc-leads-redesign [data-pc-toggle-stages] {
+    grid-column: 2;
+    grid-row: 1;
     display: inline-flex;
     min-height: 44px;
     align-items: center;
@@ -263,6 +262,8 @@
   }
 
   #crm.pc-leads-redesign .mvp-stage-counters {
+    grid-column: 1;
+    grid-row: 1;
     display: flex;
     flex-wrap: nowrap;
     gap: 7px;

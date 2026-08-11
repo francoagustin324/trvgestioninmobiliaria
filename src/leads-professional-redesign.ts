@@ -167,9 +167,9 @@ function renderAttentionSection(container: HTMLElement): void {
 
   const definitions: Array<{ id: AttentionFilter; label: string }> = [
     { id: 'overdue', label: 'Seguimientos vencidos' },
-    { id: 'missing-action', label: 'Sin próxima acción' },
-    { id: 'new-uncontacted', label: 'Nuevos sin contactar' },
     { id: 'today', label: 'Seguimientos para hoy' },
+    { id: 'new-uncontacted', label: 'Nuevos sin contactar' },
+    { id: 'missing-action', label: 'Sin próxima acción' },
   ];
   const grid = section.querySelector<HTMLElement>('.pc-attention-grid');
   if (!grid) return;
@@ -209,7 +209,7 @@ function enhanceFilterPanel(container: HTMLElement): void {
   const details = panel.querySelector<HTMLDetailsElement>('.mvp-lead-more-filters');
   const summary = details?.querySelector<HTMLElement>('summary');
   const active = activeFilterCount(container);
-  if (summary) {
+  if (summary && !isDesktop()) {
     const label = summary.querySelector<HTMLElement>('span');
     text(label, active ? `Filtros (${active})` : 'Filtros');
     summary.setAttribute('aria-label', active ? `Abrir filtros. ${active} activos` : 'Abrir filtros');
@@ -392,8 +392,8 @@ function install(): void {
     form.querySelector<HTMLButtonElement>('[data-cancel-client-edit]')?.click();
   });
 
-  window.addEventListener('resize', scheduleEnhance);
   window.matchMedia(MOBILE_QUERY).addEventListener('change', scheduleEnhance);
+  window.matchMedia(DESKTOP_QUERY).addEventListener('change', scheduleEnhance);
   scheduleEnhance();
 }
 
