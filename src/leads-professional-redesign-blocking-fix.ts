@@ -61,23 +61,29 @@ function synchronizeDesktopFilterSummary(details: HTMLDetailsElement, active: nu
   summary.setAttribute('aria-label', active ? `Filtros. ${active} activos` : 'Filtros');
 }
 
+function bindFilterDisclosure(details: HTMLDetailsElement): void {
+  if (boundFilterDetails.has(details)) return;
+  boundFilterDetails.add(details);
+  const summary = details.querySelector<HTMLElement>(':scope > summary');
+  summary?.addEventListener('click', (event) => {
+    if (event.defaultPrevented) return;
+    const requestedOpen = !details.open;
+    if (isMobile()) filterPanelOpen = requestedOpen;
+    else if (isDesktop()) desktopFilterPanelOpen = requestedOpen;
+  });
+  details.addEventListener('toggle', () => {
+    if (!details.isConnected) return;
+    applyFilterInteractionState(details, (!isMobile() && !isDesktop()) || details.open);
+  });
+}
+
 function synchronizeFilterPanel(crm: HTMLElement): void {
   const details = crm.querySelector<HTMLDetailsElement>('.mvp-lead-more-filters');
   if (!details) return;
-
-  if (!boundFilterDetails.has(details)) {
-    boundFilterDetails.add(details);
-    details.addEventListener('toggle', () => {
-      if (!details.isConnected) return;
-      if (isMobile()) filterPanelOpen = details.open;
-      else if (isDesktop()) desktopFilterPanelOpen = details.open;
-      applyFilterInteractionState(details, (!isMobile() && !isDesktop()) || details.open);
-    });
-  }
+  bindFilterDisclosure(details);
 
   if (isMobile()) {
     desktopFilterPanelOpen = false;
-    if (details.open && !filterPanelOpen) filterPanelOpen = true;
     if (details.open !== filterPanelOpen) details.open = filterPanelOpen;
     applyFilterInteractionState(details, details.open);
     return;
