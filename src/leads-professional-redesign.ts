@@ -1,6 +1,7 @@
 type AttentionFilter = 'all' | 'overdue' | 'missing-action' | 'new-uncontacted' | 'today';
 
 const MOBILE_QUERY = '(max-width: 720px)';
+const DESKTOP_QUERY = '(min-width: 901px)';
 const LEAD_CARD_SELECTOR = '#mvp-lead-results .mvp-lead-card';
 let attentionFilter: AttentionFilter = 'all';
 let stagesExpanded = false;
@@ -8,6 +9,10 @@ let scheduled = false;
 
 function isMobile(): boolean {
   return window.matchMedia(MOBILE_QUERY).matches;
+}
+
+function isDesktop(): boolean {
+  return window.matchMedia(DESKTOP_QUERY).matches;
 }
 
 function text(element: Element | null, value: string): void {
@@ -269,7 +274,7 @@ function enhanceStageSummary(container: HTMLElement): void {
 
   const toggle = shell.querySelector<HTMLButtonElement>('[data-pc-toggle-stages]');
   if (toggle) {
-    toggle.hidden = !isMobile();
+    toggle.hidden = !(isMobile() || isDesktop());
     toggle.textContent = stagesExpanded ? 'Ver menos etapas' : 'Ver todas las etapas';
     toggle.setAttribute('aria-expanded', String(stagesExpanded));
   }
