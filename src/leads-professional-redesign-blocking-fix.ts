@@ -70,6 +70,7 @@ function bindFilterDisclosure(details: HTMLDetailsElement): void {
     const requestedOpen = !details.open;
     if (isMobile()) filterPanelOpen = requestedOpen;
     else if (isDesktop()) desktopFilterPanelOpen = requestedOpen;
+    applyFilterInteractionState(details, requestedOpen);
   });
   details.addEventListener('toggle', () => {
     if (!details.isConnected) return;
