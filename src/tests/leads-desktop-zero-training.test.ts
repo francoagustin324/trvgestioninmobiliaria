@@ -21,11 +21,29 @@ const DESKTOP_VIEWPORTS = [
 ] as const;
 
 function owner(): TeamMember {
-  return { id: 1, userId: USER_ID, name: 'Franco Solis', email: 'franco@propcontrol.test', phone: '5493515110069', role: 'Dueño', status: 'Activo', createdAt: '2026-08-11T12:00:00.000Z' };
+  return {
+    id: 1,
+    userId: USER_ID,
+    name: 'Franco Solis',
+    email: 'franco@propcontrol.test',
+    phone: '5493515110069',
+    role: 'Dueño',
+    status: 'Activo',
+    createdAt: '2026-08-11T12:00:00.000Z',
+  };
 }
 
 function secondMember(): TeamMember {
-  return { id: 2, userId: 'desktop-zero-training-member-2', name: 'Agente Demo', email: 'agente@propcontrol.test', phone: '5493515110070', role: 'Dueño', status: 'Activo', createdAt: '2026-08-11T12:00:00.000Z' };
+  return {
+    id: 2,
+    userId: 'desktop-zero-training-member-2',
+    name: 'Agente Demo',
+    email: 'agente@propcontrol.test',
+    phone: '5493515110070',
+    role: 'Dueño',
+    status: 'Activo',
+    createdAt: '2026-08-11T12:00:00.000Z',
+  };
 }
 
 function fixture(): CrmData {
@@ -34,25 +52,67 @@ function fixture(): CrmData {
   crm.teamMembers = [owner(), secondMember()];
   crm.activityLog = [];
   crm.clients = [
-    { id: 1, name: 'Lucía Martín', phone: '+54 9 351 511-0069', email: 'lucia@ejemplo.com', interest: 'Dúplex en Docta', budget: 'USD 120000', currency: 'USD', status: 'Lead', temperature: 'Tibio', pipeline: 'Nuevo', assignedToId: 1, createdById: 1 },
-    { id: 2, name: 'Martín Pérez', phone: '+54 9 351 511-0071', email: 'martin@ejemplo.com', interest: 'Departamento en General Paz', budget: 'USD 90000', currency: 'USD', status: 'Lead', temperature: 'Caliente', pipeline: 'Contactado', assignedToId: 2, createdById: 1, nextAction: 'Confirmar visita', nextFollowUp: '2026-08-11' },
+    {
+      id: 1,
+      name: 'Lucía Martín',
+      phone: '+54 9 351 511-0069',
+      email: 'lucia@ejemplo.com',
+      interest: 'Dúplex en Docta',
+      budget: 'USD 120000',
+      currency: 'USD',
+      status: 'Lead',
+      temperature: 'Tibio',
+      pipeline: 'Nuevo',
+      assignedToId: 1,
+      createdById: 1,
+    },
+    {
+      id: 2,
+      name: 'Martín Pérez',
+      phone: '+54 9 351 511-0071',
+      email: 'martin@ejemplo.com',
+      interest: 'Departamento en General Paz',
+      budget: 'USD 90000',
+      currency: 'USD',
+      status: 'Lead',
+      temperature: 'Caliente',
+      pipeline: 'Contactado',
+      assignedToId: 2,
+      createdById: 1,
+      nextAction: 'Confirmar visita',
+      nextFollowUp: '2026-08-11',
+    },
   ];
   crm.reminders = [];
   crm.conversations = [];
   crm.properties = [];
   crm.contacts = [];
   crm.fichas = [];
-  crm.settings = { ...crm.settings, profileName: owner().name, profileEmail: owner().email, agencyName: 'TRV Gestión Inmobiliaria' };
+  crm.settings = {
+    ...crm.settings,
+    profileName: owner().name,
+    profileEmail: owner().email,
+    agencyName: 'TRV Gestión Inmobiliaria',
+  };
   return crm;
 }
 
 function chromeExecutable(): string | undefined {
-  return ['/usr/bin/google-chrome', '/usr/bin/google-chrome-stable', '/usr/bin/chromium', '/usr/bin/chromium-browser'].find(existsSync);
+  return [
+    '/usr/bin/google-chrome',
+    '/usr/bin/google-chrome-stable',
+    '/usr/bin/chromium',
+    '/usr/bin/chromium-browser',
+  ].find(existsSync);
 }
 
 async function waitForServer(url: string): Promise<void> {
   for (let attempt = 0; attempt < 120; attempt += 1) {
-    try { if ((await fetch(`${url}/health`)).ok) return; } catch { /* retry */ }
+    try {
+      if ((await fetch(`${url}/health`)).ok) return;
+    } catch {
+      // retry
+    }
     await new Promise((resolve) => setTimeout(resolve, 250));
   }
   throw new Error('Servidor de prueba no disponible.');
@@ -61,7 +121,17 @@ async function waitForServer(url: string): Promise<void> {
 async function startServer(port: number): Promise<ChildProcess> {
   const server = spawn(process.execPath, ['dist/server.js'], {
     cwd: process.cwd(),
-    env: { ...process.env, PORT: String(port), SUPABASE_URL: '', SUPABASE_PUBLISHABLE_KEY: '', SUPABASE_SECRET_KEY: '', SUPABASE_SERVICE_ROLE_KEY: '', LEAD_QUALIFICATION_AI_ENDPOINT: '', LEAD_QUALIFICATION_AI_KEY: '', LEAD_QUALIFICATION_AI_MODEL: '' },
+    env: {
+      ...process.env,
+      PORT: String(port),
+      SUPABASE_URL: '',
+      SUPABASE_PUBLISHABLE_KEY: '',
+      SUPABASE_SECRET_KEY: '',
+      SUPABASE_SERVICE_ROLE_KEY: '',
+      LEAD_QUALIFICATION_AI_ENDPOINT: '',
+      LEAD_QUALIFICATION_AI_KEY: '',
+      LEAD_QUALIFICATION_AI_MODEL: '',
+    },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   await waitForServer(`http://127.0.0.1:${port}`);
@@ -72,8 +142,14 @@ async function stopServer(server: ChildProcess): Promise<void> {
   if (server.exitCode !== null) return;
   server.kill('SIGTERM');
   await new Promise<void>((resolve) => {
-    const timer = setTimeout(() => { if (server.exitCode === null) server.kill('SIGKILL'); resolve(); }, 2_000);
-    server.once('exit', () => { clearTimeout(timer); resolve(); });
+    const timer = setTimeout(() => {
+      if (server.exitCode === null) server.kill('SIGKILL');
+      resolve();
+    }, 2_000);
+    server.once('exit', () => {
+      clearTimeout(timer);
+      resolve();
+    });
   });
 }
 
@@ -81,11 +157,29 @@ async function seedContext(context: BrowserContext): Promise<void> {
   const actorKey = `cloud:${USER_ID}`;
   const identityKey = `propcontrol-whatsapp-human-identity-v1:${encodeURIComponent(ORG_ID)}:1:${encodeURIComponent(actorKey)}`;
   await context.addInitScript(({ crm, identityStorageKey, storageKey }) => {
-    localStorage.setItem('propcontrol-cloud-session-v1', JSON.stringify({ accessToken: 'access', refreshToken: 'refresh', expiresAt: Date.now() + 3_600_000, userId: 'desktop-zero-training-owner', email: 'franco@propcontrol.test' }));
+    localStorage.setItem('propcontrol-cloud-session-v1', JSON.stringify({
+      accessToken: 'access',
+      refreshToken: 'refresh',
+      expiresAt: Date.now() + 3_600_000,
+      userId: 'desktop-zero-training-owner',
+      email: 'franco@propcontrol.test',
+    }));
     localStorage.setItem(storageKey, JSON.stringify(crm));
-    localStorage.setItem(`${storageKey}:sync`, JSON.stringify({ dirty: false, localUpdatedAt: '2026-08-11T18:00:00.000Z', lastCloudSavedAt: '2026-08-11T18:00:00.000Z', lastCloudVersion: '2026-08-11T18:00:00.000Z' }));
+    localStorage.setItem(`${storageKey}:sync`, JSON.stringify({
+      dirty: false,
+      localUpdatedAt: '2026-08-11T18:00:00.000Z',
+      lastCloudSavedAt: '2026-08-11T18:00:00.000Z',
+      lastCloudVersion: '2026-08-11T18:00:00.000Z',
+    }));
     localStorage.setItem('propcontrol-active-team-member-v1', '1');
-    localStorage.setItem(identityStorageKey, JSON.stringify({ version: 1, organizationId: 'desktop-zero-training-org', memberId: 1, actorKey: 'cloud:desktop-zero-training-owner', humanName: 'Franco Solis', confirmedAt: '2026-08-11T18:00:00.000Z' }));
+    localStorage.setItem(identityStorageKey, JSON.stringify({
+      version: 1,
+      organizationId: 'desktop-zero-training-org',
+      memberId: 1,
+      actorKey: 'cloud:desktop-zero-training-owner',
+      humanName: 'Franco Solis',
+      confirmedAt: '2026-08-11T18:00:00.000Z',
+    }));
   }, { crm: fixture(), identityStorageKey: identityKey, storageKey: STORAGE_KEY });
 }
 
@@ -98,12 +192,16 @@ async function load(page: Page, url: string): Promise<void> {
     const details = document.querySelector<HTMLDetailsElement>('#crm .mvp-lead-more-filters');
     const toggle = document.querySelector<HTMLButtonElement>('#crm [data-pc-toggle-stages]');
     return Boolean(details && !details.open && toggle && !toggle.hidden);
-  });
-  await page.waitForTimeout(100);
+  }, undefined, { timeout: 20_000 });
+  await page.waitForTimeout(120);
 }
 
 async function noHorizontalOverflow(page: Page): Promise<boolean> {
-  return page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1 && document.body.scrollWidth <= document.body.clientWidth + 1);
+  return page.evaluate(() => {
+    const html = document.documentElement;
+    const body = document.body;
+    return html.scrollWidth <= html.clientWidth + 1 && body.scrollWidth <= body.clientWidth + 1;
+  });
 }
 
 async function firstLeadDistance(page: Page): Promise<number> {
@@ -125,6 +223,29 @@ async function minimumControlHeight(page: Page, selector: string): Promise<numbe
   return page.locator(selector).evaluate((element) => element.getBoundingClientRect().height);
 }
 
+async function assertDesktopNewLeadPlacement(page: Page): Promise<void> {
+  const result = await page.evaluate(() => {
+    const heading = document.querySelector<HTMLElement>('#crm .pc-leads-heading');
+    const button = document.querySelector<HTMLElement>('#crm [data-toggle="client-form"]');
+    if (!heading || !button) throw new Error('Cabecera o Nuevo lead ausente.');
+    const headingRect = heading.getBoundingClientRect();
+    const buttonRect = button.getBoundingClientRect();
+    return {
+      parent: button.parentElement?.className ?? '',
+      headingTop: headingRect.top,
+      headingBottom: headingRect.bottom,
+      headingRight: headingRect.right,
+      buttonTop: buttonRect.top,
+      buttonBottom: buttonRect.bottom,
+      buttonRight: buttonRect.right,
+    };
+  });
+  assert.match(result.parent, /mvp-lead-filter-primary/, 'Se conserva el contrato DOM histórico desktop.');
+  assert.ok(result.buttonTop >= result.headingTop - 3, JSON.stringify(result));
+  assert.ok(result.buttonBottom <= result.headingBottom + 3, JSON.stringify(result));
+  assert.ok(Math.abs(result.headingRight - result.buttonRight) <= 3, JSON.stringify(result));
+}
+
 function resetArtifactDirectory(directory: string): void {
   rmSync(directory, { recursive: true, force: true });
   mkdirSync(directory, { recursive: true });
@@ -137,7 +258,15 @@ test('PR143 desktop cero capacitación Chromium + regresión móvil', { timeout:
   const port = 62200 + Math.floor(Math.random() * 100);
   const server = await startServer(port);
   const browser = await chromium.launch({ executablePath, headless: true });
-  const context = await browser.newContext({ viewport: { width: 1366, height: 768 }, screen: { width: 1366, height: 768 }, isMobile: false, hasTouch: false, locale: 'es-AR', timezoneId: 'America/Argentina/Cordoba', colorScheme: 'dark' });
+  const context = await browser.newContext({
+    viewport: { width: 1366, height: 768 },
+    screen: { width: 1366, height: 768 },
+    isMobile: false,
+    hasTouch: false,
+    locale: 'es-AR',
+    timezoneId: 'America/Argentina/Cordoba',
+    colorScheme: 'dark',
+  });
   await seedContext(context);
 
   try {
@@ -148,9 +277,10 @@ test('PR143 desktop cero capacitación Chromium + regresión móvil', { timeout:
     const heading = page.locator('#crm .pc-leads-heading');
     assert.equal((await heading.locator('h1').textContent())?.trim(), 'Leads');
     assert.equal((await heading.locator('p').textContent())?.trim(), 'Contactá primero a los leads que requieren atención.');
-    const newLead = heading.locator('[data-toggle="client-form"]');
+    const newLead = page.locator('#crm [data-toggle="client-form"]').first();
     assert.equal(await newLead.isVisible(), true, 'Nuevo lead debe estar visible en cabecera desktop.');
-    assert.ok(await minimumControlHeight(page, '#crm .pc-leads-heading [data-toggle="client-form"]') >= 42);
+    assert.ok(await minimumControlHeight(page, '#crm [data-toggle="client-form"]') >= 42);
+    await assertDesktopNewLeadPlacement(page);
 
     const search = page.locator('#mvp-lead-search');
     assert.equal(await search.isVisible(), true, 'Buscador siempre visible.');
@@ -163,7 +293,7 @@ test('PR143 desktop cero capacitación Chromium + regresión móvil', { timeout:
     assert.ok(await minimumControlHeight(page, '#crm .mvp-lead-more-filters > summary') >= 42);
 
     await filterSummary.click();
-    assert.equal(await details.getAttribute('open'), '', 'Filtros deben abrirse manualmente.');
+    await page.waitForFunction(() => document.querySelector<HTMLDetailsElement>('#crm .mvp-lead-more-filters')?.open === true);
     for (const selector of ['#mvp-lead-stage-filter', '#mvp-lead-temperature-filter', '#mvp-lead-assignee-filter', '#mvp-lead-order']) {
       const control = page.locator(selector);
       assert.equal(await control.isVisible(), true, `${selector} debe estar accesible.`);
@@ -174,18 +304,22 @@ test('PR143 desktop cero capacitación Chromium + regresión móvil', { timeout:
 
     await page.locator('#mvp-lead-stage-filter').selectOption('Calificado');
     await page.waitForFunction(() => document.querySelector('#crm .mvp-lead-more-filters > summary span')?.textContent?.includes('Filtros (1)'));
-    assert.equal(await details.getAttribute('open'), '', 'Un filtro activo debe quedar identificable.');
-    assert.match((await filterSummary.locator('span').textContent()) ?? '', /Filtros \([1-9]/);
+    assert.equal(await page.locator('#crm .mvp-lead-more-filters').getAttribute('open'), '', 'Un filtro activo debe quedar identificable.');
+    assert.match((await page.locator('#crm .mvp-lead-more-filters > summary span').textContent()) ?? '', /Filtros \([1-9]/);
 
     const priorities = page.locator('#crm [data-pc-attention]');
     assert.equal(await priorities.count(), 4, 'Deben conservarse las cuatro prioridades canónicas.');
     const priorityLabels = await priorities.locator('span').allTextContents();
-    for (const expected of ['Seguimientos vencidos', 'Seguimientos para hoy', 'Nuevos sin contactar', 'Sin próxima acción']) assert.ok(priorityLabels.includes(expected), `Falta prioridad ${expected}.`);
+    for (const expected of ['Seguimientos vencidos', 'Seguimientos para hoy', 'Nuevos sin contactar', 'Sin próxima acción']) {
+      assert.ok(priorityLabels.includes(expected), `Falta prioridad ${expected}.`);
+    }
     const priorityStates = await priorities.evaluateAll((buttons) => buttons.map((button) => button.getAttribute('data-pc-actionable')));
     assert.ok(priorityStates.every((value) => value === 'true' || value === 'false'));
 
     const collapsedWithSecondary = await visibleStages(page);
-    for (const expected of ['Todas', 'Nuevo', 'Contactado', 'Visita coordinada', 'Calificado']) assert.ok(collapsedWithSecondary.includes(expected), `La etapa ${expected} debe permanecer visible.`);
+    for (const expected of ['Todas', 'Nuevo', 'Contactado', 'Visita coordinada', 'Calificado']) {
+      assert.ok(collapsedWithSecondary.includes(expected), `La etapa ${expected} debe permanecer visible.`);
+    }
     assert.ok(collapsedWithSecondary.length <= 5, 'Pipeline colapsado no debe mostrar todas las etapas.');
 
     const pipelineToggle = page.locator('#crm [data-pc-toggle-stages]');
@@ -197,28 +331,37 @@ test('PR143 desktop cero capacitación Chromium + regresión móvil', { timeout:
 
     await pipelineToggle.click();
     await page.waitForFunction(() => document.querySelector('#crm [data-pc-toggle-stages]')?.textContent?.includes('Ver menos etapas'));
-    assert.equal((await visibleStages(page)).length, 9, 'Pipeline expandido debe exponer todas las etapas.');
+    const expandedStages = await visibleStages(page);
+    assert.equal(expandedStages.length, 9, 'Pipeline expandido debe exponer todas las etapas.');
     assert.equal((await pipelineToggle.textContent())?.trim(), 'Ver menos etapas');
 
     await page.locator('[data-pc-clear-filters]').click();
     await page.waitForFunction(() => document.querySelector('#crm .mvp-lead-more-filters > summary span')?.textContent?.trim() === 'Filtros');
     assert.equal(await page.locator('#mvp-lead-stage-filter').inputValue(), 'Todas');
-    assert.equal(await details.getAttribute('open'), null, 'Limpiar debe devolver disclosure limpio.');
+    await page.waitForFunction(() => document.querySelector<HTMLDetailsElement>('#crm .mvp-lead-more-filters')?.open === false);
 
     if ((await pipelineToggle.getAttribute('aria-expanded')) === 'true') await pipelineToggle.click();
     await page.waitForTimeout(100);
-    assert.deepEqual(await visibleStages(page), ['Todas', 'Nuevo', 'Contactado', 'Visita coordinada']);
+    const collapsedStages = await visibleStages(page);
+    assert.deepEqual(collapsedStages, ['Todas', 'Nuevo', 'Contactado', 'Visita coordinada']);
 
     const firstStage = page.locator('#crm .mvp-stage-counter').filter({ hasText: 'Todos' }).first();
     await firstStage.focus();
     await page.keyboard.press('End');
-    assert.equal(await page.evaluate(() => (document.activeElement as HTMLElement | null)?.getAttribute('data-stage-quick')), 'Visita coordinada', 'End debe recorrer sólo etapas visibles.');
+    const focusedAfterEnd = await page.evaluate(() => (document.activeElement as HTMLElement | null)?.getAttribute('data-stage-quick'));
+    assert.equal(focusedAfterEnd, 'Visita coordinada', 'End debe recorrer sólo etapas visibles.');
     await page.keyboard.press('ArrowLeft');
-    assert.equal(await page.evaluate(() => (document.activeElement as HTMLElement | null)?.getAttribute('data-stage-quick')), 'Contactado', 'Flecha izquierda debe recorrer sólo etapas visibles.');
+    const focusedAfterLeft = await page.evaluate(() => (document.activeElement as HTMLElement | null)?.getAttribute('data-stage-quick'));
+    assert.equal(focusedAfterLeft, 'Contactado', 'Flecha izquierda debe recorrer sólo etapas visibles.');
 
     const whatsapp = page.locator('#crm .mvp-zero-primary').first();
     assert.equal((await whatsapp.textContent())?.trim(), 'WhatsApp');
-    const whatsappVisual = await whatsapp.evaluate((button) => ({ background: getComputedStyle(button).backgroundColor, before: getComputedStyle(button, '::before').content, after: getComputedStyle(button, '::after').content, height: button.getBoundingClientRect().height }));
+    const whatsappVisual = await whatsapp.evaluate((button) => ({
+      background: getComputedStyle(button).backgroundColor,
+      before: getComputedStyle(button, '::before').content,
+      after: getComputedStyle(button, '::after').content,
+      height: button.getBoundingClientRect().height,
+    }));
     assert.equal(whatsappVisual.background, 'rgb(27, 112, 69)', 'CTA desktop debe usar verde sobrio aprobado.');
     assert.ok(['none', 'normal', '""'].includes(whatsappVisual.before));
     assert.ok(['none', 'normal', '""'].includes(whatsappVisual.after));
@@ -228,11 +371,14 @@ test('PR143 desktop cero capacitación Chromium + regresión móvil', { timeout:
 
     for (const viewport of DESKTOP_VIEWPORTS) {
       await page.setViewportSize({ width: viewport.width, height: viewport.height });
-      await page.waitForTimeout(120);
+      await page.waitForTimeout(140);
       assert.equal(await noHorizontalOverflow(page), true, `Sin overflow horizontal en ${viewport.width}.`);
+      await assertDesktopNewLeadPlacement(page);
       const distance = await firstLeadDistance(page);
       console.log(`PR143_AFTER_${viewport.width}x${viewport.height}=${distance}`);
-      if (viewport.width === 1366) assert.ok(distance <= TARGET_1366_DISTANCE + 0.5, `1366 debe reducir al menos 20%: ${distance} <= ${TARGET_1366_DISTANCE}.`);
+      if (viewport.width === 1366) {
+        assert.ok(distance <= TARGET_1366_DISTANCE + 0.5, `1366 debe reducir al menos 20%: ${distance} <= ${TARGET_1366_DISTANCE}.`);
+      }
       if (viewport.width === 1024) {
         const top = await page.locator('#crm .mvp-lead-card').first().evaluate((card) => card.getBoundingClientRect().top);
         assert.ok(top < viewport.height - 80, 'A 1024 debe verse claramente el comienzo del primer lead.');
@@ -241,32 +387,39 @@ test('PR143 desktop cero capacitación Chromium + regresión móvil', { timeout:
     }
 
     await page.setViewportSize({ width: 1366, height: 768 });
-    await page.waitForTimeout(100);
-    await filterSummary.click();
+    await page.waitForTimeout(120);
+    await page.locator('#crm .mvp-lead-more-filters > summary').click();
+    await page.waitForFunction(() => document.querySelector<HTMLDetailsElement>('#crm .mvp-lead-more-filters')?.open === true);
     await page.screenshot({ path: `${CHROMIUM_ARTIFACT_DIR}/desktop-1366-filters-open.png`, fullPage: false });
-    await filterSummary.click();
+    await page.locator('#crm .mvp-lead-more-filters > summary').click();
     if ((await pipelineToggle.getAttribute('aria-expanded')) !== 'true') await pipelineToggle.click();
     await page.waitForTimeout(100);
     await page.screenshot({ path: `${CHROMIUM_ARTIFACT_DIR}/desktop-1366-pipeline-expanded.png`, fullPage: false });
     await page.locator('#crm .mvp-lead-card').first().screenshot({ path: `${CHROMIUM_ARTIFACT_DIR}/desktop-1366-first-lead-cta.png` });
 
     const expandedBeforeRerenders = await pipelineToggle.getAttribute('aria-expanded');
-    await page.evaluate(() => { for (let index = 0; index < 10; index += 1) document.dispatchEvent(new CustomEvent('trv-render')); });
-    await page.waitForTimeout(150);
+    await page.evaluate(() => {
+      for (let index = 0; index < 10; index += 1) document.dispatchEvent(new CustomEvent('trv-render'));
+    });
+    await page.waitForTimeout(180);
     assert.equal(await page.locator('#crm [data-pc-toggle-stages]').count(), 1, 'Diez rerenders no duplican toggle de pipeline.');
-    assert.equal(await page.locator('#crm .pc-leads-heading [data-toggle="client-form"]').count(), 1, 'Diez rerenders no duplican Nuevo lead.');
+    assert.equal(await page.locator('#crm [data-toggle="client-form"]').count(), 1, 'Diez rerenders no duplican Nuevo lead.');
     await pipelineToggle.click();
     await page.waitForTimeout(100);
     assert.notEqual(await pipelineToggle.getAttribute('aria-expanded'), expandedBeforeRerenders, 'Un click debe producir un solo cambio de estado.');
 
     if ((await pipelineToggle.getAttribute('aria-expanded')) === 'true') await pipelineToggle.click();
     await page.setViewportSize({ width: 390, height: 844 });
-    await page.waitForTimeout(200);
+    await page.waitForTimeout(220);
     assert.equal(await noHorizontalOverflow(page), true, 'PR143 no debe introducir overflow móvil.');
     assert.equal(await page.locator('#mvp-lead-search').getAttribute('placeholder'), 'Buscar por nombre, WhatsApp o interés');
-    assert.equal(await details.getAttribute('open'), null, 'Filtros móvil aprobado sigue cerrado.');
+    assert.equal(await page.locator('#crm .mvp-lead-more-filters').getAttribute('open'), null, 'Filtros móvil aprobado sigue cerrado.');
     assert.equal((await page.locator('#crm .mvp-zero-primary').first().textContent())?.trim(), 'WhatsApp');
-    const mobilePseudo = await page.locator('#crm .mvp-zero-primary').first().evaluate((button) => ({ before: getComputedStyle(button, '::before').content, after: getComputedStyle(button, '::after').content }));
+    assert.match(await page.locator('#crm [data-toggle="client-form"]').evaluate((button) => button.parentElement?.className ?? ''), /mvp-page-heading/);
+    const mobilePseudo = await page.locator('#crm .mvp-zero-primary').first().evaluate((button) => ({
+      before: getComputedStyle(button, '::before').content,
+      after: getComputedStyle(button, '::after').content,
+    }));
     assert.ok(['none', 'normal', '""'].includes(mobilePseudo.before));
     assert.ok(['none', 'normal', '""'].includes(mobilePseudo.after));
     const mobileLabels = await page.locator('.mobile-bottom-nav [data-mobile-module] .nav-label').allTextContents();
@@ -274,10 +427,12 @@ test('PR143 desktop cero capacitación Chromium + regresión móvil', { timeout:
     await page.screenshot({ path: `${CHROMIUM_ARTIFACT_DIR}/mobile-390-regression.png`, fullPage: false });
 
     await page.setViewportSize({ width: 1366, height: 768 });
-    await page.waitForTimeout(180);
-    assert.equal(await page.locator('#crm .pc-leads-heading [data-toggle="client-form"]').count(), 1, 'Desktop→mobile→desktop conserva DOM sano.');
+    await page.waitForTimeout(220);
+    assert.equal(await page.locator('#crm [data-toggle="client-form"]').count(), 1, 'Desktop→mobile→desktop conserva DOM sano.');
+    assert.match(await page.locator('#crm [data-toggle="client-form"]').evaluate((button) => button.parentElement?.className ?? ''), /mvp-lead-filter-primary/);
     assert.equal(await page.locator('#crm [data-pc-toggle-stages]').count(), 1, 'Desktop→mobile→desktop conserva pipeline único.');
     assert.equal(await noHorizontalOverflow(page), true);
+    await assertDesktopNewLeadPlacement(page);
   } finally {
     await context.close();
     await browser.close();
@@ -290,8 +445,17 @@ test('PR143 WebKit desktop 1280/1440', { timeout: 120_000 }, async () => {
   const port = 62320 + Math.floor(Math.random() * 80);
   const server = await startServer(port);
   const browser = await webkit.launch({ headless: true });
-  const context = await browser.newContext({ viewport: { width: 1280, height: 800 }, screen: { width: 1280, height: 800 }, isMobile: false, hasTouch: false, locale: 'es-AR', timezoneId: 'America/Argentina/Cordoba', colorScheme: 'dark' });
+  const context = await browser.newContext({
+    viewport: { width: 1280, height: 800 },
+    screen: { width: 1280, height: 800 },
+    isMobile: false,
+    hasTouch: false,
+    locale: 'es-AR',
+    timezoneId: 'America/Argentina/Cordoba',
+    colorScheme: 'dark',
+  });
   await seedContext(context);
+
   try {
     const page = await context.newPage();
     await load(page, `http://127.0.0.1:${port}`);
@@ -300,14 +464,16 @@ test('PR143 WebKit desktop 1280/1440', { timeout: 120_000 }, async () => {
       { width: 1440, height: 900, screenshot: 'webkit-desktop-1440.png' },
     ]) {
       await page.setViewportSize({ width: viewport.width, height: viewport.height });
-      await page.waitForTimeout(140);
+      await page.waitForTimeout(160);
       assert.equal(await noHorizontalOverflow(page), true, `WebKit ${viewport.width} sin overflow.`);
       assert.equal(await page.locator('#crm .mvp-lead-more-filters').getAttribute('open'), null);
       assert.equal(await page.locator('#crm [data-pc-toggle-stages]').isVisible(), true);
       assert.deepEqual(await visibleStages(page), ['Todas', 'Nuevo', 'Contactado', 'Visita coordinada']);
       assert.equal((await page.locator('#crm .mvp-zero-primary').first().textContent())?.trim(), 'WhatsApp');
       assert.ok(await firstLeadDistance(page) < BASELINE_DISTANCE, 'Primer lead debe subir también en WebKit.');
+      await assertDesktopNewLeadPlacement(page);
       await page.locator('#crm .mvp-lead-more-filters > summary').click();
+      await page.waitForFunction(() => document.querySelector<HTMLDetailsElement>('#crm .mvp-lead-more-filters')?.open === true);
       assert.equal(await page.locator('#mvp-lead-stage-filter').isVisible(), true);
       await page.locator('#crm .mvp-lead-more-filters > summary').click();
       await page.screenshot({ path: `${WEBKIT_ARTIFACT_DIR}/${viewport.screenshot}`, fullPage: false });

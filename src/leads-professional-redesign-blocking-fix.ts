@@ -51,7 +51,7 @@ function activeDesktopFilterCount(crm: HTMLElement): number {
   return count;
 }
 
-function synchronizeDesktopFilterSummary(crm: HTMLElement, details: HTMLDetailsElement, active: number): void {
+function synchronizeDesktopFilterSummary(details: HTMLDetailsElement, active: number): void {
   const summary = details.querySelector<HTMLElement>(':scope > summary');
   if (!summary) return;
   const label = summary.querySelector<HTMLElement>('span');
@@ -77,6 +77,7 @@ function synchronizeFilterPanel(crm: HTMLElement): void {
 
   if (isMobile()) {
     desktopFilterPanelOpen = false;
+    if (details.open && !filterPanelOpen) filterPanelOpen = true;
     if (details.open !== filterPanelOpen) details.open = filterPanelOpen;
     applyFilterInteractionState(details, details.open);
     return;
@@ -86,7 +87,7 @@ function synchronizeFilterPanel(crm: HTMLElement): void {
     filterPanelOpen = false;
     const active = activeDesktopFilterCount(crm);
     const open = active > 0 || desktopFilterPanelOpen;
-    synchronizeDesktopFilterSummary(crm, details, active);
+    synchronizeDesktopFilterSummary(details, active);
     if (details.open !== open) details.open = open;
     applyFilterInteractionState(details, open);
     return;
@@ -123,12 +124,7 @@ function synchronizeDesktopStageSummary(crm: HTMLElement): void {
   const pipelineLabel = crm.querySelector<HTMLElement>('[data-pc-stage-heading] > div > span');
   if (attentionLabel) attentionLabel.textContent = desktop ? 'Prioridades' : 'Prioridades comerciales';
   if (pipelineLabel) pipelineLabel.textContent = desktop ? 'Pipeline' : 'Pipeline comercial';
-
   if (!desktop) return;
-
-  const heading = crm.querySelector<HTMLElement>('.mvp-page-heading');
-  const create = crm.querySelector<HTMLButtonElement>('[data-toggle="client-form"]');
-  if (heading && create && !create.closest('#mvp-lead-form') && create.parentElement !== heading) heading.append(create);
 
   const shell = crm.querySelector<HTMLElement>('[data-stage-shell]');
   const counters = shell?.querySelector<HTMLElement>('.mvp-stage-counters');
@@ -182,7 +178,7 @@ function synchronizeRedesign(): boolean {
 function scheduleSynchronization(): void {
   if (synchronizationScheduled) return;
   synchronizationScheduled = true;
-  window.requestAnimationFrame(synchronizeRedesign);
+  window.requestAnimationFrame(() => window.requestAnimationFrame(synchronizeRedesign));
 }
 
 function scheduleSynchronizationAfterCurrentEvent(): void {
@@ -239,9 +235,7 @@ function install(): void {
     scheduleSynchronization();
   });
 
-  if (initialPreparationFrame === null) {
-    initialPreparationFrame = window.requestAnimationFrame(prepareInitialLeadsBeforePaint);
-  }
+  if (initialPreparationFrame === null) initialPreparationFrame = window.requestAnimationFrame(prepareInitialLeadsBeforePaint);
 }
 
 install();

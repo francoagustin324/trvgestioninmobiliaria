@@ -1,25 +1,37 @@
 /* PR #143 — Leads desktop cero capacitación. Aislado a >=901px para preservar PR #142 móvil. */
 @media (min-width: 901px) {
-  #crm.pc-leads-redesign .pc-leads-heading {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) auto;
-    align-items: center;
-    gap: 12px 20px;
-    margin-bottom: 10px;
+  #crm.pc-leads-redesign {
+    position: relative;
   }
 
-  #crm.pc-leads-redesign .pc-leads-heading > div { min-width: 0; }
+  #crm.pc-leads-redesign .pc-leads-heading {
+    display: block;
+    min-height: 52px;
+    margin-bottom: 10px;
+    padding-right: 148px;
+  }
+
+  #crm.pc-leads-redesign .pc-leads-heading > div {
+    min-width: 0;
+  }
+
   #crm.pc-leads-redesign .pc-leads-heading h1 {
     margin: 0 0 2px;
     font-size: clamp(1.7rem, 2.2vw, 2rem);
     line-height: 1.08;
   }
+
   #crm.pc-leads-redesign .pc-leads-heading p {
     max-width: 720px;
     margin: 0;
     line-height: 1.35;
   }
-  #crm.pc-leads-redesign .pc-leads-heading > .mvp-lead-new-button {
+
+  #crm.pc-leads-redesign .mvp-lead-filter-primary > .mvp-lead-new-button {
+    position: absolute;
+    top: 0;
+    right: 0;
+    z-index: 2;
     min-width: 116px;
     min-height: 44px;
     margin: 0;
@@ -32,6 +44,7 @@
     min-height: 0;
     padding: 10px 12px;
   }
+
   #crm.pc-leads-redesign .mvp-lead-filter-primary,
   #crm.pc-leads-redesign .mvp-lead-active-filters,
   #crm.pc-leads-redesign .mvp-lead-more-filters,
@@ -49,17 +62,23 @@
     gap: 12px;
     order: 1;
   }
+
   #crm.pc-leads-redesign .mvp-lead-search-field {
     min-width: 0;
     margin: 0;
     gap: 3px;
   }
+
   #crm.pc-leads-redesign .mvp-lead-search-field > span {
     font-size: 0.74rem;
     line-height: 1.1;
   }
+
   #crm.pc-leads-redesign #mvp-lead-search,
-  #crm.pc-leads-redesign .mvp-lead-filter-grid select { min-height: 44px; }
+  #crm.pc-leads-redesign .mvp-lead-filter-grid select {
+    min-height: 44px;
+  }
+
   #crm.pc-leads-redesign #mvp-lead-count {
     align-self: center;
     color: var(--text-muted, #aebeb5);
@@ -73,6 +92,7 @@
     order: 2;
     margin: 0;
   }
+
   #crm.pc-leads-redesign .mvp-lead-more-filters > summary {
     display: flex;
     min-height: 44px;
@@ -82,38 +102,56 @@
     padding: 0 12px;
     cursor: pointer;
   }
-  #crm.pc-leads-redesign .mvp-lead-more-filters > summary > span { font-weight: 800; }
+
+  #crm.pc-leads-redesign .mvp-lead-more-filters > summary > span {
+    font-weight: 800;
+  }
+
   #crm.pc-leads-redesign .mvp-lead-more-filters > summary > small {
     min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
   }
-  #crm.pc-leads-redesign .mvp-lead-more-filters[open] { padding-bottom: 2px; }
+
+  #crm.pc-leads-redesign .mvp-lead-more-filters[open] {
+    padding-bottom: 2px;
+  }
+
   #crm.pc-leads-redesign .mvp-lead-filter-grid {
     display: grid;
     grid-template-columns: repeat(4, minmax(145px, 1fr));
     gap: 8px 10px;
     margin: 8px 0 0;
   }
-  #crm.pc-leads-redesign .mvp-lead-filter-grid label { min-width: 0; }
+
+  #crm.pc-leads-redesign .mvp-lead-filter-grid label {
+    min-width: 0;
+  }
+
   #crm.pc-leads-redesign .mvp-lead-filter-toggles {
     display: flex;
     flex-wrap: wrap;
     gap: 8px 16px;
     margin-top: 8px;
   }
+
   #crm.pc-leads-redesign .mvp-lead-filter-toggles label {
     min-height: 42px;
     align-items: center;
   }
+
   #crm.pc-leads-redesign .pc-filter-actions {
     display: flex;
     justify-content: flex-end;
     gap: 8px;
     margin-top: 8px;
   }
-  #crm.pc-leads-redesign .pc-filter-actions button { min-height: 44px; }
+
+  #crm.pc-leads-redesign .pc-filter-actions button {
+    min-height: 44px;
+  }
+
   #crm.pc-leads-redesign .mvp-lead-active-filters {
     order: 3;
     margin: 0;
@@ -125,24 +163,31 @@
     padding: 0;
     margin: 0;
   }
+
   #crm.pc-leads-redesign .pc-stage-summary {
     order: 5;
     padding: 0;
     margin: 0;
   }
+
   #crm.pc-leads-redesign .pc-stage-heading,
   #crm.pc-leads-redesign .pc-attention-section .pc-section-heading {
     min-height: 20px;
     margin: 0 0 5px;
   }
+
   #crm.pc-leads-redesign .pc-stage-heading,
-  #crm.pc-leads-redesign .pc-section-heading { align-items: center; }
+  #crm.pc-leads-redesign .pc-section-heading {
+    align-items: center;
+  }
+
   #crm.pc-leads-redesign .pc-section-heading > div > span {
     color: var(--text-muted, #aebeb5);
     font-size: 0.78rem;
     font-weight: 850;
     letter-spacing: 0.01em;
   }
+
   #crm.pc-leads-redesign .pc-section-heading h2 {
     position: absolute;
     width: 1px;
@@ -162,19 +207,28 @@
     overflow: visible;
     padding: 0;
   }
+
   #crm.pc-leads-redesign .pc-attention-chip {
     min-width: 0;
     min-height: 44px;
     padding: 7px 10px;
     gap: 6px;
   }
+
   #crm.pc-leads-redesign .pc-attention-chip span {
     min-width: 0;
     font-size: 0.78rem;
     line-height: 1.2;
   }
-  #crm.pc-leads-redesign .pc-attention-chip[data-pc-actionable="false"] { opacity: 0.5; }
-  #crm.pc-leads-redesign .pc-attention-chip[data-pc-actionable="true"] { opacity: 1; }
+
+  #crm.pc-leads-redesign .pc-attention-chip[data-pc-actionable="false"] {
+    opacity: 0.5;
+  }
+
+  #crm.pc-leads-redesign .pc-attention-chip[data-pc-actionable="true"] {
+    opacity: 1;
+  }
+
   #crm.pc-leads-redesign [data-pc-attention="overdue"] { order: 1; }
   #crm.pc-leads-redesign [data-pc-attention="today"] { order: 2; }
   #crm.pc-leads-redesign [data-pc-attention="new-uncontacted"] { order: 3; }
@@ -185,6 +239,7 @@
     justify-content: space-between;
     gap: 12px;
   }
+
   #crm.pc-leads-redesign [data-pc-toggle-stages] {
     display: inline-flex;
     min-height: 44px;
@@ -192,6 +247,7 @@
     padding: 0 12px;
     white-space: nowrap;
   }
+
   #crm.pc-leads-redesign .mvp-stage-counters {
     display: flex;
     flex-wrap: nowrap;
@@ -202,7 +258,11 @@
     padding: 0;
     scrollbar-width: none;
   }
-  #crm.pc-leads-redesign .mvp-stage-counters::-webkit-scrollbar { display: none; }
+
+  #crm.pc-leads-redesign .mvp-stage-counters::-webkit-scrollbar {
+    display: none;
+  }
+
   #crm.pc-leads-redesign .mvp-stage-counter {
     flex: 0 0 auto;
     width: auto;
@@ -210,9 +270,11 @@
     min-height: 44px;
     padding: 0 12px;
   }
+
   #crm.pc-leads-redesign .pc-stage-summary[data-expanded="false"] [data-pc-secondary-stage]:not(.active):not([aria-pressed="true"]):not(.pc-selected-stage) {
     display: none;
   }
+
   #crm.pc-leads-redesign .pc-stage-summary[data-expanded="true"] .mvp-stage-counters {
     flex-wrap: wrap;
     overflow: visible;
@@ -222,6 +284,7 @@
     gap: 10px;
     margin-top: 10px;
   }
+
   #crm.pc-leads-redesign .pc-professional-lead-card {
     gap: 8px;
     padding: 12px 14px;
@@ -233,11 +296,13 @@
     color: #f7fff9;
     box-shadow: 0 6px 16px rgba(7, 74, 39, 0.2);
   }
+
   #crm .mvp-lead-quick-actions[data-zero-training-actions="true"] > .mvp-zero-primary::before,
   #crm .mvp-lead-quick-actions[data-zero-training-actions="true"] > .mvp-zero-primary::after {
     content: none;
     display: none;
   }
+
   #crm .mvp-lead-quick-actions[data-zero-training-actions="true"] > .mvp-zero-primary:focus-visible {
     outline: 3px solid rgba(132, 222, 174, 0.72);
     outline-offset: 2px;
