@@ -353,12 +353,30 @@ function resetFilters(): void {
   };
 }
 
+function synchronizeFilterStateFromControls(container: HTMLElement): void {
+  const search = container.querySelector<HTMLInputElement>('#mvp-lead-search');
+  const stage = container.querySelector<HTMLSelectElement>('#mvp-lead-stage-filter');
+  const temperature = container.querySelector<HTMLSelectElement>('#mvp-lead-temperature-filter');
+  const assignee = container.querySelector<HTMLSelectElement>('#mvp-lead-assignee-filter');
+  const order = container.querySelector<HTMLSelectElement>('#mvp-lead-order');
+  const overdue = container.querySelector<HTMLInputElement>('#mvp-lead-overdue-filter');
+  const missingAction = container.querySelector<HTMLInputElement>('#mvp-lead-missing-action-filter');
+  if (search) filters.search = search.value;
+  if (stage) filters.stage = stage.value as LeadFilters['stage'];
+  if (temperature) filters.temperature = temperature.value as LeadFilters['temperature'];
+  if (assignee) filters.assignee = assignee.value === 'Todos' ? 'Todos' : Number(assignee.value);
+  if (order) filters.order = order.value as LeadOrder;
+  if (overdue) filters.overdueOnly = overdue.checked;
+  if (missingAction) filters.missingNextActionOnly = missingAction.checked;
+}
+
 function bindFilters(container: HTMLElement): void {
   container.querySelector<HTMLInputElement>('#mvp-lead-search')?.addEventListener('input', (event) => {
     filters.search = (event.currentTarget as HTMLInputElement).value;
     updateLeadResults(container);
   });
   container.querySelector<HTMLSelectElement>('#mvp-lead-stage-filter')?.addEventListener('change', (event) => {
+    synchronizeFilterStateFromControls(container);
     filters.stage = (event.currentTarget as HTMLSelectElement).value as LeadFilters['stage'];
     renderMvpLeads(container, true);
   });
@@ -367,6 +385,7 @@ function bindFilters(container: HTMLElement): void {
     updateLeadResults(container);
   });
   container.querySelector<HTMLSelectElement>('#mvp-lead-assignee-filter')?.addEventListener('change', (event) => {
+    synchronizeFilterStateFromControls(container);
     const current = (event.currentTarget as HTMLSelectElement).value;
     filters.assignee = current === 'Todos' ? 'Todos' : Number(current);
     renderMvpLeads(container);
@@ -389,6 +408,7 @@ function bindFilters(container: HTMLElement): void {
   });
   container.querySelectorAll<HTMLButtonElement>('[data-stage-quick]').forEach((button) => {
     button.addEventListener('click', () => {
+      synchronizeFilterStateFromControls(container);
       filters.stage = button.dataset.stageQuick as LeadFilters['stage'];
       renderMvpLeads(container, true);
     });
