@@ -20,9 +20,13 @@ jobs:
       PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+      - name: Verificar cache-busting de assets directos
+        run: node scripts/verify-direct-asset-cache-bust.mjs --ci
       - name: Instalar dependencias
         run: npm install --silent
       - name: Provisionar WebKit Playwright
