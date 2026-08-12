@@ -1,6 +1,7 @@
 type AttentionFilter = 'all' | 'overdue' | 'missing-action' | 'new-uncontacted' | 'today';
 
 const MOBILE_QUERY = '(max-width: 720px)';
+const DESKTOP_QUERY = '(min-width: 901px)';
 const LEAD_CARD_SELECTOR = '#mvp-lead-results .mvp-lead-card';
 let attentionFilter: AttentionFilter = 'all';
 let stagesExpanded = false;
@@ -8,6 +9,10 @@ let scheduled = false;
 
 function isMobile(): boolean {
   return window.matchMedia(MOBILE_QUERY).matches;
+}
+
+function isDesktop(): boolean {
+  return window.matchMedia(DESKTOP_QUERY).matches;
 }
 
 function text(element: Element | null, value: string): void {
@@ -162,15 +167,16 @@ function renderAttentionSection(container: HTMLElement): void {
 
   const definitions: Array<{ id: AttentionFilter; label: string }> = [
     { id: 'overdue', label: 'Seguimientos vencidos' },
-    { id: 'missing-action', label: 'Sin próxima acción' },
-    { id: 'new-uncontacted', label: 'Nuevos sin contactar' },
     { id: 'today', label: 'Seguimientos para hoy' },
+    { id: 'new-uncontacted', label: 'Nuevos sin contactar' },
+    { id: 'missing-action', label: 'Sin próxima acción' },
   ];
   const grid = section.querySelector<HTMLElement>('.pc-attention-grid');
   if (!grid) return;
   grid.innerHTML = definitions.map(({ id, label }) => {
     const active = attentionFilter === id;
-    return `<button type="button" class="pc-attention-chip${active ? ' active' : ''}" data-pc-attention="${id}" aria-pressed="${active}"><span>${label}</span><b>${attentionCount(container, id)}</b></button>`;
+    const count = attentionCount(container, id);
+    return `<button type="button" class="pc-attention-chip${active ? ' active' : ''}" data-pc-attention="${id}" data-pc-actionable="${count > 0}" aria-pressed="${active}"><span>${label}</span><b>${count}</b></button>`;
   }).join('');
 }
 
@@ -204,7 +210,7 @@ function enhanceFilterPanel(container: HTMLElement): void {
   const details = panel.querySelector<HTMLDetailsElement>('.mvp-lead-more-filters');
   const summary = details?.querySelector<HTMLElement>('summary');
   const active = activeFilterCount(container);
-  if (summary) {
+  if (summary && !isDesktop()) {
     const label = summary.querySelector<HTMLElement>('span');
     text(label, active ? `Filtros (${active})` : 'Filtros');
     summary.setAttribute('aria-label', active ? `Abrir filtros. ${active} activos` : 'Abrir filtros');
@@ -269,7 +275,7 @@ function enhanceStageSummary(container: HTMLElement): void {
 
   const toggle = shell.querySelector<HTMLButtonElement>('[data-pc-toggle-stages]');
   if (toggle) {
-    toggle.hidden = !isMobile();
+    toggle.hidden = !(isMobile() || isDesktop());
     toggle.textContent = stagesExpanded ? 'Ver menos etapas' : 'Ver todas las etapas';
     toggle.setAttribute('aria-expanded', String(stagesExpanded));
   }
@@ -387,8 +393,8 @@ function install(): void {
     form.querySelector<HTMLButtonElement>('[data-cancel-client-edit]')?.click();
   });
 
-  window.addEventListener('resize', scheduleEnhance);
   window.matchMedia(MOBILE_QUERY).addEventListener('change', scheduleEnhance);
+  window.matchMedia(DESKTOP_QUERY).addEventListener('change', scheduleEnhance);
   scheduleEnhance();
 }
 

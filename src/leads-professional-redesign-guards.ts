@@ -5,11 +5,17 @@ function hasCoreFilters(crm: HTMLElement): boolean {
   const stage = crm.querySelector<HTMLSelectElement>('#mvp-lead-stage-filter')?.value;
   const temperature = crm.querySelector<HTMLSelectElement>('#mvp-lead-temperature-filter')?.value;
   const assignee = crm.querySelector<HTMLSelectElement>('#mvp-lead-assignee-filter')?.value;
+  const order = crm.querySelector<HTMLSelectElement>('#mvp-lead-order')?.value;
+  const overdueOnly = crm.querySelector<HTMLInputElement>('#mvp-lead-overdue-filter')?.checked;
+  const missingNextActionOnly = crm.querySelector<HTMLInputElement>('#mvp-lead-missing-action-filter')?.checked;
   return Boolean(
     search
     || (stage && stage !== 'Todas')
     || (temperature && temperature !== 'Todas')
     || (assignee && assignee !== 'Todos')
+    || (order && order !== 'priority')
+    || overdueOnly
+    || missingNextActionOnly
   );
 }
 
@@ -76,7 +82,8 @@ function synchronizeLeadRedesignState(): void {
   const activeCoreFilters = hasCoreFilters(crm);
   const activeAttention = Boolean(crm.querySelector('.pc-attention-chip.active'));
   const clear = crm.querySelector<HTMLButtonElement>('[data-pc-clear-filters]');
-  if (clear) clear.hidden = !activeCoreFilters && !activeAttention;
+  const desktop = window.matchMedia('(min-width: 901px)').matches;
+  if (clear) clear.hidden = desktop ? false : !activeCoreFilters && !activeAttention;
 
   const formOpen = Boolean(crm.querySelector('#mvp-lead-form.pc-lead-dialog:not(.collapsed)'));
   const pageAction = crm.querySelector<HTMLButtonElement>('.pc-leads-heading > [data-toggle="client-form"]');

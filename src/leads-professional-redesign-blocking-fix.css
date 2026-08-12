@@ -3,12 +3,10 @@
 #crm.pc-leads-redesign .mvp-lead-more-filters:not([open]) > :not(summary),
 #crm.pc-leads-redesign .mvp-lead-more-filters > [hidden] {
   display: none !important;
-  visibility: hidden !important;
   pointer-events: none !important;
 }
 
 #crm.pc-leads-redesign .mvp-lead-more-filters[open] > :not(summary):not([hidden]) {
-  visibility: visible;
   pointer-events: auto;
 }
 
