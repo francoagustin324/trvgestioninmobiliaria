@@ -57,10 +57,9 @@ function bindFilterDisclosure(details: HTMLDetailsElement): void {
   boundFilterDetails.add(details);
   const summary = details.querySelector<HTMLElement>(':scope > summary');
   summary?.addEventListener('click', (event) => {
-    if (event.defaultPrevented) return;
+    if (event.defaultPrevented || !isMobile()) return;
     const requestedOpen = !details.open;
-    if (isMobile()) filterPanelOpen = requestedOpen;
-    else if (isDesktop()) desktopFilterPanelOpen = requestedOpen;
+    filterPanelOpen = requestedOpen;
     applyFilterInteractionState(details, requestedOpen);
   });
   details.addEventListener('toggle', () => {
