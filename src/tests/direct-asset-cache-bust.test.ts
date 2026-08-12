@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { execFileSync, spawnSync } from 'node:child_process';
+import { execFileSync, spawnSync, type SpawnSyncReturns } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -63,12 +63,12 @@ function withFixture(run: (fixture: { root: string; base: string }) => void): vo
   try { run(current); } finally { rmSync(current.root, { recursive: true, force: true }); }
 }
 
-function assertPass(result: ReturnType<typeof spawnSync>): void {
+function assertPass(result: SpawnSyncReturns<string>): void {
   assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
   assert.match(String(result.stdout), /CACHE-BUST OK/);
 }
 
-function assertFail(result: ReturnType<typeof spawnSync>, expected: RegExp): void {
+function assertFail(result: SpawnSyncReturns<string>, expected: RegExp): void {
   assert.equal(result.status, 1, `${result.stdout}\n${result.stderr}`);
   assert.match(String(result.stderr), expected);
 }
