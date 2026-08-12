@@ -2,9 +2,9 @@ const MOBILE_QUERY = '(max-width: 720px)';
 const DESKTOP_QUERY = '(min-width: 901px)';
 const INSTALL_FLAG = '__pcLeadsBlockingFixInstalled';
 const boundFilterDetails = new WeakSet<HTMLDetailsElement>();
+const initializedDesktopFilterDetails = new WeakSet<HTMLDetailsElement>();
 
 let filterPanelOpen = false;
-let desktopFilterPanelOpen = false;
 let synchronizationScheduled = false;
 let initialPreparationFrame: number | null = null;
 let initialEnhancementSignalSent = false;
@@ -59,15 +59,11 @@ function bindFilterDisclosure(details: HTMLDetailsElement): void {
     if (event.defaultPrevented) return;
     const requestedOpen = !details.open;
     if (isMobile()) filterPanelOpen = requestedOpen;
-    else if (isDesktop()) desktopFilterPanelOpen = requestedOpen;
     applyFilterInteractionState(details, requestedOpen);
   });
   details.addEventListener('toggle', () => {
     if (!details.isConnected) return;
-    if (!details.open) {
-      if (isMobile()) filterPanelOpen = false;
-      if (isDesktop()) desktopFilterPanelOpen = false;
-    }
+    if (!details.open && isMobile()) filterPanelOpen = false;
     applyFilterInteractionState(details, (!isMobile() && !isDesktop()) || details.open);
   });
 }
@@ -78,7 +74,6 @@ function synchronizeFilterPanel(crm: HTMLElement): void {
   bindFilterDisclosure(details);
 
   if (isMobile()) {
-    desktopFilterPanelOpen = false;
     if (details.open !== filterPanelOpen) details.open = filterPanelOpen;
     applyFilterInteractionState(details, details.open);
     return;
@@ -88,13 +83,15 @@ function synchronizeFilterPanel(crm: HTMLElement): void {
     filterPanelOpen = false;
     const active = activeDesktopFilterCount(crm);
     synchronizeDesktopFilterSummary(details, active);
-    if (details.open !== desktopFilterPanelOpen) details.open = desktopFilterPanelOpen;
-    applyFilterInteractionState(details, desktopFilterPanelOpen);
+    if (!initializedDesktopFilterDetails.has(details)) {
+      initializedDesktopFilterDetails.add(details);
+      details.open = false;
+    }
+    applyFilterInteractionState(details, details.open);
     return;
   }
 
   filterPanelOpen = false;
-  desktopFilterPanelOpen = false;
   details.open = true;
   applyFilterInteractionState(details, true);
 }
@@ -210,7 +207,6 @@ function closeMobileFilters(): void {
 
 function closeDesktopFilters(): void {
   if (!isDesktop()) return;
-  desktopFilterPanelOpen = false;
   const details = document.querySelector<HTMLDetailsElement>('#crm .mvp-lead-more-filters');
   if (!details) return;
   details.open = false;
@@ -242,7 +238,7 @@ function install(): void {
     scheduleSynchronization();
   });
   window.matchMedia(DESKTOP_QUERY).addEventListener('change', () => {
-    desktopFilterPanelOpen = false;
+    closeDesktopFilters();
     scheduleSynchronization();
   });
 
