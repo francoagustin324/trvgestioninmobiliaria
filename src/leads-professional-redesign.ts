@@ -175,7 +175,8 @@ function renderAttentionSection(container: HTMLElement): void {
   if (!grid) return;
   grid.innerHTML = definitions.map(({ id, label }) => {
     const active = attentionFilter === id;
-    return `<button type="button" class="pc-attention-chip${active ? ' active' : ''}" data-pc-attention="${id}" aria-pressed="${active}"><span>${label}</span><b>${attentionCount(container, id)}</b></button>`;
+    const count = attentionCount(container, id);
+    return `<button type="button" class="pc-attention-chip${active ? ' active' : ''}" data-pc-attention="${id}" data-pc-actionable="${count > 0}" aria-pressed="${active}"><span>${label}</span><b>${count}</b></button>`;
   }).join('');
 }
 
