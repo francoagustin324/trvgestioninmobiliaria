@@ -1,0 +1,54 @@
+name: Post-deploy production smoke
+
+on:
+  deployment_status:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  deployments: read
+
+concurrency:
+  group: post-deploy-production-smoke-${{ github.event_name == 'deployment_status' && github.event.deployment.sha || github.sha }}
+  cancel-in-progress: false
+
+jobs:
+  production-smoke:
+    if: >-
+      ${{
+        github.event_name == 'workflow_dispatch' ||
+        (
+          github.event_name == 'deployment_status' &&
+          github.event.deployment_status.state == 'success' &&
+          github.event.deployment.environment == 'joyful-success / production'
+        )
+      }}
+    runs-on: ubuntu-latest
+    env:
+      PRODUCTION_BASE_URL: ${{ vars.PRODUCTION_BASE_URL }}
+      SMOKE_EVENT: ${{ github.event_name }}
+      SMOKE_DEPLOYMENT_SHA: ${{ github.event_name == 'deployment_status' && github.event.deployment.sha || github.sha }}
+      SMOKE_ENVIRONMENT: ${{ github.event_name == 'deployment_status' && github.event.deployment.environment || 'manual' }}
+    steps:
+      - name: Checkout del release desplegado
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'deployment_status' && github.event.deployment.sha || github.sha }}
+      - name: Configurar Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Instalar dependencias
+        run: npm install --silent
+      - name: Provisionar Chromium Playwright
+        run: npx playwright install --with-deps chromium
+      - name: Ejecutar smoke de producción
+        run: node scripts/verify-production-smoke.mjs
+      - name: Adjuntar diagnóstico post-deploy
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: post-deploy-smoke-diagnostics
+          path: artifacts/post-deploy-smoke
+          if-no-files-found: error
+          retention-days: 14
