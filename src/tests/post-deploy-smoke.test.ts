@@ -236,7 +236,7 @@ test('20. workflow usa vars.PRODUCTION_BASE_URL y nunca environment_url', () => 
 test('21. browser smoke detecta pageerror', async () => {
   const directory = mkdtempSync(join(tmpdir(), 'propcontrol-smoke-browser-error-'));
   try {
-    await withServer((_request, response) => send(response, 200, 'text/html', `<!doctype html><html><body><main class="public-auth-shell"><form id="public-auth-form"></form></main><script>throw new Error('boom-smoke')</script></body></html>`), async (baseUrl) => {
+    await withServer((_request, response) => send(response, 200, 'text/html', `<!doctype html><html><body><main class="public-auth-shell"><form id="public-auth-form"><button>Ingresar</button></form></main><script>throw new Error('boom-smoke')</script></body></html>`), async (baseUrl) => {
       await expectReject(smoke.runBrowserSmoke(baseUrl, {
         executablePath: chromeExecutable(),
         screenshotPath: join(directory, 'pageerror.png'),
