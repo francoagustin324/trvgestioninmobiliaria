@@ -397,6 +397,18 @@ test('PR143 desktop cero capacitación Chromium + regresión móvil', { timeout:
 
     await filterSummary.click();
     await waitForFilterPanelVisible(page);
+    await page.waitForFunction(() => {
+      const filterDetails = document.querySelector<HTMLDetailsElement>('#crm .mvp-lead-more-filters');
+      const stage = document.querySelector<HTMLSelectElement>('#mvp-lead-stage-filter');
+      const presentationClear = document.querySelector<HTMLButtonElement>('[data-pc-clear-filters]');
+      const coreClear = document.querySelector<HTMLButtonElement>('[data-clear-lead-filters]');
+      return Boolean(
+        filterDetails?.open
+        && stage?.value === 'Calificado'
+        && presentationClear?.isConnected
+        && coreClear?.isConnected
+      );
+    });
     await page.locator('[data-pc-clear-filters]').click();
     await page.waitForFunction(() => document.querySelector('#crm .mvp-lead-more-filters > summary span')?.textContent?.trim() === 'Filtros');
     assert.equal(await page.locator('#mvp-lead-stage-filter').inputValue(), 'Todas');
