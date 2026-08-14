@@ -412,7 +412,18 @@ async function verifyIdentityPanel(page: Page, screenshotName?: string): Promise
   await page.locator('#crm.active [data-contact-whatsapp="41"]').click();
   const panel = page.locator('#propcontrol-whatsapp-contact .whatsapp-contact-panel');
   await panel.waitFor({ state: 'visible' });
-  await page.waitForFunction(() => document.querySelectorAll('#propcontrol-whatsapp-contact .whatsapp-context-note').length === 1);
+  await page.waitForFunction(() => {
+    const panelElement = document.querySelector<HTMLElement>('#propcontrol-whatsapp-contact .whatsapp-contact-panel');
+    const identityForm = panelElement?.querySelector<HTMLElement>('[data-whatsapp-identity-form]');
+    const contextNote = panelElement?.querySelector<HTMLElement>('[data-whatsapp-context-note]');
+    return Boolean(
+      panelElement
+      && identityForm
+      && panelElement.querySelectorAll('.whatsapp-context-note').length === 1
+      && identityForm.querySelectorAll('.whatsapp-context-note').length === 0
+      && contextNote?.querySelector('strong')?.textContent?.trim() === 'Configuración personal requerida'
+    );
+  });
 
   assert.equal(await panel.getByText('Configuración personal requerida', { exact: true }).count(), 1);
   assert.equal(await panel.locator('.whatsapp-context-note').count(), 1);
