@@ -39,7 +39,7 @@ jobs:
         with:
           node-version: 22
       - name: Instalar dependencias
-        run: npm install --silent
+        run: npm ci --silent
       - name: Provisionar Chromium Playwright
         run: npx playwright install --with-deps chromium
       - name: Ejecutar smoke de producción
