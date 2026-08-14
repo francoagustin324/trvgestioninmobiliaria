@@ -19,10 +19,10 @@ jobs:
     env:
       PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
       - name: Verificar cache-busting de assets directos
@@ -43,7 +43,7 @@ jobs:
           exit $code
       - name: Guardar diagnóstico de compilación
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: build-diagnostics
           path: build.log
@@ -58,7 +58,7 @@ jobs:
           exit $code
       - name: Guardar diagnóstico de pruebas
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: test-diagnostics
           path: test.log
@@ -81,7 +81,7 @@ jobs:
           done
       - name: Adjuntar capturas WebKit PR142
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: propcontrol-pr142-webkit-evidencia
           path: artifacts/leads-mobile-webkit-validation
@@ -89,7 +89,7 @@ jobs:
           retention-days: 14
       - name: Adjuntar capturas reales B1.3
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: b1-3-capturas-reales
           path: artifacts/b1-3
@@ -97,7 +97,7 @@ jobs:
           retention-days: 14
       - name: Adjuntar capturas reales B1.3.1
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: b1-3-1-capturas-reales
           path: artifacts/b1-3-1
@@ -105,7 +105,7 @@ jobs:
           retention-days: 14
       - name: Adjuntar capturas reales B1.3.2
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: b1-3-2-capturas-reales
           path: artifacts/b1-3-2
@@ -113,7 +113,7 @@ jobs:
           retention-days: 14
       - name: Adjuntar capturas reales B1.3.3
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: b1-3-3-capturas-reales
           path: artifacts/b1-3-3
@@ -143,7 +143,7 @@ jobs:
           done
       - name: Adjuntar capturas rediseño profesional de Leads
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: leads-professional-redesign-capturas
           path: artifacts/leads-redesign
@@ -170,7 +170,7 @@ jobs:
           done
       - name: Adjuntar capturas FASE 1 cero capacitación
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: leads-zero-training-phase1-capturas
           path: artifacts/leads-zero-training-phase1
@@ -198,7 +198,7 @@ jobs:
           done
       - name: Adjuntar capturas finales PR142
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: propcontrol-pr142-capturas-finales
           path: artifacts/leads-mobile-real-validation
@@ -233,7 +233,7 @@ jobs:
           done
       - name: Adjuntar ZIP final PR143
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: propcontrol-pr143-capturas-finales
           path: PROPCONTROL_PR143_CAPTURAS_FINALES.zip
@@ -255,7 +255,7 @@ jobs:
           done
       - name: Adjuntar capturas WebKit PR143
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: propcontrol-pr143-webkit-evidencia
           path: artifacts/leads-desktop-zero-training-webkit
