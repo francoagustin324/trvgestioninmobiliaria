@@ -28,7 +28,7 @@ jobs:
       - name: Verificar cache-busting de assets directos
         run: node scripts/verify-direct-asset-cache-bust.mjs --ci
       - name: Instalar dependencias
-        run: npm install --silent
+        run: npm ci --silent
       - name: Provisionar WebKit Playwright
         run: |
           unset PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD
@@ -47,11 +47,12 @@ jobs:
         with:
           name: build-diagnostics
           path: build.log
+          if-no-files-found: error
           retention-days: 1
       - name: Ejecutar pruebas
         run: |
           set +e
-          npm test --silent > test.log 2>&1
+          npm run test:ci --silent > test.log 2>&1
           code=$?
           cat test.log
           exit $code
@@ -61,6 +62,7 @@ jobs:
         with:
           name: test-diagnostics
           path: test.log
+          if-no-files-found: error
           retention-days: 3
       - name: Verificar capturas WebKit PR142
         if: always()
