@@ -518,11 +518,19 @@ async function validateDisclosureAndPopover(page: Page): Promise<void> {
   await overdue.locator('.mvp-lead-followup-menu > summary').click();
   const button = overdue.locator('[data-complete-client-follow-up]');
   await button.waitFor({ state: 'visible' });
-  assert.equal(await button.evaluate((element) => {
+  await page.waitForFunction(() => {
+    const element = document.querySelector<HTMLElement>('#crm .mvp-lead-full-sheet[open] .mvp-lead-followup-menu[open] [data-complete-client-follow-up]');
+    if (!element) return false;
     const rect = element.getBoundingClientRect();
     const hit = document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2);
     return hit === element || element.contains(hit);
-  }), true);
+  });
+  const isButtonHitTarget = await button.evaluate((element) => {
+    const rect = element.getBoundingClientRect();
+    const hit = document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2);
+    return hit === element || element.contains(hit);
+  });
+  assert.ok(isButtonHitTarget);
   await overdue.locator('.mvp-lead-followup-menu').evaluate((element: HTMLDetailsElement) => { element.open = false; });
 }
 
