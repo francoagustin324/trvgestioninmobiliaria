@@ -1,0 +1,83 @@
+name: R1-F PR143 stress
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+env:
+  PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
+
+jobs:
+  pr143-stress:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout frozen R1-D workspace
+        uses: actions/checkout@v7
+        with:
+          ref: 0e1e1777706fc933ec9c1694978a0ed0d6e65cd2
+
+      - name: Setup Node 22
+        uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install exact lockfile dependencies
+        run: npm ci --silent
+
+      - name: Build frozen R1-D workspace
+        run: npm run build --silent
+
+      - name: Stress PR143 Chromium sequentially
+        id: stress
+        shell: bash
+        run: |
+          set +e
+          mkdir -p r1f-logs
+          : > r1f-logs/summary.txt
+          overall_exit=0
+
+          for i in $(seq -w 1 25); do
+            log="r1f-logs/iteration-${i}.log"
+            start_ns=$(date +%s%N)
+
+            node --test --test-concurrency=1 \
+              --test-name-pattern='^PR143 desktop cero capacitación Chromium \+ regresión móvil$' \
+              dist/tests/leads-desktop-zero-training.test.js \
+              >"${log}" 2>&1
+            exit_code=$?
+
+            end_ns=$(date +%s%N)
+            duration_ms=$(( (end_ns - start_ns) / 1000000 ))
+
+            if [ "${exit_code}" -eq 0 ]; then
+              result="PASS"
+            else
+              result="FAIL"
+              overall_exit="${exit_code}"
+            fi
+
+            printf 'iteration=%s result=%s exit_code=%s duration_ms=%s\n' \
+              "${i}" "${result}" "${exit_code}" "${duration_ms}" \
+              | tee -a r1f-logs/summary.txt
+
+            cat "${log}"
+
+            if [ "${exit_code}" -ne 0 ]; then
+              break
+            fi
+          done
+
+          exit "${overall_exit}"
+
+      - name: Upload R1-F diagnostics
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: r1f-pr143-stress-diagnostics
+          path: r1f-logs/
+          if-no-files-found: error
