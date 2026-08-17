@@ -237,15 +237,22 @@ async function activeSecondaryFilterSnapshot(page: Page): Promise<{ count: numbe
     const stage = crm.querySelector<HTMLSelectElement>('#mvp-lead-stage-filter')?.value;
     const temperature = crm.querySelector<HTMLSelectElement>('#mvp-lead-temperature-filter')?.value;
     const assignee = crm.querySelector<HTMLSelectElement>('#mvp-lead-assignee-filter')?.value;
-    const order = crm.querySelector<HTMLSelectElement>('#mvp-lead-order')?.value;
     if (stage && stage !== 'Todas') count += 1;
     if (temperature && temperature !== 'Todas') count += 1;
     if (assignee && assignee !== 'Todos') count += 1;
-    if (order && order !== 'priority') count += 1;
     if (crm.querySelector<HTMLInputElement>('#mvp-lead-overdue-filter')?.checked) count += 1;
     if (crm.querySelector<HTMLInputElement>('#mvp-lead-missing-action-filter')?.checked) count += 1;
     return { count, label };
   });
+}
+
+async function settleLeadFilterSynchronization(page: Page): Promise<void> {
+  await page.evaluate(() => new Promise<void>((resolve) => {
+    document.dispatchEvent(new CustomEvent('trv-render'));
+    queueMicrotask(() => {
+      window.requestAnimationFrame(() => window.requestAnimationFrame(() => resolve()));
+    });
+  }));
 }
 
 async function visibleStages(page: Page): Promise<string[]> {
@@ -562,7 +569,9 @@ test('PR143 desktop cero capacitación Chromium + regresión móvil', { timeout:
     assert.equal(await details.getAttribute('open'), null, 'Filtros secundarios cerrados por defecto en desktop.');
     const filterSummary = details.locator(':scope > summary');
     const initialFilters = await activeSecondaryFilterSnapshot(page);
-    assert.equal(initialFilters.label, initialFilters.count > 0 ? `Filtros (${initialFilters.count})` : 'Filtros', `El resumen cerrado debe reflejar exactamente los filtros activos: ${JSON.stringify(initialFilters)}`);
+    assert.equal(await page.locator('#mvp-lead-order').inputValue(), 'recent', 'El orden inicial de Leads debe ser Más recientes.');
+    assert.equal(initialFilters.count, 0, `El orden no debe contar como filtro: ${JSON.stringify(initialFilters)}`);
+    assert.equal(initialFilters.label, 'Filtros', `El resumen inicial no debe contar la preferencia de orden: ${JSON.stringify(initialFilters)}`);
     console.log(`PR143_INITIAL_FILTERS=${JSON.stringify(initialFilters)}`);
     await assertControlTarget(page, '#crm .mvp-lead-more-filters > summary', 'Summary Filtros');
 
@@ -581,15 +590,18 @@ test('PR143 desktop cero capacitación Chromium + regresión móvil', { timeout:
     await page.locator('#mvp-lead-stage-filter').selectOption('Calificado');
     await page.waitForFunction(() => document.querySelector('#crm .mvp-lead-more-filters > summary span')?.textContent?.includes('Filtros ('));
     assert.equal(await page.locator('#crm .mvp-lead-more-filters').getAttribute('open'), '', 'Un panel abierto explícitamente debe seguir operativo mientras se edita.');
+    assert.equal(await page.locator('#mvp-lead-stage-filter').inputValue(), 'Calificado');
+    assert.equal(await page.locator('#mvp-lead-order').inputValue(), 'recent', 'Cambiar etapa no debe alterar la preferencia de orden.');
     const editedFilters = await activeSecondaryFilterSnapshot(page);
-    assert.equal(editedFilters.label, `Filtros (${editedFilters.count})`);
-    assert.ok(editedFilters.count >= 1);
+    assert.equal(editedFilters.count, 1, `Calificado debe ser el único filtro real activo: ${JSON.stringify(editedFilters)}`);
+    assert.equal(editedFilters.label, 'Filtros (1)');
     await page.locator('[data-pc-apply-filters]').click();
     await page.waitForFunction(() => document.querySelector<HTMLDetailsElement>('#crm .mvp-lead-more-filters')?.open === false);
     assert.equal(await page.locator('#mvp-lead-stage-filter').inputValue(), 'Calificado', 'Aplicar no pierde el filtro activo.');
+    assert.equal(await page.locator('#mvp-lead-order').inputValue(), 'recent', 'Aplicar no debe alterar la preferencia de orden.');
     const appliedFilters = await activeSecondaryFilterSnapshot(page);
-    assert.equal(appliedFilters.label, `Filtros (${appliedFilters.count})`);
-    assert.ok(appliedFilters.count >= 1);
+    assert.equal(appliedFilters.label, 'Filtros (1)');
+    assert.equal(appliedFilters.count, 1);
     await page.evaluate(() => document.dispatchEvent(new CustomEvent('trv-render')));
     await page.waitForTimeout(120);
     assert.equal(await page.locator('#crm .mvp-lead-more-filters').getAttribute('open'), null, 'Un rerender con filtros activos no debe autoabrirlos.');
@@ -655,7 +667,21 @@ test('PR143 desktop cero capacitación Chromium + regresión móvil', { timeout:
     }
     if (clearDiagnosticError) throw clearDiagnosticError;
     assert.equal(await page.locator('#mvp-lead-stage-filter').inputValue(), 'Todas');
+    assert.equal(await page.locator('#mvp-lead-order').inputValue(), 'recent', 'Limpiar debe restaurar Más recientes.');
+    assert.equal((await page.locator('#crm .mvp-lead-more-filters > summary span').textContent())?.trim(), 'Filtros');
     await page.waitForFunction(() => document.querySelector<HTMLDetailsElement>('#crm .mvp-lead-more-filters')?.open === false);
+
+    await settleLeadFilterSynchronization(page);
+    const clearedFilters = await activeSecondaryFilterSnapshot(page);
+    const clearContract = await page.evaluate(() => ({
+      stage: document.querySelector<HTMLSelectElement>('#mvp-lead-stage-filter')?.value ?? null,
+      order: document.querySelector<HTMLSelectElement>('#mvp-lead-order')?.value ?? null,
+      summary: document.querySelector('#crm .mvp-lead-more-filters > summary span')?.textContent?.trim() ?? null,
+      detailsOpen: document.querySelector<HTMLDetailsElement>('#crm .mvp-lead-more-filters')?.open ?? null,
+    }));
+    assert.deepEqual(clearedFilters, { count: 0, label: 'Filtros' }, `Limpiar debe dejar cero filtros reales: ${JSON.stringify(clearedFilters)}`);
+    assert.deepEqual(clearContract, { stage: 'Todas', order: 'recent', summary: 'Filtros', detailsOpen: false });
+    console.log(`PR143_CLEAR_CONTRACT=${JSON.stringify({ ...clearContract, activeFilterCount: clearedFilters.count })}`);
 
     if ((await pipelineToggle.getAttribute('aria-expanded')) === 'true') await pipelineToggle.click();
     await page.waitForTimeout(100);

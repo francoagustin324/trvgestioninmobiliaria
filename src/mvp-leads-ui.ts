@@ -46,7 +46,7 @@ let filters: LeadListFilters = {
   overdueOnly: false,
   missingNextActionOnly: false,
   assignee: 'Todos',
-  order: 'priority',
+  order: 'recent',
 };
 let expandedClientId: number | null = null;
 
@@ -349,7 +349,7 @@ function resetFilters(): void {
     overdueOnly: false,
     missingNextActionOnly: false,
     assignee: 'Todos',
-    order: 'priority',
+    order: 'recent',
   };
 }
 

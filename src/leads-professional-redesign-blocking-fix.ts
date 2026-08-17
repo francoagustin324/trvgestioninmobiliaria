@@ -32,11 +32,9 @@ function activeDesktopFilterCount(crm: HTMLElement): number {
   const stage = crm.querySelector<HTMLSelectElement>('#mvp-lead-stage-filter')?.value;
   const temperature = crm.querySelector<HTMLSelectElement>('#mvp-lead-temperature-filter')?.value;
   const assignee = crm.querySelector<HTMLSelectElement>('#mvp-lead-assignee-filter')?.value;
-  const order = crm.querySelector<HTMLSelectElement>('#mvp-lead-order')?.value;
   if (stage && stage !== 'Todas') count += 1;
   if (temperature && temperature !== 'Todas') count += 1;
   if (assignee && assignee !== 'Todos') count += 1;
-  if (order && order !== 'priority') count += 1;
   if (crm.querySelector<HTMLInputElement>('#mvp-lead-overdue-filter')?.checked) count += 1;
   if (crm.querySelector<HTMLInputElement>('#mvp-lead-missing-action-filter')?.checked) count += 1;
   return count;
