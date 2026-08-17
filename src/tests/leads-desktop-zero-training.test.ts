@@ -436,6 +436,18 @@ test('PR143 desktop cero capacitación Chromium + regresión móvil', { timeout:
 
     if ((await pipelineToggle.getAttribute('aria-expanded')) === 'true') await pipelineToggle.click();
     await page.waitForTimeout(100);
+    const settledFilters = await activeSecondaryFilterSnapshot(page);
+    const settledClearContract = await page.evaluate(() => ({
+      stage: document.querySelector<HTMLSelectElement>('#mvp-lead-stage-filter')?.value ?? null,
+      order: document.querySelector<HTMLSelectElement>('#mvp-lead-order')?.value ?? null,
+      summary: document.querySelector('#crm .mvp-lead-more-filters > summary span')?.textContent?.trim() ?? null,
+      detailsOpen: document.querySelector<HTMLDetailsElement>('#crm .mvp-lead-more-filters')?.open ?? null,
+    }));
+    assert.equal(settledClearContract.stage, 'Todas', 'Limpiar no debe rebotar la etapa después del settling existente.');
+    assert.equal(settledClearContract.order, 'recent', 'Limpiar no debe rebotar el orden después del settling existente.');
+    assert.equal(settledClearContract.summary, 'Filtros', 'Limpiar no debe rebotar el resumen después del settling existente.');
+    assert.equal(settledClearContract.detailsOpen, false, 'Limpiar no debe reabrir filtros después del settling existente.');
+    assert.equal(settledFilters.count, 0, `Limpiar no debe reactivar filtros comerciales después del settling: ${JSON.stringify(settledFilters)}`);
     const collapsedStages = await visibleStages(page);
     assert.deepEqual(collapsedStages, ['Todas', 'Nuevo', 'Contactado', 'Visita coordinada']);
 
