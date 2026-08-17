@@ -295,7 +295,6 @@ async function secondaryControls(page: Page): Promise<SecondaryControlSnapshot> 
     if (stage && stage !== 'Todas') count += 1;
     if (temperature && temperature !== 'Todas') count += 1;
     if (assignee && assignee !== 'Todos') count += 1;
-    if (order && order !== 'priority') count += 1;
     if (overdue) count += 1;
     if (missingAction) count += 1;
     return { count, stage, temperature, assignee, order, overdue, missingAction };
@@ -414,18 +413,22 @@ test('PRE-B1.4.3A desktop >=901: filtros, pipeline, rerenders y resultados comer
     await summary.click();
     await waitForDetailsOpen(page, true);
     await page.locator('#mvp-lead-order').selectOption('name');
-    await page.waitForFunction(() => document.querySelector('#crm .mvp-lead-more-filters > summary span')?.textContent?.trim() === 'Filtros (1)');
+    await page.waitForFunction(() => {
+      const order = document.querySelector<HTMLSelectElement>('#mvp-lead-order');
+      const summaryLabel = document.querySelector('#crm .mvp-lead-more-filters > summary span');
+      return order?.value === 'name' && summaryLabel?.textContent?.trim() === 'Filtros';
+    });
     assert.equal((await filterSummary(page)).open, true, 'Cambiar un control no cierra un panel abierto manualmente.');
 
     await page.locator('#mvp-lead-stage-filter').selectOption('Calificado');
-    await page.waitForFunction(() => document.querySelector('#crm .mvp-lead-more-filters > summary span')?.textContent?.trim() === 'Filtros (2)');
+    await page.waitForFunction(() => document.querySelector('#crm .mvp-lead-more-filters > summary span')?.textContent?.trim() === 'Filtros (1)');
     assert.equal((await filterSummary(page)).open, true, 'El rerender de etapa conserva apertura manual dentro del ciclo.');
     assert.deepEqual(await visibleLeadNames(page), ['Carla Calificada', 'Zoe Calificada'], 'Main filtra Calificado y conserva orden alfabético solicitado.');
     await assertSummaryMatchesControls(page);
 
     await page.locator('[data-pc-apply-filters]').click();
     await waitForDetailsOpen(page, false);
-    assert.equal((await filterSummary(page)).label, 'Filtros (2)', 'Aplicar cierra y conserva N exacto.');
+    assert.equal((await filterSummary(page)).label, 'Filtros (1)', 'Aplicar cierra y conserva N exacto.');
 
     const collapsed = await visibleStages(page);
     for (const stage of ['Todas', 'Nuevo', 'Contactado', 'Visita coordinada', 'Calificado']) {
@@ -462,7 +465,7 @@ test('PRE-B1.4.3A desktop >=901: filtros, pipeline, rerenders y resultados comer
 
     await clearSecondaryFilters(page);
     assert.equal(await page.locator('#mvp-lead-stage-filter').inputValue(), 'Todas');
-    assert.equal(await page.locator('#mvp-lead-order').inputValue(), 'priority');
+    assert.equal(await page.locator('#mvp-lead-order').inputValue(), 'recent');
 
     await summary.click();
     await waitForDetailsOpen(page, true);
@@ -472,7 +475,7 @@ test('PRE-B1.4.3A desktop >=901: filtros, pipeline, rerenders y resultados comer
     assert.equal(await page.locator('#mvp-lead-order').inputValue(), 'name', 'DOM real autorizado domina el modelo viejo al rerender de etapa.');
     assert.equal(await page.locator('#mvp-lead-stage-filter').inputValue(), 'Calificado');
     assert.deepEqual(await visibleLeadNames(page), ['Carla Calificada', 'Zoe Calificada'], 'El rerender conserva conjunto y orden comercial del DOM real.');
-    assert.equal((await assertSummaryMatchesControls(page)).count, 2, 'N se deriva de los controles reales tras el rerender.');
+    assert.equal((await assertSummaryMatchesControls(page)).count, 1, 'N se deriva sólo de filtros comerciales reales tras el rerender.');
 
     assert.deepEqual(await currentCommercialData(page), expectedCommercialData, 'Filtrar no modifica etapa, temperatura, follow-up ni datos comerciales persistidos.');
     assert.deepEqual(externalWrites, [], `Los tests no producen escrituras externas reales: ${JSON.stringify(externalWrites)}`);

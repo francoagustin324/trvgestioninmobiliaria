@@ -612,7 +612,7 @@ test('rediseño de Leads permanece aislado de la lógica comercial aprobada', ()
 
   assert.match(index, /leads-professional-redesign\.css\?v=20260805-1/);
   assert.match(index, /leads-professional-redesign\.js\?v=20260811-1/);
-  assert.match(index, /leads-professional-redesign-guards\.js\?v=20260811-1/);
+  assert.match(index, /leads-professional-redesign-guards\.js\?v=20260816-1/);
   assert.match(redesign, /Contactá primero a los leads que requieren atención/);
   assert.match(redesign, /Buscar por nombre, WhatsApp o interés/);
   assert.match(redesign, /Atención requerida/);
