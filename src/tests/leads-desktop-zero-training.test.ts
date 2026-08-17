@@ -246,15 +246,6 @@ async function activeSecondaryFilterSnapshot(page: Page): Promise<{ count: numbe
   });
 }
 
-async function settleLeadFilterSynchronization(page: Page): Promise<void> {
-  await page.evaluate(() => new Promise<void>((resolve) => {
-    document.dispatchEvent(new CustomEvent('trv-render'));
-    queueMicrotask(() => {
-      window.requestAnimationFrame(() => window.requestAnimationFrame(() => resolve()));
-    });
-  }));
-}
-
 async function visibleStages(page: Page): Promise<string[]> {
   return page.evaluate(() => Array.from(document.querySelectorAll<HTMLButtonElement>('#crm .mvp-stage-counter'))
     .filter((button) => getComputedStyle(button).display !== 'none' && button.getClientRects().length > 0)
@@ -658,7 +649,16 @@ test('PR143 desktop cero capacitación Chromium + regresión móvil', { timeout:
     let clearDiagnosticError: unknown;
     try {
       await page.locator('[data-pc-clear-filters]').click();
-      await page.waitForFunction(() => document.querySelector('#crm .mvp-lead-more-filters > summary span')?.textContent?.trim() === 'Filtros');
+      await page.waitForFunction(() => {
+        const stage = document.querySelector<HTMLSelectElement>('#mvp-lead-stage-filter');
+        const order = document.querySelector<HTMLSelectElement>('#mvp-lead-order');
+        const summary = document.querySelector('#crm .mvp-lead-more-filters > summary span');
+        const filterDetails = document.querySelector<HTMLDetailsElement>('#crm .mvp-lead-more-filters');
+        return stage?.value === 'Todas'
+          && order?.value === 'recent'
+          && summary?.textContent?.trim() === 'Filtros'
+          && filterDetails?.open === false;
+      });
     } catch (error) {
       clearDiagnosticError = error;
     } finally {
@@ -666,12 +666,6 @@ test('PR143 desktop cero capacitación Chromium + regresión móvil', { timeout:
       console.log(`PR143_CLEAR_DIAGNOSTIC=${JSON.stringify(clearDiagnostic)}`);
     }
     if (clearDiagnosticError) throw clearDiagnosticError;
-    assert.equal(await page.locator('#mvp-lead-stage-filter').inputValue(), 'Todas');
-    assert.equal(await page.locator('#mvp-lead-order').inputValue(), 'recent', 'Limpiar debe restaurar Más recientes.');
-    assert.equal((await page.locator('#crm .mvp-lead-more-filters > summary span').textContent())?.trim(), 'Filtros');
-    await page.waitForFunction(() => document.querySelector<HTMLDetailsElement>('#crm .mvp-lead-more-filters')?.open === false);
-
-    await settleLeadFilterSynchronization(page);
     const clearedFilters = await activeSecondaryFilterSnapshot(page);
     const clearContract = await page.evaluate(() => ({
       stage: document.querySelector<HTMLSelectElement>('#mvp-lead-stage-filter')?.value ?? null,
@@ -838,7 +832,7 @@ test('PR143 WebKit desktop 1280/1440', { timeout: 120_000 }, async () => {
 test('PR143 cache bust: todo runtime modificado cambia URL servida', () => {
   const index = readFileSync('index.html', 'utf8');
   assert.match(index, /\/src\/leads-desktop-zero-training\.css\?v=20260811-1/);
-  assert.match(index, /\/dist\/leads-professional-redesign-blocking-fix\.js\?v=20260811-1/);
+  assert.match(index, /\/dist\/leads-professional-redesign-blocking-fix\.js\?v=20260816-1/);
   assert.doesNotMatch(index, /\/dist\/leads-professional-redesign-blocking-fix\.js\?v=20260805-1/);
   assert.match(index, /\/dist\/leads-professional-redesign\.js\?v=20260811-1/);
   assert.doesNotMatch(index, /\/dist\/leads-professional-redesign\.js\?v=20260805-1/);
