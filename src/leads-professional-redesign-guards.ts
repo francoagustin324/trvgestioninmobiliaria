@@ -5,7 +5,6 @@ function hasCoreFilters(crm: HTMLElement): boolean {
   const stage = crm.querySelector<HTMLSelectElement>('#mvp-lead-stage-filter')?.value;
   const temperature = crm.querySelector<HTMLSelectElement>('#mvp-lead-temperature-filter')?.value;
   const assignee = crm.querySelector<HTMLSelectElement>('#mvp-lead-assignee-filter')?.value;
-  const order = crm.querySelector<HTMLSelectElement>('#mvp-lead-order')?.value;
   const overdueOnly = crm.querySelector<HTMLInputElement>('#mvp-lead-overdue-filter')?.checked;
   const missingNextActionOnly = crm.querySelector<HTMLInputElement>('#mvp-lead-missing-action-filter')?.checked;
   return Boolean(
@@ -13,7 +12,6 @@ function hasCoreFilters(crm: HTMLElement): boolean {
     || (stage && stage !== 'Todas')
     || (temperature && temperature !== 'Todas')
     || (assignee && assignee !== 'Todos')
-    || (order && order !== 'priority')
     || overdueOnly
     || missingNextActionOnly
   );
@@ -34,7 +32,7 @@ function setSelectValue(select: HTMLSelectElement | null, value: string): void {
 function clearCoreFiltersFallback(crm: HTMLElement): void {
   setInputValue(crm.querySelector<HTMLInputElement>('#mvp-lead-search'), '');
   setSelectValue(crm.querySelector<HTMLSelectElement>('#mvp-lead-temperature-filter'), 'Todas');
-  setSelectValue(crm.querySelector<HTMLSelectElement>('#mvp-lead-order'), 'priority');
+  setSelectValue(crm.querySelector<HTMLSelectElement>('#mvp-lead-order'), 'recent');
   setSelectValue(crm.querySelector<HTMLSelectElement>('#mvp-lead-assignee-filter'), 'Todos');
   const currentCrm = document.querySelector<HTMLElement>('#crm.pc-leads-redesign') ?? crm;
   setSelectValue(currentCrm.querySelector<HTMLSelectElement>('#mvp-lead-stage-filter'), 'Todas');

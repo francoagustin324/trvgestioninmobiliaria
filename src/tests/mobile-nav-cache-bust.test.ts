@@ -6,11 +6,12 @@ const html = readFileSync('index.html', 'utf8');
 const whatsappScope = readFileSync('src/whatsapp-action-scope.ts', 'utf8');
 
 const shellVersion = '20260802-1';
+const leadRealUseVersion = '20260816-1';
 
 test('carga una versión nueva y coordinada del shell móvil', () => {
   assert.ok(html.includes(`/dist/cloud-compat-bootstrap.js?v=${shellVersion}`));
   assert.ok(html.includes(`/dist/mvp-main.js?v=${shellVersion}`));
-  assert.ok(html.includes(`/dist/lead-real-use-ui.js?v=${shellVersion}`));
+  assert.ok(html.includes(`/dist/lead-real-use-ui.js?v=${leadRealUseVersion}`));
   assert.ok(html.includes(`/dist/invitation-link-ux.js?v=${shellVersion}`));
   assert.ok(html.includes(`/dist/sync-recovery-bootstrap.js?v=${shellVersion}`));
   assert.ok(html.includes(`/dist/whatsapp-action-scope.js?v=${shellVersion}`));

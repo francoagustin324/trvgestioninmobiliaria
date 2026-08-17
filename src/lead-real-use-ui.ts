@@ -65,7 +65,6 @@ function applyRecentVisualOrder(): boolean {
   bindOrderPreference(order, results);
   if (manualOrderSelected) return true;
 
-  order.value = 'recent';
   const rank = new Map(sortLeads(visibleClients(), 'recent').map((client, index) => [client.id, index] as const));
   results.querySelectorAll<HTMLElement>(':scope > [data-client-id]').forEach((card) => {
     const position = rank.get(Number(card.dataset.clientId));

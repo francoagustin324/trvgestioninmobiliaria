@@ -237,11 +237,9 @@ async function activeSecondaryFilterSnapshot(page: Page): Promise<{ count: numbe
     const stage = crm.querySelector<HTMLSelectElement>('#mvp-lead-stage-filter')?.value;
     const temperature = crm.querySelector<HTMLSelectElement>('#mvp-lead-temperature-filter')?.value;
     const assignee = crm.querySelector<HTMLSelectElement>('#mvp-lead-assignee-filter')?.value;
-    const order = crm.querySelector<HTMLSelectElement>('#mvp-lead-order')?.value;
     if (stage && stage !== 'Todas') count += 1;
     if (temperature && temperature !== 'Todas') count += 1;
     if (assignee && assignee !== 'Todos') count += 1;
-    if (order && order !== 'priority') count += 1;
     if (crm.querySelector<HTMLInputElement>('#mvp-lead-overdue-filter')?.checked) count += 1;
     if (crm.querySelector<HTMLInputElement>('#mvp-lead-missing-action-filter')?.checked) count += 1;
     return { count, label };
@@ -291,6 +289,238 @@ function resetArtifactDirectory(directory: string): void {
   mkdirSync(directory, { recursive: true });
 }
 
+type Pr143DiagnosticWindow = Window & typeof globalThis & {
+  __pr143ClearDiagnostic?: {
+    snapshot: (label: string) => Record<string, unknown>;
+    finish: (label: string) => Record<string, unknown>;
+  };
+};
+
+async function installPr143ClearDiagnostic(page: Page): Promise<Record<string, unknown>> {
+  return page.evaluate(() => {
+    const diagnosticWindow = window as Pr143DiagnosticWindow;
+    const crm = document.querySelector<HTMLElement>('#crm');
+    if (!crm) throw new Error('PR143 diagnóstico: #crm ausente.');
+
+    const trace: Array<Record<string, unknown>> = [];
+    const nodeIds = new WeakMap<Node, number>();
+    const presentationGenerations = new WeakMap<Node, number>();
+    const coreGenerations = new WeakMap<Node, number>();
+    let nextNodeId = 1;
+    let nextPresentationGeneration = 1;
+    let nextCoreGeneration = 1;
+
+    const nodeId = (node: Node | null): number | null => {
+      if (!node) return null;
+      const existing = nodeIds.get(node);
+      if (existing) return existing;
+      const id = nextNodeId;
+      nextNodeId += 1;
+      nodeIds.set(node, id);
+      return id;
+    };
+
+    const roleGeneration = (node: Node | null, role: 'presentation' | 'core'): number | null => {
+      if (!node) return null;
+      const generations = role === 'presentation' ? presentationGenerations : coreGenerations;
+      const existing = generations.get(node);
+      if (existing) return existing;
+      const generation = role === 'presentation' ? nextPresentationGeneration : nextCoreGeneration;
+      if (role === 'presentation') nextPresentationGeneration += 1;
+      else nextCoreGeneration += 1;
+      generations.set(node, generation);
+      return generation;
+    };
+
+    const describeNode = (target: EventTarget | null): Record<string, unknown> => {
+      if (target === document) return { kind: 'document', nodeId: nodeId(document) };
+      if (!(target instanceof Node)) return { kind: target === null ? 'null' : typeof target };
+      const base: Record<string, unknown> = {
+        kind: target.nodeName,
+        nodeId: nodeId(target),
+        connected: target.isConnected,
+      };
+      if (target instanceof Element) {
+        base.id = target.id || null;
+        base.className = target.getAttribute('class');
+        base.presentationGeneration = target.matches('[data-pc-clear-filters]') ? roleGeneration(target, 'presentation') : null;
+        base.coreGeneration = target.matches('[data-clear-lead-filters]') ? roleGeneration(target, 'core') : null;
+      }
+      return base;
+    };
+
+    const describeRoleNode = (node: HTMLButtonElement | null, role: 'presentation' | 'core'): Record<string, unknown> => ({
+      nodeId: nodeId(node),
+      generation: roleGeneration(node, role),
+      connected: node?.isConnected ?? false,
+      disabled: node?.disabled ?? null,
+      text: node?.textContent?.trim() ?? null,
+    });
+
+    const snapshot = (label: string): Record<string, unknown> => {
+      const details = document.querySelector<HTMLDetailsElement>('#crm .mvp-lead-more-filters');
+      const stage = document.querySelector<HTMLSelectElement>('#mvp-lead-stage-filter');
+      const presentation = document.querySelector<HTMLButtonElement>('[data-pc-clear-filters]');
+      const core = document.querySelector<HTMLButtonElement>('[data-clear-lead-filters]');
+      return {
+        label,
+        stage: stage?.value ?? null,
+        summary: document.querySelector('#crm .mvp-lead-more-filters > summary span')?.textContent?.trim() ?? null,
+        detailsOpen: details?.open ?? null,
+        presentation: describeRoleNode(presentation, 'presentation'),
+        core: describeRoleNode(core, 'core'),
+      };
+    };
+
+    const moduleUrls = performance
+      .getEntriesByType('resource')
+      .map((entry) => entry.name)
+      .filter((name) => /\/dist\/leads-professional-redesign\.js(?:\?|$)/.test(name));
+    const moduleEvidence = {
+      urls: moduleUrls,
+      hasBare: moduleUrls.some((name) => {
+        const parsed = new URL(name, location.href);
+        return parsed.pathname.endsWith('/dist/leads-professional-redesign.js') && parsed.search === '';
+      }),
+      hasVersioned: moduleUrls.some((name) => {
+        const parsed = new URL(name, location.href);
+        return parsed.pathname.endsWith('/dist/leads-professional-redesign.js') && parsed.search !== '';
+      }),
+    };
+
+    const record = (kind: string, extra: Record<string, unknown> = {}): void => {
+      trace.push({
+        sequence: trace.length + 1,
+        atMs: Math.round(performance.now() * 1000) / 1000,
+        kind,
+        ...extra,
+        state: snapshot(kind),
+      });
+    };
+
+    const initialPresentation = document.querySelector<HTMLButtonElement>('[data-pc-clear-filters]');
+    const initialCore = document.querySelector<HTMLButtonElement>('[data-clear-lead-filters]');
+    let lastPresentation = initialPresentation;
+    let lastCore = initialCore;
+
+    const eventContext = (event: MouseEvent): Record<string, unknown> => {
+      const targetElement = event.target instanceof Element ? event.target : null;
+      const presentation = targetElement?.closest<HTMLButtonElement>('[data-pc-clear-filters]') ?? null;
+      const core = targetElement?.closest<HTMLButtonElement>('[data-clear-lead-filters]') ?? null;
+      return {
+        eventTarget: describeNode(event.target),
+        currentTarget: describeNode(event.currentTarget),
+        targetPresentation: describeRoleNode(presentation, 'presentation'),
+        targetCore: describeRoleNode(core, 'core'),
+        eventPhase: event.eventPhase,
+        defaultPrevented: event.defaultPrevented,
+      };
+    };
+
+    const captureListener = (event: MouseEvent): void => {
+      const target = event.target instanceof Element ? event.target : null;
+      const presentation = target?.closest('[data-pc-clear-filters]');
+      const core = target?.closest('[data-clear-lead-filters]');
+      if (!presentation && !core) return;
+      record(presentation ? 'presentation-document-capture' : 'core-document-capture', eventContext(event));
+    };
+
+    const bubbleListener = (event: MouseEvent): void => {
+      const target = event.target instanceof Element ? event.target : null;
+      const presentation = target?.closest('[data-pc-clear-filters]');
+      const core = target?.closest('[data-clear-lead-filters]');
+      if (!presentation && !core) return;
+      record(presentation ? 'presentation-document-bubble' : 'core-document-bubble', eventContext(event));
+    };
+
+    document.addEventListener('click', captureListener, true);
+    document.addEventListener('click', bubbleListener, false);
+
+    const originalButtonClick = HTMLButtonElement.prototype.click;
+    const patchedButtonClick = function patchedPr143DiagnosticClick(this: HTMLButtonElement): void {
+      if (this.matches('[data-clear-lead-filters]')) {
+        record('core-click-method-invoked', { invokedCore: describeRoleNode(this, 'core') });
+      } else if (this.matches('[data-pc-clear-filters]')) {
+        record('presentation-click-method-invoked', { invokedPresentation: describeRoleNode(this, 'presentation') });
+      }
+      originalButtonClick.call(this);
+    };
+    HTMLButtonElement.prototype.click = patchedButtonClick;
+
+    const observer = new MutationObserver((mutations) => {
+      const presentation = document.querySelector<HTMLButtonElement>('[data-pc-clear-filters]');
+      const core = document.querySelector<HTMLButtonElement>('[data-clear-lead-filters]');
+      const presentationReplaced = presentation !== lastPresentation;
+      const coreReplaced = core !== lastCore;
+      const crmRootRebuilt = mutations.some((mutation) => mutation.type === 'childList' && mutation.target === crm);
+      const filterTreeTouched = mutations.some((mutation) => {
+        const nodes = [...mutation.addedNodes, ...mutation.removedNodes];
+        return nodes.some((node) => node instanceof Element && (
+          node.matches('.mvp-lead-more-filters, [data-pc-clear-filters], [data-clear-lead-filters]')
+          || Boolean(node.querySelector('.mvp-lead-more-filters, [data-pc-clear-filters], [data-clear-lead-filters]'))
+        ));
+      });
+      if (presentationReplaced || coreReplaced || crmRootRebuilt || filterTreeTouched) {
+        record('mutation-relevant', {
+          mutationCount: mutations.length,
+          presentationReplaced,
+          coreReplaced,
+          crmRootRebuilt,
+          filterTreeTouched,
+          previousPresentation: describeRoleNode(lastPresentation, 'presentation'),
+          previousCore: describeRoleNode(lastCore, 'core'),
+          currentPresentation: describeRoleNode(presentation, 'presentation'),
+          currentCore: describeRoleNode(core, 'core'),
+        });
+      }
+      lastPresentation = presentation;
+      lastCore = core;
+    });
+    observer.observe(crm, { childList: true, subtree: true });
+
+    const before = snapshot('before-click');
+    record('diagnostic-installed', { moduleEvidence, before });
+
+    diagnosticWindow.__pr143ClearDiagnostic = {
+      snapshot,
+      finish: (label: string): Record<string, unknown> => {
+        const after = snapshot(label);
+        const result = {
+          moduleEvidence,
+          before,
+          after,
+          previousNodes: {
+            presentation: {
+              ...describeRoleNode(initialPresentation, 'presentation'),
+              stillCurrent: initialPresentation === document.querySelector('[data-pc-clear-filters]'),
+            },
+            core: {
+              ...describeRoleNode(initialCore, 'core'),
+              stillCurrent: initialCore === document.querySelector('[data-clear-lead-filters]'),
+            },
+          },
+          trace: [...trace],
+        };
+        observer.disconnect();
+        document.removeEventListener('click', captureListener, true);
+        document.removeEventListener('click', bubbleListener, false);
+        if (HTMLButtonElement.prototype.click === patchedButtonClick) HTMLButtonElement.prototype.click = originalButtonClick;
+        delete diagnosticWindow.__pr143ClearDiagnostic;
+        return result;
+      },
+    };
+
+    return { moduleEvidence, before };
+  });
+}
+
+async function finishPr143ClearDiagnostic(page: Page, label: string): Promise<Record<string, unknown>> {
+  return page.evaluate((diagnosticLabel) => {
+    const diagnosticWindow = window as Pr143DiagnosticWindow;
+    return diagnosticWindow.__pr143ClearDiagnostic?.finish(diagnosticLabel) ?? { missingDiagnostic: true, label: diagnosticLabel };
+  }, label);
+}
+
 test('PR143 desktop cero capacitación Chromium + regresión móvil', { timeout: 180_000 }, async () => {
   const executablePath = chromeExecutable();
   assert.ok(executablePath, 'Chrome/Chromium no disponible.');
@@ -330,7 +560,9 @@ test('PR143 desktop cero capacitación Chromium + regresión móvil', { timeout:
     assert.equal(await details.getAttribute('open'), null, 'Filtros secundarios cerrados por defecto en desktop.');
     const filterSummary = details.locator(':scope > summary');
     const initialFilters = await activeSecondaryFilterSnapshot(page);
-    assert.equal(initialFilters.label, initialFilters.count > 0 ? `Filtros (${initialFilters.count})` : 'Filtros', `El resumen cerrado debe reflejar exactamente los filtros activos: ${JSON.stringify(initialFilters)}`);
+    assert.equal(await page.locator('#mvp-lead-order').inputValue(), 'recent', 'El orden inicial de Leads debe ser Más recientes.');
+    assert.equal(initialFilters.count, 0, `El orden no debe contar como filtro: ${JSON.stringify(initialFilters)}`);
+    assert.equal(initialFilters.label, 'Filtros', `El resumen inicial no debe contar la preferencia de orden: ${JSON.stringify(initialFilters)}`);
     console.log(`PR143_INITIAL_FILTERS=${JSON.stringify(initialFilters)}`);
     await assertControlTarget(page, '#crm .mvp-lead-more-filters > summary', 'Summary Filtros');
 
@@ -349,15 +581,18 @@ test('PR143 desktop cero capacitación Chromium + regresión móvil', { timeout:
     await page.locator('#mvp-lead-stage-filter').selectOption('Calificado');
     await page.waitForFunction(() => document.querySelector('#crm .mvp-lead-more-filters > summary span')?.textContent?.includes('Filtros ('));
     assert.equal(await page.locator('#crm .mvp-lead-more-filters').getAttribute('open'), '', 'Un panel abierto explícitamente debe seguir operativo mientras se edita.');
+    assert.equal(await page.locator('#mvp-lead-stage-filter').inputValue(), 'Calificado');
+    assert.equal(await page.locator('#mvp-lead-order').inputValue(), 'recent', 'Cambiar etapa no debe alterar la preferencia de orden.');
     const editedFilters = await activeSecondaryFilterSnapshot(page);
-    assert.equal(editedFilters.label, `Filtros (${editedFilters.count})`);
-    assert.ok(editedFilters.count >= 1);
+    assert.equal(editedFilters.count, 1, `Calificado debe ser el único filtro real activo: ${JSON.stringify(editedFilters)}`);
+    assert.equal(editedFilters.label, 'Filtros (1)');
     await page.locator('[data-pc-apply-filters]').click();
     await page.waitForFunction(() => document.querySelector<HTMLDetailsElement>('#crm .mvp-lead-more-filters')?.open === false);
     assert.equal(await page.locator('#mvp-lead-stage-filter').inputValue(), 'Calificado', 'Aplicar no pierde el filtro activo.');
+    assert.equal(await page.locator('#mvp-lead-order').inputValue(), 'recent', 'Aplicar no debe alterar la preferencia de orden.');
     const appliedFilters = await activeSecondaryFilterSnapshot(page);
-    assert.equal(appliedFilters.label, `Filtros (${appliedFilters.count})`);
-    assert.ok(appliedFilters.count >= 1);
+    assert.equal(appliedFilters.label, 'Filtros (1)');
+    assert.equal(appliedFilters.count, 1);
     await page.evaluate(() => document.dispatchEvent(new CustomEvent('trv-render')));
     await page.waitForTimeout(120);
     assert.equal(await page.locator('#crm .mvp-lead-more-filters').getAttribute('open'), null, 'Un rerender con filtros activos no debe autoabrirlos.');
@@ -397,10 +632,50 @@ test('PR143 desktop cero capacitación Chromium + regresión móvil', { timeout:
 
     await filterSummary.click();
     await waitForFilterPanelVisible(page);
-    await page.locator('[data-pc-clear-filters]').click();
-    await page.waitForFunction(() => document.querySelector('#crm .mvp-lead-more-filters > summary span')?.textContent?.trim() === 'Filtros');
-    assert.equal(await page.locator('#mvp-lead-stage-filter').inputValue(), 'Todas');
-    await page.waitForFunction(() => document.querySelector<HTMLDetailsElement>('#crm .mvp-lead-more-filters')?.open === false);
+    await page.waitForFunction(() => {
+      const filterDetails = document.querySelector<HTMLDetailsElement>('#crm .mvp-lead-more-filters');
+      const stage = document.querySelector<HTMLSelectElement>('#mvp-lead-stage-filter');
+      const presentationClear = document.querySelector<HTMLButtonElement>('[data-pc-clear-filters]');
+      const coreClear = document.querySelector<HTMLButtonElement>('[data-clear-lead-filters]');
+      return Boolean(
+        filterDetails?.open
+        && stage?.value === 'Calificado'
+        && presentationClear?.isConnected
+        && coreClear?.isConnected
+      );
+    });
+    const clearDiagnosticBefore = await installPr143ClearDiagnostic(page);
+    console.log(`PR143_CLEAR_DIAG_BEFORE=${JSON.stringify(clearDiagnosticBefore)}`);
+    let clearDiagnosticError: unknown;
+    try {
+      await page.locator('[data-pc-clear-filters]').click();
+      await page.waitForFunction(() => {
+        const stage = document.querySelector<HTMLSelectElement>('#mvp-lead-stage-filter');
+        const order = document.querySelector<HTMLSelectElement>('#mvp-lead-order');
+        const summary = document.querySelector('#crm .mvp-lead-more-filters > summary span');
+        const filterDetails = document.querySelector<HTMLDetailsElement>('#crm .mvp-lead-more-filters');
+        return stage?.value === 'Todas'
+          && order?.value === 'recent'
+          && summary?.textContent?.trim() === 'Filtros'
+          && filterDetails?.open === false;
+      });
+    } catch (error) {
+      clearDiagnosticError = error;
+    } finally {
+      const clearDiagnostic = await finishPr143ClearDiagnostic(page, clearDiagnosticError ? 'after-click-failure' : 'after-click-success');
+      console.log(`PR143_CLEAR_DIAGNOSTIC=${JSON.stringify(clearDiagnostic)}`);
+    }
+    if (clearDiagnosticError) throw clearDiagnosticError;
+    const clearedFilters = await activeSecondaryFilterSnapshot(page);
+    const clearContract = await page.evaluate(() => ({
+      stage: document.querySelector<HTMLSelectElement>('#mvp-lead-stage-filter')?.value ?? null,
+      order: document.querySelector<HTMLSelectElement>('#mvp-lead-order')?.value ?? null,
+      summary: document.querySelector('#crm .mvp-lead-more-filters > summary span')?.textContent?.trim() ?? null,
+      detailsOpen: document.querySelector<HTMLDetailsElement>('#crm .mvp-lead-more-filters')?.open ?? null,
+    }));
+    assert.deepEqual(clearedFilters, { count: 0, label: 'Filtros' }, `Limpiar debe dejar cero filtros reales: ${JSON.stringify(clearedFilters)}`);
+    assert.deepEqual(clearContract, { stage: 'Todas', order: 'recent', summary: 'Filtros', detailsOpen: false });
+    console.log(`PR143_CLEAR_CONTRACT=${JSON.stringify({ ...clearContract, activeFilterCount: clearedFilters.count })}`);
 
     if ((await pipelineToggle.getAttribute('aria-expanded')) === 'true') await pipelineToggle.click();
     await page.waitForTimeout(100);
@@ -557,7 +832,7 @@ test('PR143 WebKit desktop 1280/1440', { timeout: 120_000 }, async () => {
 test('PR143 cache bust: todo runtime modificado cambia URL servida', () => {
   const index = readFileSync('index.html', 'utf8');
   assert.match(index, /\/src\/leads-desktop-zero-training\.css\?v=20260811-1/);
-  assert.match(index, /\/dist\/leads-professional-redesign-blocking-fix\.js\?v=20260811-1/);
+  assert.match(index, /\/dist\/leads-professional-redesign-blocking-fix\.js\?v=20260816-1/);
   assert.doesNotMatch(index, /\/dist\/leads-professional-redesign-blocking-fix\.js\?v=20260805-1/);
   assert.match(index, /\/dist\/leads-professional-redesign\.js\?v=20260811-1/);
   assert.doesNotMatch(index, /\/dist\/leads-professional-redesign\.js\?v=20260805-1/);

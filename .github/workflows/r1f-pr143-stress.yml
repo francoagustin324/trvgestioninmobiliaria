@@ -1,0 +1,97 @@
+name: R1-H PR143 stress
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+env:
+  PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
+
+jobs:
+  pr143-stress:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout exact PR HEAD
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+
+      - name: Verify exact PR HEAD
+        shell: bash
+        run: |
+          set -euo pipefail
+          expected="${{ github.event.pull_request.head.sha }}"
+          actual="$(git rev-parse HEAD)"
+          printf 'EXPECTED_HEAD=%s\nACTUAL_HEAD=%s\n' "${expected}" "${actual}"
+          test "${actual}" = "${expected}"
+
+      - name: Setup Node 22
+        uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install exact lockfile dependencies
+        run: npm ci --silent
+
+      - name: Clean build R1-H workspace
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf dist
+          npm run build --silent
+
+      - name: Stress PR143 Chromium sequentially 50x
+        id: stress
+        shell: bash
+        run: |
+          set +e
+          mkdir -p r1h-logs
+          : > r1h-logs/summary.txt
+          overall_exit=0
+
+          for i in $(seq -w 1 50); do
+            log="r1h-logs/iteration-${i}.log"
+            start_ns=$(date +%s%N)
+
+            node --test --test-concurrency=1 \
+              --test-name-pattern='^PR143 desktop cero capacitación Chromium \+ regresión móvil$' \
+              dist/tests/leads-desktop-zero-training.test.js \
+              >"${log}" 2>&1
+            exit_code=$?
+
+            end_ns=$(date +%s%N)
+            duration_ms=$(( (end_ns - start_ns) / 1000000 ))
+
+            if [ "${exit_code}" -eq 0 ]; then
+              result="PASS"
+            else
+              result="FAIL"
+              overall_exit="${exit_code}"
+            fi
+
+            printf 'iteration=%s result=%s exit_code=%s duration_ms=%s\n' \
+              "${i}" "${result}" "${exit_code}" "${duration_ms}" \
+              | tee -a r1h-logs/summary.txt
+
+            cat "${log}"
+
+            if [ "${exit_code}" -ne 0 ]; then
+              break
+            fi
+          done
+
+          exit "${overall_exit}"
+
+      - name: Upload R1-H diagnostics
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: r1h-pr143-stress-diagnostics
+          path: r1h-logs/
+          if-no-files-found: error
