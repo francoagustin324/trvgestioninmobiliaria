@@ -47,7 +47,7 @@ function visitToday(): Client {
     pipeline: 'Visita coordinada',
     temperature: 'Caliente',
     nextFollowUp: TODAY,
-    nextAction: 'Visita 17:30',
+    nextAction: 'Confirmar visita 17:30',
   });
 }
 
@@ -71,7 +71,7 @@ test('B1.4.1 C: visita de hoy conserva motivo, hora y acción existente', () => 
   assert.equal(result.length, 1);
   assert.match(result[0]!.reason, /Visita hoy/);
   assert.match(result[0]!.reason, /17:30/);
-  assert.equal(result[0]!.action, 'Visita 17:30');
+  assert.equal(result[0]!.action, 'Confirmar visita');
 });
 
 test('B1.4.1 D/E: terminales quedan fuera y la cola nunca supera tres recomendaciones', () => {

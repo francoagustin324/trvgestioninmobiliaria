@@ -33,7 +33,7 @@ export function supervisedAttentionQueue(
     .map((client) => {
       const primaryAlert = leadPrimaryAlert(client, today);
       const presentation = leadCardAttentionPresentation(client, today);
-      const reason = presentation.alertFullLabel || primaryAlert.label;
+      const reason = primaryAlert.label;
       const dateLabel = presentation.dateLabel || presentation.scheduledDateLabel || '';
       return {
         clientId: client.id,
