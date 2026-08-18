@@ -102,31 +102,53 @@
 
 @media (max-width: 720px) {
   .pc-supervised-attention-queue {
-    grid-template-columns: minmax(0, 1fr);
-    gap: 6px;
-    padding: 8px;
+    grid-template-columns: 64px minmax(0, 1fr);
+    gap: 4px;
+    margin: 2px 0 4px;
+    padding: 2px 4px;
     overflow-x: hidden;
+    border-radius: 9px;
   }
 
   .pc-supervised-attention-heading {
-    flex-direction: row;
-    align-items: baseline;
-    justify-content: space-between;
-    gap: 8px;
+    gap: 0;
+  }
+
+  .pc-supervised-attention-heading strong {
+    font-size: 0.61rem;
+    line-height: 1.05;
+    letter-spacing: 0.035em;
+  }
+
+  .pc-supervised-attention-heading span {
+    display: none;
   }
 
   .pc-supervised-attention-list {
     grid-template-columns: minmax(0, 1fr);
+    gap: 2px;
   }
 
   .pc-supervised-attention-item {
-    min-height: 52px;
+    min-height: 16px;
+    grid-template-columns: minmax(0, 0.72fr) minmax(0, 1.05fr) minmax(0, 1.2fr);
+    align-items: center;
+    align-content: center;
+    gap: 3px;
+    padding: 1px 3px;
+    border-radius: 6px;
   }
 
   .pc-supervised-attention-name,
   .pc-supervised-attention-reason,
   .pc-supervised-attention-action {
-    white-space: normal;
+    font-size: 0.6rem;
+    line-height: 1.1;
+    white-space: nowrap;
     overflow-wrap: anywhere;
+  }
+
+  .pc-supervised-attention-reason small {
+    font-size: inherit;
   }
 }
