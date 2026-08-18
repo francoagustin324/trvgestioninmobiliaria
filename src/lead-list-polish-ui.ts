@@ -1,3 +1,6 @@
+import { renderSupervisedAttentionQueue } from './lead-attention-queue.js';
+import { visibleClients } from './team-access.js';
+
 const desktopQuery = '(min-width: 901px)';
 
 interface LeadListEnhancementOptions {
@@ -127,11 +130,19 @@ function schedulePipelineGeometryRefresh(container: HTMLElement): void {
   });
 }
 
+function renderAttentionQueue(container: HTMLElement): void {
+  const results = container.querySelector<HTMLElement>('#mvp-lead-results');
+  if (!results) return;
+  container.querySelector<HTMLElement>('[data-supervised-attention-queue]')?.remove();
+  results.insertAdjacentHTML('beforebegin', renderSupervisedAttentionQueue(visibleClients()));
+}
+
 export function enhanceLeadList(container: HTMLElement, options: LeadListEnhancementOptions = {}): void {
   activeLeadContainer = container;
   const breakpoint = desktopBreakpoint();
   placeNewLeadButton(container, breakpoint.matches);
   syncFilterDetails(container);
   enhancePipelines(container, options.centerSelectedStage === true);
+  renderAttentionQueue(container);
   schedulePipelineGeometryRefresh(container);
 }
