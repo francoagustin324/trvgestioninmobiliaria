@@ -7,6 +7,7 @@ import type {
   OrganizationSettings,
   Property,
   Reminder,
+  SupervisedRecommendationRecord,
   TeamMember,
   TeamMemberStatus,
   TeamRole,
@@ -43,6 +44,10 @@ export interface CloudMembershipContext {
   currentMemberId: number;
   currentRole: TeamRole;
   members: TeamMember[];
+}
+
+interface RecommendationCloudPayload extends SupervisedRecommendationRecord {
+  recordKind: 'supervised_recommendation';
 }
 
 function normalizedRole(value: unknown): TeamRole {
@@ -123,6 +128,9 @@ export function reconcileCrmAssignments(crm: CrmData, context: CloudMembershipCo
     fichas: crm.fichas.map(assigned),
     conversations: crm.conversations.map(assigned),
     activityLog: crm.activityLog.map((item) => ({ ...item, actorId: memberId(item.actorId) })),
+    recommendationLog: crm.recommendationLog
+      .filter((item) => item.organizationId === context.organizationId)
+      .map((item) => ({ ...item, actorId: memberId(item.actorId) })),
   };
 }
 
@@ -160,6 +168,10 @@ function visibleToCurrentMember<T extends { assignedToId?: number }>(
   return items.filter((item) => item.assignedToId === context.currentMemberId);
 }
 
+function recommendationPayload(item: SupervisedRecommendationRecord): RecommendationCloudPayload {
+  return { recordKind: 'supervised_recommendation', ...item };
+}
+
 export function crmToCloudRecords(
   crm: CrmData,
   context: CloudMembershipContext,
@@ -180,14 +192,31 @@ export function crmToCloudRecords(
     ...reconciled.activityLog
       .filter((item) => elevated || item.actorId === member)
       .map((item) => row(org, 'activity', item.id, Number(item.actorId || member), item, userId)),
+    ...reconciled.recommendationLog
+      .filter((item) => item.organizationId === org && (elevated || item.actorId === member))
+      .map((item) => row(org, 'activity', `recommendation:${item.id}`, item.actorId, recommendationPayload(item), userId)),
   ];
+}
+
+function recommendationRecordPayload(value: unknown): value is RecommendationCloudPayload {
+  return Boolean(value && typeof value === 'object' && (value as { recordKind?: string }).recordKind === 'supervised_recommendation');
 }
 
 function recordsOf<T>(rows: CloudRecordRow[], entityType: CloudEntityType): T[] {
   return rows
-    .filter((item) => item.entity_type === entityType && item.payload && typeof item.payload === 'object')
+    .filter((item) => item.entity_type === entityType && item.payload && typeof item.payload === 'object' && !recommendationRecordPayload(item.payload))
     .map((item) => item.payload as T)
     .sort((left, right) => Number((left as { id?: number }).id ?? 0) - Number((right as { id?: number }).id ?? 0));
+}
+
+function recommendationRecords(rows: CloudRecordRow[], context: CloudMembershipContext): SupervisedRecommendationRecord[] {
+  const validActorIds = new Set(context.members.map((member) => member.id));
+  return rows
+    .filter((item) => item.entity_type === 'activity' && recommendationRecordPayload(item.payload))
+    .map((item) => item.payload as RecommendationCloudPayload)
+    .filter((item) => item.organizationId === context.organizationId && validActorIds.has(Number(item.actorId)))
+    .map(({ recordKind: _recordKind, ...item }) => item)
+    .sort((left, right) => left.shownAt.localeCompare(right.shownAt));
 }
 
 function organizationFromRows(rows: CloudRecordRow[], fallback: OrganizationSettings, organizationId: string): OrganizationSettings {
@@ -213,6 +242,7 @@ export function cloudRecordsToCrm(
     organization: organizationFromRows(rows, fallback.organization, context.organizationId),
     teamMembers: context.members,
     activityLog: recordsOf<ActivityEntry>(rows, 'activity'),
+    recommendationLog: recommendationRecords(rows, context),
     clients: recordsOf<Client>(rows, 'client'),
     properties: recordsOf<Property>(rows, 'property'),
     contacts: recordsOf<CommercialContact>(rows, 'commercial_contact'),
