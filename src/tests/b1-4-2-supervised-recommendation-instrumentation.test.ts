@@ -1,15 +1,20 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
-import { cloudRecordsToCrm, crmToCloudRecords, type CloudMembershipContext } from '../cloud-records.js';
+import { cloudRecordsToCrm, crmToCloudRecords, staleCloudRecords, type CloudMembershipContext } from '../cloud-records.js';
 import { renderSupervisedAttentionQueue, supervisedAttentionQueue, type LeadAttentionRecommendation } from '../lead-attention-queue.js';
 import {
   appendShownRecommendations,
   applyHumanActivityToRecommendations,
   recommendationLogicalId,
   type RecommendationInstrumentationContext,
+  type SupervisedRecommendationRecord,
 } from '../lead-recommendation-instrumentation-core.js';
-import { initialData, type ActivityEntry, type Client, type SupervisedRecommendationRecord } from '../models.js';
+import {
+  mergeSupervisedRecommendationTelemetry,
+  supervisedRecommendationCloudRow,
+} from '../lead-recommendation-telemetry.js';
+import { initialData, type ActivityEntry, type Client } from '../models.js';
 
 const TODAY = '2026-08-19';
 const SHOWN_AT = '2026-08-19T12:00:00.000Z';
@@ -27,7 +32,7 @@ function client(id: number, overrides: Partial<Client> = {}): Client {
     lastContact: '2026-08-18',
     nextAction: 'Enviar opciones',
     nextFollowUp: '2026-08-25',
-    notes: 'Dato sensible que no debe viajar a recommendationLog',
+    notes: 'Dato sensible que no debe viajar a telemetría',
     assignedToId: 1,
     createdById: 1,
     ...overrides,
@@ -145,7 +150,11 @@ test('B1.4.2 H: render puro no guarda ni muta lead/activity/reminder/followup/pi
   for (const forbidden of ['saveData', 'addActivity', 'Reminder', 'nextFollowUp =', 'nextAction =', 'pipeline =']) {
     assert.equal(runtimeSource.includes(forbidden), false, forbidden);
   }
-  assert.match(runtimeSource, /persistRecommendationInstrumentation\(\)/);
+  assert.match(runtimeSource, /persistSupervisedRecommendationTelemetry\(context, previous, shown\.log\)/);
+  const telemetrySource = readFileSync('src/lead-recommendation-telemetry.ts', 'utf8');
+  for (const forbidden of ['queueCloudSave', 'saveData(', 'writeLocalSnapshot', 'markSyncError', 'propcontrol-cloud-status']) {
+    assert.equal(telemetrySource.includes(forbidden), false, forbidden);
+  }
 });
 
 test('B1.4.2 I/N: terminales fuera, motor B1.4.1 intacto y máximo tres', () => {
@@ -177,10 +186,9 @@ test('B1.4.2 J: shown/decision respetan organization, actor y visible client bou
   assert.equal(hiddenClient.changed, 0);
 });
 
-test('B1.4.2 J/K: cloud reutiliza activity namespace sin contaminar activityLog y minimiza payload', () => {
+test('B1.4.2 J/K: telemetría cloud queda aislada del CRM, respeta scope y minimiza payload', () => {
   const crm = structuredClone(initialData);
   crm.organization.id = 'org-a';
-  crm.recommendationLog = [shownRecord()];
   crm.activityLog = [activity('Seguimiento completado')];
   const cloudContext: CloudMembershipContext = {
     organizationId: 'org-a',
@@ -188,18 +196,51 @@ test('B1.4.2 J/K: cloud reutiliza activity namespace sin contaminar activityLog 
     currentRole: 'Corredor',
     members: crm.teamMembers.map((member) => ({ ...member, id: 1, role: 'Corredor', status: 'Activo' })),
   };
-  const rows = crmToCloudRecords(crm, cloudContext, 'user-1');
-  const recommendationRow = rows.find((row) => row.entity_type === 'activity' && row.entity_key.includes('recommendation:'));
-  assert.ok(recommendationRow);
+  const crmRows = crmToCloudRecords(crm, cloudContext, 'user-1');
+  const recommendationRow = supervisedRecommendationCloudRow(shownRecord(), 'user-1');
+  const rows = [...crmRows, recommendationRow];
   assert.equal(recommendationRow.organization_id, 'org-a');
   assert.equal(recommendationRow.assigned_member_id, 1);
   const payload = JSON.stringify(recommendationRow.payload);
   for (const sensitive of ['phone', 'email', 'notes', 'Dato sensible', '549351']) assert.equal(payload.includes(sensitive), false, sensitive);
 
   const loaded = cloudRecordsToCrm(rows, cloudContext, crm);
-  assert.equal(loaded.recommendationLog.length, 1);
+  assert.deepEqual(Object.keys(loaded).sort(), Object.keys(initialData).sort());
   assert.equal(loaded.activityLog.some((entry) => entry.action === 'Seguimiento completado'), true);
-  assert.equal(loaded.activityLog.some((entry) => String(entry.action).includes('recommendation')), false);
+  assert.equal(loaded.activityLog.length, 1);
+
+  const nextCrmRows = crmToCloudRecords(loaded, cloudContext, 'user-1');
+  assert.equal(staleCloudRecords(rows, nextCrmRows).some((row) => row.entity_key === recommendationRow.entity_key), false);
+
+  const cloudSource = readFileSync('src/cloud-api.ts', 'utf8');
+  assert.match(cloudSource, /crmSyncRecords\(existing\)/);
+  assert.match(cloudSource, /latestRemoteVersion\(crmSyncRecords\(refreshed\)\)/);
+  assert.match(cloudSource, /const crmRecords = crmSyncRecords\(records\)/);
+});
+
+test('B1.4.2 cloud: primer shown y primera decisión sobreviven escrituras concurrentes del mismo ciclo', () => {
+  const first = shownRecord();
+  const later = {
+    ...first,
+    shownAt: '2026-08-19T12:03:00.000Z',
+    humanDecision: 'modified' as const,
+    decisionAt: '2026-08-19T12:05:00.000Z',
+    actualAction: 'Seguimiento reprogramado',
+  };
+  const decided = mergeSupervisedRecommendationTelemetry(first, later);
+  assert.equal(decided.shownAt, SHOWN_AT);
+  assert.equal(decided.humanDecision, 'modified');
+
+  const laterContradiction = {
+    ...later,
+    humanDecision: 'executed' as const,
+    decisionAt: '2026-08-19T12:06:00.000Z',
+    actualAction: 'Contacto por WhatsApp',
+  };
+  const stable = mergeSupervisedRecommendationTelemetry(decided, laterContradiction);
+  assert.equal(stable.shownAt, SHOWN_AT);
+  assert.equal(stable.humanDecision, 'modified');
+  assert.equal(stable.decisionAt, '2026-08-19T12:05:00.000Z');
 });
 
 test('B1.4.2 L/M: recent y contrato Limpiar PR143 siguen sin ser alterados', () => {
@@ -225,9 +266,8 @@ test('B1.4.2 O/P: instrumentación no agrega CSS, overlays ni controles visuales
 });
 
 test('B1.4.2: ignored se difiere; nunca se infiere por tiempo o timeout', () => {
-  const model = readFileSync('src/models.ts', 'utf8');
   const core = readFileSync('src/lead-recommendation-instrumentation-core.ts', 'utf8');
-  assert.equal(model.includes("'ignored'"), false);
+  assert.equal(core.includes("'ignored'"), false);
   assert.equal(core.includes('setTimeout'), false);
   assert.equal(core.includes('Date.now()'), false);
 });

@@ -6,7 +6,6 @@ import type {
   FichaMode,
   ModuleId,
   OrganizationSettings,
-  SupervisedRecommendationRecord,
   TeamMember,
   WhatsAppConversation,
 } from './models.js';
@@ -106,31 +105,6 @@ function normalizedActivityLog(value: unknown): ActivityEntry[] {
     }));
 }
 
-function normalizedRecommendationLog(value: unknown): SupervisedRecommendationRecord[] {
-  if (!Array.isArray(value)) return [];
-  return value
-    .filter((item): item is SupervisedRecommendationRecord => Boolean(item && typeof item === 'object'))
-    .map((item): SupervisedRecommendationRecord => ({
-      id: String(item.id || ''),
-      organizationId: String(item.organizationId || ''),
-      actorId: Number(item.actorId || 0),
-      clientId: Number(item.clientId || 0),
-      shownAt: String(item.shownAt || new Date(0).toISOString()),
-      reason: String(item.reason || ''),
-      alertKind: String(item.alertKind || ''),
-      recommendedAction: String(item.recommendedAction || ''),
-      relevantDate: item.relevantDate ? String(item.relevantDate) : undefined,
-      context: item.context ? String(item.context) : undefined,
-      stage: String(item.stage || ''),
-      humanDecision: item.humanDecision === 'executed' || item.humanDecision === 'modified' ? item.humanDecision : 'pending',
-      decisionAt: item.decisionAt ? String(item.decisionAt) : undefined,
-      actualAction: item.actualAction ? String(item.actualAction) : undefined,
-      outcome: item.outcome === 'Ganado' || item.outcome === 'Perdido' ? item.outcome : undefined,
-      outcomeAt: item.outcomeAt ? String(item.outcomeAt) : undefined,
-    }))
-    .filter((item) => item.id && item.organizationId && item.actorId > 0 && item.clientId > 0);
-}
-
 function normalizedData(value: Partial<CrmData>): CrmData {
   const teamMembers = normalizedTeamMembers(value.teamMembers);
   const ownerId = teamMembers.find((member) => member.role === 'Dueño')?.id ?? teamMembers[0]?.id ?? 1;
@@ -138,7 +112,6 @@ function normalizedData(value: Partial<CrmData>): CrmData {
     organization: normalizedOrganization(value.organization),
     teamMembers,
     activityLog: normalizedActivityLog(value.activityLog),
-    recommendationLog: normalizedRecommendationLog(value.recommendationLog),
     clients: Array.isArray(value.clients) ? value.clients.map((client) => ({
       ...client,
       assignedToId: Number(client.assignedToId ?? ownerId),
@@ -241,15 +214,6 @@ export function replaceData(data: CrmData, syncCloud = false): void {
 
 export function saveData(reason = 'Cambio local'): void {
   writeLocalSnapshot(state.crm, { markDirty: true, reason });
-  queueCloudSave(state.crm);
-}
-
-export function persistRecommendationInstrumentation(): void {
-  writeLocalSnapshot(state.crm, {
-    markDirty: true,
-    reason: 'Instrumentación Autopilot supervisado',
-    backup: false,
-  });
   queueCloudSave(state.crm);
 }
 

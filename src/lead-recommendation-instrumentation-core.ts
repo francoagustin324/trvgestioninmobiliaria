@@ -1,5 +1,26 @@
 import type { LeadAttentionRecommendation } from './lead-attention-queue.js';
-import type { ActivityEntry, SupervisedRecommendationRecord } from './models.js';
+import type { ActivityEntry } from './models.js';
+
+export type RecommendationHumanDecision = 'pending' | 'executed' | 'modified';
+
+export interface SupervisedRecommendationRecord {
+  id: string;
+  organizationId: string;
+  actorId: number;
+  clientId: number;
+  shownAt: string;
+  reason: string;
+  alertKind: string;
+  recommendedAction: string;
+  relevantDate?: string;
+  context?: string;
+  stage: string;
+  humanDecision: RecommendationHumanDecision;
+  decisionAt?: string;
+  actualAction?: string;
+  outcome?: 'Ganado' | 'Perdido';
+  outcomeAt?: string;
+}
 
 export type InstrumentedHumanActionKind = 'contact' | 'followup-completed' | 'followup-scheduled' | 'next-action-updated';
 

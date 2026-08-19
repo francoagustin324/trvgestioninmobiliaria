@@ -23,7 +23,6 @@ export type AuditEngine = 'Reglas de seguridad' | 'Comprensión por conceptos' |
 export type TeamRole = 'Dueño' | 'Administrador' | 'Corredor';
 export type TeamMemberStatus = 'Activo' | 'Pendiente de acceso' | 'Suspendido';
 export type AssignmentEntity = 'Cliente' | 'Propiedad' | 'Conversación' | 'Tarea';
-export type RecommendationHumanDecision = 'pending' | 'executed' | 'modified';
 
 export interface OrganizationSettings {
   id: string;
@@ -52,25 +51,6 @@ export interface ActivityEntry {
   entityId?: number;
   detail: string;
   createdAt: string;
-}
-
-export interface SupervisedRecommendationRecord {
-  id: string;
-  organizationId: string;
-  actorId: number;
-  clientId: number;
-  shownAt: string;
-  reason: string;
-  alertKind: string;
-  recommendedAction: string;
-  relevantDate?: string;
-  context?: string;
-  stage: string;
-  humanDecision: RecommendationHumanDecision;
-  decisionAt?: string;
-  actualAction?: string;
-  outcome?: 'Ganado' | 'Perdido';
-  outcomeAt?: string;
 }
 
 export interface Client {
@@ -170,7 +150,6 @@ export interface CrmData {
   organization: OrganizationSettings;
   teamMembers: TeamMember[];
   activityLog: ActivityEntry[];
-  recommendationLog: SupervisedRecommendationRecord[];
   clients: Client[];
   properties: Property[];
   contacts: CommercialContact[];
@@ -234,7 +213,6 @@ export const initialData: CrmData = {
     createdAt: '2026-07-13T00:00:00.000Z',
   }],
   activityLog: [],
-  recommendationLog: [],
   clients: [{
     id: 1, name: 'Lucía Martín', phone: '351 555-0101', email: 'lucia@email.com',
     interest: 'Departamento de 2 dormitorios en Nueva Córdoba', status: 'Lead', temperature: 'Caliente',

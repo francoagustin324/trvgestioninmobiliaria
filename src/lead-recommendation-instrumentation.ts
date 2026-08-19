@@ -4,7 +4,11 @@ import {
   applyHumanActivitiesToRecommendations,
   type RecommendationInstrumentationContext,
 } from './lead-recommendation-instrumentation-core.js';
-import { persistRecommendationInstrumentation, state } from './store.js';
+import {
+  persistSupervisedRecommendationTelemetry,
+  readSupervisedRecommendationTelemetry,
+} from './lead-recommendation-telemetry.js';
+import { state } from './store.js';
 import { activeMember, visibleClients } from './team-access.js';
 
 function runtimeContext(): RecommendationInstrumentationContext {
@@ -35,7 +39,8 @@ export function instrumentVisibleSupervisedRecommendations(container: HTMLElemen
     pendingFrame = null;
     if (!container.isConnected) return;
     const context = runtimeContext();
-    const decisions = applyHumanActivitiesToRecommendations(state.crm.recommendationLog, context, state.crm.activityLog);
+    const previous = readSupervisedRecommendationTelemetry(context);
+    const decisions = applyHumanActivitiesToRecommendations(previous, context, state.crm.activityLog);
     const shown = appendShownRecommendations(
       decisions.log,
       context,
@@ -43,7 +48,6 @@ export function instrumentVisibleSupervisedRecommendations(container: HTMLElemen
       new Date().toISOString(),
     );
     if (!decisions.changed && !shown.changed) return;
-    state.crm.recommendationLog = shown.log;
-    persistRecommendationInstrumentation();
+    persistSupervisedRecommendationTelemetry(context, previous, shown.log);
   });
 }
