@@ -110,7 +110,7 @@ function normalizedRecommendationLog(value: unknown): SupervisedRecommendationRe
   if (!Array.isArray(value)) return [];
   return value
     .filter((item): item is SupervisedRecommendationRecord => Boolean(item && typeof item === 'object'))
-    .map((item) => ({
+    .map((item): SupervisedRecommendationRecord => ({
       id: String(item.id || ''),
       organizationId: String(item.organizationId || ''),
       actorId: Number(item.actorId || 0),
