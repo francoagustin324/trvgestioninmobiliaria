@@ -47,7 +47,8 @@ export function instrumentVisibleSupervisedRecommendations(container: HTMLElemen
       actuallyDisplayedRecommendations(container),
       new Date().toISOString(),
     );
-    if (!decisions.changed && !shown.changed) return;
+    // Persistir también sin cambios permite reintentar un outbox cloud pendiente
+    // en una oportunidad segura, sin tocar el estado/sync del CRM.
     persistSupervisedRecommendationTelemetry(context, previous, shown.log);
   });
 }

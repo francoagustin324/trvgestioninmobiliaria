@@ -46,12 +46,10 @@ export interface CloudMembershipContext {
 }
 
 export function isSupervisedRecommendationTelemetryPayload(value: unknown): boolean {
-  return Boolean(
-    value
-    && typeof value === 'object'
-    && !Array.isArray(value)
-    && (value as { recordKind?: unknown }).recordKind === 'supervised_recommendation',
-  );
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const kind = (value as { recordKind?: unknown }).recordKind;
+  // Compatibilidad defensiva: aislar tanto filas R1 históricas como eventos R2 append-only.
+  return kind === 'supervised_recommendation' || kind === 'supervised_recommendation_event';
 }
 
 function normalizedRole(value: unknown): TeamRole {

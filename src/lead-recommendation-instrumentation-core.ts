@@ -18,11 +18,20 @@ export interface SupervisedRecommendationRecord {
   humanDecision: RecommendationHumanDecision;
   decisionAt?: string;
   actualAction?: string;
+  decisionSourceActivityId?: number;
+  decisionSourceActivityCreatedAt?: string;
+  decisionSourceActivityAction?: string;
   outcome?: 'Ganado' | 'Perdido';
   outcomeAt?: string;
 }
 
-export type InstrumentedHumanActionKind = 'contact' | 'followup-completed' | 'followup-scheduled' | 'next-action-updated';
+export type InstrumentedHumanActionKind =
+  | 'contact'
+  | 'followup-completed'
+  | 'followup-scheduled'
+  | 'next-action-updated'
+  | 'visit-confirmed'
+  | 'financing-confirmed';
 
 export interface RecommendationInstrumentationContext {
   organizationId: string;
@@ -47,20 +56,23 @@ function encodedIdentityPart(value: unknown): string {
   return encodeURIComponent(normalizedIdentityPart(value));
 }
 
+/**
+ * Identidad semántica estable del ciclo de recomendación.
+ * Deliberadamente NO incluye reason/when/copy relativo ("ayer", "hace N días").
+ */
 export function recommendationLogicalId(
   organizationId: string,
   actorId: number,
-  recommendation: Pick<LeadAttentionRecommendation, 'clientId' | 'reason' | 'alertKind' | 'action' | 'when' | 'relevantDate' | 'stage'>,
+  recommendation: Pick<LeadAttentionRecommendation, 'clientId' | 'alertKind' | 'action' | 'relevantDate' | 'stage'>,
 ): string {
   return [
-    'v1',
+    'v2',
     encodedIdentityPart(organizationId),
     String(actorId),
     String(recommendation.clientId),
     encodedIdentityPart(recommendation.alertKind),
-    encodedIdentityPart(recommendation.reason),
     encodedIdentityPart(recommendation.action),
-    encodedIdentityPart(recommendation.relevantDate || recommendation.when),
+    encodedIdentityPart(recommendation.relevantDate),
     encodedIdentityPart(recommendation.stage),
   ].join('|');
 }
@@ -105,23 +117,82 @@ export function appendShownRecommendations(
 export function humanActionFromActivity(activity: ActivityEntry): InstrumentedHumanActionKind | null {
   if (activity.action === 'Contacto por WhatsApp') return 'contact';
   if (activity.action === 'Seguimiento completado') return 'followup-completed';
-  if (activity.action === 'Seguimiento reprogramado' || activity.action === 'Próxima acción programada') return 'followup-scheduled';
+  if (
+    activity.action === 'Seguimiento reprogramado'
+    || activity.action === 'Próxima acción programada'
+    || activity.action === 'Seguimiento por WhatsApp programado'
+  ) return 'followup-scheduled';
   if (activity.action === 'Próxima acción actualizada') return 'next-action-updated';
+  if (activity.action === 'Visita confirmada' || activity.action === 'Visita confirmada por WhatsApp') return 'visit-confirmed';
+  if (activity.action === 'Financiación confirmada') return 'financing-confirmed';
   return null;
 }
 
-function actionExecutesRecommendation(record: SupervisedRecommendationRecord, action: InstrumentedHumanActionKind): boolean {
-  if (record.alertKind === 'new-uncontacted') return action === 'contact';
-  if (record.alertKind === 'overdue' || record.alertKind === 'due-today') {
-    return action === 'contact' || action === 'followup-completed';
+function actionText(value: unknown): string {
+  return normalizedIdentityPart(value)
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function exactContactRecommendation(value: string): boolean {
+  return value === 'contactar por primera vez'
+    || value === 'contactar por whatsapp'
+    || value === 'volver a contactar por whatsapp'
+    || value === 'volver a contactar';
+}
+
+function schedulesFollowUp(value: string): boolean {
+  return value === 'programar seguimiento'
+    || value === 'definir proxima accion'
+    || value === 'definir accion';
+}
+
+/**
+ * Regla conservadora: executed sólo existe cuando la equivalencia entre la
+ * recomendación y la actividad humana es determinística. Una actividad humana
+ * real pero distinta se clasifica modified; una actividad no instrumentada se ignora.
+ */
+export function classifyActivityAgainstRecommendation(
+  record: SupervisedRecommendationRecord,
+  activity: ActivityEntry,
+): Exclude<RecommendationHumanDecision, 'pending'> | null {
+  const recommended = actionText(record.recommendedAction);
+  const actual = actionText(activity.action);
+  const kind = humanActionFromActivity(activity);
+
+  // Igualdad textual normalizada es evidencia determinística suficiente.
+  if (recommended && actual === recommended) return 'executed';
+  if (!kind) return null;
+
+  if (kind === 'contact') {
+    if (record.alertKind === 'new-uncontacted' && recommended === 'contactar por primera vez') return 'executed';
+    if (exactContactRecommendation(recommended)) return 'executed';
+    return 'modified';
   }
-  if (record.alertKind === 'visit-today') {
-    return action === 'contact' || action === 'followup-completed';
+
+  if (kind === 'followup-scheduled') {
+    return schedulesFollowUp(recommended) ? 'executed' : 'modified';
   }
-  if (record.alertKind === 'no-follow-up' || record.alertKind === 'no-action') {
-    return action === 'followup-scheduled' || action === 'next-action-updated';
+
+  if (kind === 'next-action-updated') {
+    return (recommended === 'definir proxima accion' || recommended === 'definir accion') ? 'executed' : 'modified';
   }
-  return false;
+
+  if (kind === 'followup-completed') {
+    return ['completar seguimiento', 'realizar seguimiento', 'hacer seguimiento'].includes(recommended)
+      ? 'executed'
+      : 'modified';
+  }
+
+  if (kind === 'visit-confirmed') {
+    return recommended === 'confirmar visita' ? 'executed' : 'modified';
+  }
+
+  if (kind === 'financing-confirmed') {
+    return recommended === 'confirmar financiacion' ? 'executed' : 'modified';
+  }
+
+  return 'modified';
 }
 
 export function applyHumanActivityToRecommendations(
@@ -131,8 +202,6 @@ export function applyHumanActivityToRecommendations(
 ): InstrumentationMutation {
   if (activity.actorId !== context.actorId || activity.entityType !== 'Cliente' || !activity.entityId) return { log, changed: 0 };
   if (!context.visibleClientIds.has(activity.entityId)) return { log, changed: 0 };
-  const actionKind = humanActionFromActivity(activity);
-  if (!actionKind) return { log, changed: 0 };
 
   const pending = log
     .map((item, index) => ({ item, index }))
@@ -146,12 +215,18 @@ export function applyHumanActivityToRecommendations(
     .sort((left, right) => right.item.shownAt.localeCompare(left.item.shownAt))[0];
   if (!pending) return { log, changed: 0 };
 
+  const decision = classifyActivityAgainstRecommendation(pending.item, activity);
+  if (!decision) return { log, changed: 0 };
+
   const next = [...log];
   next[pending.index] = {
     ...pending.item,
-    humanDecision: actionExecutesRecommendation(pending.item, actionKind) ? 'executed' : 'modified',
+    humanDecision: decision,
     decisionAt: activity.createdAt,
     actualAction: activity.action,
+    decisionSourceActivityId: activity.id,
+    decisionSourceActivityCreatedAt: activity.createdAt,
+    decisionSourceActivityAction: activity.action,
   };
   return { log: next, changed: 1 };
 }

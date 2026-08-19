@@ -1,17 +1,15 @@
 import { getCloudMembershipContext, getCloudSession } from './cloud-api.js';
-import {
-  isSupervisedRecommendationTelemetryPayload,
-  organizationScopedEntityKey,
-  type CloudRecordRow,
-} from './cloud-records.js';
+import { organizationScopedEntityKey, type CloudRecordRow } from './cloud-records.js';
 import { scopedStorageKey } from './sync-safety.js';
 import type {
-  RecommendationInstrumentationContext,
   RecommendationHumanDecision,
+  RecommendationInstrumentationContext,
   SupervisedRecommendationRecord,
 } from './lead-recommendation-instrumentation-core.js';
+import type { TeamRole } from './models.js';
 
-const TELEMETRY_STORAGE_SUFFIX = 'supervised-recommendations-v1';
+const TELEMETRY_STORAGE_SUFFIX = 'supervised-recommendations-v2';
+const TELEMETRY_OUTBOX_SUFFIX = 'supervised-recommendation-outbox-v1';
 
 interface PublicCloudConfig {
   configured?: boolean;
@@ -19,12 +17,51 @@ interface PublicCloudConfig {
   publishableKey?: string;
 }
 
-interface RecommendationTelemetryPayload extends SupervisedRecommendationRecord {
-  recordKind: 'supervised_recommendation';
+export type RecommendationTelemetryEventType = 'RECOMMENDATION_SHOWN' | 'RECOMMENDATION_DECISION';
+
+export interface SupervisedRecommendationEvent {
+  recordKind: 'supervised_recommendation_event';
+  eventId: string;
+  eventType: RecommendationTelemetryEventType;
+  logicalRecommendationId: string;
+  organizationId: string;
+  actorId: number;
+  clientId: number;
+  occurredAt: string;
+  reason?: string;
+  alertKind?: string;
+  recommendedAction?: string;
+  relevantDate?: string;
+  stage?: string;
+  humanDecision?: Exclude<RecommendationHumanDecision, 'pending'>;
+  actualAction?: string;
+  sourceActivityIdentity?: string;
+  sourceActivityId?: number;
+  sourceActivityCreatedAt?: string;
+  sourceActivityAction?: string;
+}
+
+export interface RecommendationTelemetryAuthorization {
+  organizationId: string;
+  currentMemberId: number;
+  currentRole: TeamRole;
+  activeMemberIds: Set<number>;
+  visibleClientIds: Set<number>;
+}
+
+export interface RecommendationTelemetryFlushResult {
+  remaining: SupervisedRecommendationEvent[];
+  sentEventIds: string[];
+  attempted: number;
+  failed: boolean;
 }
 
 let cloudConfigPromise: Promise<{ url: string; publishableKey: string }> | null = null;
 let cloudWriteQueue: Promise<void> = Promise.resolve();
+
+function identityPart(value: unknown): string {
+  return encodeURIComponent(String(value ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().toLowerCase());
+}
 
 function humanDecision(value: unknown): RecommendationHumanDecision {
   return value === 'executed' || value === 'modified' ? value : 'pending';
@@ -53,182 +90,228 @@ function normalizedRecommendation(value: unknown): SupervisedRecommendationRecor
     humanDecision: humanDecision(item.humanDecision),
     decisionAt: item.decisionAt ? String(item.decisionAt) : undefined,
     actualAction: item.actualAction ? String(item.actualAction) : undefined,
+    decisionSourceActivityId: Number.isFinite(item.decisionSourceActivityId) ? Number(item.decisionSourceActivityId) : undefined,
+    decisionSourceActivityCreatedAt: item.decisionSourceActivityCreatedAt ? String(item.decisionSourceActivityCreatedAt) : undefined,
+    decisionSourceActivityAction: item.decisionSourceActivityAction ? String(item.decisionSourceActivityAction) : undefined,
     outcome: item.outcome === 'Ganado' || item.outcome === 'Perdido' ? item.outcome : undefined,
     outcomeAt: item.outcomeAt ? String(item.outcomeAt) : undefined,
   };
 }
 
-function localStorageKey(context: RecommendationInstrumentationContext): string {
-  return [
-    scopedStorageKey(),
-    TELEMETRY_STORAGE_SUFFIX,
-    encodeURIComponent(context.organizationId),
-    String(context.actorId),
-  ].join(':');
-}
-
-export function readSupervisedRecommendationTelemetry(
-  context: RecommendationInstrumentationContext,
-): SupervisedRecommendationRecord[] {
-  try {
-    const parsed: unknown = JSON.parse(localStorage.getItem(localStorageKey(context)) || '[]');
-    if (!Array.isArray(parsed)) return [];
-    return parsed
-      .map(normalizedRecommendation)
-      .filter((item): item is SupervisedRecommendationRecord => Boolean(
-        item
-        && item.organizationId === context.organizationId
-        && item.actorId === context.actorId,
-      ));
-  } catch {
-    return [];
-  }
-}
-
-function writeLocalTelemetry(
-  context: RecommendationInstrumentationContext,
-  log: SupervisedRecommendationRecord[],
-): void {
-  const scoped = log.filter((item) => (
-    item.organizationId === context.organizationId
-    && item.actorId === context.actorId
-  ));
-  localStorage.setItem(localStorageKey(context), JSON.stringify(scoped));
-}
-
-function telemetryPayload(record: SupervisedRecommendationRecord): RecommendationTelemetryPayload {
-  return { recordKind: 'supervised_recommendation', ...record };
-}
-
-export function supervisedRecommendationCloudRow(
-  record: SupervisedRecommendationRecord,
-  userId: string,
-): CloudRecordRow {
+function normalizedEvent(value: unknown): SupervisedRecommendationEvent | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const item = value as Partial<SupervisedRecommendationEvent>;
+  const eventType = item.eventType === 'RECOMMENDATION_SHOWN' || item.eventType === 'RECOMMENDATION_DECISION' ? item.eventType : null;
+  const eventId = String(item.eventId || '');
+  const logicalRecommendationId = String(item.logicalRecommendationId || '');
+  const organizationId = String(item.organizationId || '');
+  const actorId = Number(item.actorId || 0);
+  const clientId = Number(item.clientId || 0);
+  if (item.recordKind !== 'supervised_recommendation_event' || !eventType || !eventId || !logicalRecommendationId || !organizationId || actorId <= 0 || clientId <= 0) return null;
   return {
-    organization_id: record.organizationId,
+    recordKind: 'supervised_recommendation_event', eventId, eventType, logicalRecommendationId, organizationId, actorId, clientId,
+    occurredAt: String(item.occurredAt || ''),
+    reason: item.reason ? String(item.reason) : undefined,
+    alertKind: item.alertKind ? String(item.alertKind) : undefined,
+    recommendedAction: item.recommendedAction ? String(item.recommendedAction) : undefined,
+    relevantDate: item.relevantDate ? String(item.relevantDate) : undefined,
+    stage: item.stage ? String(item.stage) : undefined,
+    humanDecision: item.humanDecision === 'executed' || item.humanDecision === 'modified' ? item.humanDecision : undefined,
+    actualAction: item.actualAction ? String(item.actualAction) : undefined,
+    sourceActivityIdentity: item.sourceActivityIdentity ? String(item.sourceActivityIdentity) : undefined,
+    sourceActivityId: Number.isFinite(item.sourceActivityId) ? Number(item.sourceActivityId) : undefined,
+    sourceActivityCreatedAt: item.sourceActivityCreatedAt ? String(item.sourceActivityCreatedAt) : undefined,
+    sourceActivityAction: item.sourceActivityAction ? String(item.sourceActivityAction) : undefined,
+  };
+}
+
+function storageKey(context: RecommendationInstrumentationContext, suffix: string): string {
+  return [scopedStorageKey(), suffix, encodeURIComponent(context.organizationId), String(context.actorId)].join(':');
+}
+
+function stateStorageKey(context: RecommendationInstrumentationContext): string {
+  return storageKey(context, TELEMETRY_STORAGE_SUFFIX);
+}
+
+function outboxStorageKey(context: RecommendationInstrumentationContext): string {
+  return storageKey(context, TELEMETRY_OUTBOX_SUFFIX);
+}
+
+export function readSupervisedRecommendationTelemetry(context: RecommendationInstrumentationContext): SupervisedRecommendationRecord[] {
+  try {
+    const parsed: unknown = JSON.parse(localStorage.getItem(stateStorageKey(context)) || '[]');
+    if (!Array.isArray(parsed)) return [];
+    return parsed.map(normalizedRecommendation).filter((item): item is SupervisedRecommendationRecord => Boolean(item && item.organizationId === context.organizationId && item.actorId === context.actorId));
+  } catch { return []; }
+}
+
+export function readSupervisedRecommendationOutbox(context: RecommendationInstrumentationContext): SupervisedRecommendationEvent[] {
+  try {
+    const parsed: unknown = JSON.parse(localStorage.getItem(outboxStorageKey(context)) || '[]');
+    if (!Array.isArray(parsed)) return [];
+    return parsed.map(normalizedEvent).filter((item): item is SupervisedRecommendationEvent => Boolean(item && item.organizationId === context.organizationId && item.actorId === context.actorId));
+  } catch { return []; }
+}
+
+function writeLocalTelemetry(context: RecommendationInstrumentationContext, log: SupervisedRecommendationRecord[]): void {
+  localStorage.setItem(stateStorageKey(context), JSON.stringify(log.filter((item) => item.organizationId === context.organizationId && item.actorId === context.actorId)));
+}
+
+function writeOutbox(context: RecommendationInstrumentationContext, events: SupervisedRecommendationEvent[]): void {
+  localStorage.setItem(outboxStorageKey(context), JSON.stringify(events.filter((item) => item.organizationId === context.organizationId && item.actorId === context.actorId)));
+}
+
+export function appendUniqueRecommendationEvents(outbox: SupervisedRecommendationEvent[], incoming: SupervisedRecommendationEvent[]): SupervisedRecommendationEvent[] {
+  const byId = new Map(outbox.map((event) => [event.eventId, event]));
+  incoming.forEach((event) => { if (!byId.has(event.eventId)) byId.set(event.eventId, event); });
+  return [...byId.values()];
+}
+
+export function recommendationShownEventId(record: SupervisedRecommendationRecord): string {
+  return ['v1', 'shown', identityPart(record.id), identityPart(record.shownAt)].join('|');
+}
+
+export function recommendationActivityIdentity(record: SupervisedRecommendationRecord): string | null {
+  if (record.decisionSourceActivityId === undefined || !record.decisionSourceActivityCreatedAt || !record.decisionSourceActivityAction) return null;
+  return ['v1', String(record.actorId), String(record.clientId), String(record.decisionSourceActivityId), identityPart(record.decisionSourceActivityCreatedAt), identityPart(record.decisionSourceActivityAction)].join('|');
+}
+
+export function recommendationDecisionEventId(record: SupervisedRecommendationRecord): string | null {
+  const activityIdentity = recommendationActivityIdentity(record);
+  return activityIdentity ? ['v1', 'decision', identityPart(record.id), identityPart(activityIdentity)].join('|') : null;
+}
+
+export function supervisedRecommendationShownEvent(record: SupervisedRecommendationRecord): SupervisedRecommendationEvent {
+  return {
+    recordKind: 'supervised_recommendation_event', eventId: recommendationShownEventId(record), eventType: 'RECOMMENDATION_SHOWN',
+    logicalRecommendationId: record.id, organizationId: record.organizationId, actorId: record.actorId, clientId: record.clientId,
+    occurredAt: record.shownAt, reason: record.reason, alertKind: record.alertKind, recommendedAction: record.recommendedAction,
+    relevantDate: record.relevantDate, stage: record.stage,
+  };
+}
+
+export function supervisedRecommendationDecisionEvent(record: SupervisedRecommendationRecord): SupervisedRecommendationEvent | null {
+  if (record.humanDecision === 'pending' || !record.decisionAt || !record.actualAction) return null;
+  const sourceActivityIdentity = recommendationActivityIdentity(record);
+  const eventId = recommendationDecisionEventId(record);
+  if (!sourceActivityIdentity || !eventId) return null;
+  return {
+    recordKind: 'supervised_recommendation_event', eventId, eventType: 'RECOMMENDATION_DECISION', logicalRecommendationId: record.id,
+    organizationId: record.organizationId, actorId: record.actorId, clientId: record.clientId, occurredAt: record.decisionAt,
+    humanDecision: record.humanDecision, actualAction: record.actualAction, sourceActivityIdentity,
+    sourceActivityId: record.decisionSourceActivityId, sourceActivityCreatedAt: record.decisionSourceActivityCreatedAt,
+    sourceActivityAction: record.decisionSourceActivityAction,
+  };
+}
+
+export function recommendationEventsFromMutation(before: SupervisedRecommendationRecord[], after: SupervisedRecommendationRecord[]): SupervisedRecommendationEvent[] {
+  const previous = new Map(before.map((item) => [item.id, item]));
+  const events: SupervisedRecommendationEvent[] = [];
+  after.forEach((record) => {
+    const prior = previous.get(record.id);
+    if (!prior) events.push(supervisedRecommendationShownEvent(record));
+    if (record.humanDecision !== 'pending' && (!prior || prior.humanDecision === 'pending')) {
+      const decision = supervisedRecommendationDecisionEvent(record);
+      if (decision) events.push(decision);
+    }
+  });
+  return events;
+}
+
+export function supervisedRecommendationCloudRow(event: SupervisedRecommendationEvent, userId: string): CloudRecordRow {
+  return {
+    organization_id: event.organizationId,
     entity_type: 'activity',
-    entity_key: organizationScopedEntityKey(record.organizationId, `recommendation:${record.id}`),
-    assigned_member_id: record.actorId,
-    payload: telemetryPayload(record),
+    entity_key: organizationScopedEntityKey(event.organizationId, `recommendation-event:${encodeURIComponent(event.eventId)}`),
+    assigned_member_id: event.actorId,
+    payload: event,
     created_by: userId,
   };
 }
 
-function recommendationFromCloudRow(row: CloudRecordRow | undefined): SupervisedRecommendationRecord | null {
-  if (!row || !isSupervisedRecommendationTelemetryPayload(row.payload)) return null;
-  const payload = row.payload as RecommendationTelemetryPayload;
-  return normalizedRecommendation(payload);
+function eventAllowed(event: SupervisedRecommendationEvent, authorization: RecommendationTelemetryAuthorization): boolean {
+  if (event.organizationId !== authorization.organizationId) return false;
+  if (!authorization.activeMemberIds.has(event.actorId)) return false;
+  if (!authorization.visibleClientIds.has(event.clientId)) return false;
+  if (authorization.currentRole === 'Corredor' && authorization.currentMemberId !== event.actorId) return false;
+  return true;
 }
 
-export function mergeSupervisedRecommendationTelemetry(
-  existing: SupervisedRecommendationRecord,
-  incoming: SupervisedRecommendationRecord,
-): SupervisedRecommendationRecord {
-  if (
-    existing.id !== incoming.id
-    || existing.organizationId !== incoming.organizationId
-    || existing.actorId !== incoming.actorId
-    || existing.clientId !== incoming.clientId
-  ) return incoming;
-
-  const existingDecided = existing.humanDecision !== 'pending';
-  const incomingDecided = incoming.humanDecision !== 'pending';
-  return {
-    ...existing,
-    shownAt: existing.shownAt <= incoming.shownAt ? existing.shownAt : incoming.shownAt,
-    humanDecision: existingDecided ? existing.humanDecision : incoming.humanDecision,
-    decisionAt: existingDecided ? existing.decisionAt : incomingDecided ? incoming.decisionAt : undefined,
-    actualAction: existingDecided ? existing.actualAction : incomingDecided ? incoming.actualAction : undefined,
-    outcome: existing.outcome ?? incoming.outcome,
-    outcomeAt: existing.outcome ? existing.outcomeAt : incoming.outcomeAt,
-  };
+export async function flushRecommendationEventBatch(
+  events: SupervisedRecommendationEvent[],
+  authorization: RecommendationTelemetryAuthorization,
+  userId: string,
+  postRows: (rows: CloudRecordRow[]) => Promise<void>,
+): Promise<RecommendationTelemetryFlushResult> {
+  const eligible = events.filter((event) => eventAllowed(event, authorization));
+  if (!eligible.length) return { remaining: events, sentEventIds: [], attempted: 0, failed: false };
+  const rows = eligible.map((event) => supervisedRecommendationCloudRow(event, userId));
+  try {
+    await postRows(rows);
+    const sent = new Set(eligible.map((event) => event.eventId));
+    return { remaining: events.filter((event) => !sent.has(event.eventId)), sentEventIds: [...sent], attempted: rows.length, failed: false };
+  } catch {
+    return { remaining: events, sentEventIds: [], attempted: rows.length, failed: true };
+  }
 }
 
 async function publicCloudConfig(): Promise<{ url: string; publishableKey: string }> {
   cloudConfigPromise ??= (async () => {
-    const response = await fetch('/api/cloud-config', {
-      headers: { Accept: 'application/json' },
-      cache: 'no-store',
-    });
+    const response = await fetch('/api/cloud-config', { headers: { Accept: 'application/json' }, cache: 'no-store' });
     if (!response.ok) throw new Error(`Cloud config ${response.status}`);
     const config = await response.json() as PublicCloudConfig;
-    if (!config.configured || !config.url || !config.publishableKey) {
-      throw new Error('Cloud no configurada para telemetría supervisada.');
-    }
-    return {
-      url: config.url.replace(/\/+$/g, ''),
-      publishableKey: config.publishableKey,
-    };
+    if (!config.configured || !config.url || !config.publishableKey) throw new Error('Cloud no configurada para telemetría supervisada.');
+    return { url: config.url.replace(/\/+$/g, ''), publishableKey: config.publishableKey };
   })();
   return cloudConfigPromise;
 }
 
 function cloudHeaders(publishableKey: string, accessToken: string): Record<string, string> {
-  return {
-    apikey: publishableKey,
-    Authorization: `Bearer ${accessToken}`,
-    'Content-Type': 'application/json',
-  };
+  return { apikey: publishableKey, Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' };
 }
 
-async function parseCloudResponse(response: Response): Promise<unknown> {
-  const text = await response.text();
-  let payload: unknown = {};
-  try { payload = text ? JSON.parse(text) : {}; } catch { payload = { message: text }; }
-  if (!response.ok) throw new Error(`Telemetría cloud ${response.status}`);
-  return payload;
-}
-
-async function persistCloudRecord(record: SupervisedRecommendationRecord): Promise<void> {
-  if (!getCloudSession()) return;
-  const membership = await getCloudMembershipContext();
-  const session = getCloudSession();
-  if (!session) return;
-  if (membership.organizationId !== record.organizationId) {
-    throw new Error('Organización inválida para telemetría supervisada.');
-  }
-  const actor = membership.members.find((member) => member.id === record.actorId && member.status === 'Activo');
-  if (!actor) throw new Error('Actor inválido para telemetría supervisada.');
-  if (membership.currentRole === 'Corredor' && membership.currentMemberId !== record.actorId) {
-    throw new Error('Un corredor no puede persistir telemetría de otro integrante.');
-  }
-
+async function postEventRows(rows: CloudRecordRow[], accessToken: string): Promise<void> {
   const config = await publicCloudConfig();
-  const incomingRow = supervisedRecommendationCloudRow(record, session.userId);
-  const query = new URL(`${config.url}/rest/v1/propcontrol_records`);
-  query.searchParams.set('select', 'organization_id,entity_type,entity_key,assigned_member_id,payload,created_by,updated_at');
-  query.searchParams.set('organization_id', `eq.${record.organizationId}`);
-  query.searchParams.set('entity_type', 'eq.activity');
-  query.searchParams.set('entity_key', `eq.${incomingRow.entity_key}`);
-  query.searchParams.set('limit', '1');
-  const existingRows = await parseCloudResponse(await fetch(query, {
-    headers: cloudHeaders(config.publishableKey, session.accessToken),
-    cache: 'no-store',
-  })) as CloudRecordRow[];
-
-  const existingRecord = recommendationFromCloudRow(existingRows[0]);
-  const mergedRecord = existingRecord
-    ? mergeSupervisedRecommendationTelemetry(existingRecord, record)
-    : record;
-  const row = supervisedRecommendationCloudRow(mergedRecord, existingRows[0]?.created_by || session.userId);
   const target = new URL(`${config.url}/rest/v1/propcontrol_records`);
   target.searchParams.set('on_conflict', 'organization_id,entity_type,entity_key');
-  await parseCloudResponse(await fetch(target, {
+  const response = await fetch(target, {
     method: 'POST',
-    headers: {
-      ...cloudHeaders(config.publishableKey, session.accessToken),
-      Prefer: 'resolution=merge-duplicates,return=minimal',
-    },
-    body: JSON.stringify([row]),
-  }));
+    headers: { ...cloudHeaders(config.publishableKey, accessToken), Prefer: 'resolution=ignore-duplicates,return=minimal' },
+    body: JSON.stringify(rows),
+  });
+  if (!response.ok) throw new Error(`Telemetría cloud ${response.status}`);
 }
 
-function changedRecords(
-  before: SupervisedRecommendationRecord[],
-  after: SupervisedRecommendationRecord[],
-): SupervisedRecommendationRecord[] {
-  const previous = new Map(before.map((item) => [item.id, JSON.stringify(item)]));
-  return after.filter((item) => previous.get(item.id) !== JSON.stringify(item));
+async function flushCloudOutbox(context: RecommendationInstrumentationContext): Promise<void> {
+  const pending = readSupervisedRecommendationOutbox(context);
+  if (!pending.length || !getCloudSession()) return;
+  try {
+    const membership = await getCloudMembershipContext();
+    const session = getCloudSession();
+    if (!session) return;
+    const authorization: RecommendationTelemetryAuthorization = {
+      organizationId: membership.organizationId,
+      currentMemberId: membership.currentMemberId,
+      currentRole: membership.currentRole,
+      activeMemberIds: new Set(membership.members.filter((member) => member.status === 'Activo').map((member) => member.id)),
+      visibleClientIds: context.visibleClientIds,
+    };
+    const result = await flushRecommendationEventBatch(pending, authorization, session.userId, (rows) => postEventRows(rows, session.accessToken));
+    if (!result.failed && result.sentEventIds.length) {
+      // ACK sobre el outbox ACTUAL: no perder eventos agregados mientras este POST estaba en vuelo.
+      const acknowledged = new Set(result.sentEventIds);
+      writeOutbox(context, readSupervisedRecommendationOutbox(context).filter((event) => !acknowledged.has(event.eventId)));
+    }
+  } catch (error) {
+    console.warn('No se pudo persistir la telemetría supervisada; queda pendiente en outbox.', error);
+  }
+}
+
+function scheduleOutboxFlush(context: RecommendationInstrumentationContext): void {
+  if (!getCloudSession()) return;
+  cloudWriteQueue = cloudWriteQueue.then(() => flushCloudOutbox(context)).catch((error) => {
+    console.warn('No se pudo vaciar el outbox de telemetría supervisada.', error);
+  });
 }
 
 export function persistSupervisedRecommendationTelemetry(
@@ -237,18 +320,8 @@ export function persistSupervisedRecommendationTelemetry(
   after: SupervisedRecommendationRecord[],
 ): void {
   writeLocalTelemetry(context, after);
-  const changed = changedRecords(before, after).filter((item) => (
-    item.organizationId === context.organizationId
-    && item.actorId === context.actorId
-    && context.visibleClientIds.has(item.clientId)
-  ));
-  if (!changed.length || !getCloudSession()) return;
-
-  cloudWriteQueue = cloudWriteQueue
-    .then(async () => {
-      for (const record of changed) await persistCloudRecord(record);
-    })
-    .catch((error) => {
-      console.warn('No se pudo persistir la telemetría supervisada.', error);
-    });
+  const events = recommendationEventsFromMutation(before, after).filter((event) => event.organizationId === context.organizationId && event.actorId === context.actorId && context.visibleClientIds.has(event.clientId));
+  if (events.length) writeOutbox(context, appendUniqueRecommendationEvents(readSupervisedRecommendationOutbox(context), events));
+  // Próxima oportunidad segura también reintenta pendientes previos; sin polling ni loop agresivo.
+  scheduleOutboxFlush(context);
 }
