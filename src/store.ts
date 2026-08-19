@@ -244,6 +244,15 @@ export function saveData(reason = 'Cambio local'): void {
   queueCloudSave(state.crm);
 }
 
+export function persistRecommendationInstrumentation(): void {
+  writeLocalSnapshot(state.crm, {
+    markDirty: true,
+    reason: 'Instrumentación Autopilot supervisado',
+    backup: false,
+  });
+  queueCloudSave(state.crm);
+}
+
 export function hasLocalBackup(): boolean {
   return hasStoredLocalBackup();
 }
