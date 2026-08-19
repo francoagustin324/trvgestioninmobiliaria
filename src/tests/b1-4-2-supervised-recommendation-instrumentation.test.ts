@@ -141,6 +141,11 @@ test('B1.4.2 H: render puro no guarda ni muta lead/activity/reminder/followup/pi
   for (const forbidden of ['saveData', 'addActivity', 'Reminder', 'nextFollowUp =', 'nextAction =', 'pipeline =']) {
     assert.equal(queueSource.includes(forbidden), false, forbidden);
   }
+  const runtimeSource = readFileSync('src/lead-recommendation-instrumentation.ts', 'utf8');
+  for (const forbidden of ['saveData', 'addActivity', 'Reminder', 'nextFollowUp =', 'nextAction =', 'pipeline =']) {
+    assert.equal(runtimeSource.includes(forbidden), false, forbidden);
+  }
+  assert.match(runtimeSource, /persistRecommendationInstrumentation\(\)/);
 });
 
 test('B1.4.2 I/N: terminales fuera, motor B1.4.1 intacto y máximo tres', () => {
