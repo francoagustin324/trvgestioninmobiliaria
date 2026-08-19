@@ -4,7 +4,7 @@ import {
   applyHumanActivitiesToRecommendations,
   type RecommendationInstrumentationContext,
 } from './lead-recommendation-instrumentation-core.js';
-import { saveData, state } from './store.js';
+import { persistRecommendationInstrumentation, state } from './store.js';
 import { activeMember, visibleClients } from './team-access.js';
 
 function runtimeContext(): RecommendationInstrumentationContext {
@@ -44,6 +44,6 @@ export function instrumentVisibleSupervisedRecommendations(container: HTMLElemen
     );
     if (!decisions.changed && !shown.changed) return;
     state.crm.recommendationLog = shown.log;
-    saveData('Instrumentación Autopilot supervisado');
+    persistRecommendationInstrumentation();
   });
 }
