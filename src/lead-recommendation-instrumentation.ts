@@ -1,13 +1,18 @@
-import { supervisedAttentionQueue, type LeadAttentionRecommendation } from './lead-attention-queue.js';
 import {
-  appendShownRecommendations,
-  applyHumanActivitiesToRecommendations,
-  type RecommendationInstrumentationContext,
-} from './lead-recommendation-instrumentation-core.js';
+  supervisedAttentionQueue,
+  supervisedAttentionRecommendationForClient,
+  type LeadAttentionRecommendation,
+} from './lead-attention-queue.js';
+import type { RecommendationInstrumentationContext } from './lead-recommendation-instrumentation-core.js';
 import {
-  persistSupervisedRecommendationTelemetry,
-  readSupervisedRecommendationTelemetry,
-} from './lead-recommendation-telemetry.js';
+  recommendationActivationWitness,
+  reconcileRecommendationLifecycle,
+  type RecommendationLifecycleInput,
+} from './lead-recommendation-lifecycle.js';
+import {
+  persistSupervisedRecommendationLifecycle,
+  readSupervisedRecommendationLifecycle,
+} from './lead-recommendation-telemetry-r3.js';
 import { state } from './store.js';
 import { activeMember, visibleClients } from './team-access.js';
 
@@ -30,6 +35,21 @@ function actuallyDisplayedRecommendations(container: HTMLElement): LeadAttention
   });
 }
 
+function lifecycleInputs(displayed: LeadAttentionRecommendation[]): RecommendationLifecycleInput[] {
+  const displayedIds = new Set(displayed.map((recommendation) => recommendation.clientId));
+  return visibleClients()
+    .map((client) => {
+      const recommendation = supervisedAttentionRecommendationForClient(client);
+      if (!recommendation) return null;
+      return {
+        recommendation,
+        activationWitness: recommendationActivationWitness(client, state.crm.activityLog, recommendation),
+        displayed: displayedIds.has(client.id),
+      };
+    })
+    .filter((input): input is RecommendationLifecycleInput => Boolean(input));
+}
+
 let pendingFrame: number | null = null;
 
 export function instrumentVisibleSupervisedRecommendations(container: HTMLElement): void {
@@ -38,17 +58,17 @@ export function instrumentVisibleSupervisedRecommendations(container: HTMLElemen
   pendingFrame = window.requestAnimationFrame(() => {
     pendingFrame = null;
     if (!container.isConnected) return;
+
     const context = runtimeContext();
-    const previous = readSupervisedRecommendationTelemetry(context);
-    const decisions = applyHumanActivitiesToRecommendations(previous, context, state.crm.activityLog);
-    const shown = appendShownRecommendations(
-      decisions.log,
+    const displayed = actuallyDisplayedRecommendations(container);
+    const snapshot = readSupervisedRecommendationLifecycle(context);
+    const mutation = reconcileRecommendationLifecycle(
+      snapshot.state,
       context,
-      actuallyDisplayedRecommendations(container),
+      lifecycleInputs(displayed),
+      state.crm.activityLog,
       new Date().toISOString(),
     );
-    // Persistir también sin cambios permite reintentar un outbox cloud pendiente
-    // en una oportunidad segura, sin tocar el estado/sync del CRM.
-    persistSupervisedRecommendationTelemetry(context, previous, shown.log);
+    persistSupervisedRecommendationLifecycle(context, snapshot, mutation);
   });
 }

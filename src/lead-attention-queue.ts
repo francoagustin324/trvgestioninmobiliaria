@@ -22,6 +22,27 @@ function temporalContext(reason: string, dateLabel: string): string {
   return normalizedReason.includes(normalizedDate) ? '' : dateLabel;
 }
 
+export function supervisedAttentionRecommendationForClient(
+  client: Client,
+  today = localIsoDate(),
+): LeadAttentionRecommendation | null {
+  if (isTerminalClient(client)) return null;
+  const primaryAlert = leadPrimaryAlert(client, today);
+  const presentation = leadCardAttentionPresentation(client, today);
+  const reason = primaryAlert.label;
+  const dateLabel = presentation.dateLabel || presentation.scheduledDateLabel || '';
+  return {
+    clientId: client.id,
+    name: client.name,
+    reason,
+    alertKind: primaryAlert.kind,
+    action: presentation.actionLabel,
+    when: temporalContext(reason, dateLabel),
+    relevantDate: presentation.scheduledDate,
+    stage: commercialStage(client),
+  };
+}
+
 export function supervisedAttentionQueue(
   clients: Client[],
   today = localIsoDate(),
@@ -32,22 +53,8 @@ export function supervisedAttentionQueue(
 
   return sortLeads(active, 'priority', today)
     .slice(0, cappedLimit)
-    .map((client) => {
-      const primaryAlert = leadPrimaryAlert(client, today);
-      const presentation = leadCardAttentionPresentation(client, today);
-      const reason = primaryAlert.label;
-      const dateLabel = presentation.dateLabel || presentation.scheduledDateLabel || '';
-      return {
-        clientId: client.id,
-        name: client.name,
-        reason,
-        alertKind: primaryAlert.kind,
-        action: presentation.actionLabel,
-        when: temporalContext(reason, dateLabel),
-        relevantDate: presentation.scheduledDate,
-        stage: commercialStage(client),
-      };
-    });
+    .map((client) => supervisedAttentionRecommendationForClient(client, today))
+    .filter((item): item is LeadAttentionRecommendation => Boolean(item));
 }
 
 export function renderSupervisedAttentionQueue(clients: Client[], today = localIsoDate()): string {
