@@ -1,5 +1,5 @@
 import { leadCardAttentionPresentation } from './lead-card-attention.js';
-import { leadPrimaryAlert, sortLeads } from './lead-list-priority.js';
+import { leadPrimaryAlert, sortLeads, type LeadAlertKind } from './lead-list-priority.js';
 import { commercialStage, isTerminalClient, localIsoDate } from './lead-pipeline.js';
 import type { Client } from './models.js';
 import { escapeHtml } from './utils.js';
@@ -8,8 +8,10 @@ export interface LeadAttentionRecommendation {
   clientId: number;
   name: string;
   reason: string;
+  alertKind: LeadAlertKind;
   action: string;
   when: string;
+  relevantDate: string;
   stage: string;
 }
 
@@ -39,8 +41,10 @@ export function supervisedAttentionQueue(
         clientId: client.id,
         name: client.name,
         reason,
+        alertKind: primaryAlert.kind,
         action: presentation.actionLabel,
         when: temporalContext(reason, dateLabel),
+        relevantDate: presentation.scheduledDate,
         stage: commercialStage(client),
       };
     });
