@@ -16,6 +16,8 @@ export interface RecommendationLifecycleCycle {
   cycleId: string;
   activationWitness: string;
   phase: RecommendationCyclePhase;
+  /** Marker técnico mínimo: identidad hash de la ActivityEntry que resolvió ESTE ciclo. */
+  resolvedByActivityIdentity?: string;
   record?: SupervisedRecommendationRecord;
 }
 
@@ -84,8 +86,6 @@ const STAGE_ACTIVITIES = new Set(['Cambio de etapa', 'Seguimiento completado']);
 
 /**
  * Evidencia estable que identifica la activación comercial actual, no el render.
- * Se eligen señales que pueden volver verdadera cada condición, evitando usar
- * actividades que sólo resuelven el ciclo actual como disparadores artificiales.
  */
 export function recommendationActivationWitness(
   client: Client,
@@ -127,6 +127,23 @@ export function recommendationActivationWitness(
 
 export function recommendationCycleId(semanticRecommendationId: string, activationWitness: string): string {
   return `v3|${stableHash(`${semanticRecommendationId}\u001f${activationWitness}`)}`;
+}
+
+/**
+ * Identidad exactly-once del hecho humano. No conserva texto comercial/PII:
+ * sólo un hash fijo de actor + lead + id + timestamp + acción normalizada.
+ */
+export function recommendationResolvedActivityIdentity(activity: ActivityEntry): string {
+  const material = [
+    'activity-v1',
+    activity.actorId,
+    activity.entityType,
+    activity.entityId || '',
+    activity.id,
+    normalized(activity.createdAt),
+    normalized(activity.action),
+  ].join('\u001f');
+  return `activity-v1|${stableHash(material)}`;
 }
 
 export function emptyRecommendationLifecycleState(): RecommendationLifecycleState {
@@ -189,7 +206,11 @@ function decidePending(
         || !context.visibleClientIds.has(activity.entityId)
       ) return;
       const cycle = cycles.get(activity.entityId);
-      if (!cycle || cycle.phase !== 'pending' || !cycle.record) return;
+      if (!cycle) return;
+      const activityIdentity = recommendationResolvedActivityIdentity(activity);
+      // R4 exactly-once: reprocesar la misma ActivityEntry de ESTE tombstone es no-op.
+      if (cycle.resolvedByActivityIdentity === activityIdentity) return;
+      if (cycle.phase !== 'pending' || !cycle.record) return;
       if (cycle.record.shownAt > activity.createdAt) return;
 
       const decision = classifyActivityAgainstRecommendation(cycle.record, activity);
@@ -208,18 +229,19 @@ function decidePending(
         decisionSourceActivityAction: activity.action,
       };
       decisionRecords.push(decided);
-      cycles.set(activity.entityId, { ...cycle, phase: 'resolved', record: undefined });
+      cycles.set(activity.entityId, {
+        ...cycle,
+        phase: 'resolved',
+        resolvedByActivityIdentity: activityIdentity,
+        record: undefined,
+      });
       changed += 1;
     });
 
   return { decisionRecords, changed };
 }
 
-/**
- * Estado local acotado: como máximo un ciclo por lead visible. La historia vive
- * en eventos cloud; localmente sólo queda el ciclo vigente/tombstone necesario
- * para dedupe y recurrencia, más el record completo exclusivamente mientras pending.
- */
+/** Estado local acotado: como máximo un ciclo/tombstone por lead visible. */
 export function reconcileRecommendationLifecycle(
   state: RecommendationLifecycleState,
   context: RecommendationInstrumentationContext,
@@ -242,13 +264,8 @@ export function reconcileRecommendationLifecycle(
     if (context.visibleClientIds.has(input.recommendation.clientId)) inputsByClient.set(input.recommendation.clientId, input);
   });
 
-  // Si una condición ya no existe, no necesitamos conservar su historia completa.
-  [...cycles.keys()].forEach((clientId) => {
-    if (!inputsByClient.has(clientId)) {
-      cycles.delete(clientId);
-      changed += 1;
-    }
-  });
+  // R4: conservar el tombstone/ciclo vigente aunque la condición desaparezca.
+  // Sigue O(leads) porque el filtrado inicial elimina sólo leads fuera del scope visible.
 
   inputsByClient.forEach((input, clientId) => {
     const semanticRecommendationId = recommendationLogicalId(
@@ -259,8 +276,6 @@ export function reconcileRecommendationLifecycle(
     const targetCycleId = recommendationCycleId(semanticRecommendationId, input.activationWitness);
     let cycle = cycles.get(clientId);
 
-    // Compatibilidad R2: si el ciclo local legado representa exactamente la misma
-    // semántica continua, se adopta sin crear SHOWN duplicado durante el upgrade.
     const legacyContinuous = Boolean(
       cycle
       && !cycle.cycleId.startsWith('v3|')
@@ -286,7 +301,7 @@ export function reconcileRecommendationLifecycle(
 
     if (input.displayed && cycle && cycle.phase === 'unshown') {
       const record = recordForCycle(cycle, context, input.recommendation, shownAt);
-      cycles.set(clientId, { ...cycle, phase: 'pending', record });
+      cycles.set(clientId, { ...cycle, phase: 'pending', resolvedByActivityIdentity: undefined, record });
       shownRecords.push(record);
       changed += 1;
     }
