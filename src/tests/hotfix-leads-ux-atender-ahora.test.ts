@@ -81,18 +81,20 @@ test('HOTFIX UX F: Todos sigue stage=Todas, default recent y Limpiar restaura PR
 });
 
 test('HOTFIX UX G: selección Todos/etapas queda centrada y sutil en desktop/mobile', () => {
-  assert.match(css, /#crm \.mvp-stage-counter\.active/);
+  assert.match(css, /#crm\.pc-leads-redesign \.mvp-stage-counter\.active/);
   assert.match(css, /display: inline-flex/);
   assert.match(css, /align-items: center/);
   assert.match(css, /justify-content: center/);
   assert.match(css, /background: rgba\(62, 105, 84, \.09\)/);
-  assert.match(css, /#crm \.mvp-stage-counter\.active b/);
+  assert.match(css, /#crm\.pc-leads-redesign \.mvp-stage-counter\.active b/);
+  assert.match(css, /#crm\.pc-leads-redesign \.mvp-stage-counter\.active:hover/);
   assert.match(css, /@media \(max-width: 720px\)/);
+  assert.equal(css.includes('!important'), false);
 });
 
-test('HOTFIX UX H: publica CSS específico sin alterar versiones coordinadas del runtime histórico', () => {
+test('HOTFIX UX H: publica sólo el CSS modificado y preserva versiones coordinadas del runtime histórico', () => {
   assert.match(html, /lead-attention-queue\.css\?v=20260818-1/);
-  assert.match(html, /hotfix-leads-attention-ux\.css\?v=20260820-1/);
+  assert.match(html, /hotfix-leads-attention-ux\.css\?v=20260820-2/);
   assert.match(html, /mvp-main\.js\?v=20260802-1/);
   assert.match(queue, /sortLeads\(active, 'priority', today\)/);
   assert.match(queue, /Math\.min\(3/);

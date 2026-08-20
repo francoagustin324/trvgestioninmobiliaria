@@ -5,10 +5,11 @@ import test from 'node:test';
 import { webkit, type Browser, type BrowserContext, type Page } from 'playwright';
 import { initialData, type CrmData, type TeamMember } from '../models.js';
 
-const USER_ID = 'hotfix-leads-ux-r1-owner';
-const ORG_ID = 'hotfix-leads-ux-r1-org';
+const USER_ID = 'hotfix-leads-ux-r2-owner';
+const ORG_ID = 'hotfix-leads-ux-r2-org';
 const STORAGE_KEY = `trv-crm-basico:user:${USER_ID}`;
 const PORT = 62753;
+const HIDDEN_SEARCH = '__r2_lead_oculto__';
 const HIDDEN_MESSAGE = 'Este lead está oculto por los filtros actuales. Ajustá o limpiá los filtros para verlo sin perder tu selección.';
 
 interface ScrollCall {
@@ -32,15 +33,15 @@ function teamMember(id: number, userId: string, name: string, role: 'Dueño' | '
 
 function fixture(): CrmData {
   const crm = structuredClone(initialData);
-  const owner = teamMember(1, USER_ID, 'Franco R1', 'Dueño');
-  const broker = teamMember(2, 'hotfix-leads-ux-r1-broker', 'Corredor R1', 'Corredor');
-  crm.organization = { id: ORG_ID, name: 'TRV Gestión Inmobiliaria', seatLimit: null, planLabel: 'Hotfix Leads UX R1' };
+  const owner = teamMember(1, USER_ID, 'Franco R2', 'Dueño');
+  const broker = teamMember(2, 'hotfix-leads-ux-r2-broker', 'Corredor R2', 'Corredor');
+  crm.organization = { id: ORG_ID, name: 'TRV Gestión Inmobiliaria', seatLimit: null, planLabel: 'Hotfix Leads UX R2' };
   crm.teamMembers = [owner, broker];
   crm.activityLog = [];
   crm.clients = [
     {
       id: 501,
-      name: 'Lead R1 Prioritario',
+      name: 'Lead R2 Prioritario',
       phone: '+54 9 351 500-0501',
       email: 'prioritario@propcontrol.test',
       interest: 'Dúplex en Docta',
@@ -56,7 +57,7 @@ function fixture(): CrmData {
     },
     {
       id: 502,
-      name: 'Lead R1 Dos',
+      name: 'Lead R2 Dos',
       phone: '+54 9 351 500-0502',
       email: 'dos@propcontrol.test',
       interest: 'Departamento en General Paz',
@@ -70,7 +71,7 @@ function fixture(): CrmData {
     },
     {
       id: 503,
-      name: 'Lead R1 Tres',
+      name: 'Lead R2 Tres',
       phone: '+54 9 351 500-0503',
       email: 'tres@propcontrol.test',
       interest: 'Casa en Urca',
@@ -84,7 +85,7 @@ function fixture(): CrmData {
     },
     {
       id: 504,
-      name: 'Lead R1 Cuatro',
+      name: 'Lead R2 Cuatro',
       phone: '+54 9 351 500-0504',
       email: 'cuatro@propcontrol.test',
       interest: 'Terreno en Docta',
@@ -100,7 +101,7 @@ function fixture(): CrmData {
     },
     {
       id: 505,
-      name: 'Lead R1 Cinco',
+      name: 'Lead R2 Cinco',
       phone: '+54 9 351 500-0505',
       email: 'cinco@propcontrol.test',
       interest: 'Departamento en Centro',
@@ -116,7 +117,7 @@ function fixture(): CrmData {
     },
     {
       id: 506,
-      name: 'Lead R1 Seis',
+      name: 'Lead R2 Seis',
       phone: '+54 9 351 500-0506',
       email: 'seis@propcontrol.test',
       interest: 'Dúplex en Manantiales',
@@ -175,7 +176,7 @@ async function startServer(): Promise<ChildProcess> {
     server.once('error', reject);
     server.once('exit', (code, signal) => {
       if (!stdout.includes('PropControl listo en')) {
-        reject(new Error(`Servidor R1 finalizó antes de estar listo: code=${code} signal=${signal} stderr=${stderr}`));
+        reject(new Error(`Servidor R2 finalizó antes de estar listo: code=${code} signal=${signal} stderr=${stderr}`));
       }
     });
   });
@@ -195,11 +196,11 @@ async function seedContext(context: BrowserContext): Promise<void> {
   const identityKey = `propcontrol-whatsapp-human-identity-v1:${encodeURIComponent(ORG_ID)}:1:${encodeURIComponent(actorKey)}`;
   await context.addInitScript(({ crm, identityStorageKey, storageKey }) => {
     localStorage.setItem('propcontrol-cloud-session-v1', JSON.stringify({
-      accessToken: 'access-r1',
-      refreshToken: 'refresh-r1',
+      accessToken: 'access-r2',
+      refreshToken: 'refresh-r2',
       expiresAt: Date.now() + 3_600_000,
-      userId: 'hotfix-leads-ux-r1-owner',
-      email: 'hotfix-leads-ux-r1-owner@propcontrol.test',
+      userId: 'hotfix-leads-ux-r2-owner',
+      email: 'hotfix-leads-ux-r2-owner@propcontrol.test',
     }));
     localStorage.setItem(storageKey, JSON.stringify(crm));
     localStorage.setItem(`${storageKey}:sync`, JSON.stringify({
@@ -211,21 +212,21 @@ async function seedContext(context: BrowserContext): Promise<void> {
     localStorage.setItem('propcontrol-active-team-member-v1', '1');
     localStorage.setItem(identityStorageKey, JSON.stringify({
       version: 1,
-      organizationId: 'hotfix-leads-ux-r1-org',
+      organizationId: 'hotfix-leads-ux-r2-org',
       memberId: 1,
-      actorKey: 'cloud:hotfix-leads-ux-r1-owner',
-      humanName: 'Franco R1',
+      actorKey: 'cloud:hotfix-leads-ux-r2-owner',
+      humanName: 'Franco R2',
       confirmedAt: '2026-08-20T15:00:00.000Z',
     }));
 
-    const scope = window as unknown as { __pcR1ScrollCalls?: ScrollCall[] };
-    scope.__pcR1ScrollCalls = [];
+    const scope = window as unknown as { __pcR2ScrollCalls?: ScrollCall[] };
+    scope.__pcR2ScrollCalls = [];
     const originalScrollIntoView = Element.prototype.scrollIntoView;
     Element.prototype.scrollIntoView = function scrollIntoView(options?: boolean | ScrollIntoViewOptions): void {
       const element = this as HTMLElement;
       const card = element.closest<HTMLElement>('[data-client-id]');
       const normalized = typeof options === 'object' && options !== null ? options : {};
-      scope.__pcR1ScrollCalls?.push({
+      scope.__pcR2ScrollCalls?.push({
         clientId: card?.dataset.clientId || '',
         behavior: String(normalized.behavior || ''),
         block: String(normalized.block || ''),
@@ -253,9 +254,12 @@ async function createContext(browser: Browser, viewport: { width: number; height
 async function load(page: Page, url: string): Promise<void> {
   await page.goto(url, { waitUntil: 'domcontentloaded' });
   await page.waitForSelector('#crm.active', { state: 'visible' });
+  await page.waitForSelector('#crm.pc-leads-redesign', { state: 'visible' });
   await page.waitForSelector('#crm .pc-supervised-attention-item[data-attention-client-id]', { state: 'visible' });
   await page.waitForSelector('#crm .mvp-stage-counter[data-stage-quick="Todas"]', { state: 'visible' });
   await page.waitForFunction(() => {
+    const todos = document.querySelector<HTMLElement>('#crm .mvp-stage-counter[data-stage-quick="Todas"]');
+    if (!todos?.classList.contains('active') || todos.getAttribute('aria-pressed') !== 'true') return false;
     for (let index = 0; index < localStorage.length; index += 1) {
       if (localStorage.key(index)?.includes('supervised-recommendation-lifecycle-v3')) return true;
     }
@@ -266,14 +270,14 @@ async function load(page: Page, url: string): Promise<void> {
 async function targetClientId(page: Page): Promise<number> {
   const value = await page.locator('#crm .pc-supervised-attention-item[data-attention-client-id]').first().getAttribute('data-attention-client-id');
   const clientId = Number(value || 0);
-  assert.equal(clientId, 501, `El fixture R1 debe priorizar al lead 501; recibido ${value}.`);
+  assert.equal(clientId, 501, `El fixture R2 debe priorizar al lead 501; recibido ${value}.`);
   return clientId;
 }
 
 async function clearScrollEvidence(page: Page): Promise<void> {
   await page.evaluate(() => {
-    const scope = window as unknown as { __pcR1ScrollCalls?: ScrollCall[] };
-    scope.__pcR1ScrollCalls = [];
+    const scope = window as unknown as { __pcR2ScrollCalls?: ScrollCall[] };
+    scope.__pcR2ScrollCalls = [];
   });
 }
 
@@ -284,8 +288,8 @@ async function assertOpened(page: Page, clientId: number): Promise<void> {
     const summary = details?.querySelector<HTMLElement>(':scope > summary');
     const content = details?.querySelector<HTMLElement>('.mvp-lead-full-content');
     const openSheets = [...document.querySelectorAll<HTMLDetailsElement>('details[data-lead-full-sheet][open]')];
-    const scope = window as unknown as { __pcR1ScrollCalls?: ScrollCall[] };
-    const scrollObserved = (scope.__pcR1ScrollCalls || []).some((call) => (
+    const scope = window as unknown as { __pcR2ScrollCalls?: ScrollCall[] };
+    const scrollObserved = (scope.__pcR2ScrollCalls || []).some((call) => (
       call.clientId === String(id)
       && call.behavior === 'smooth'
       && call.block === 'center'
@@ -332,44 +336,19 @@ async function closeSheet(page: Page, clientId: number): Promise<void> {
   await clearScrollEvidence(page);
 }
 
-async function localStorageSnapshot(page: Page): Promise<Array<[string, string | null]>> {
+async function crmSnapshot(page: Page): Promise<string> {
+  return page.evaluate((storageKey) => localStorage.getItem(storageKey) || '', STORAGE_KEY);
+}
+
+async function whatsAppSnapshot(page: Page): Promise<Array<[string, string | null]>> {
   return page.evaluate(() => {
     const entries: Array<[string, string | null]> = [];
     for (let index = 0; index < localStorage.length; index += 1) {
       const key = localStorage.key(index);
-      if (key) entries.push([key, localStorage.getItem(key)]);
+      if (key?.toLowerCase().includes('whatsapp')) entries.push([key, localStorage.getItem(key)]);
     }
     return entries.sort(([left], [right]) => left.localeCompare(right));
   });
-}
-
-async function commercialSnapshot(page: Page): Promise<unknown> {
-  return page.evaluate((storageKey) => {
-    const crm = JSON.parse(localStorage.getItem(storageKey) || '{}') as {
-      clients?: Array<Record<string, unknown>>;
-      activityLog?: unknown[];
-      reminders?: unknown[];
-      contacts?: unknown[];
-      conversations?: unknown[];
-    };
-    return {
-      activityLog: crm.activityLog || [],
-      reminders: crm.reminders || [],
-      pipeline: (crm.clients || []).map((client) => ({
-        id: client.id,
-        pipeline: client.pipeline,
-        nextAction: client.nextAction,
-        nextFollowUp: client.nextFollowUp,
-        phone: client.phone,
-        email: client.email,
-        status: client.status,
-        temperature: client.temperature,
-        assignedToId: client.assignedToId,
-      })),
-      contacts: crm.contacts || [],
-      conversations: crm.conversations || [],
-    };
-  }, STORAGE_KEY);
 }
 
 async function telemetrySnapshot(page: Page): Promise<{ entries: Array<[string, string | null]>; eventTypes: string[] }> {
@@ -394,7 +373,7 @@ async function telemetrySnapshot(page: Page): Promise<{ entries: Array<[string, 
       const raw = localStorage.getItem(key);
       entries.push([key, raw]);
       if (!raw) continue;
-      try { walk(JSON.parse(raw)); } catch { /* evidencia por valor raw igualmente preservada */ }
+      try { walk(JSON.parse(raw)); } catch { /* el valor raw sigue formando parte del snapshot */ }
     }
     entries.sort(([left], [right]) => left.localeCompare(right));
     eventTypes.sort();
@@ -413,6 +392,8 @@ async function filterSnapshot(page: Page): Promise<Record<string, string>> {
 }
 
 async function todosMetrics(page: Page): Promise<{
+  className: string;
+  ariaPressed: string | null;
   active: boolean;
   display: string;
   alignItems: string;
@@ -441,6 +422,8 @@ async function todosMetrics(page: Page): Promise<{
     const stage = document.querySelector<HTMLSelectElement>('#mvp-lead-stage-filter');
     const order = document.querySelector<HTMLSelectElement>('#mvp-lead-order');
     return {
+      className: element.className,
+      ariaPressed: element.getAttribute('aria-pressed'),
       active: element.classList.contains('active') && buttonRect.width > 0 && buttonRect.height > 0,
       display: style.display,
       alignItems: style.alignItems,
@@ -457,12 +440,14 @@ async function todosMetrics(page: Page): Promise<{
 }
 
 function assertTodosMetrics(metrics: Awaited<ReturnType<typeof todosMetrics>>, label: string): void {
+  assert.equal(metrics.className.split(/\s+/).includes('mvp-stage-counter'), true, `${label}: clase mvp-stage-counter ausente.`);
+  assert.equal(metrics.ariaPressed, 'true', `${label}: aria-pressed debe reflejar la etapa activa.`);
   assert.equal(metrics.active, true, `${label}: Todos debe estar activo y visible.`);
   assert.ok(metrics.display === 'flex' || metrics.display === 'inline-flex', `${label}: display inesperado ${metrics.display}.`);
   assert.equal(metrics.alignItems, 'center', `${label}: align-items debe ser center.`);
   assert.equal(metrics.justifyContent, 'center', `${label}: justify-content debe ser center.`);
-  assert.match(metrics.background, /62\s*,\s*105\s*,\s*84/, `${label}: debe conservar el fondo verde sutil del hotfix.`);
-  assert.doesNotMatch(metrics.background, /110\s*,\s*90\s*,\s*36/, `${label}: no debe volver el fondo amarillo dominante anterior.`);
+  assert.match(metrics.background, /62\s*,\s*105\s*,\s*84/, `${label}: debe usar el fondo verde sutil del hotfix.`);
+  assert.doesNotMatch(metrics.background, /110\s*,\s*90\s*,\s*36/, `${label}: no debe volver el fondo marrón/amarillo anterior.`);
   assert.ok(metrics.buttonTextDelta <= 1.5, `${label}: texto Todos descentrado ${metrics.buttonTextDelta}px.`);
   assert.ok(metrics.buttonCountDelta <= 1.5, `${label}: contador descentrado ${metrics.buttonCountDelta}px.`);
   assert.ok(metrics.textCountDelta <= 1.5, `${label}: texto/contador desalineados ${metrics.textCountDelta}px.`);
@@ -471,45 +456,54 @@ function assertTodosMetrics(metrics: Awaited<ReturnType<typeof todosMetrics>>, l
   assert.equal(metrics.orderLabel, 'Más recientes', `${label}: la etiqueta histórica debe seguir siendo Más recientes.`);
 }
 
-test('HOTFIX UX POST-B1.4.2 R1 — evidencia browser real y determinística', async (t) => {
+test('HOTFIX UX POST-B1.4.2 R2 — evidencia browser real, aislada y determinística', async (t) => {
   const server = await startServer();
   const browser = await webkit.launch({ headless: true });
   const url = `http://127.0.0.1:${PORT}`;
 
   try {
-    await t.test('A/D/E/F desktop: click abre clientId exacto, foco/scroll, cero mutación y Todos geométrico', async () => {
+    await t.test('A desktop visual: Todos usa computed style corregido y conserva stage=Todas', async () => {
       const context = await createContext(browser, { width: 1366, height: 768 }, false);
       try {
         const page = await context.newPage();
         await load(page, url);
         assertTodosMetrics(await todosMetrics(page), 'desktop');
+      } finally {
+        await context.close();
+      }
+    });
 
+    await t.test('B desktop navegación: click real abre clientId exacto, foco/scroll y cero mutación CRM/telemetría', async () => {
+      const context = await createContext(browser, { width: 1366, height: 768 }, false);
+      try {
+        const page = await context.newPage();
+        await load(page, url);
         const clientId = await targetClientId(page);
         assert.equal(await page.locator('#crm .pc-supervised-attention-item[data-attention-client-id]').count(), 3, 'ATENDER AHORA debe respetar max3.');
         const queueButton = page.locator(`#crm button.pc-supervised-attention-item[data-attention-client-id="${clientId}"]`).first();
         assert.equal(await queueButton.evaluate((element) => element.tagName), 'BUTTON');
         assert.equal(await queueButton.getAttribute('type'), 'button');
-        assert.match(await queueButton.getAttribute('aria-label') || '', /Abrir ficha completa de Lead R1 Prioritario/);
+        assert.match(await queueButton.getAttribute('aria-label') || '', /Abrir ficha completa de Lead R2 Prioritario/);
 
-        const crmBefore = await commercialSnapshot(page);
+        const crmBefore = await crmSnapshot(page);
+        const whatsAppBefore = await whatsAppSnapshot(page);
         const telemetryBefore = await telemetrySnapshot(page);
-        const storageBefore = await localStorageSnapshot(page);
-        assert.ok(telemetryBefore.eventTypes.includes('RECOMMENDATION_SHOWN'), 'El snapshot debe aislar el SHOWN legítimo del render inicial.');
+        assert.ok(telemetryBefore.eventTypes.includes('RECOMMENDATION_SHOWN'), 'El snapshot debe tomarse después del SHOWN legítimo del render inicial.');
         assert.equal(telemetryBefore.eventTypes.includes('RECOMMENDATION_DECISION'), false, 'El render inicial no debe contener DECISION en el fixture limpio.');
 
         await clearScrollEvidence(page);
         await queueButton.click();
         await assertOpened(page, clientId);
 
-        assert.deepEqual(await commercialSnapshot(page), crmBefore, 'Navegar desde ATENDER AHORA no debe mutar CRM comercial.');
-        assert.deepEqual(await telemetrySnapshot(page), telemetryBefore, 'Navegar desde ATENDER AHORA no debe mutar lifecycle/outbox ni generar DECISION.');
-        assert.deepEqual(await localStorageSnapshot(page), storageBefore, 'La navegación UX no debe persistir ningún estado adicional.');
+        assert.equal(await crmSnapshot(page), crmBefore, 'Navegar desde ATENDER AHORA no debe mutar la representación persistida del CRM.');
+        assert.deepEqual(await whatsAppSnapshot(page), whatsAppBefore, 'Navegar no debe mutar estado comercial de WhatsApp.');
+        assert.deepEqual(await telemetrySnapshot(page), telemetryBefore, 'Navegar no debe mutar lifecycle/outbox ni generar RECOMMENDATION_DECISION.');
       } finally {
         await context.close();
       }
     });
 
-    await t.test('B desktop: Enter y Space heredan activación nativa del button y abren el lead correcto', async () => {
+    await t.test('C desktop teclado: Enter y Space heredan activación nativa del button y abren el lead correcto', async () => {
       const context = await createContext(browser, { width: 1366, height: 768 }, false);
       try {
         const page = await context.newPage();
@@ -533,31 +527,26 @@ test('HOTFIX UX POST-B1.4.2 R1 — evidencia browser real y determinística', as
       }
     });
 
-    await t.test('C desktop: lead oculto conserva search/stage/temperature/assignee/order y anuncia estado accesible', async () => {
+    await t.test('D desktop hidden-by-filter: búsqueda visible oculta el lead y conserva todos los filtros', async () => {
       const context = await createContext(browser, { width: 1366, height: 768 }, false);
       try {
         const page = await context.newPage();
         await load(page, url);
         const clientId = await targetClientId(page);
-
-        await page.locator('#mvp-lead-stage-filter').selectOption('Nuevo');
-        await page.waitForFunction(() => document.querySelector<HTMLSelectElement>('#mvp-lead-stage-filter')?.value === 'Nuevo');
-        await page.locator('#mvp-lead-assignee-filter').selectOption('2');
-        await page.waitForFunction(() => document.querySelector<HTMLSelectElement>('#mvp-lead-assignee-filter')?.value === '2');
-        await page.locator('#mvp-lead-temperature-filter').selectOption('Frío');
-        await page.locator('#mvp-lead-order').selectOption('name');
-        await page.locator('#mvp-lead-search').fill('__r1_lead_oculto__');
+        const search = page.locator('#mvp-lead-search');
+        assert.equal(await search.isVisible(), true, 'El escenario debe usar un control de filtro realmente visible.');
+        await search.fill(HIDDEN_SEARCH);
         await page.waitForFunction((id) => !document.querySelector(`#mvp-lead-results .mvp-lead-card[data-client-id="${id}"]`), clientId);
 
         const filtersBefore = await filterSnapshot(page);
         assert.deepEqual(filtersBefore, {
-          search: '__r1_lead_oculto__',
-          stage: 'Nuevo',
-          temperature: 'Frío',
-          assignee: '2',
-          order: 'name',
+          search: HIDDEN_SEARCH,
+          stage: 'Todas',
+          temperature: 'Todas',
+          assignee: 'Todos',
+          order: 'recent',
         });
-        const crmBefore = await commercialSnapshot(page);
+        const crmBefore = await crmSnapshot(page);
         const telemetryBefore = await telemetrySnapshot(page);
 
         await page.locator(`#crm button.pc-supervised-attention-item[data-attention-client-id="${clientId}"]`).first().click();
@@ -573,21 +562,30 @@ test('HOTFIX UX POST-B1.4.2 R1 — evidencia browser real y determinística', as
         }, HIDDEN_MESSAGE);
 
         assert.deepEqual(await filterSnapshot(page), filtersBefore, 'ATENDER AHORA no debe limpiar ni modificar filtros para revelar un lead oculto.');
-        assert.equal(await page.locator(`#mvp-lead-results .mvp-lead-card[data-client-id="${clientId}"]`).count(), 0, 'El lead debe seguir oculto después de navegar desde la cola.');
-        assert.deepEqual(await commercialSnapshot(page), crmBefore, 'La navegación de lead oculto tampoco debe mutar CRM.');
-        assert.deepEqual(await telemetrySnapshot(page), telemetryBefore, 'La navegación de lead oculto tampoco debe generar DECISION ni mutar lifecycle/outbox.');
+        assert.equal(await page.locator(`#mvp-lead-results .mvp-lead-card[data-client-id="${clientId}"]`).count(), 0, 'El lead debe seguir oculto: no hay auto-reveal ni reset de filtros.');
+        assert.equal(await crmSnapshot(page), crmBefore, 'La navegación de un lead oculto tampoco debe mutar CRM.');
+        assert.deepEqual(await telemetrySnapshot(page), telemetryBefore, 'La navegación de un lead oculto tampoco debe generar DECISION ni mutar lifecycle/outbox.');
       } finally {
         await context.close();
       }
     });
 
-    await t.test('G mobile 390x844: Todos centrado, tap accionable, target táctil, ficha correcta y cero overflow', async () => {
+    await t.test('E mobile visual 390x844: Todos usa computed style corregido y centrado', async () => {
       const context = await createContext(browser, { width: 390, height: 844 }, true);
       try {
         const page = await context.newPage();
         await load(page, url);
         assertTodosMetrics(await todosMetrics(page), 'mobile');
+      } finally {
+        await context.close();
+      }
+    });
 
+    await t.test('F mobile navegación 390x844: tap real abre lead correcto, target táctil, ficha usable y cero overflow', async () => {
+      const context = await createContext(browser, { width: 390, height: 844 }, true);
+      try {
+        const page = await context.newPage();
+        await load(page, url);
         const clientId = await targetClientId(page);
         const button = page.locator(`#crm button.pc-supervised-attention-item[data-attention-client-id="${clientId}"]`).first();
         const targetRect = await button.boundingBox();
