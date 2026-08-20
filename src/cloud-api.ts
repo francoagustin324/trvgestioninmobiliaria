@@ -4,6 +4,7 @@ import {
   cloudRecordIdentity,
   cloudRecordsToCrm,
   crmToCloudRecords,
+  isSupervisedRecommendationTelemetryPayload,
   membershipContext,
   staleCloudRecords,
   type CloudMembershipContext,
@@ -362,8 +363,12 @@ async function deleteStaleRecords(
   }
 }
 
+function crmSyncRecords(records: CloudRecordRow[]): CloudRecordRow[] {
+  return records.filter((record) => !isSupervisedRecommendationTelemetryPayload(record.payload));
+}
+
 function recordsFingerprint(records: CloudRecordRow[]): string {
-  return stableFingerprint(records
+  return stableFingerprint(crmSyncRecords(records)
     .map((record) => ({
       organization_id: record.organization_id,
       entity_type: record.entity_type,
@@ -384,7 +389,7 @@ async function pushWithContext(
   const next = crmToCloudRecords(crm, context, session.userId);
   const existingFingerprint = recordsFingerprint(existing);
   const nextFingerprint = recordsFingerprint(next);
-  const remoteVersion = latestRemoteVersion(existing);
+  const remoteVersion = latestRemoteVersion(crmSyncRecords(existing));
 
   assertRemoteIsSafe(remoteVersion, nextFingerprint, existingFingerprint);
   if (existingFingerprint === nextFingerprint) {
@@ -395,7 +400,7 @@ async function pushWithContext(
   await upsertRecords(config, session, next);
   await deleteStaleRecords(config, session, staleCloudRecords(existing, next));
   const refreshed = await fetchCloudRecords(config, session, context.organizationId);
-  markCloudSaved(latestRemoteVersion(refreshed));
+  markCloudSaved(latestRemoteVersion(crmSyncRecords(refreshed)));
 }
 
 export async function pullCloudData(fallback: CrmData = initialData): Promise<CrmData | null> {
@@ -405,9 +410,10 @@ export async function pullCloudData(fallback: CrmData = initialData): Promise<Cr
   const context = membershipContext(await fetchMembershipRows(config, session), session.userId);
   try {
     const records = await fetchCloudRecords(config, session, context.organizationId);
-    if (records.length) {
-      markCloudHydrated(latestRemoteVersion(records));
-      return cloudRecordsToCrm(records, context, fallback);
+    const crmRecords = crmSyncRecords(records);
+    if (crmRecords.length) {
+      markCloudHydrated(latestRemoteVersion(crmRecords));
+      return cloudRecordsToCrm(crmRecords, context, fallback);
     }
 
     if (context.currentRole !== 'Corredor') {

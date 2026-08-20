@@ -3,15 +3,17 @@ import { spawn, type ChildProcess } from 'node:child_process';
 import { existsSync, mkdirSync } from 'node:fs';
 import test from 'node:test';
 import { chromium, type Browser, type BrowserContext, type Page, type Route } from 'playwright';
-import { crmToCloudRecords, type CloudMembershipContext, type CloudRecordRow } from '../cloud-records.js';
+import {
+  crmToCloudRecords,
+  isSupervisedRecommendationTelemetryPayload,
+  type CloudMembershipContext,
+  type CloudRecordRow,
+} from '../cloud-records.js';
 import { initialData, type CrmData, type TeamMember } from '../models.js';
 
 const USER_ID = 'cloud-followup-owner';
 const ORG_ID = 'cloud-followup-org';
-const SESSION_KEY = 'propcontrol-cloud-session-v1';
 const STORAGE_KEY = `trv-crm-basico:user:${USER_ID}`;
-const SYNC_KEY = `${STORAGE_KEY}:sync`;
-const ACTIVE_MEMBER_KEY = 'propcontrol-active-team-member-v1';
 const FIXED_TIME = new Date('2026-08-07T16:52:00-03:00');
 const FOLLOW_UP_DATE = '2026-08-10';
 const ARTIFACT_DIR = 'artifacts/cloud-followup-hotfix';
@@ -106,20 +108,63 @@ async function stopServer(server: ChildProcess): Promise<void> {
   });
 }
 
-function stamp(records: CloudRecordRow[], value: string): CloudRecordRow[] {
-  return records.map((record) => ({ ...structuredClone(record), updated_at: value }));
+function recordIdentity(record: Pick<CloudRecordRow, 'organization_id' | 'entity_type' | 'entity_key'>): string {
+  return `${record.organization_id}|${record.entity_type}|${record.entity_key}`;
+}
+
+function isTelemetryRow(record: CloudRecordRow): boolean {
+  return isSupervisedRecommendationTelemetryPayload(record.payload);
+}
+
+function humanActivityRows(records: CloudRecordRow[]): CloudRecordRow[] {
+  return records.filter((row) => row.entity_type === 'activity' && !isTelemetryRow(row));
+}
+
+function parseInFilter(value: string): Set<string> {
+  if (!value.startsWith('in.(') || !value.endsWith(')')) return new Set();
+  return new Set(value.slice(4, -1).split(',').map((item) => item.trim().replace(/^"|"$/g, '')));
+}
+
+function filteredRows(records: CloudRecordRow[], url: URL): CloudRecordRow[] {
+  let rows = records;
+  const organization = url.searchParams.get('organization_id');
+  if (organization?.startsWith('eq.')) rows = rows.filter((row) => row.organization_id === organization.slice(3));
+  const entityType = url.searchParams.get('entity_type');
+  if (entityType?.startsWith('eq.')) rows = rows.filter((row) => row.entity_type === entityType.slice(3));
+  const entityKey = url.searchParams.get('entity_key');
+  if (entityKey?.startsWith('eq.')) rows = rows.filter((row) => row.entity_key === entityKey.slice(3));
+  else if (entityKey?.startsWith('in.(')) {
+    const keys = parseInFilter(entityKey);
+    rows = rows.filter((row) => keys.has(row.entity_key));
+  }
+  return structuredClone(rows);
 }
 
 async function installCloudRoutes(context: BrowserContext, initial: CrmData): Promise<{
   firstWriteStarted: Promise<void>;
   releaseFirstWrite: () => void;
-  postCount: () => number;
+  crmPostCount: () => number;
+  telemetryPostCount: () => number;
   remote: () => CloudRecordRow[];
 }> {
-  let remote = stamp(crmToCloudRecords(initial, contextForCloud(), USER_ID), '2026-08-07T19:40:00.000Z');
-  let postCount = 0;
+  let remote = crmToCloudRecords(initial, contextForCloud(), USER_ID)
+    .map((record) => ({ ...structuredClone(record), updated_at: '2026-08-07T19:40:00.000Z' }));
+  let crmPostCount = 0;
+  let telemetryPostCount = 0;
+  let writeSequence = 0;
   const firstStarted = deferred();
   const firstRelease = deferred();
+
+  function upsert(rows: CloudRecordRow[]): void {
+    writeSequence += 1;
+    const updatedAt = `2026-08-07T19:52:${String(writeSequence).padStart(2, '0')}.000Z`;
+    rows.forEach((incoming) => {
+      const index = remote.findIndex((existing) => recordIdentity(existing) === recordIdentity(incoming));
+      const next = { ...structuredClone(incoming), updated_at: updatedAt };
+      if (index >= 0) remote[index] = { ...remote[index], ...next };
+      else remote.push(next);
+    });
+  }
 
   await context.route('**/api/cloud-config', async (route) => {
     await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ configured: true, url: new URL(route.request().url()).origin, publishableKey: 'key' }) });
@@ -134,22 +179,41 @@ async function installCloudRoutes(context: BrowserContext, initial: CrmData): Pr
     if (url.pathname.endsWith('/organization_members')) {
       return fulfill([{ organization_id: ORG_ID, member_id: 1, user_id: USER_ID, role: 'owner', status: 'active', display_name: owner().name, email: owner().email, created_at: owner().createdAt }]);
     }
-    if (url.pathname.endsWith('/propcontrol_records') && method === 'GET') return fulfill(remote);
-    if (url.pathname.endsWith('/propcontrol_records') && method === 'DELETE') return fulfill([]);
+    if (url.pathname.endsWith('/propcontrol_records') && method === 'GET') {
+      return fulfill(filteredRows(remote, url));
+    }
+    if (url.pathname.endsWith('/propcontrol_records') && method === 'DELETE') {
+      const deleting = new Set(filteredRows(remote, url).map(recordIdentity));
+      remote = remote.filter((row) => !deleting.has(recordIdentity(row)));
+      return fulfill([]);
+    }
     if (url.pathname.endsWith('/propcontrol_records') && method === 'POST') {
-      postCount += 1;
       const body = request.postDataJSON() as CloudRecordRow[];
-      if (postCount === 1) {
-        firstStarted.resolve();
-        await firstRelease.promise;
+      const telemetry = body.filter(isTelemetryRow);
+      const crm = body.filter((row) => !isTelemetryRow(row));
+      if (telemetry.length) telemetryPostCount += 1;
+      if (crm.length) {
+        crmPostCount += 1;
+        if (crmPostCount === 1) {
+          firstStarted.resolve();
+          await firstRelease.promise;
+        }
       }
-      remote = stamp(body, postCount === 1 ? '2026-08-07T19:52:01.000Z' : `2026-08-07T19:52:${String(postCount).padStart(2, '0')}.000Z`);
+      // Supabase/PostgREST: cada POST hace UPSERT por la clave compuesta;
+      // un batch parcial no reemplaza el conjunto remoto completo.
+      upsert(body);
       return fulfill([]);
     }
     return route.fulfill({ status: 404, body: '{}' });
   });
 
-  return { firstWriteStarted: firstStarted.promise, releaseFirstWrite: firstRelease.resolve, postCount: () => postCount, remote: () => structuredClone(remote) };
+  return {
+    firstWriteStarted: firstStarted.promise,
+    releaseFirstWrite: firstRelease.resolve,
+    crmPostCount: () => crmPostCount,
+    telemetryPostCount: () => telemetryPostCount,
+    remote: () => structuredClone(remote),
+  };
 }
 
 async function installStorage(context: BrowserContext, crm: CrmData): Promise<void> {
@@ -184,7 +248,7 @@ async function load(page: Page, url: string): Promise<void> {
 }
 
 function activityCount(records: CloudRecordRow[], action: string): number {
-  return records.filter((row) => row.entity_type === 'activity' && (row.payload as { action?: string }).action === action).length;
+  return humanActivityRows(records).filter((row) => (row.payload as { action?: string }).action === action).length;
 }
 
 async function waitForSafeCloudSave(page: Page): Promise<void> {
@@ -192,7 +256,7 @@ async function waitForSafeCloudSave(page: Page): Promise<void> {
   await page.waitForFunction(() => ((window as TestWindow).__cloudMessages || []).includes('Guardado seguro en la nube.'), null, { timeout: 20_000 });
 }
 
-test('navegador real: contacto cloud A en vuelo + seguimiento automático B + confirmación + reload conserva tarjeta, resumen y Agenda', { timeout: 240_000 }, async () => {
+test('navegador real: contacto cloud A en vuelo + telemetría append-only + seguimiento B conserva CRM, resumen y Agenda', { timeout: 240_000 }, async () => {
   mkdirSync(ARTIFACT_DIR, { recursive: true });
   const executablePath = chromeExecutable();
   assert.ok(executablePath, 'Chrome/Chromium no disponible.');
@@ -218,22 +282,25 @@ test('navegador real: contacto cloud A en vuelo + seguimiento automático B + co
     await page.clock.runFor(750);
 
     await cloud.firstWriteStarted;
-    assert.equal(cloud.postCount(), 1, 'A debe ser el único push en vuelo');
+    assert.equal(cloud.crmPostCount(), 1, 'A debe ser el único push CRM en vuelo');
 
     assert.equal(await page.evaluate((key) => (JSON.parse(localStorage.getItem(key) || '{}') as CrmData).clients[0]?.nextFollowUp, STORAGE_KEY), FOLLOW_UP_DATE);
     await page.clock.runFor(850);
-    assert.equal(cloud.postCount(), 1, 'La cola mantiene un único POST mientras el primero sigue en vuelo');
+    assert.equal(cloud.crmPostCount(), 1, 'La cola CRM mantiene un único POST CRM mientras el primero sigue en vuelo');
     cloud.releaseFirstWrite();
     await page.waitForFunction(() => ((window as TestWindow).__cloudMessages || []).includes('Guardado seguro en la nube.'), null, { timeout: 20_000 });
-    assert.ok(cloud.postCount() >= 1 && cloud.postCount() <= 2, `La cola segura usó ${cloud.postCount()} push(es).`);
+    assert.ok(cloud.crmPostCount() >= 1 && cloud.crmPostCount() <= 2, `La cola segura usó ${cloud.crmPostCount()} push(es) CRM.`);
+
     let remoteClient = cloud.remote().find((row) => row.entity_type === 'client')?.payload as { nextFollowUp?: string; nextAction?: string };
     assert.equal(remoteClient.nextFollowUp, FOLLOW_UP_DATE);
     assert.equal(remoteClient.nextAction, 'Volver a contactar por WhatsApp');
     assert.equal(activityCount(cloud.remote(), 'Contacto por WhatsApp'), 1);
     assert.equal(activityCount(cloud.remote(), 'Seguimiento por WhatsApp programado'), 1);
     assert.equal(cloud.remote().filter((row) => row.entity_type === 'reminder').length, 0);
+    assert.ok(cloud.telemetryPostCount() >= 1, 'La telemetría puede escribir concurrentemente sin secuestrar el bloqueo CRM.');
+    assert.ok(cloud.remote().some(isTelemetryRow), 'La telemetría append-only sobrevive junto al CRM.');
 
-    const activitiesBeforeNone = cloud.remote().filter((row) => row.entity_type === 'activity').length;
+    const activitiesBeforeNone = humanActivityRows(cloud.remote()).length;
     await page.evaluate(() => { (window as TestWindow).__cloudMessages = []; });
     await page.locator('[data-whatsapp-change-followup]').click();
     const noneForm = page.locator('[data-zero-followup-form]');
@@ -247,7 +314,7 @@ test('navegador real: contacto cloud A en vuelo + seguimiento automático B + co
     remoteClient = cloud.remote().find((row) => row.entity_type === 'client')?.payload as { nextFollowUp?: string; nextAction?: string };
     assert.equal(remoteClient.nextFollowUp, undefined);
     assert.equal(remoteClient.nextAction, undefined);
-    assert.equal(cloud.remote().filter((row) => row.entity_type === 'activity').length, activitiesBeforeNone, 'none no agrega actividad falsa.');
+    assert.equal(humanActivityRows(cloud.remote()).length, activitiesBeforeNone, 'none no agrega actividad humana falsa.');
     assert.equal(activityCount(cloud.remote(), 'Contacto por WhatsApp'), 1, 'El contacto confirmado se conserva.');
     assert.equal(activityCount(cloud.remote(), 'Seguimiento por WhatsApp programado'), 1, 'none no duplica la actividad histórica.');
     assert.equal(cloud.remote().filter((row) => row.entity_type === 'reminder').length, 0);
@@ -267,6 +334,7 @@ test('navegador real: contacto cloud A en vuelo + seguimiento automático B + co
     assert.equal(activityCount(cloud.remote(), 'Contacto por WhatsApp'), 1);
     assert.equal(activityCount(cloud.remote(), 'Seguimiento por WhatsApp programado'), 1);
     assert.equal(cloud.remote().filter((row) => row.entity_type === 'reminder').length, 0);
+    assert.ok(cloud.remote().some(isTelemetryRow), 'Los POST CRM posteriores no reemplazan ni borran telemetría.');
 
     await page.reload({ waitUntil: 'domcontentloaded' });
     await page.waitForSelector('#crm.active', { state: 'visible', timeout: 20_000 });

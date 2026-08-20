@@ -1,4 +1,5 @@
 import { renderSupervisedAttentionQueue } from './lead-attention-queue.js';
+import { instrumentVisibleSupervisedRecommendations } from './lead-recommendation-instrumentation.js';
 import { visibleClients } from './team-access.js';
 
 const desktopQuery = '(min-width: 901px)';
@@ -144,5 +145,6 @@ export function enhanceLeadList(container: HTMLElement, options: LeadListEnhance
   syncFilterDetails(container);
   enhancePipelines(container, options.centerSelectedStage === true);
   renderAttentionQueue(container);
+  instrumentVisibleSupervisedRecommendations(container);
   schedulePipelineGeometryRefresh(container);
 }

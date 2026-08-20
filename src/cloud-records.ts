@@ -45,6 +45,13 @@ export interface CloudMembershipContext {
   members: TeamMember[];
 }
 
+export function isSupervisedRecommendationTelemetryPayload(value: unknown): boolean {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const kind = (value as { recordKind?: unknown }).recordKind;
+  // Compatibilidad defensiva: aislar tanto filas R1 históricas como eventos R2 append-only.
+  return kind === 'supervised_recommendation' || kind === 'supervised_recommendation_event';
+}
+
 function normalizedRole(value: unknown): TeamRole {
   const role = String(value ?? '').toLowerCase();
   if (['owner', 'dueño', 'dueno'].includes(role)) return 'Dueño';
@@ -185,7 +192,12 @@ export function crmToCloudRecords(
 
 function recordsOf<T>(rows: CloudRecordRow[], entityType: CloudEntityType): T[] {
   return rows
-    .filter((item) => item.entity_type === entityType && item.payload && typeof item.payload === 'object')
+    .filter((item) => (
+      item.entity_type === entityType
+      && item.payload
+      && typeof item.payload === 'object'
+      && !isSupervisedRecommendationTelemetryPayload(item.payload)
+    ))
     .map((item) => item.payload as T)
     .sort((left, right) => Number((left as { id?: number }).id ?? 0) - Number((right as { id?: number }).id ?? 0));
 }
@@ -229,5 +241,9 @@ export function cloudRecordIdentity(record: Pick<CloudRecordRow, 'organization_i
 
 export function staleCloudRecords(existing: CloudRecordRow[], next: CloudRecordRow[]): CloudRecordRow[] {
   const nextIds = new Set(next.map(cloudRecordIdentity));
-  return existing.filter((record) => !nextIds.has(cloudRecordIdentity(record)) && record.entity_type !== 'organization');
+  return existing.filter((record) => (
+    !nextIds.has(cloudRecordIdentity(record))
+    && record.entity_type !== 'organization'
+    && !isSupervisedRecommendationTelemetryPayload(record.payload)
+  ));
 }
