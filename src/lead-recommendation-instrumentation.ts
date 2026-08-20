@@ -10,9 +10,9 @@ import {
   type RecommendationLifecycleInput,
 } from './lead-recommendation-lifecycle.js';
 import {
-  persistSupervisedRecommendationLifecycle,
-  readSupervisedRecommendationLifecycle,
-} from './lead-recommendation-telemetry-r3.js';
+  persistSupervisedRecommendationLifecycleR4,
+  readSupervisedRecommendationLifecycleR4,
+} from './lead-recommendation-telemetry-r4.js';
 import { state } from './store.js';
 import { activeMember, visibleClients } from './team-access.js';
 
@@ -30,8 +30,8 @@ function actuallyDisplayedRecommendations(container: HTMLElement): LeadAttention
   return recommendations.filter((recommendation) => {
     const item = container.querySelector<HTMLElement>(`[data-attention-client-id="${recommendation.clientId}"]`);
     if (!item?.isConnected || item.hidden || item.getClientRects().length === 0) return false;
-    const style = getComputedStyle(item);
-    return style.display !== 'none' && style.visibility !== 'hidden';
+    const computedStyle = getComputedStyle(item);
+    return computedStyle.display !== 'none' && computedStyle.visibility !== 'hidden';
   });
 }
 
@@ -61,7 +61,7 @@ export function instrumentVisibleSupervisedRecommendations(container: HTMLElemen
 
     const context = runtimeContext();
     const displayed = actuallyDisplayedRecommendations(container);
-    const snapshot = readSupervisedRecommendationLifecycle(context);
+    const snapshot = readSupervisedRecommendationLifecycleR4(context);
     const mutation = reconcileRecommendationLifecycle(
       snapshot.state,
       context,
@@ -69,6 +69,6 @@ export function instrumentVisibleSupervisedRecommendations(container: HTMLElemen
       state.crm.activityLog,
       new Date().toISOString(),
     );
-    persistSupervisedRecommendationLifecycle(context, snapshot, mutation);
+    persistSupervisedRecommendationLifecycleR4(context, snapshot, mutation);
   });
 }
