@@ -13,6 +13,7 @@ let desktopMedia: MediaQueryList | null = null;
 let pendingPipelineFrame: number | null = null;
 const filterDetailsBindings = new WeakSet<HTMLDetailsElement>();
 const pipelineBindings = new WeakSet<HTMLElement>();
+const attentionQueueBindings = new WeakSet<HTMLElement>();
 
 function placeNewLeadButton(container: HTMLElement, desktop: boolean): void {
   const heading = container.querySelector<HTMLElement>('.mvp-page-heading');
@@ -138,6 +139,58 @@ function renderAttentionQueue(container: HTMLElement): void {
   results.insertAdjacentHTML('beforebegin', renderSupervisedAttentionQueue(visibleClients()));
 }
 
+function attentionNavigationStatus(container: HTMLElement): HTMLElement | null {
+  return container.querySelector<HTMLElement>('[data-attention-navigation-status]');
+}
+
+function announceAttentionNavigation(container: HTMLElement, message = ''): void {
+  const status = attentionNavigationStatus(container);
+  if (!status) return;
+  status.textContent = message;
+  status.hidden = !message;
+}
+
+export function openAttentionLead(container: HTMLElement, clientId: number): 'opened' | 'filtered-out' {
+  const card = container.querySelector<HTMLElement>(`#mvp-lead-results .mvp-lead-card[data-client-id="${clientId}"]`);
+  if (!card) {
+    announceAttentionNavigation(
+      container,
+      'Este lead está oculto por los filtros actuales. Ajustá o limpiá los filtros para verlo sin perder tu selección.',
+    );
+    return 'filtered-out';
+  }
+
+  announceAttentionNavigation(container);
+  container.querySelectorAll<HTMLElement>('.mvp-lead-card.pc-attention-target')
+    .forEach((item) => item.classList.remove('pc-attention-target'));
+  card.classList.add('pc-attention-target');
+
+  const details = card.querySelector<HTMLDetailsElement>(`[data-lead-full-sheet="${clientId}"]`);
+  if (details) details.open = true;
+  const focusTarget = details?.querySelector<HTMLElement>('summary') || card;
+  if (focusTarget === card && !card.hasAttribute('tabindex')) card.tabIndex = -1;
+
+  window.requestAnimationFrame(() => {
+    if (!card.isConnected) return;
+    card.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'nearest' });
+    focusTarget.focus({ preventScroll: true });
+  });
+  return 'opened';
+}
+
+function bindAttentionQueue(container: HTMLElement): void {
+  if (attentionQueueBindings.has(container)) return;
+  attentionQueueBindings.add(container);
+  container.addEventListener('click', (event) => {
+    const target = event.target as HTMLElement;
+    const button = target.closest<HTMLButtonElement>('button[data-attention-client-id]');
+    if (!button || !container.contains(button)) return;
+    const clientId = Number(button.dataset.attentionClientId);
+    if (!clientId) return;
+    openAttentionLead(container, clientId);
+  });
+}
+
 export function enhanceLeadList(container: HTMLElement, options: LeadListEnhancementOptions = {}): void {
   activeLeadContainer = container;
   const breakpoint = desktopBreakpoint();
@@ -145,6 +198,7 @@ export function enhanceLeadList(container: HTMLElement, options: LeadListEnhance
   syncFilterDetails(container);
   enhancePipelines(container, options.centerSelectedStage === true);
   renderAttentionQueue(container);
+  bindAttentionQueue(container);
   instrumentVisibleSupervisedRecommendations(container);
   schedulePipelineGeometryRefresh(container);
 }
