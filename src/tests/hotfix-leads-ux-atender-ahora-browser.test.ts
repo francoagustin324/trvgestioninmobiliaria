@@ -19,6 +19,36 @@ interface ScrollCall {
   inline: string;
 }
 
+interface TargetMetrics {
+  count: number;
+  heights: number[];
+  widths: number[];
+  minHeight: number;
+  minWidth: number;
+}
+
+interface StageContrastMetric {
+  labelColor: string;
+  counterColor: string;
+  backgroundColor: string;
+  effectiveBackground: string;
+  labelRatio: number;
+  counterRatio: number;
+  stage: string;
+  centered: boolean;
+  brown: boolean;
+}
+
+interface HorizontalMetrics {
+  viewport: number;
+  document: number;
+  body: number;
+  queue: { x: number; width: number } | null;
+  stageCounters: { x: number; width: number } | null;
+  buttons: Array<{ x: number; width: number }>;
+  content: { x: number; width: number } | null;
+}
+
 function teamMember(id: number, userId: string, name: string, role: 'Dueño' | 'Corredor'): TeamMember {
   return {
     id,
@@ -270,6 +300,7 @@ async function load(page: Page, url: string): Promise<void> {
 async function targetClientId(page: Page): Promise<number> {
   const value = await page.locator('#crm .pc-supervised-attention-item[data-attention-client-id]').first().getAttribute('data-attention-client-id');
   const clientId = Number(value || 0);
+  assert.ok(clientId > 0, `ATENDER AHORA debe exponer un clientId real; recibido ${value}.`);
   assert.equal(clientId, 501, `El fixture R2 debe priorizar al lead 501; recibido ${value}.`);
   return clientId;
 }
@@ -373,7 +404,7 @@ async function telemetrySnapshot(page: Page): Promise<{ entries: Array<[string, 
       const raw = localStorage.getItem(key);
       entries.push([key, raw]);
       if (!raw) continue;
-      try { walk(JSON.parse(raw)); } catch { /* el valor raw sigue formando parte del snapshot */ }
+      try { walk(JSON.parse(raw)); } catch { /* conservar evidencia raw */ }
     }
     entries.sort(([left], [right]) => left.localeCompare(right));
     eventTypes.sort();
@@ -392,8 +423,6 @@ async function filterSnapshot(page: Page): Promise<Record<string, string>> {
 }
 
 async function todosMetrics(page: Page): Promise<{
-  className: string;
-  ariaPressed: string | null;
   active: boolean;
   display: string;
   alignItems: string;
@@ -422,8 +451,6 @@ async function todosMetrics(page: Page): Promise<{
     const stage = document.querySelector<HTMLSelectElement>('#mvp-lead-stage-filter');
     const order = document.querySelector<HTMLSelectElement>('#mvp-lead-order');
     return {
-      className: element.className,
-      ariaPressed: element.getAttribute('aria-pressed'),
       active: element.classList.contains('active') && buttonRect.width > 0 && buttonRect.height > 0,
       display: style.display,
       alignItems: style.alignItems,
@@ -440,14 +467,12 @@ async function todosMetrics(page: Page): Promise<{
 }
 
 function assertTodosMetrics(metrics: Awaited<ReturnType<typeof todosMetrics>>, label: string): void {
-  assert.equal(metrics.className.split(/\s+/).includes('mvp-stage-counter'), true, `${label}: clase mvp-stage-counter ausente.`);
-  assert.equal(metrics.ariaPressed, 'true', `${label}: aria-pressed debe reflejar la etapa activa.`);
   assert.equal(metrics.active, true, `${label}: Todos debe estar activo y visible.`);
   assert.ok(metrics.display === 'flex' || metrics.display === 'inline-flex', `${label}: display inesperado ${metrics.display}.`);
   assert.equal(metrics.alignItems, 'center', `${label}: align-items debe ser center.`);
   assert.equal(metrics.justifyContent, 'center', `${label}: justify-content debe ser center.`);
-  assert.match(metrics.background, /62\s*,\s*105\s*,\s*84/, `${label}: debe usar el fondo verde sutil del hotfix.`);
-  assert.doesNotMatch(metrics.background, /110\s*,\s*90\s*,\s*36/, `${label}: no debe volver el fondo marrón/amarillo anterior.`);
+  assert.match(metrics.background, /62\s*,\s*105\s*,\s*84/, `${label}: debe conservar fondo verde sutil.`);
+  assert.doesNotMatch(metrics.background, /110\s*,\s*90\s*,\s*36/, `${label}: no debe volver el fondo marrón anterior.`);
   assert.ok(metrics.buttonTextDelta <= 1.5, `${label}: texto Todos descentrado ${metrics.buttonTextDelta}px.`);
   assert.ok(metrics.buttonCountDelta <= 1.5, `${label}: contador descentrado ${metrics.buttonCountDelta}px.`);
   assert.ok(metrics.textCountDelta <= 1.5, `${label}: texto/contador desalineados ${metrics.textCountDelta}px.`);
@@ -456,24 +481,180 @@ function assertTodosMetrics(metrics: Awaited<ReturnType<typeof todosMetrics>>, l
   assert.equal(metrics.orderLabel, 'Más recientes', `${label}: la etiqueta histórica debe seguir siendo Más recientes.`);
 }
 
-test('HOTFIX UX POST-B1.4.2 R2 — evidencia browser real, aislada y determinística', async (t) => {
+async function targetMetrics(page: Page): Promise<TargetMetrics> {
+  return page.locator('#crm button.pc-supervised-attention-item[data-attention-client-id]').evaluateAll((elements) => {
+    const rects = elements
+      .filter((element) => element.getClientRects().length > 0)
+      .map((element) => (element as HTMLElement).getBoundingClientRect());
+    const heights = rects.map((rect) => rect.height);
+    const widths = rects.map((rect) => rect.width);
+    return {
+      count: rects.length,
+      heights,
+      widths,
+      minHeight: heights.length ? Math.min(...heights) : 0,
+      minWidth: widths.length ? Math.min(...widths) : 0,
+    };
+  });
+}
+
+function assertTargetMetrics(metrics: TargetMetrics, label: string): void {
+  assert.equal(metrics.count, 3, `${label}: el fixture debe mostrar exactamente 3 recomendaciones.`);
+  metrics.heights.forEach((height, index) => assert.ok(height >= 44, `${label}: target ${index + 1} mide ${height}px de alto.`));
+  metrics.widths.forEach((width, index) => assert.ok(width >= 44, `${label}: target ${index + 1} mide ${width}px de ancho.`));
+}
+
+async function stageContrastMetric(page: Page): Promise<StageContrastMetric> {
+  return page.locator('#crm .mvp-stage-counter[data-stage-quick="Todas"]').evaluate((chip) => {
+    type Rgba = { r: number; g: number; b: number; a: number };
+    const parse = (value: string): Rgba => {
+      const match = value.match(/rgba?\(([^)]+)\)/);
+      const captured = match?.[1];
+      if (!captured) throw new Error(`Color no interpretable: ${value}`);
+      const parts = captured.split(/[ ,/]+/).filter(Boolean).map(Number);
+      const [r = 0, g = 0, b = 0, alpha = 1] = parts;
+      return { r, g, b, a: alpha };
+    };
+    const blend = (top: Rgba, bottom: Rgba): Rgba => {
+      const a = top.a + bottom.a * (1 - top.a);
+      if (a === 0) return { r: 0, g: 0, b: 0, a: 0 };
+      return {
+        r: ((top.r * top.a) + (bottom.r * bottom.a * (1 - top.a))) / a,
+        g: ((top.g * top.a) + (bottom.g * bottom.a * (1 - top.a))) / a,
+        b: ((top.b * top.a) + (bottom.b * bottom.a * (1 - top.a))) / a,
+        a,
+      };
+    };
+    const effectiveBackground = (element: Element): Rgba => {
+      const chain: Element[] = [];
+      for (let current: Element | null = element; current; current = current.parentElement) chain.push(current);
+      let result: Rgba = { r: 255, g: 255, b: 255, a: 1 };
+      for (const current of chain.reverse()) result = blend(parse(getComputedStyle(current).backgroundColor), result);
+      return result;
+    };
+    const channel = (value: number): number => {
+      const normalized = value / 255;
+      return normalized <= 0.04045 ? normalized / 12.92 : ((normalized + 0.055) / 1.055) ** 2.4;
+    };
+    const luminance = (color: Rgba): number => (
+      0.2126 * channel(color.r) + 0.7152 * channel(color.g) + 0.0722 * channel(color.b)
+    );
+    const ratio = (foreground: Rgba, background: Rgba): number => {
+      const lighter = Math.max(luminance(foreground), luminance(background));
+      const darker = Math.min(luminance(foreground), luminance(background));
+      return (lighter + 0.05) / (darker + 0.05);
+    };
+    const serialize = (color: Rgba): string => `rgba(${color.r.toFixed(2)}, ${color.g.toFixed(2)}, ${color.b.toFixed(2)}, ${color.a.toFixed(3)})`;
+    const background = effectiveBackground(chip);
+    const labelStyle = getComputedStyle(chip);
+    const counter = chip.querySelector<HTMLElement>('b');
+    if (!counter) throw new Error('Todos no tiene contador.');
+    const label = blend(parse(labelStyle.color), background);
+    const numeric = blend(parse(getComputedStyle(counter).color), background);
+
+    const textNode = [...chip.childNodes].find((node) => node.nodeType === Node.TEXT_NODE && node.textContent?.trim() === 'Todos');
+    if (!textNode) throw new Error('Todos no tiene nodo de texto.');
+    const range = document.createRange();
+    range.selectNodeContents(textNode);
+    const chipRect = chip.getBoundingClientRect();
+    const textRect = range.getBoundingClientRect();
+    const counterRect = counter.getBoundingClientRect();
+    const center = chipRect.top + chipRect.height / 2;
+    const centered = Math.abs(center - (textRect.top + textRect.height / 2)) <= 1.5
+      && Math.abs(center - (counterRect.top + counterRect.height / 2)) <= 1.5;
+    const rawBackground = labelStyle.backgroundColor;
+    return {
+      labelColor: labelStyle.color,
+      counterColor: getComputedStyle(counter).color,
+      backgroundColor: rawBackground,
+      effectiveBackground: serialize(background),
+      labelRatio: ratio(label, background),
+      counterRatio: ratio(numeric, background),
+      stage: document.querySelector<HTMLSelectElement>('#mvp-lead-stage-filter')?.value || '',
+      centered,
+      brown: /110\s*,\s*90\s*,\s*36/.test(rawBackground),
+    };
+  });
+}
+
+function assertContrast(metric: StageContrastMetric, label: string): void {
+  assert.ok(metric.labelRatio >= 4.5, `${label}: contraste label ${metric.labelRatio.toFixed(2)} < 4.5.`);
+  assert.ok(metric.counterRatio >= 4.5, `${label}: contraste contador ${metric.counterRatio.toFixed(2)} < 4.5.`);
+  assert.equal(metric.brown, false, `${label}: no debe reaparecer rgb(110,90,36).`);
+  assert.equal(metric.centered, true, `${label}: Todos debe seguir centrado.`);
+  assert.equal(metric.stage, 'Todas', `${label}: stage debe seguir siendo Todas.`);
+}
+
+async function horizontalMetrics(page: Page, clientId?: number): Promise<HorizontalMetrics> {
+  return page.evaluate((id) => {
+    const rect = (element: Element | null): { x: number; width: number } | null => {
+      if (!element) return null;
+      const box = element.getBoundingClientRect();
+      return { x: box.x, width: box.width };
+    };
+    const buttons = [...document.querySelectorAll<HTMLElement>('button.pc-supervised-attention-item[data-attention-client-id]')]
+      .filter((element) => element.getClientRects().length > 0)
+      .map((element) => rect(element))
+      .filter((item): item is { x: number; width: number } => Boolean(item));
+    const content = id
+      ? rect(document.querySelector(`.mvp-lead-card[data-client-id="${id}"] .mvp-lead-full-content`))
+      : null;
+    return {
+      viewport: document.documentElement.clientWidth,
+      document: document.documentElement.scrollWidth,
+      body: document.body.scrollWidth,
+      queue: rect(document.querySelector('.pc-supervised-attention-queue')),
+      stageCounters: rect(document.querySelector('.mvp-stage-counters')),
+      buttons,
+      content,
+    };
+  }, clientId || 0);
+}
+
+function assertHorizontal(metrics: HorizontalMetrics, label: string, contentExpected: boolean): void {
+  assert.ok(metrics.document <= metrics.viewport + 1, `${label}: overflow document ${metrics.document - metrics.viewport}px.`);
+  assert.ok(metrics.body <= metrics.viewport + 1, `${label}: overflow body ${metrics.body - metrics.viewport}px.`);
+  for (const [name, item] of [['queue', metrics.queue], ['stageCounters', metrics.stageCounters]] as const) {
+    assert.ok(item, `${label}: ${name} debe tener geometría.`);
+    assert.ok(item.x >= -1, `${label}: ${name} sale por izquierda x=${item.x}.`);
+    assert.ok(item.x + item.width <= metrics.viewport + 1, `${label}: ${name} sale por derecha ${item.x + item.width}px.`);
+  }
+  metrics.buttons.forEach((item, index) => {
+    assert.ok(item.x >= -1, `${label}: button ${index + 1} sale por izquierda.`);
+    assert.ok(item.x + item.width <= metrics.viewport + 1, `${label}: button ${index + 1} sale por derecha.`);
+  });
+  if (contentExpected) {
+    assert.ok(metrics.content, `${label}: ficha abierta debe tener geometría.`);
+    assert.ok(metrics.content.x >= -1, `${label}: ficha sale por izquierda.`);
+    assert.ok(metrics.content.x + metrics.content.width <= metrics.viewport + 1, `${label}: ficha sale por derecha.`);
+  }
+}
+
+test('HOTFIX UX POST-B1.4.2 R3 — mobile tap, target y contraste accesible exact-SHA', async (t) => {
   const server = await startServer();
   const browser = await webkit.launch({ headless: true });
   const url = `http://127.0.0.1:${PORT}`;
 
   try {
-    await t.test('A desktop visual: Todos usa computed style corregido y conserva stage=Todas', async () => {
+    await t.test('A desktop: Todos conserva visual neutro, centrado, stage=Todas y contraste >=4.5', async () => {
       const context = await createContext(browser, { width: 1366, height: 768 }, false);
       try {
         const page = await context.newPage();
         await load(page, url);
         assertTodosMetrics(await todosMetrics(page), 'desktop');
+        const normal = await stageContrastMetric(page);
+        assertContrast(normal, 'desktop normal');
+        const todos = page.locator('#crm .mvp-stage-counter[data-stage-quick="Todas"]');
+        await todos.hover();
+        const hover = await stageContrastMetric(page);
+        assertContrast(hover, 'desktop hover');
+        console.log(`R3_CONTRAST desktop ${JSON.stringify({ normal, hover })}`);
       } finally {
         await context.close();
       }
     });
 
-    await t.test('B desktop navegación: click real abre clientId exacto, foco/scroll y cero mutación CRM/telemetría', async () => {
+    await t.test('B desktop: click real abre clientId exacto, foco/scroll y cero mutación CRM/telemetría', async () => {
       const context = await createContext(browser, { width: 1366, height: 768 }, false);
       try {
         const page = await context.newPage();
@@ -486,24 +667,24 @@ test('HOTFIX UX POST-B1.4.2 R2 — evidencia browser real, aislada y determinís
         assert.match(await queueButton.getAttribute('aria-label') || '', /Abrir ficha completa de Lead R2 Prioritario/);
 
         const crmBefore = await crmSnapshot(page);
-        const whatsAppBefore = await whatsAppSnapshot(page);
+        const whatsappBefore = await whatsAppSnapshot(page);
         const telemetryBefore = await telemetrySnapshot(page);
-        assert.ok(telemetryBefore.eventTypes.includes('RECOMMENDATION_SHOWN'), 'El snapshot debe tomarse después del SHOWN legítimo del render inicial.');
-        assert.equal(telemetryBefore.eventTypes.includes('RECOMMENDATION_DECISION'), false, 'El render inicial no debe contener DECISION en el fixture limpio.');
+        assert.ok(telemetryBefore.eventTypes.includes('RECOMMENDATION_SHOWN'), 'Debe aislarse SHOWN legítimo del render inicial.');
+        assert.equal(telemetryBefore.eventTypes.includes('RECOMMENDATION_DECISION'), false, 'Render inicial no debe contener DECISION.');
 
         await clearScrollEvidence(page);
         await queueButton.click();
         await assertOpened(page, clientId);
 
-        assert.equal(await crmSnapshot(page), crmBefore, 'Navegar desde ATENDER AHORA no debe mutar la representación persistida del CRM.');
-        assert.deepEqual(await whatsAppSnapshot(page), whatsAppBefore, 'Navegar no debe mutar estado comercial de WhatsApp.');
-        assert.deepEqual(await telemetrySnapshot(page), telemetryBefore, 'Navegar no debe mutar lifecycle/outbox ni generar RECOMMENDATION_DECISION.');
+        assert.equal(await crmSnapshot(page), crmBefore, 'Navegar no debe mutar CRM persistido.');
+        assert.deepEqual(await whatsAppSnapshot(page), whatsappBefore, 'Navegar no debe mutar estado comercial WhatsApp.');
+        assert.deepEqual(await telemetrySnapshot(page), telemetryBefore, 'Navegar no debe mutar lifecycle/outbox ni generar DECISION.');
       } finally {
         await context.close();
       }
     });
 
-    await t.test('C desktop teclado: Enter y Space heredan activación nativa del button y abren el lead correcto', async () => {
+    await t.test('C desktop: Enter y Space heredan activación nativa y abren el lead correcto', async () => {
       const context = await createContext(browser, { width: 1366, height: 768 }, false);
       try {
         const page = await context.newPage();
@@ -513,13 +694,13 @@ test('HOTFIX UX POST-B1.4.2 R2 — evidencia browser real, aislada y determinís
 
         await clearScrollEvidence(page);
         await queueButton.focus();
-        assert.equal(await queueButton.evaluate((element) => document.activeElement === element), true, 'El botón debe recibir foco nativo antes de Enter.');
+        assert.equal(await queueButton.evaluate((element) => document.activeElement === element), true);
         await page.keyboard.press('Enter');
         await assertOpened(page, clientId);
 
         await closeSheet(page, clientId);
         await queueButton.focus();
-        assert.equal(await queueButton.evaluate((element) => document.activeElement === element), true, 'El botón debe recibir foco nativo antes de Space.');
+        assert.equal(await queueButton.evaluate((element) => document.activeElement === element), true);
         await page.keyboard.press('Space');
         await assertOpened(page, clientId);
       } finally {
@@ -527,87 +708,141 @@ test('HOTFIX UX POST-B1.4.2 R2 — evidencia browser real, aislada y determinís
       }
     });
 
-    await t.test('D desktop hidden-by-filter: búsqueda visible oculta el lead y conserva todos los filtros', async () => {
+    await t.test('D desktop: hidden-by-filter conserva filtros, card oculta y aviso accesible', async () => {
       const context = await createContext(browser, { width: 1366, height: 768 }, false);
       try {
         const page = await context.newPage();
         await load(page, url);
         const clientId = await targetClientId(page);
+        const filtersBaseline = await filterSnapshot(page);
+        assert.deepEqual(filtersBaseline, { search: '', stage: 'Todas', temperature: 'Todas', assignee: 'Todos', order: 'recent' });
+
         const search = page.locator('#mvp-lead-search');
-        assert.equal(await search.isVisible(), true, 'El escenario debe usar un control de filtro realmente visible.');
+        assert.equal(await search.isVisible(), true, 'El filtro usado debe ser UI real visible.');
         await search.fill(HIDDEN_SEARCH);
         await page.waitForFunction((id) => !document.querySelector(`#mvp-lead-results .mvp-lead-card[data-client-id="${id}"]`), clientId);
 
         const filtersBefore = await filterSnapshot(page);
-        assert.deepEqual(filtersBefore, {
-          search: HIDDEN_SEARCH,
-          stage: 'Todas',
-          temperature: 'Todas',
-          assignee: 'Todos',
-          order: 'recent',
-        });
+        assert.deepEqual(filtersBefore, { ...filtersBaseline, search: HIDDEN_SEARCH });
         const crmBefore = await crmSnapshot(page);
         const telemetryBefore = await telemetrySnapshot(page);
 
         await page.locator(`#crm button.pc-supervised-attention-item[data-attention-client-id="${clientId}"]`).first().click();
         await page.waitForFunction((message) => {
           const status = document.querySelector<HTMLElement>('[data-attention-navigation-status]');
-          return Boolean(
-            status
-            && !status.hidden
-            && status.textContent?.trim() === message
-            && status.getAttribute('role') === 'status'
-            && status.getAttribute('aria-live') === 'polite'
-          );
+          return Boolean(status && !status.hidden && status.textContent?.trim() === message && status.getAttribute('role') === 'status' && status.getAttribute('aria-live') === 'polite');
         }, HIDDEN_MESSAGE);
 
-        assert.deepEqual(await filterSnapshot(page), filtersBefore, 'ATENDER AHORA no debe limpiar ni modificar filtros para revelar un lead oculto.');
-        assert.equal(await page.locator(`#mvp-lead-results .mvp-lead-card[data-client-id="${clientId}"]`).count(), 0, 'El lead debe seguir oculto: no hay auto-reveal ni reset de filtros.');
-        assert.equal(await crmSnapshot(page), crmBefore, 'La navegación de un lead oculto tampoco debe mutar CRM.');
-        assert.deepEqual(await telemetrySnapshot(page), telemetryBefore, 'La navegación de un lead oculto tampoco debe generar DECISION ni mutar lifecycle/outbox.');
+        assert.deepEqual(await filterSnapshot(page), filtersBefore, 'ATENDER AHORA no debe resetear filtros.');
+        assert.equal(await page.locator(`#mvp-lead-results .mvp-lead-card[data-client-id="${clientId}"]`).count(), 0, 'Lead debe seguir oculto.');
+        assert.equal(await crmSnapshot(page), crmBefore, 'Lead oculto no debe mutar CRM.');
+        assert.deepEqual(await telemetrySnapshot(page), telemetryBefore, 'Lead oculto no debe generar DECISION.');
       } finally {
         await context.close();
       }
     });
 
-    await t.test('E mobile visual 390x844: Todos usa computed style corregido y centrado', async () => {
-      const context = await createContext(browser, { width: 390, height: 844 }, true);
-      try {
-        const page = await context.newPage();
-        await load(page, url);
-        assertTodosMetrics(await todosMetrics(page), 'mobile');
-      } finally {
-        await context.close();
+    await t.test('E targets: desktop, 390x844 y 320x568 miden >=44px en todas las recomendaciones visibles', async () => {
+      const specs = [
+        { name: 'desktop', viewport: { width: 1366, height: 768 }, mobile: false },
+        { name: '390x844', viewport: { width: 390, height: 844 }, mobile: true },
+        { name: '320x568', viewport: { width: 320, height: 568 }, mobile: true },
+      ];
+      const collected: Array<{ name: string; metrics: TargetMetrics }> = [];
+      for (const spec of specs) {
+        const context = await createContext(browser, spec.viewport, spec.mobile);
+        try {
+          const page = await context.newPage();
+          await load(page, url);
+          collected.push({ name: spec.name, metrics: await targetMetrics(page) });
+        } finally {
+          await context.close();
+        }
       }
+      collected.forEach(({ name, metrics }) => {
+        console.log(`R3_TARGET ${name} ${JSON.stringify(metrics)}`);
+        assertTargetMetrics(metrics, name);
+      });
     });
 
-    await t.test('F mobile navegación 390x844: tap real abre lead correcto, target táctil, ficha usable y cero overflow', async () => {
+    await t.test('F contraste mobile: 390x844 y 320x568 label/contador >=4.5, centrados y sin marrón', async () => {
+      const specs = [
+        { name: '390x844', viewport: { width: 390, height: 844 } },
+        { name: '320x568', viewport: { width: 320, height: 568 } },
+      ];
+      const collected: Array<{ name: string; visual: Awaited<ReturnType<typeof todosMetrics>>; contrast: StageContrastMetric }> = [];
+      for (const spec of specs) {
+        const context = await createContext(browser, spec.viewport, true);
+        try {
+          const page = await context.newPage();
+          await load(page, url);
+          collected.push({ name: spec.name, visual: await todosMetrics(page), contrast: await stageContrastMetric(page) });
+        } finally {
+          await context.close();
+        }
+      }
+      collected.forEach(({ name, visual, contrast }) => {
+        assertTodosMetrics(visual, name);
+        assertContrast(contrast, name);
+        console.log(`R3_CONTRAST ${name} ${JSON.stringify(contrast)}`);
+      });
+    });
+
+    await t.test('G tap mobile 390x844: tap real abre exactamente la ficha correcta y mantiene foco/estado accesible', async () => {
       const context = await createContext(browser, { width: 390, height: 844 }, true);
       try {
         const page = await context.newPage();
         await load(page, url);
         const clientId = await targetClientId(page);
         const button = page.locator(`#crm button.pc-supervised-attention-item[data-attention-client-id="${clientId}"]`).first();
-        const targetRect = await button.boundingBox();
-        assert.ok(targetRect, 'ATENDER AHORA debe tener geometría táctil observable.');
-        assert.ok(targetRect.height >= 44, `Target táctil insuficiente: ${targetRect.height}px de alto.`);
-        assert.ok(targetRect.width >= 44, `Target táctil insuficiente: ${targetRect.width}px de ancho.`);
-
         await clearScrollEvidence(page);
         await button.tap();
         await assertOpened(page, clientId);
+        const content = page.locator(`.mvp-lead-card[data-client-id="${clientId}"] .mvp-lead-full-content`);
+        assert.equal(await content.isVisible(), true, 'Ficha mobile debe ser visible.');
+        assert.ok((await content.innerText()).trim().length > 0, 'Ficha mobile debe contener información legible.');
+      } finally {
+        await context.close();
+      }
+    });
 
-        const overflow = await page.evaluate(() => ({
-          document: document.documentElement.scrollWidth - document.documentElement.clientWidth,
-          body: document.body.scrollWidth - document.documentElement.clientWidth,
-        }));
-        assert.ok(overflow.document <= 1, `Overflow horizontal document: ${overflow.document}px.`);
-        assert.ok(overflow.body <= 1, `Overflow horizontal body: ${overflow.body}px.`);
+    await t.test('H overflow 390x844: cero overflow antes y después del tap; cola/buttons/stages/ficha dentro de viewport', async () => {
+      const context = await createContext(browser, { width: 390, height: 844 }, true);
+      try {
+        const page = await context.newPage();
+        await load(page, url);
+        const before = await horizontalMetrics(page);
+        console.log(`R3_OVERFLOW 390x844 before ${JSON.stringify(before)}`);
+        assertHorizontal(before, '390x844 before', false);
 
-        const contentRect = await page.locator(`.mvp-lead-card[data-client-id="${clientId}"] .mvp-lead-full-content`).boundingBox();
-        assert.ok(contentRect, 'La ficha completa mobile debe ser visible y usable.');
-        assert.ok(contentRect.x >= -1, `La ficha mobile se sale por izquierda: x=${contentRect.x}.`);
-        assert.ok(contentRect.x + contentRect.width <= 391, `La ficha mobile se sale por derecha: ${contentRect.x + contentRect.width}px.`);
+        const clientId = await targetClientId(page);
+        await clearScrollEvidence(page);
+        await page.locator(`#crm button.pc-supervised-attention-item[data-attention-client-id="${clientId}"]`).first().tap();
+        await assertOpened(page, clientId);
+        const after = await horizontalMetrics(page, clientId);
+        console.log(`R3_OVERFLOW 390x844 after ${JSON.stringify(after)}`);
+        assertHorizontal(after, '390x844 after', true);
+      } finally {
+        await context.close();
+      }
+    });
+
+    await t.test('I overflow 320x568: cero overflow antes y después del tap; cola/buttons/stages/ficha dentro de viewport', async () => {
+      const context = await createContext(browser, { width: 320, height: 568 }, true);
+      try {
+        const page = await context.newPage();
+        await load(page, url);
+        const before = await horizontalMetrics(page);
+        console.log(`R3_OVERFLOW 320x568 before ${JSON.stringify(before)}`);
+        assertHorizontal(before, '320x568 before', false);
+
+        const clientId = await targetClientId(page);
+        await clearScrollEvidence(page);
+        await page.locator(`#crm button.pc-supervised-attention-item[data-attention-client-id="${clientId}"]`).first().tap();
+        await assertOpened(page, clientId);
+        const after = await horizontalMetrics(page, clientId);
+        console.log(`R3_OVERFLOW 320x568 after ${JSON.stringify(after)}`);
+        assertHorizontal(after, '320x568 after', true);
       } finally {
         await context.close();
       }

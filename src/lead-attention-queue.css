@@ -130,7 +130,7 @@
   }
 
   .pc-supervised-attention-item {
-    min-height: 16px;
+    min-height: 44px;
     grid-template-columns: minmax(0, 0.72fr) minmax(0, 1.05fr) minmax(0, 1.2fr);
     align-items: center;
     align-content: center;
