@@ -1,3 +1,4 @@
+import { bindSupervisedAttentionLeadNavigation } from './lead-attention-navigation.js';
 import { renderSupervisedAttentionQueue } from './lead-attention-queue.js';
 import { instrumentVisibleSupervisedRecommendations } from './lead-recommendation-instrumentation.js';
 import { visibleClients } from './team-access.js';
@@ -144,6 +145,7 @@ export function enhanceLeadList(container: HTMLElement, options: LeadListEnhance
   placeNewLeadButton(container, breakpoint.matches);
   syncFilterDetails(container);
   enhancePipelines(container, options.centerSelectedStage === true);
+  bindSupervisedAttentionLeadNavigation(container);
   renderAttentionQueue(container);
   instrumentVisibleSupervisedRecommendations(container);
   schedulePipelineGeometryRefresh(container);

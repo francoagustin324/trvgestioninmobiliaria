@@ -60,11 +60,11 @@ export function supervisedAttentionQueue(
 export function renderSupervisedAttentionQueue(clients: Client[], today = localIsoDate()): string {
   const recommendations = supervisedAttentionQueue(clients, today, 3);
   const body = recommendations.length
-    ? `<div class="pc-supervised-attention-list">${recommendations.map((recommendation) => `<article class="pc-supervised-attention-item" data-attention-client-id="${recommendation.clientId}" aria-label="Atender a ${escapeHtml(recommendation.name)}">
+    ? `<div class="pc-supervised-attention-list">${recommendations.map((recommendation) => `<button type="button" class="pc-supervised-attention-item" data-attention-client-id="${recommendation.clientId}" aria-label="Abrir ficha completa de ${escapeHtml(recommendation.name)} desde Atender ahora">
       <strong class="pc-supervised-attention-name">${escapeHtml(recommendation.name)}</strong>
       <span class="pc-supervised-attention-reason" title="${escapeHtml(recommendation.reason)}">${escapeHtml(recommendation.reason)}${recommendation.when ? ` <small>· ${escapeHtml(recommendation.when)}</small>` : ''}</span>
       <span class="pc-supervised-attention-action" title="${escapeHtml(recommendation.action)}"><b aria-hidden="true">→</b> ${escapeHtml(recommendation.action)}</span>
-    </article>`).join('')}</div>`
+    </button>`).join('')}</div>`
     : '<p class="pc-supervised-attention-empty">No hay leads activos para atender ahora.</p>';
 
   return `<section class="pc-supervised-attention-queue" data-supervised-attention-queue aria-labelledby="pc-supervised-attention-title">

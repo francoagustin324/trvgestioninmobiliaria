@@ -43,16 +43,38 @@
 
 .pc-supervised-attention-item {
   box-sizing: border-box;
+  width: 100%;
   min-width: 0;
   min-height: 48px;
   display: grid;
   align-content: center;
   gap: 1px;
+  margin: 0;
   padding: 5px 7px;
   overflow: hidden;
+  appearance: none;
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 9px;
   background: rgba(255, 255, 255, 0.035);
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 140ms ease, background 140ms ease, transform 140ms ease;
+}
+
+.pc-supervised-attention-item:hover {
+  border-color: rgba(190, 219, 205, 0.28);
+  background: rgba(176, 208, 192, 0.075);
+}
+
+.pc-supervised-attention-item:active {
+  transform: translateY(1px);
+}
+
+.pc-supervised-attention-item:focus-visible {
+  outline: 2px solid rgba(190, 219, 205, 0.82);
+  outline-offset: 2px;
 }
 
 .pc-supervised-attention-name,
@@ -100,6 +122,68 @@
   line-height: 1.3;
 }
 
+.pc-supervised-attention-status {
+  margin: 0 0 8px;
+  padding: 7px 10px;
+  border: 1px solid rgba(190, 219, 205, 0.16);
+  border-radius: 9px;
+  background: rgba(176, 208, 192, 0.055);
+  color: var(--ink-soft, #a8bbb1);
+  font-size: 0.76rem;
+  line-height: 1.35;
+}
+
+.pc-supervised-attention-status[hidden] {
+  display: none;
+}
+
+#crm .mvp-lead-card.pc-attention-focus-target {
+  outline: 2px solid rgba(190, 219, 205, 0.78);
+  outline-offset: 3px;
+  box-shadow: 0 0 0 5px rgba(176, 208, 192, 0.08);
+}
+
+/* Hotfix post-B1.4.2: selección de etapa centrada y sutil, sin alterar filtros. */
+#crm.pc-leads-redesign .pc-stage-summary .mvp-stage-counter {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  line-height: 1;
+}
+
+#crm.pc-leads-redesign .pc-stage-summary .mvp-stage-counter b {
+  display: inline-grid;
+  place-items: center;
+  margin-left: 0;
+  line-height: 1;
+}
+
+#crm.pc-leads-redesign .pc-stage-summary .mvp-stage-counter.active,
+#crm.pc-leads-redesign .pc-stage-summary .mvp-stage-counter[aria-pressed="true"] {
+  border-color: rgba(188, 214, 202, 0.52);
+  background: #173b31;
+  color: #f4f8f6;
+  box-shadow: inset 0 0 0 1px rgba(220, 233, 227, 0.07);
+}
+
+#crm.pc-leads-redesign .pc-stage-summary .mvp-stage-counter.active b,
+#crm.pc-leads-redesign .pc-stage-summary .mvp-stage-counter[aria-pressed="true"] b {
+  color: #dbe9e2;
+}
+
+#crm.pc-leads-redesign .pc-stage-summary .mvp-stage-counter.active:hover,
+#crm.pc-leads-redesign .pc-stage-summary .mvp-stage-counter[aria-pressed="true"]:hover {
+  border-color: rgba(199, 223, 212, 0.66);
+  background: #1b4438;
+  color: #f4f8f6;
+}
+
+#crm.pc-leads-redesign .pc-stage-summary .mvp-stage-counter.active:hover b,
+#crm.pc-leads-redesign .pc-stage-summary .mvp-stage-counter[aria-pressed="true"]:hover b {
+  color: #dbe9e2;
+}
+
 @media (max-width: 720px) {
   .pc-supervised-attention-queue {
     grid-template-columns: 64px minmax(0, 1fr);
@@ -126,17 +210,17 @@
 
   .pc-supervised-attention-list {
     grid-template-columns: minmax(0, 1fr);
-    gap: 2px;
+    gap: 3px;
   }
 
   .pc-supervised-attention-item {
-    min-height: 16px;
+    min-height: 44px;
     grid-template-columns: minmax(0, 0.72fr) minmax(0, 1.05fr) minmax(0, 1.2fr);
     align-items: center;
     align-content: center;
     gap: 3px;
-    padding: 1px 3px;
-    border-radius: 6px;
+    padding: 4px 5px;
+    border-radius: 7px;
   }
 
   .pc-supervised-attention-name,
@@ -150,5 +234,10 @@
 
   .pc-supervised-attention-reason small {
     font-size: inherit;
+  }
+
+  .pc-supervised-attention-status {
+    margin-bottom: 6px;
+    font-size: 0.72rem;
   }
 }
