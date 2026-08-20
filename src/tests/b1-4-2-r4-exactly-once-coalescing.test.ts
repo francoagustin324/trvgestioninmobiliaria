@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import test from 'node:test';
 import { supervisedAttentionQueue, type LeadAttentionRecommendation } from '../lead-attention-queue.js';
 import {
@@ -20,14 +20,12 @@ import {
   appendUniqueRecommendationEvents,
   eventsFromLifecycleMutation,
   flushRecommendationEventBatch,
+  persistSupervisedRecommendationLifecycle,
+  readSupervisedRecommendationLifecycle,
   supervisedRecommendationCloudRow,
   type RecommendationTelemetryAuthorization,
   type SupervisedRecommendationEvent,
-} from '../lead-recommendation-telemetry-r3.js';
-import {
-  persistSupervisedRecommendationLifecycleR4,
-  readSupervisedRecommendationLifecycleR4,
-} from '../lead-recommendation-telemetry-r4.js';
+} from '../lead-recommendation-telemetry.js';
 import type { ActivityEntry, Client } from '../models.js';
 import type { CloudRecordRow } from '../cloud-records.js';
 
@@ -118,7 +116,7 @@ test('R4.1 pending -> decision -> compactacion -> misma ActivityEntry => 0 nuevo
 test('R4.2 reload/read lifecycle conserva marker exactly-once', async () => {
   const human = activity(101); const once = reconcile(pending().state, [input()], [human]);
   const key = 'trv-crm-basico:supervised-recommendation-lifecycle-v3:org-a:1'; const storage = fakeStorage({ [key]: JSON.stringify(once.state) });
-  await withLocalStorage(storage, () => { const loaded = readSupervisedRecommendationLifecycleR4(context()); assert.equal(loaded.state.cycles[0]!.resolvedByActivityIdentity, recommendationResolvedActivityIdentity(human)); assert.equal(reconcile(loaded.state, [input()], [human]).decisionRecords.length, 0); });
+  await withLocalStorage(storage, () => { const loaded = readSupervisedRecommendationLifecycle(context()); assert.equal(loaded.state.cycles[0]!.resolvedByActivityIdentity, recommendationResolvedActivityIdentity(human)); assert.equal(reconcile(loaded.state, [input()], [human]).decisionRecords.length, 0); });
 });
 
 test('R4.3 remount/reconcile no duplica decision', () => { const human = activity(102); const once = reconcile(pending().state, [input()], [human]); assert.equal(reconcile(structuredClone(once.state), [input()], [human]).decisionRecords.length, 0); });
@@ -183,7 +181,7 @@ test('R4.18 telemetria no bloquea/elimina follow-up CRM', () => { const source =
 
 test('R4.19 follow-up CRM no elimina telemetria append-only', () => { const source = readFileSync('src/tests/followup-cloud-persistence-browser.test.ts', 'utf8'); assert.match(source, /Los POST CRM posteriores no reemplazan ni borran telemetría/); assert.equal(source.includes('remote = stamp(body'), false); });
 
-test('R4.20 no-op rerender => no events ni write lifecycle', async () => { const first = pending(); const noop = reconcile(first.state, [input()], []); assert.equal(noop.changed, 0); assert.equal(eventsFromLifecycleMutation(noop).length, 0); const storage = fakeStorage(); await withLocalStorage(storage, () => { persistSupervisedRecommendationLifecycleR4(context(), { state: first.state, migratedFromR2: false }, noop); assert.equal(storage.writes, 0); }); });
+test('R4.20 no-op rerender => no events ni write lifecycle', async () => { const first = pending(); const noop = reconcile(first.state, [input()], []); assert.equal(noop.changed, 0); assert.equal(eventsFromLifecycleMutation(noop).length, 0); const storage = fakeStorage(); await withLocalStorage(storage, () => { persistSupervisedRecommendationLifecycle(context(), { state: first.state, migratedFromR2: false }, noop); assert.equal(storage.writes, 0); }); });
 
 test('R4.21 30 rerenders misma activacion => 1 SHOWN', () => { let state = emptyRecommendationLifecycleState(); let shown = 0; for (let i = 0; i < 30; i += 1) { const m = reconcile(state, [input()]); shown += m.shownRecords.length; state = m.state; } assert.equal(shown, 1); });
 
@@ -214,3 +212,39 @@ test('R4.33 PR143 Limpiar sin rebound', () => { const source = readFileSync('src
 test('R4.34 mobile sin overflow/overlap', () => { const css = readFileSync('src/lead-attention-queue.css', 'utf8'); const runtime = readFileSync('src/lead-recommendation-instrumentation.ts', 'utf8'); assert.match(css, /@media \(max-width: 720px\)/); assert.match(css, /overflow-x:\s*hidden/); assert.doesNotMatch(runtime, /\.style\.[\w$-]+\s*=/); assert.doesNotMatch(runtime, /setAttribute\(\s*['"]style['"]/); });
 
 test('R4.35 desktop sin regresion + CI PR143 Chromium/WebKit', () => { const runtime = readFileSync('src/lead-recommendation-instrumentation.ts', 'utf8'); assert.equal(runtime.includes('innerHTML'), false); assert.equal(runtime.includes('insertAdjacentHTML'), false); const workflow = readFileSync('.github/workflows/ci.yml', 'utf8'); assert.match(workflow, /PR143/); assert.match(workflow, /webkit/i); });
+
+test('R5.1 existe una sola implementación productiva canónica de telemetría', () => {
+  const telemetryFiles = readdirSync('src')
+    .filter((name) => /^lead-recommendation-telemetry(?:-r\d+)?\.ts$/.test(name))
+    .sort();
+  assert.deepEqual(telemetryFiles, ['lead-recommendation-telemetry.ts']);
+  assert.equal(existsSync('src/lead-recommendation-telemetry-r3.ts'), false);
+  assert.equal(existsSync('src/lead-recommendation-telemetry-r4.ts'), false);
+});
+
+test('R5.2 runtime importa exclusivamente telemetría canónica', () => {
+  const runtime = readFileSync('src/lead-recommendation-instrumentation.ts', 'utf8');
+  assert.match(runtime, /from ['"]\.\/lead-recommendation-telemetry\.js['"]/);
+  assert.equal(runtime.includes('lead-recommendation-telemetry-r3'), false);
+  assert.equal(runtime.includes('lead-recommendation-telemetry-r4'), false);
+  assert.match(runtime, /readSupervisedRecommendationLifecycle/);
+  assert.match(runtime, /persistSupervisedRecommendationLifecycle/);
+});
+
+test('R5.3 tests históricos ejercitan únicamente el módulo canónico', () => {
+  const testFiles = readdirSync('src/tests').filter((name) => name.endsWith('.test.ts'));
+  const offenders = testFiles.filter((name) => {
+    const importLines = readFileSync(`src/tests/${name}`, 'utf8')
+      .split('\n')
+      .filter((line) => line.trimStart().startsWith('import '));
+    return importLines.some((line) => line.includes('lead-recommendation-telemetry-r3') || line.includes('lead-recommendation-telemetry-r4'));
+  });
+  assert.deepEqual(offenders, []);
+  for (const name of [
+    'b1-4-2-supervised-recommendation-instrumentation.test.ts',
+    'b1-4-2-r3-recommendation-lifecycle.test.ts',
+    'b1-4-2-r4-exactly-once-coalescing.test.ts',
+  ]) {
+    assert.match(readFileSync(`src/tests/${name}`, 'utf8'), /\.\.\/lead-recommendation-telemetry\.js/);
+  }
+});

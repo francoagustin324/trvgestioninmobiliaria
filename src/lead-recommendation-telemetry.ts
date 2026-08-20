@@ -1,14 +1,21 @@
 import { getCloudMembershipContext, getCloudSession } from './cloud-api.js';
 import { organizationScopedEntityKey, type CloudRecordRow } from './cloud-records.js';
-import { scopedStorageKey } from './sync-safety.js';
 import type {
   RecommendationHumanDecision,
   RecommendationInstrumentationContext,
   SupervisedRecommendationRecord,
 } from './lead-recommendation-instrumentation-core.js';
+import {
+  emptyRecommendationLifecycleState,
+  type RecommendationLifecycleCycle,
+  type RecommendationLifecycleMutation,
+  type RecommendationLifecycleState,
+} from './lead-recommendation-lifecycle.js';
 import type { TeamRole } from './models.js';
+import { scopedStorageKey } from './sync-safety.js';
 
-const TELEMETRY_STORAGE_SUFFIX = 'supervised-recommendations-v2';
+const LEGACY_TELEMETRY_STORAGE_SUFFIX = 'supervised-recommendations-v2';
+const LIFECYCLE_STORAGE_SUFFIX = 'supervised-recommendation-lifecycle-v3';
 const TELEMETRY_OUTBOX_SUFFIX = 'supervised-recommendation-outbox-v1';
 
 interface PublicCloudConfig {
@@ -23,7 +30,9 @@ export interface SupervisedRecommendationEvent {
   recordKind: 'supervised_recommendation_event';
   eventId: string;
   eventType: RecommendationTelemetryEventType;
+  /** Compatibilidad R2: sigue representando la identidad semántica. */
   logicalRecommendationId: string;
+  recommendationCycleId?: string;
   organizationId: string;
   actorId: number;
   clientId: number;
@@ -56,18 +65,57 @@ export interface RecommendationTelemetryFlushResult {
   failed: boolean;
 }
 
+export interface RecommendationLifecycleSnapshot {
+  state: RecommendationLifecycleState;
+  migratedFromR2: boolean;
+}
+
+interface FlushFlight {
+  running: Promise<void> | null;
+  requestedAgain: boolean;
+}
+
 let cloudConfigPromise: Promise<{ url: string; publishableKey: string }> | null = null;
-let cloudWriteQueue: Promise<void> = Promise.resolve();
+const flushFlights = new Map<string, FlushFlight>();
+
+function normalized(value: unknown): string {
+  return String(value ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().toLowerCase();
+}
 
 function identityPart(value: unknown): string {
-  return encodeURIComponent(String(value ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().toLowerCase());
+  return encodeURIComponent(normalized(value));
+}
+
+function stableHash(value: string): string {
+  let hash = 0x811c9dc5;
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return (hash >>> 0).toString(16).padStart(8, '0');
+}
+
+function storageKey(context: RecommendationInstrumentationContext, suffix: string): string {
+  return [scopedStorageKey(), suffix, encodeURIComponent(context.organizationId), String(context.actorId)].join(':');
+}
+
+function lifecycleStorageKey(context: RecommendationInstrumentationContext): string {
+  return storageKey(context, LIFECYCLE_STORAGE_SUFFIX);
+}
+
+function legacyStorageKey(context: RecommendationInstrumentationContext): string {
+  return storageKey(context, LEGACY_TELEMETRY_STORAGE_SUFFIX);
+}
+
+function outboxStorageKey(context: RecommendationInstrumentationContext): string {
+  return storageKey(context, TELEMETRY_OUTBOX_SUFFIX);
 }
 
 function humanDecision(value: unknown): RecommendationHumanDecision {
   return value === 'executed' || value === 'modified' ? value : 'pending';
 }
 
-function normalizedRecommendation(value: unknown): SupervisedRecommendationRecord | null {
+function normalizedLegacyRecord(value: unknown): SupervisedRecommendationRecord | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
   const item = value as Partial<SupervisedRecommendationRecord>;
   const id = String(item.id || '');
@@ -98,6 +146,95 @@ function normalizedRecommendation(value: unknown): SupervisedRecommendationRecor
   };
 }
 
+function normalizedCycle(value: unknown): RecommendationLifecycleCycle | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const item = value as Partial<RecommendationLifecycleCycle>;
+  const clientId = Number(item.clientId || 0);
+  const semanticRecommendationId = String(item.semanticRecommendationId || '');
+  const cycleId = String(item.cycleId || '');
+  const activationWitness = String(item.activationWitness || '');
+  const phase = item.phase === 'unshown' || item.phase === 'pending' || item.phase === 'resolved' ? item.phase : null;
+  if (clientId <= 0 || !semanticRecommendationId || !cycleId || !activationWitness || !phase) return null;
+  const record = phase === 'pending' ? normalizedLegacyRecord(item.record) || undefined : undefined;
+  if (phase === 'pending' && !record) return null;
+  const marker = String(item.resolvedByActivityIdentity || '');
+  const resolvedByActivityIdentity = phase === 'resolved' && /^activity-v1\|[0-9a-f]{32}$/.test(marker)
+    ? marker
+    : undefined;
+  return { clientId, semanticRecommendationId, cycleId, activationWitness, phase, resolvedByActivityIdentity, record };
+}
+
+function normalizedLifecycle(value: unknown, context: RecommendationInstrumentationContext): RecommendationLifecycleState | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const item = value as Partial<RecommendationLifecycleState>;
+  if (item.version !== 3 || !Array.isArray(item.cycles)) return null;
+  const cycles = item.cycles
+    .map(normalizedCycle)
+    .filter((cycle): cycle is RecommendationLifecycleCycle => Boolean(cycle && context.visibleClientIds.has(cycle.clientId)));
+  return { version: 3, cycles };
+}
+
+function migrateLegacyState(context: RecommendationInstrumentationContext): RecommendationLifecycleState | null {
+  try {
+    const raw = localStorage.getItem(legacyStorageKey(context));
+    if (!raw) return null;
+    const parsed: unknown = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return emptyRecommendationLifecycleState();
+    const latest = new Map<number, SupervisedRecommendationRecord>();
+    parsed
+      .map(normalizedLegacyRecord)
+      .filter((record): record is SupervisedRecommendationRecord => Boolean(
+        record
+        && record.organizationId === context.organizationId
+        && record.actorId === context.actorId
+        && context.visibleClientIds.has(record.clientId),
+      ))
+      .forEach((record) => {
+        const current = latest.get(record.clientId);
+        if (!current || current.shownAt < record.shownAt) latest.set(record.clientId, record);
+      });
+    return {
+      version: 3,
+      cycles: [...latest.values()].map((record) => ({
+        clientId: record.clientId,
+        semanticRecommendationId: record.id,
+        cycleId: record.id,
+        activationWitness: 'legacy-r2',
+        phase: record.humanDecision === 'pending' ? 'pending' : 'resolved',
+        record: record.humanDecision === 'pending' ? record : undefined,
+      })),
+    };
+  } catch {
+    return emptyRecommendationLifecycleState();
+  }
+}
+
+export function readSupervisedRecommendationLifecycle(
+  context: RecommendationInstrumentationContext,
+): RecommendationLifecycleSnapshot {
+  try {
+    const raw = localStorage.getItem(lifecycleStorageKey(context));
+    if (raw) {
+      const state = normalizedLifecycle(JSON.parse(raw), context);
+      if (state) return { state, migratedFromR2: false };
+    }
+  } catch {
+    // Un estado local corrupto no puede bloquear el CRM ni tocar datos comerciales.
+  }
+  const migrated = migrateLegacyState(context);
+  return migrated
+    ? { state: migrated, migratedFromR2: true }
+    : { state: emptyRecommendationLifecycleState(), migratedFromR2: false };
+}
+
+function writeLifecycleState(context: RecommendationInstrumentationContext, state: RecommendationLifecycleState): void {
+  const scoped: RecommendationLifecycleState = {
+    version: 3,
+    cycles: state.cycles.filter((cycle) => context.visibleClientIds.has(cycle.clientId)),
+  };
+  localStorage.setItem(lifecycleStorageKey(context), JSON.stringify(scoped));
+}
+
 function normalizedEvent(value: unknown): SupervisedRecommendationEvent | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
   const item = value as Partial<SupervisedRecommendationEvent>;
@@ -109,7 +246,14 @@ function normalizedEvent(value: unknown): SupervisedRecommendationEvent | null {
   const clientId = Number(item.clientId || 0);
   if (item.recordKind !== 'supervised_recommendation_event' || !eventType || !eventId || !logicalRecommendationId || !organizationId || actorId <= 0 || clientId <= 0) return null;
   return {
-    recordKind: 'supervised_recommendation_event', eventId, eventType, logicalRecommendationId, organizationId, actorId, clientId,
+    recordKind: 'supervised_recommendation_event',
+    eventId,
+    eventType,
+    logicalRecommendationId,
+    recommendationCycleId: item.recommendationCycleId ? String(item.recommendationCycleId) : undefined,
+    organizationId,
+    actorId,
+    clientId,
     occurredAt: String(item.occurredAt || ''),
     reason: item.reason ? String(item.reason) : undefined,
     alertKind: item.alertKind ? String(item.alertKind) : undefined,
@@ -125,95 +269,113 @@ function normalizedEvent(value: unknown): SupervisedRecommendationEvent | null {
   };
 }
 
-function storageKey(context: RecommendationInstrumentationContext, suffix: string): string {
-  return [scopedStorageKey(), suffix, encodeURIComponent(context.organizationId), String(context.actorId)].join(':');
-}
-
-function stateStorageKey(context: RecommendationInstrumentationContext): string {
-  return storageKey(context, TELEMETRY_STORAGE_SUFFIX);
-}
-
-function outboxStorageKey(context: RecommendationInstrumentationContext): string {
-  return storageKey(context, TELEMETRY_OUTBOX_SUFFIX);
-}
-
-export function readSupervisedRecommendationTelemetry(context: RecommendationInstrumentationContext): SupervisedRecommendationRecord[] {
-  try {
-    const parsed: unknown = JSON.parse(localStorage.getItem(stateStorageKey(context)) || '[]');
-    if (!Array.isArray(parsed)) return [];
-    return parsed.map(normalizedRecommendation).filter((item): item is SupervisedRecommendationRecord => Boolean(item && item.organizationId === context.organizationId && item.actorId === context.actorId));
-  } catch { return []; }
-}
-
 export function readSupervisedRecommendationOutbox(context: RecommendationInstrumentationContext): SupervisedRecommendationEvent[] {
   try {
     const parsed: unknown = JSON.parse(localStorage.getItem(outboxStorageKey(context)) || '[]');
     if (!Array.isArray(parsed)) return [];
-    return parsed.map(normalizedEvent).filter((item): item is SupervisedRecommendationEvent => Boolean(item && item.organizationId === context.organizationId && item.actorId === context.actorId));
-  } catch { return []; }
-}
-
-function writeLocalTelemetry(context: RecommendationInstrumentationContext, log: SupervisedRecommendationRecord[]): void {
-  localStorage.setItem(stateStorageKey(context), JSON.stringify(log.filter((item) => item.organizationId === context.organizationId && item.actorId === context.actorId)));
+    return parsed.map(normalizedEvent).filter((event): event is SupervisedRecommendationEvent => Boolean(
+      event && event.organizationId === context.organizationId && event.actorId === context.actorId,
+    ));
+  } catch {
+    return [];
+  }
 }
 
 function writeOutbox(context: RecommendationInstrumentationContext, events: SupervisedRecommendationEvent[]): void {
-  localStorage.setItem(outboxStorageKey(context), JSON.stringify(events.filter((item) => item.organizationId === context.organizationId && item.actorId === context.actorId)));
+  localStorage.setItem(
+    outboxStorageKey(context),
+    JSON.stringify(events.filter((event) => event.organizationId === context.organizationId && event.actorId === context.actorId)),
+  );
 }
 
-export function appendUniqueRecommendationEvents(outbox: SupervisedRecommendationEvent[], incoming: SupervisedRecommendationEvent[]): SupervisedRecommendationEvent[] {
+export function appendUniqueRecommendationEvents(
+  outbox: SupervisedRecommendationEvent[],
+  incoming: SupervisedRecommendationEvent[],
+): SupervisedRecommendationEvent[] {
   const byId = new Map(outbox.map((event) => [event.eventId, event]));
   incoming.forEach((event) => { if (!byId.has(event.eventId)) byId.set(event.eventId, event); });
   return [...byId.values()];
 }
 
-export function recommendationShownEventId(record: SupervisedRecommendationRecord): string {
-  return ['v1', 'shown', identityPart(record.id), identityPart(record.shownAt)].join('|');
+export function acknowledgeRecommendationEvents(
+  currentOutbox: SupervisedRecommendationEvent[],
+  sentEventIds: string[],
+): SupervisedRecommendationEvent[] {
+  const acknowledged = new Set(sentEventIds);
+  return currentOutbox.filter((event) => !acknowledged.has(event.eventId));
+}
+
+function semanticIdForRecord(record: SupervisedRecommendationRecord, state: RecommendationLifecycleState): string {
+  return state.cycles.find((cycle) => cycle.cycleId === record.id)?.semanticRecommendationId || record.id;
 }
 
 export function recommendationActivityIdentity(record: SupervisedRecommendationRecord): string | null {
   if (record.decisionSourceActivityId === undefined || !record.decisionSourceActivityCreatedAt || !record.decisionSourceActivityAction) return null;
-  return ['v1', String(record.actorId), String(record.clientId), String(record.decisionSourceActivityId), identityPart(record.decisionSourceActivityCreatedAt), identityPart(record.decisionSourceActivityAction)].join('|');
+  return [
+    'v1',
+    String(record.actorId),
+    String(record.clientId),
+    String(record.decisionSourceActivityId),
+    identityPart(record.decisionSourceActivityCreatedAt),
+    identityPart(record.decisionSourceActivityAction),
+  ].join('|');
 }
 
-export function recommendationDecisionEventId(record: SupervisedRecommendationRecord): string | null {
-  const activityIdentity = recommendationActivityIdentity(record);
-  return activityIdentity ? ['v1', 'decision', identityPart(record.id), identityPart(activityIdentity)].join('|') : null;
-}
-
-export function supervisedRecommendationShownEvent(record: SupervisedRecommendationRecord): SupervisedRecommendationEvent {
+export function recommendationShownEvent(
+  record: SupervisedRecommendationRecord,
+  state: RecommendationLifecycleState,
+): SupervisedRecommendationEvent {
+  const semanticRecommendationId = semanticIdForRecord(record, state);
   return {
-    recordKind: 'supervised_recommendation_event', eventId: recommendationShownEventId(record), eventType: 'RECOMMENDATION_SHOWN',
-    logicalRecommendationId: record.id, organizationId: record.organizationId, actorId: record.actorId, clientId: record.clientId,
-    occurredAt: record.shownAt, reason: record.reason, alertKind: record.alertKind, recommendedAction: record.recommendedAction,
-    relevantDate: record.relevantDate, stage: record.stage,
+    recordKind: 'supervised_recommendation_event',
+    eventId: `v3|shown|${stableHash(record.id)}|${stableHash(record.shownAt)}`,
+    eventType: 'RECOMMENDATION_SHOWN',
+    logicalRecommendationId: semanticRecommendationId,
+    recommendationCycleId: record.id,
+    organizationId: record.organizationId,
+    actorId: record.actorId,
+    clientId: record.clientId,
+    occurredAt: record.shownAt,
+    reason: record.reason,
+    alertKind: record.alertKind,
+    recommendedAction: record.recommendedAction,
+    relevantDate: record.relevantDate,
+    stage: record.stage,
   };
 }
 
-export function supervisedRecommendationDecisionEvent(record: SupervisedRecommendationRecord): SupervisedRecommendationEvent | null {
+export function recommendationDecisionEvent(
+  record: SupervisedRecommendationRecord,
+  state: RecommendationLifecycleState,
+): SupervisedRecommendationEvent | null {
   if (record.humanDecision === 'pending' || !record.decisionAt || !record.actualAction) return null;
   const sourceActivityIdentity = recommendationActivityIdentity(record);
-  const eventId = recommendationDecisionEventId(record);
-  if (!sourceActivityIdentity || !eventId) return null;
+  if (!sourceActivityIdentity) return null;
+  const semanticRecommendationId = semanticIdForRecord(record, state);
   return {
-    recordKind: 'supervised_recommendation_event', eventId, eventType: 'RECOMMENDATION_DECISION', logicalRecommendationId: record.id,
-    organizationId: record.organizationId, actorId: record.actorId, clientId: record.clientId, occurredAt: record.decisionAt,
-    humanDecision: record.humanDecision, actualAction: record.actualAction, sourceActivityIdentity,
-    sourceActivityId: record.decisionSourceActivityId, sourceActivityCreatedAt: record.decisionSourceActivityCreatedAt,
+    recordKind: 'supervised_recommendation_event',
+    eventId: `v3|decision|${stableHash(record.id)}|${stableHash(sourceActivityIdentity)}`,
+    eventType: 'RECOMMENDATION_DECISION',
+    logicalRecommendationId: semanticRecommendationId,
+    recommendationCycleId: record.id,
+    organizationId: record.organizationId,
+    actorId: record.actorId,
+    clientId: record.clientId,
+    occurredAt: record.decisionAt,
+    humanDecision: record.humanDecision,
+    actualAction: record.actualAction,
+    sourceActivityIdentity,
+    sourceActivityId: record.decisionSourceActivityId,
+    sourceActivityCreatedAt: record.decisionSourceActivityCreatedAt,
     sourceActivityAction: record.decisionSourceActivityAction,
   };
 }
 
-export function recommendationEventsFromMutation(before: SupervisedRecommendationRecord[], after: SupervisedRecommendationRecord[]): SupervisedRecommendationEvent[] {
-  const previous = new Map(before.map((item) => [item.id, item]));
-  const events: SupervisedRecommendationEvent[] = [];
-  after.forEach((record) => {
-    const prior = previous.get(record.id);
-    if (!prior) events.push(supervisedRecommendationShownEvent(record));
-    if (record.humanDecision !== 'pending' && (!prior || prior.humanDecision === 'pending')) {
-      const decision = supervisedRecommendationDecisionEvent(record);
-      if (decision) events.push(decision);
-    }
+export function eventsFromLifecycleMutation(mutation: RecommendationLifecycleMutation): SupervisedRecommendationEvent[] {
+  const events = mutation.shownRecords.map((record) => recommendationShownEvent(record, mutation.state));
+  mutation.decisionRecords.forEach((record) => {
+    const event = recommendationDecisionEvent(record, mutation.state);
+    if (event) events.push(event);
   });
   return events;
 }
@@ -249,7 +411,12 @@ export async function flushRecommendationEventBatch(
   try {
     await postRows(rows);
     const sent = new Set(eligible.map((event) => event.eventId));
-    return { remaining: events.filter((event) => !sent.has(event.eventId)), sentEventIds: [...sent], attempted: rows.length, failed: false };
+    return {
+      remaining: events.filter((event) => !sent.has(event.eventId)),
+      sentEventIds: [...sent],
+      attempted: rows.length,
+      failed: false,
+    };
   } catch {
     return { remaining: events, sentEventIds: [], attempted: rows.length, failed: true };
   }
@@ -267,7 +434,11 @@ async function publicCloudConfig(): Promise<{ url: string; publishableKey: strin
 }
 
 function cloudHeaders(publishableKey: string, accessToken: string): Record<string, string> {
-  return { apikey: publishableKey, Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' };
+  return {
+    apikey: publishableKey,
+    Authorization: `Bearer ${accessToken}`,
+    'Content-Type': 'application/json',
+  };
 }
 
 async function postEventRows(rows: CloudRecordRow[], accessToken: string): Promise<void> {
@@ -276,19 +447,22 @@ async function postEventRows(rows: CloudRecordRow[], accessToken: string): Promi
   target.searchParams.set('on_conflict', 'organization_id,entity_type,entity_key');
   const response = await fetch(target, {
     method: 'POST',
-    headers: { ...cloudHeaders(config.publishableKey, accessToken), Prefer: 'resolution=ignore-duplicates,return=minimal' },
+    headers: {
+      ...cloudHeaders(config.publishableKey, accessToken),
+      Prefer: 'resolution=ignore-duplicates,return=minimal',
+    },
     body: JSON.stringify(rows),
   });
   if (!response.ok) throw new Error(`Telemetría cloud ${response.status}`);
 }
 
-async function flushCloudOutbox(context: RecommendationInstrumentationContext): Promise<void> {
+async function flushCloudOutbox(context: RecommendationInstrumentationContext): Promise<boolean> {
   const pending = readSupervisedRecommendationOutbox(context);
-  if (!pending.length || !getCloudSession()) return;
+  if (!pending.length || !getCloudSession()) return true;
   try {
     const membership = await getCloudMembershipContext();
     const session = getCloudSession();
-    if (!session) return;
+    if (!session) return true;
     const authorization: RecommendationTelemetryAuthorization = {
       organizationId: membership.organizationId,
       currentMemberId: membership.currentMemberId,
@@ -296,32 +470,79 @@ async function flushCloudOutbox(context: RecommendationInstrumentationContext): 
       activeMemberIds: new Set(membership.members.filter((member) => member.status === 'Activo').map((member) => member.id)),
       visibleClientIds: context.visibleClientIds,
     };
-    const result = await flushRecommendationEventBatch(pending, authorization, session.userId, (rows) => postEventRows(rows, session.accessToken));
-    if (!result.failed && result.sentEventIds.length) {
-      // ACK sobre el outbox ACTUAL: no perder eventos agregados mientras este POST estaba en vuelo.
-      const acknowledged = new Set(result.sentEventIds);
-      writeOutbox(context, readSupervisedRecommendationOutbox(context).filter((event) => !acknowledged.has(event.eventId)));
+    const result = await flushRecommendationEventBatch(
+      pending,
+      authorization,
+      session.userId,
+      (rows) => postEventRows(rows, session.accessToken),
+    );
+    if (result.failed) return false;
+    if (result.sentEventIds.length) {
+      // ACK contra el outbox ACTUAL: un evento agregado durante el POST sobrevive.
+      const current = readSupervisedRecommendationOutbox(context);
+      const next = acknowledgeRecommendationEvents(current, result.sentEventIds);
+      if (next.length !== current.length) writeOutbox(context, next);
     }
+    return true;
   } catch (error) {
     console.warn('No se pudo persistir la telemetría supervisada; queda pendiente en outbox.', error);
+    return false;
   }
 }
 
-function scheduleOutboxFlush(context: RecommendationInstrumentationContext): void {
+/** Single-flight por scope; un render concurrente sólo coalescea otra oportunidad. */
+export function scheduleRecommendationOutboxFlush(context: RecommendationInstrumentationContext): void {
   if (!getCloudSession()) return;
-  cloudWriteQueue = cloudWriteQueue.then(() => flushCloudOutbox(context)).catch((error) => {
-    console.warn('No se pudo vaciar el outbox de telemetría supervisada.', error);
+  const key = outboxStorageKey(context);
+  let flight = flushFlights.get(key);
+  if (!flight) {
+    flight = { running: null, requestedAgain: false };
+    flushFlights.set(key, flight);
+  }
+  if (flight.running) {
+    flight.requestedAgain = true;
+    return;
+  }
+
+  const activeFlight = flight;
+  activeFlight.running = (async () => {
+    do {
+      activeFlight.requestedAgain = false;
+      const success = await flushCloudOutbox(context);
+      if (!success) break;
+    } while (activeFlight.requestedAgain && readSupervisedRecommendationOutbox(context).length > 0);
+  })().finally(() => {
+    activeFlight.running = null;
+    if (!activeFlight.requestedAgain) flushFlights.delete(key);
   });
 }
 
-export function persistSupervisedRecommendationTelemetry(
+export function persistSupervisedRecommendationLifecycle(
   context: RecommendationInstrumentationContext,
-  before: SupervisedRecommendationRecord[],
-  after: SupervisedRecommendationRecord[],
+  snapshot: RecommendationLifecycleSnapshot,
+  mutation: RecommendationLifecycleMutation,
 ): void {
-  writeLocalTelemetry(context, after);
-  const events = recommendationEventsFromMutation(before, after).filter((event) => event.organizationId === context.organizationId && event.actorId === context.actorId && context.visibleClientIds.has(event.clientId));
-  if (events.length) writeOutbox(context, appendUniqueRecommendationEvents(readSupervisedRecommendationOutbox(context), events));
-  // Próxima oportunidad segura también reintenta pendientes previos; sin polling ni loop agresivo.
-  scheduleOutboxFlush(context);
+  const events = eventsFromLifecycleMutation(mutation).filter((event) => (
+    event.organizationId === context.organizationId
+    && event.actorId === context.actorId
+    && context.visibleClientIds.has(event.clientId)
+  ));
+
+  // Durabilidad: un evento nuevo entra al outbox ANTES de compactar el estado local.
+  if (events.length) {
+    const current = readSupervisedRecommendationOutbox(context);
+    const next = appendUniqueRecommendationEvents(current, events);
+    if (next.length !== current.length) writeOutbox(context, next);
+  }
+
+  if (mutation.changed > 0 || snapshot.migratedFromR2) {
+    writeLifecycleState(context, mutation.state);
+    if (snapshot.migratedFromR2) localStorage.removeItem(legacyStorageKey(context));
+  }
+
+  // No-op render: cero write local. Si hay outbox pendiente, conserva una
+  // oportunidad coalescida de recovery cloud sin polling ni timers permanentes.
+  if (events.length || readSupervisedRecommendationOutbox(context).length > 0) {
+    scheduleRecommendationOutboxFlush(context);
+  }
 }

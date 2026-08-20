@@ -28,7 +28,7 @@ import {
   supervisedRecommendationCloudRow,
   type RecommendationTelemetryAuthorization,
   type SupervisedRecommendationEvent,
-} from '../lead-recommendation-telemetry-r3.js';
+} from '../lead-recommendation-telemetry.js';
 import { initialData, type ActivityEntry, type Client } from '../models.js';
 
 const TODAY = '2026-08-19';
@@ -286,7 +286,7 @@ test('R3.15 rerender no-op no genera SHOWN/DECISION', () => {
 });
 
 test('R3.16 no-op no reescribe lifecycle local', () => {
-  const source = readFileSync('src/lead-recommendation-telemetry-r3.ts', 'utf8');
+  const source = readFileSync('src/lead-recommendation-telemetry.ts', 'utf8');
   assert.match(source, /if \(mutation\.changed > 0 \|\| snapshot\.migratedFromR2\)/);
   assert.equal((source.match(/writeLifecycleState\(context, mutation\.state\)/g) || []).length, 1);
   assert.match(source, /No-op render: cero write local/);
@@ -353,7 +353,7 @@ test('R3.22 Won/Lost continúa human-only', () => {
 
 test('R3.23 telemetría no modifica CRM/sync/nextAction/followup/reminder/pipeline', () => {
   const runtime = readFileSync('src/lead-recommendation-instrumentation.ts', 'utf8');
-  const telemetry = readFileSync('src/lead-recommendation-telemetry-r3.ts', 'utf8');
+  const telemetry = readFileSync('src/lead-recommendation-telemetry.ts', 'utf8');
   for (const forbidden of ['saveData', 'queueCloudSave', 'addActivity', 'Reminder', 'nextFollowUp =', 'nextAction =', 'pipeline =', 'markSyncError', 'markCloudSaved', 'propcontrol-cloud-status']) {
     assert.equal(runtime.includes(forbidden), false, `runtime:${forbidden}`);
     assert.equal(telemetry.includes(forbidden), false, `telemetry:${forbidden}`);
@@ -421,7 +421,7 @@ test('R3.29 mobile conserva protección overflow/overlap existente', () => {
 test('R3.30 desktop sin regresión visual: R3 no introduce UI/CSS y CI mantiene PR143', () => {
   const runtime = readFileSync('src/lead-recommendation-instrumentation.ts', 'utf8');
   const lifecycle = readFileSync('src/lead-recommendation-lifecycle.ts', 'utf8');
-  const telemetry = readFileSync('src/lead-recommendation-telemetry-r3.ts', 'utf8');
+  const telemetry = readFileSync('src/lead-recommendation-telemetry.ts', 'utf8');
   for (const source of [runtime, lifecycle, telemetry]) {
     assert.equal(source.includes('innerHTML'), false);
     assert.equal(source.includes('insertAdjacentHTML'), false);

@@ -10,9 +10,9 @@ import {
   type RecommendationLifecycleInput,
 } from './lead-recommendation-lifecycle.js';
 import {
-  persistSupervisedRecommendationLifecycleR4,
-  readSupervisedRecommendationLifecycleR4,
-} from './lead-recommendation-telemetry-r4.js';
+  persistSupervisedRecommendationLifecycle,
+  readSupervisedRecommendationLifecycle,
+} from './lead-recommendation-telemetry.js';
 import { state } from './store.js';
 import { activeMember, visibleClients } from './team-access.js';
 
@@ -61,7 +61,7 @@ export function instrumentVisibleSupervisedRecommendations(container: HTMLElemen
 
     const context = runtimeContext();
     const displayed = actuallyDisplayedRecommendations(container);
-    const snapshot = readSupervisedRecommendationLifecycleR4(context);
+    const snapshot = readSupervisedRecommendationLifecycle(context);
     const mutation = reconcileRecommendationLifecycle(
       snapshot.state,
       context,
@@ -69,6 +69,6 @@ export function instrumentVisibleSupervisedRecommendations(container: HTMLElemen
       state.crm.activityLog,
       new Date().toISOString(),
     );
-    persistSupervisedRecommendationLifecycleR4(context, snapshot, mutation);
+    persistSupervisedRecommendationLifecycle(context, snapshot, mutation);
   });
 }

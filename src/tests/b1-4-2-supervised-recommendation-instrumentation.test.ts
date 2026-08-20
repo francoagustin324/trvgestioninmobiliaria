@@ -18,15 +18,13 @@ import {
   type RecommendationInstrumentationContext,
   type SupervisedRecommendationRecord,
 } from '../lead-recommendation-instrumentation-core.js';
+import type { RecommendationLifecycleState } from '../lead-recommendation-lifecycle.js';
 import {
   appendUniqueRecommendationEvents,
   flushRecommendationEventBatch,
-  recommendationDecisionEventId,
-  recommendationEventsFromMutation,
-  recommendationShownEventId,
+  recommendationDecisionEvent,
+  recommendationShownEvent,
   supervisedRecommendationCloudRow,
-  supervisedRecommendationDecisionEvent,
-  supervisedRecommendationShownEvent,
   type RecommendationTelemetryAuthorization,
   type SupervisedRecommendationEvent,
 } from '../lead-recommendation-telemetry.js';
@@ -65,6 +63,54 @@ function activity(action: string, createdAt = '2026-08-19T12:05:00.000Z', actorI
 
 function auth(visible = [1]): RecommendationTelemetryAuthorization {
   return { organizationId: 'org-a', currentMemberId: 1, currentRole: 'Corredor', activeMemberIds: new Set([1]), visibleClientIds: new Set(visible) };
+}
+
+function compatibilityState(record: SupervisedRecommendationRecord): RecommendationLifecycleState {
+  const phase = record.humanDecision === 'pending' ? 'pending' : 'resolved';
+  return {
+    version: 3,
+    cycles: [{
+      clientId: record.clientId,
+      semanticRecommendationId: record.id,
+      cycleId: record.id,
+      activationWitness: 'r2-compat-test',
+      phase,
+      record: phase === 'pending' ? record : undefined,
+    }],
+  };
+}
+
+function supervisedRecommendationShownEvent(record: SupervisedRecommendationRecord): SupervisedRecommendationEvent {
+  return recommendationShownEvent(record, compatibilityState(record));
+}
+
+function supervisedRecommendationDecisionEvent(record: SupervisedRecommendationRecord): SupervisedRecommendationEvent | null {
+  return recommendationDecisionEvent(record, compatibilityState(record));
+}
+
+function recommendationShownEventId(record: SupervisedRecommendationRecord): string {
+  return supervisedRecommendationShownEvent(record).eventId;
+}
+
+function recommendationDecisionEventId(record: SupervisedRecommendationRecord): string | null {
+  return supervisedRecommendationDecisionEvent(record)?.eventId ?? null;
+}
+
+function recommendationEventsFromMutation(
+  before: SupervisedRecommendationRecord[],
+  after: SupervisedRecommendationRecord[],
+): SupervisedRecommendationEvent[] {
+  const previous = new Map(before.map((item) => [item.id, item]));
+  const events: SupervisedRecommendationEvent[] = [];
+  after.forEach((record) => {
+    const prior = previous.get(record.id);
+    if (!prior) events.push(supervisedRecommendationShownEvent(record));
+    if (record.humanDecision !== 'pending' && (!prior || prior.humanDecision === 'pending')) {
+      const decision = supervisedRecommendationDecisionEvent(record);
+      if (decision) events.push(decision);
+    }
+  });
+  return events;
 }
 
 function rowId(row: CloudRecordRow): string {
