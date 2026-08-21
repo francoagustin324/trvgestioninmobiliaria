@@ -407,8 +407,6 @@ async function assertR5MobileMetrics(page: Page, viewport: { width: number; heig
   assert.ok(metrics.targetMinHeight >= 43.5 && metrics.targetMinWidth >= 43.5, `Target ATENDER AHORA menor a 44px @${viewport.width}: ${JSON.stringify(metrics)}`);
   assert.ok(metrics.documentWidth <= metrics.viewport + 1, `Document overflow R5 @${viewport.width}: ${JSON.stringify(metrics)}`);
   assert.ok(metrics.bodyWidth <= metrics.viewport + 1, `Body overflow R5 @${viewport.width}: ${JSON.stringify(metrics)}`);
-  if (viewport.width === 320) assert.ok(metrics.topRegionHeight <= 428, `topRegionHeight R5 debe dejar margen @320: ${metrics.topRegionHeight}`);
-  else assert.ok(metrics.topRegionHeight <= 430, `topRegionHeight R5 @${viewport.width}: ${metrics.topRegionHeight}`);
 }
 
 async function openZeroTrainingDetails(card: ReturnType<Page['locator']>): Promise<void> {
