@@ -417,6 +417,29 @@ async function openZeroTrainingDetails(card: ReturnType<Page['locator']>): Promi
   await sheet.waitFor({ state: 'visible' });
 }
 
+async function waitForFilterDisclosureState(page: Page, expectedOpen: boolean): Promise<void> {
+  await page.waitForFunction((expected) => {
+    const details = document.querySelector<HTMLDetailsElement>('#crm .mvp-lead-more-filters');
+    const summary = details?.querySelector<HTMLElement>(':scope > summary');
+    if (!details || !summary) return false;
+    return details.open === expected && summary.getAttribute('aria-expanded') === String(expected);
+  }, expectedOpen);
+  const state = await page.evaluate((expected) => {
+    const details = document.querySelector<HTMLDetailsElement>('#crm .mvp-lead-more-filters');
+    const summary = details?.querySelector<HTMLElement>(':scope > summary');
+    if (!details || !summary) throw new Error('No se pudo medir el disclosure de Más filtros.');
+    return {
+      viewportWidth: window.innerWidth,
+      state: expected ? 'open' : 'closed',
+      detailsOpen: details.open,
+      ariaExpanded: summary.getAttribute('aria-expanded'),
+    };
+  }, expectedOpen);
+  console.log(`R9_FILTER_DISCLOSURE ${JSON.stringify(state)}`);
+  assert.equal(state.detailsOpen, expectedOpen);
+  assert.equal(state.ariaExpanded, String(expectedOpen));
+}
+
 async function assertSingleExpandedAndPersistent(page: Page): Promise<void> {
   const firstCard = page.locator('#crm .mvp-lead-compact-card').nth(0);
   await openZeroTrainingDetails(firstCard);
@@ -429,8 +452,7 @@ async function assertSingleExpandedAndPersistent(page: Page): Promise<void> {
   const filterDetails = page.locator('#crm .mvp-lead-more-filters');
   const filterSummary = filterDetails.locator(':scope > summary');
   if ((await filterDetails.getAttribute('open')) === null) await filterSummary.click();
-  await page.waitForFunction(() => document.querySelector<HTMLDetailsElement>('#crm .mvp-lead-more-filters')?.open === true);
-  assert.equal(await filterSummary.getAttribute('aria-expanded'), 'true');
+  await waitForFilterDisclosureState(page, true);
   const order = page.locator('#mvp-lead-order');
   await order.selectOption('name');
   assert.equal(await order.inputValue(), 'name');
@@ -439,8 +461,7 @@ async function assertSingleExpandedAndPersistent(page: Page): Promise<void> {
   await order.selectOption('priority');
   assert.equal(await order.inputValue(), 'priority');
   if ((await filterDetails.getAttribute('open')) !== null) await filterSummary.click();
-  await page.waitForFunction(() => document.querySelector<HTMLDetailsElement>('#crm .mvp-lead-more-filters')?.open === false);
-  assert.equal(await filterSummary.getAttribute('aria-expanded'), 'false');
+  await waitForFilterDisclosureState(page, false);
 }
 
 async function assertHumanVisibleSummary(page: Page, width: number): Promise<void> {
