@@ -399,15 +399,21 @@ async function assertSingleExpandedAndPersistent(page: Page): Promise<void> {
   await page.waitForFunction(() => document.querySelectorAll('#crm .mvp-lead-full-sheet[open]').length === 1);
   assert.equal(await page.locator('#crm .mvp-lead-full-sheet[open]').count(), 1);
   const selectedClient = await page.locator('#crm .mvp-lead-full-sheet[open]').getAttribute('data-lead-full-sheet');
-  await page.locator('#crm .mvp-lead-more-filters').evaluate((details: HTMLDetailsElement) => { details.open = true; });
+  const filterDetails = page.locator('#crm .mvp-lead-more-filters');
+  const filterSummary = filterDetails.locator(':scope > summary');
+  if ((await filterDetails.getAttribute('open')) === null) await filterSummary.click();
+  await page.waitForFunction(() => document.querySelector<HTMLDetailsElement>('#crm .mvp-lead-more-filters')?.open === true);
+  assert.equal(await filterSummary.getAttribute('aria-expanded'), 'true');
   const order = page.locator('#mvp-lead-order');
   await order.selectOption('name');
-  await page.waitForTimeout(100);
+  assert.equal(await order.inputValue(), 'name');
   assert.equal(await page.locator('#crm .mvp-lead-full-sheet[open]').count(), 1);
   assert.equal(await page.locator('#crm .mvp-lead-full-sheet[open]').getAttribute('data-lead-full-sheet'), selectedClient);
-  await page.locator('#crm .mvp-lead-more-filters').evaluate((details: HTMLDetailsElement) => { details.open = true; });
-  await page.locator('#mvp-lead-order').selectOption('priority');
-  await page.locator('#crm .mvp-lead-more-filters').evaluate((details: HTMLDetailsElement) => { details.open = false; });
+  await order.selectOption('priority');
+  assert.equal(await order.inputValue(), 'priority');
+  if ((await filterDetails.getAttribute('open')) !== null) await filterSummary.click();
+  await page.waitForFunction(() => document.querySelector<HTMLDetailsElement>('#crm .mvp-lead-more-filters')?.open === false);
+  assert.equal(await filterSummary.getAttribute('aria-expanded'), 'false');
 }
 
 async function assertPipelineSelection(page: Page): Promise<void> {
@@ -601,7 +607,25 @@ test('B1.2.3 valida lista compacta, prioridad y disclosure con la aplicación re
           await capture(page, `leads-expanded-${key}.png`);
         }
         if (viewport.width === 390) {
-          await page.locator('#crm .mvp-lead-full-sheet[open] > summary').click();
+          const filterDetails = page.locator('#crm .mvp-lead-more-filters');
+          assert.equal(await filterDetails.getAttribute('open'), null, 'Más filtros debe estar cerrado antes de accionar la ficha.');
+          const summary = page.locator('#crm .mvp-lead-full-sheet[open] > summary');
+          const hitTarget = await summary.evaluate((element) => {
+            const rect = element.getBoundingClientRect();
+            const x = rect.left + rect.width / 2;
+            const y = rect.top + rect.height / 2;
+            const target = document.elementFromPoint(x, y);
+            return {
+              valid: target === element || element.contains(target),
+              x,
+              y,
+              targetTag: target?.tagName || '',
+              targetClass: target instanceof HTMLElement ? target.className : '',
+            };
+          });
+          assert.equal(hitTarget.valid, true, `El summary de ficha está interceptado antes del click real: ${JSON.stringify(hitTarget)}`);
+          await summary.click();
+          await page.waitForFunction(() => document.querySelectorAll('#crm .mvp-lead-full-sheet[open]').length === 0);
           await assertFollowUpActions(page);
           await assertAutomaticPanel(page, viewport.width);
           const panel = page.locator('#crm .lead-qualification-panel');

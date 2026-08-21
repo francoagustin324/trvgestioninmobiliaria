@@ -152,3 +152,14 @@
     font-size: inherit;
   }
 }
+
+@media (max-width: 360px) {
+  .pc-supervised-attention-queue {
+    margin: 0;
+    padding: 0 4px;
+  }
+
+  .pc-supervised-attention-list {
+    gap: 0;
+  }
+}
