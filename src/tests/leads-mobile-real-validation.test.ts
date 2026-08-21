@@ -295,6 +295,19 @@ test('Chrome Android equivalente: CTA, cabecera y pipeline resisten la matriz mÃ
         };
       });
 
+      if (width === 320 || width === 390 || width === 430) {
+        console.log(`R6_CANONICAL_BROWSER ${width} ${JSON.stringify({
+          viewport: snapshot.viewport,
+          documentWidth: snapshot.documentWidth,
+          bodyWidth: snapshot.bodyWidth,
+          crmWidth: snapshot.crmWidth,
+          crmClientWidth: snapshot.crmClientWidth,
+          topRegionHeight: snapshot.topRegionHeight,
+          targetMinHeight: Math.min(...snapshot.actionBoxes.map((box) => box.height)),
+          targetMinWidth: Math.min(...snapshot.actionBoxes.map((box) => box.width)),
+        })}`);
+      }
+
       assert.equal(snapshot.text, 'WhatsApp', `texto CTA @${width}`);
       assert.equal(snapshot.before, 'none', `::before CTA @${width}`);
       assert.equal(snapshot.after, 'none', `::after CTA @${width}`);

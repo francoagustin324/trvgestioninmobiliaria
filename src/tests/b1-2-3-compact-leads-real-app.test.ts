@@ -382,12 +382,62 @@ async function assertClosedLayout(page: Page, viewport: { width: number; height:
   return metrics.heights;
 }
 
+async function assertR5MobileMetrics(page: Page, viewport: { width: number; height: number }): Promise<void> {
+  if (![320, 390, 430].includes(viewport.width)) return;
+  const metrics = await page.evaluate(() => {
+    const heading = document.querySelector<HTMLElement>('#crm .pc-leads-heading');
+    const card = document.querySelector<HTMLElement>('#crm .mvp-lead-compact-card');
+    const targets = [...document.querySelectorAll<HTMLElement>('#crm .pc-supervised-attention-item[data-attention-client-id]')]
+      .filter((element) => element.getClientRects().length > 0);
+    if (!heading || !card || targets.length === 0) throw new Error('Faltan elementos R5 para medir geometría mobile.');
+    const headingRect = heading.getBoundingClientRect();
+    const cardRect = card.getBoundingClientRect();
+    const targetRects = targets.map((target) => target.getBoundingClientRect());
+    return {
+      viewport: window.innerWidth,
+      documentWidth: document.documentElement.scrollWidth,
+      bodyWidth: document.body.scrollWidth,
+      topRegionHeight: cardRect.top - headingRect.top,
+      targetCount: targetRects.length,
+      targetMinHeight: Math.min(...targetRects.map((rect) => rect.height)),
+      targetMinWidth: Math.min(...targetRects.map((rect) => rect.width)),
+    };
+  });
+  console.log(`R5_BROWSER ${viewport.width}x${viewport.height} ${JSON.stringify(metrics)}`);
+  assert.ok(metrics.targetMinHeight >= 43.5 && metrics.targetMinWidth >= 43.5, `Target ATENDER AHORA menor a 44px @${viewport.width}: ${JSON.stringify(metrics)}`);
+  assert.ok(metrics.documentWidth <= metrics.viewport + 1, `Document overflow R5 @${viewport.width}: ${JSON.stringify(metrics)}`);
+  assert.ok(metrics.bodyWidth <= metrics.viewport + 1, `Body overflow R5 @${viewport.width}: ${JSON.stringify(metrics)}`);
+}
+
 async function openZeroTrainingDetails(card: ReturnType<Page['locator']>): Promise<void> {
   const sheet = card.locator('.mvp-lead-full-sheet');
   if (await sheet.getAttribute('open') !== null) return;
   await card.locator('.mvp-lead-actions-menu > summary').click();
   await card.getByRole('button', { name: 'Ver detalles', exact: true }).click();
   await sheet.waitFor({ state: 'visible' });
+}
+
+async function waitForFilterDisclosureState(page: Page, expectedOpen: boolean): Promise<void> {
+  await page.waitForFunction((expected) => {
+    const details = document.querySelector<HTMLDetailsElement>('#crm .mvp-lead-more-filters');
+    const summary = details?.querySelector<HTMLElement>(':scope > summary');
+    if (!details || !summary) return false;
+    return details.open === expected && summary.getAttribute('aria-expanded') === String(expected);
+  }, expectedOpen);
+  const state = await page.evaluate((expected) => {
+    const details = document.querySelector<HTMLDetailsElement>('#crm .mvp-lead-more-filters');
+    const summary = details?.querySelector<HTMLElement>(':scope > summary');
+    if (!details || !summary) throw new Error('No se pudo medir el disclosure de Más filtros.');
+    return {
+      viewportWidth: window.innerWidth,
+      state: expected ? 'open' : 'closed',
+      detailsOpen: details.open,
+      ariaExpanded: summary.getAttribute('aria-expanded'),
+    };
+  }, expectedOpen);
+  console.log(`R9_FILTER_DISCLOSURE ${JSON.stringify(state)}`);
+  assert.equal(state.detailsOpen, expectedOpen);
+  assert.equal(state.ariaExpanded, String(expectedOpen));
 }
 
 async function assertSingleExpandedAndPersistent(page: Page): Promise<void> {
@@ -399,15 +449,67 @@ async function assertSingleExpandedAndPersistent(page: Page): Promise<void> {
   await page.waitForFunction(() => document.querySelectorAll('#crm .mvp-lead-full-sheet[open]').length === 1);
   assert.equal(await page.locator('#crm .mvp-lead-full-sheet[open]').count(), 1);
   const selectedClient = await page.locator('#crm .mvp-lead-full-sheet[open]').getAttribute('data-lead-full-sheet');
-  await page.locator('#crm .mvp-lead-more-filters').evaluate((details: HTMLDetailsElement) => { details.open = true; });
+  const filterDetails = page.locator('#crm .mvp-lead-more-filters');
+  const filterSummary = filterDetails.locator(':scope > summary');
+  if ((await filterDetails.getAttribute('open')) === null) await filterSummary.click();
+  await waitForFilterDisclosureState(page, true);
   const order = page.locator('#mvp-lead-order');
   await order.selectOption('name');
-  await page.waitForTimeout(100);
+  assert.equal(await order.inputValue(), 'name');
   assert.equal(await page.locator('#crm .mvp-lead-full-sheet[open]').count(), 1);
   assert.equal(await page.locator('#crm .mvp-lead-full-sheet[open]').getAttribute('data-lead-full-sheet'), selectedClient);
-  await page.locator('#crm .mvp-lead-more-filters').evaluate((details: HTMLDetailsElement) => { details.open = true; });
-  await page.locator('#mvp-lead-order').selectOption('priority');
-  await page.locator('#crm .mvp-lead-more-filters').evaluate((details: HTMLDetailsElement) => { details.open = false; });
+  await order.selectOption('priority');
+  assert.equal(await order.inputValue(), 'priority');
+  if ((await filterDetails.getAttribute('open')) !== null) await filterSummary.click();
+  await waitForFilterDisclosureState(page, false);
+}
+
+async function assertHumanVisibleSummary(page: Page, width: number): Promise<void> {
+  const summary = page.locator('#crm .mvp-lead-full-sheet[open] > summary');
+  await summary.waitFor({ state: 'visible' });
+  const measure = async () => summary.evaluate((element) => {
+    const rect = element.getBoundingClientRect();
+    const x = rect.left + rect.width / 2;
+    const y = rect.top + rect.height / 2;
+    const target = document.elementFromPoint(x, y);
+    const topbar = document.querySelector<HTMLElement>('.app-topbar');
+    const topbarRect = topbar && getComputedStyle(topbar).display !== 'none' ? topbar.getBoundingClientRect() : null;
+    const scrollHeight = Math.max(document.documentElement.scrollHeight, document.body.scrollHeight);
+    const maxScrollY = Math.max(0, scrollHeight - window.innerHeight);
+    return {
+      valid: target === element || element.contains(target),
+      x,
+      y,
+      top: rect.top,
+      bottom: rect.bottom,
+      height: rect.height,
+      topbarBottom: topbarRect?.bottom ?? 0,
+      viewportHeight: window.innerHeight,
+      scrollY: window.scrollY,
+      scrollHeight,
+      maxScrollY,
+      targetTag: target?.tagName || '',
+      targetClass: target instanceof HTMLElement ? target.className : '',
+    };
+  });
+  const before = await measure();
+  const clearance = 12;
+  const safeTop = before.topbarBottom + clearance + before.height / 2;
+  const safeBottom = before.viewportHeight - clearance - before.height / 2;
+  assert.ok(safeTop <= safeBottom, `No existe zona segura vertical para el summary @${width}: ${JSON.stringify({ before, safeTop, safeBottom })}`);
+  const targetY = (safeTop + safeBottom) / 2;
+  const deltaY = before.y - targetY;
+  const desiredScrollY = Math.min(before.maxScrollY, Math.max(0, before.scrollY + deltaY));
+  await page.evaluate((top) => {
+    window.scrollTo({ top, behavior: 'instant' });
+  }, desiredScrollY);
+  await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+  const after = await measure();
+  console.log(`R8_VIEWPORT ${width} ${JSON.stringify({ before, safeTop, safeBottom, targetY, deltaY, desiredScrollY, after })}`);
+  assert.ok(after.top >= after.topbarBottom + clearance, `El summary no quedó completo debajo de app-topbar + clearance @${width}: ${JSON.stringify(after)}`);
+  assert.ok(after.bottom <= after.viewportHeight - clearance, `El summary no quedó completo dentro del límite inferior seguro @${width}: ${JSON.stringify(after)}`);
+  assert.ok(after.y >= 0 && after.y <= after.viewportHeight, `El centro accionable quedó fuera del viewport @${width}: ${JSON.stringify(after)}`);
+  assert.equal(after.valid, true, `El summary de ficha está interceptado antes del click real @${width}: ${JSON.stringify(after)}`);
 }
 
 async function assertPipelineSelection(page: Page): Promise<void> {
@@ -591,6 +693,7 @@ test('B1.2.3 valida lista compacta, prioridad y disclosure con la aplicación re
           assert.match(await page.evaluate(() => navigator.userAgent), /Android|Mobile/i);
         }
         await assertClosedLayout(page, viewport);
+        await assertR5MobileMetrics(page, viewport);
         await assertPipelineSelection(page);
         if (screenshotViewports.has(key)) {
           await page.evaluate(() => window.scrollTo({ top: 0, behavior: 'instant' }));
@@ -600,13 +703,26 @@ test('B1.2.3 valida lista compacta, prioridad y disclosure con la aplicación re
           await open.scrollIntoViewIfNeeded();
           await capture(page, `leads-expanded-${key}.png`);
         }
-        if (viewport.width === 390) {
-          await page.locator('#crm .mvp-lead-full-sheet[open] > summary').click();
-          await assertFollowUpActions(page);
-          await assertAutomaticPanel(page, viewport.width);
-          const panel = page.locator('#crm .lead-qualification-panel');
-          await panel.scrollIntoViewIfNeeded();
-          await capture(page, `leads-panel-${key}.png`);
+        if (viewport.width === 320 || viewport.width === 390) {
+          if (viewport.width === 320) await assertSingleExpandedAndPersistent(page);
+          const filterDetails = page.locator('#crm .mvp-lead-more-filters');
+          assert.equal(await filterDetails.getAttribute('open'), null, 'Más filtros debe estar cerrado antes de accionar la ficha.');
+          const orderBefore = await page.locator('#mvp-lead-order').inputValue();
+          const searchBefore = await page.locator('#mvp-lead-search').inputValue();
+          await assertHumanVisibleSummary(page, viewport.width);
+          const summary = page.locator('#crm .mvp-lead-full-sheet[open] > summary');
+          await summary.click();
+          await page.waitForFunction(() => document.querySelectorAll('#crm .mvp-lead-full-sheet[open]').length === 0);
+          assert.equal(await page.locator('#mvp-lead-order').inputValue(), orderBefore, `El click de ficha alteró orden @${viewport.width}.`);
+          assert.equal(await page.locator('#mvp-lead-search').inputValue(), searchBefore, `El click de ficha alteró búsqueda @${viewport.width}.`);
+          assert.equal(await filterDetails.getAttribute('open'), null, `El click de ficha reabrió Más filtros @${viewport.width}.`);
+          if (viewport.width === 390) {
+            await assertFollowUpActions(page);
+            await assertAutomaticPanel(page, viewport.width);
+            const panel = page.locator('#crm .lead-qualification-panel');
+            await panel.scrollIntoViewIfNeeded();
+            await capture(page, `leads-panel-${key}.png`);
+          }
         }
       } finally {
         await page.close();

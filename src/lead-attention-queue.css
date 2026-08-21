@@ -130,7 +130,7 @@
   }
 
   .pc-supervised-attention-item {
-    min-height: 16px;
+    min-height: 44px;
     grid-template-columns: minmax(0, 0.72fr) minmax(0, 1.05fr) minmax(0, 1.2fr);
     align-items: center;
     align-content: center;
@@ -150,5 +150,24 @@
 
   .pc-supervised-attention-reason small {
     font-size: inherit;
+  }
+}
+
+@media (max-width: 360px) {
+  .pc-supervised-attention-queue {
+    margin: 0;
+    padding: 0 4px;
+  }
+
+  .pc-supervised-attention-list {
+    gap: 0;
+  }
+
+  #crm.pc-leads-redesign .pc-lead-controls {
+    margin-bottom: 1px;
+  }
+
+  #crm.pc-leads-redesign .pc-attention-section {
+    gap: 3px;
   }
 }
