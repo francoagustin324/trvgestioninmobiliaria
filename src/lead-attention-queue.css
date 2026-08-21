@@ -162,4 +162,12 @@
   .pc-supervised-attention-list {
     gap: 0;
   }
+
+  #crm.pc-leads-redesign .pc-lead-controls {
+    margin-bottom: 1px;
+  }
+
+  #crm.pc-leads-redesign .pc-attention-section {
+    gap: 3px;
+  }
 }

@@ -141,7 +141,7 @@ test('B1.4.1 J: calcular y renderizar recomendaciones no muta Client ni contiene
 test('B1.4.1 K/L: CSS mantiene top 3 compacto, sin overflow móvil y sin overlays', () => {
   const css = readFileSync('src/lead-attention-queue.css', 'utf8');
   const html = readFileSync('index.html', 'utf8');
-  assert.ok(html.includes('/src/lead-attention-queue.css?v=20260820-2'));
+  assert.ok(html.includes('/src/lead-attention-queue.css?v=20260820-3'));
   assert.ok(css.includes('grid-template-columns: repeat(3, minmax(0, 1fr))'));
   assert.ok(css.includes('max-width: 100%'));
   assert.ok(css.includes('min-width: 0'));

@@ -382,6 +382,35 @@ async function assertClosedLayout(page: Page, viewport: { width: number; height:
   return metrics.heights;
 }
 
+async function assertR5MobileMetrics(page: Page, viewport: { width: number; height: number }): Promise<void> {
+  if (![320, 390, 430].includes(viewport.width)) return;
+  const metrics = await page.evaluate(() => {
+    const heading = document.querySelector<HTMLElement>('#crm .pc-leads-heading');
+    const card = document.querySelector<HTMLElement>('#crm .mvp-lead-compact-card');
+    const targets = [...document.querySelectorAll<HTMLElement>('#crm .pc-supervised-attention-item[data-attention-client-id]')]
+      .filter((element) => element.getClientRects().length > 0);
+    if (!heading || !card || targets.length === 0) throw new Error('Faltan elementos R5 para medir geometría mobile.');
+    const headingRect = heading.getBoundingClientRect();
+    const cardRect = card.getBoundingClientRect();
+    const targetRects = targets.map((target) => target.getBoundingClientRect());
+    return {
+      viewport: window.innerWidth,
+      documentWidth: document.documentElement.scrollWidth,
+      bodyWidth: document.body.scrollWidth,
+      topRegionHeight: cardRect.top - headingRect.top,
+      targetCount: targetRects.length,
+      targetMinHeight: Math.min(...targetRects.map((rect) => rect.height)),
+      targetMinWidth: Math.min(...targetRects.map((rect) => rect.width)),
+    };
+  });
+  console.log(`R5_BROWSER ${viewport.width}x${viewport.height} ${JSON.stringify(metrics)}`);
+  assert.ok(metrics.targetMinHeight >= 43.5 && metrics.targetMinWidth >= 43.5, `Target ATENDER AHORA menor a 44px @${viewport.width}: ${JSON.stringify(metrics)}`);
+  assert.ok(metrics.documentWidth <= metrics.viewport + 1, `Document overflow R5 @${viewport.width}: ${JSON.stringify(metrics)}`);
+  assert.ok(metrics.bodyWidth <= metrics.viewport + 1, `Body overflow R5 @${viewport.width}: ${JSON.stringify(metrics)}`);
+  if (viewport.width === 320) assert.ok(metrics.topRegionHeight <= 428, `topRegionHeight R5 debe dejar margen @320: ${metrics.topRegionHeight}`);
+  else assert.ok(metrics.topRegionHeight <= 430, `topRegionHeight R5 @${viewport.width}: ${metrics.topRegionHeight}`);
+}
+
 async function openZeroTrainingDetails(card: ReturnType<Page['locator']>): Promise<void> {
   const sheet = card.locator('.mvp-lead-full-sheet');
   if (await sheet.getAttribute('open') !== null) return;
@@ -414,6 +443,41 @@ async function assertSingleExpandedAndPersistent(page: Page): Promise<void> {
   if ((await filterDetails.getAttribute('open')) !== null) await filterSummary.click();
   await page.waitForFunction(() => document.querySelector<HTMLDetailsElement>('#crm .mvp-lead-more-filters')?.open === false);
   assert.equal(await filterSummary.getAttribute('aria-expanded'), 'false');
+}
+
+async function assertHumanVisibleSummary(page: Page, width: number): Promise<void> {
+  const summary = page.locator('#crm .mvp-lead-full-sheet[open] > summary');
+  await summary.waitFor({ state: 'visible' });
+  const measure = async () => summary.evaluate((element) => {
+    const rect = element.getBoundingClientRect();
+    const x = rect.left + rect.width / 2;
+    const y = rect.top + rect.height / 2;
+    const target = document.elementFromPoint(x, y);
+    const topbar = document.querySelector<HTMLElement>('.app-topbar');
+    const topbarRect = topbar && getComputedStyle(topbar).display !== 'none' ? topbar.getBoundingClientRect() : null;
+    return {
+      valid: target === element || element.contains(target),
+      x,
+      y,
+      top: rect.top,
+      bottom: rect.bottom,
+      topbarBottom: topbarRect?.bottom ?? 0,
+      scrollY: window.scrollY,
+      targetTag: target?.tagName || '',
+      targetClass: target instanceof HTMLElement ? target.className : '',
+    };
+  });
+  const before = await measure();
+  const clearance = 12;
+  const correction = Math.max(0, before.topbarBottom + clearance - before.y);
+  if (correction > 0) {
+    await page.mouse.wheel(0, -Math.ceil(correction + clearance));
+    await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+  }
+  const after = await measure();
+  console.log(`R5_HITTEST ${width} ${JSON.stringify({ before, correction, after })}`);
+  assert.ok(after.y > after.topbarBottom, `El centro accionable sigue debajo de app-topbar @${width}: ${JSON.stringify(after)}`);
+  assert.equal(after.valid, true, `El summary de ficha está interceptado antes del click real @${width}: ${JSON.stringify(after)}`);
 }
 
 async function assertPipelineSelection(page: Page): Promise<void> {
@@ -597,6 +661,7 @@ test('B1.2.3 valida lista compacta, prioridad y disclosure con la aplicación re
           assert.match(await page.evaluate(() => navigator.userAgent), /Android|Mobile/i);
         }
         await assertClosedLayout(page, viewport);
+        await assertR5MobileMetrics(page, viewport);
         await assertPipelineSelection(page);
         if (screenshotViewports.has(key)) {
           await page.evaluate(() => window.scrollTo({ top: 0, behavior: 'instant' }));
@@ -606,31 +671,26 @@ test('B1.2.3 valida lista compacta, prioridad y disclosure con la aplicación re
           await open.scrollIntoViewIfNeeded();
           await capture(page, `leads-expanded-${key}.png`);
         }
-        if (viewport.width === 390) {
+        if (viewport.width === 320 || viewport.width === 390) {
+          if (viewport.width === 320) await assertSingleExpandedAndPersistent(page);
           const filterDetails = page.locator('#crm .mvp-lead-more-filters');
           assert.equal(await filterDetails.getAttribute('open'), null, 'Más filtros debe estar cerrado antes de accionar la ficha.');
+          const orderBefore = await page.locator('#mvp-lead-order').inputValue();
+          const searchBefore = await page.locator('#mvp-lead-search').inputValue();
+          await assertHumanVisibleSummary(page, viewport.width);
           const summary = page.locator('#crm .mvp-lead-full-sheet[open] > summary');
-          const hitTarget = await summary.evaluate((element) => {
-            const rect = element.getBoundingClientRect();
-            const x = rect.left + rect.width / 2;
-            const y = rect.top + rect.height / 2;
-            const target = document.elementFromPoint(x, y);
-            return {
-              valid: target === element || element.contains(target),
-              x,
-              y,
-              targetTag: target?.tagName || '',
-              targetClass: target instanceof HTMLElement ? target.className : '',
-            };
-          });
-          assert.equal(hitTarget.valid, true, `El summary de ficha está interceptado antes del click real: ${JSON.stringify(hitTarget)}`);
           await summary.click();
           await page.waitForFunction(() => document.querySelectorAll('#crm .mvp-lead-full-sheet[open]').length === 0);
-          await assertFollowUpActions(page);
-          await assertAutomaticPanel(page, viewport.width);
-          const panel = page.locator('#crm .lead-qualification-panel');
-          await panel.scrollIntoViewIfNeeded();
-          await capture(page, `leads-panel-${key}.png`);
+          assert.equal(await page.locator('#mvp-lead-order').inputValue(), orderBefore, `El click de ficha alteró orden @${viewport.width}.`);
+          assert.equal(await page.locator('#mvp-lead-search').inputValue(), searchBefore, `El click de ficha alteró búsqueda @${viewport.width}.`);
+          assert.equal(await filterDetails.getAttribute('open'), null, `El click de ficha reabrió Más filtros @${viewport.width}.`);
+          if (viewport.width === 390) {
+            await assertFollowUpActions(page);
+            await assertAutomaticPanel(page, viewport.width);
+            const panel = page.locator('#crm .lead-qualification-panel');
+            await panel.scrollIntoViewIfNeeded();
+            await capture(page, `leads-panel-${key}.png`);
+          }
         }
       } finally {
         await page.close();
