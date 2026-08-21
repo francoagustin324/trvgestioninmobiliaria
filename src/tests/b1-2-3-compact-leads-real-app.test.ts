@@ -453,6 +453,8 @@ async function assertHumanVisibleSummary(page: Page, width: number): Promise<voi
     const target = document.elementFromPoint(x, y);
     const topbar = document.querySelector<HTMLElement>('.app-topbar');
     const topbarRect = topbar && getComputedStyle(topbar).display !== 'none' ? topbar.getBoundingClientRect() : null;
+    const scrollHeight = Math.max(document.documentElement.scrollHeight, document.body.scrollHeight);
+    const maxScrollY = Math.max(0, scrollHeight - window.innerHeight);
     return {
       valid: target === element || element.contains(target),
       x,
@@ -463,6 +465,8 @@ async function assertHumanVisibleSummary(page: Page, width: number): Promise<voi
       topbarBottom: topbarRect?.bottom ?? 0,
       viewportHeight: window.innerHeight,
       scrollY: window.scrollY,
+      scrollHeight,
+      maxScrollY,
       targetTag: target?.tagName || '',
       targetClass: target instanceof HTMLElement ? target.className : '',
     };
@@ -474,14 +478,13 @@ async function assertHumanVisibleSummary(page: Page, width: number): Promise<voi
   assert.ok(safeTop <= safeBottom, `No existe zona segura vertical para el summary @${width}: ${JSON.stringify({ before, safeTop, safeBottom })}`);
   const targetY = (safeTop + safeBottom) / 2;
   const deltaY = before.y - targetY;
-  const wheelDeltaY = Math.round(deltaY);
-  const wheelCount = wheelDeltaY === 0 ? 0 : 1;
-  if (wheelDeltaY !== 0) {
-    await page.mouse.wheel(0, wheelDeltaY);
-  }
+  const desiredScrollY = Math.min(before.maxScrollY, Math.max(0, before.scrollY + deltaY));
+  await page.evaluate((top) => {
+    window.scrollTo({ top, behavior: 'instant' });
+  }, desiredScrollY);
   await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
   const after = await measure();
-  console.log(`R7_HITTEST ${width} ${JSON.stringify({ before, safeTop, safeBottom, targetY, deltaY, wheelDeltaY, wheelCount, after })}`);
+  console.log(`R8_VIEWPORT ${width} ${JSON.stringify({ before, safeTop, safeBottom, targetY, deltaY, desiredScrollY, after })}`);
   assert.ok(after.top >= after.topbarBottom + clearance, `El summary no quedó completo debajo de app-topbar + clearance @${width}: ${JSON.stringify(after)}`);
   assert.ok(after.bottom <= after.viewportHeight - clearance, `El summary no quedó completo dentro del límite inferior seguro @${width}: ${JSON.stringify(after)}`);
   assert.ok(after.y >= 0 && after.y <= after.viewportHeight, `El centro accionable quedó fuera del viewport @${width}: ${JSON.stringify(after)}`);
