@@ -263,7 +263,7 @@ async function inspectViewport(page: Page, url: string, width: number, height: n
   await assertTextNotClipped(scheduled, `${width}: fecha de seguimiento`);
 
   const fullSheet = lead.locator('.mvp-lead-full-sheet');
-  const moreActions = lead.locator('[data-lead-menu-toggle="1"]');
+  const moreActions = lead.locator('.mvp-lead-actions-menu > summary');
   await assertTarget(moreActions, `${width}: Más acciones`);
   await moreActions.click();
   const viewDetails = lead.locator('[data-open-lead-details="1"]');

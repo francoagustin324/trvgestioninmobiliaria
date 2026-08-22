@@ -357,7 +357,7 @@
 
 @media (max-width: 360px) {
   .pc-supervised-attention-queue {
-    grid-template-columns: 118px minmax(0, 1fr);
+    grid-template-columns: 104px minmax(0, 1fr);
     margin: 0;
     padding: 0 3px;
   }

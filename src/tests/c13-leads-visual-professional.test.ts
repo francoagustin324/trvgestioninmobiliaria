@@ -9,7 +9,7 @@ const compactCard = readFileSync('src/lead-card-compact-ui.ts', 'utf8');
 
 test('C13 A: capa visual final queda después de PR153 y con cache bust propio', () => {
   const previous = html.indexOf('/src/hotfix-leads-attention-ux.css?v=20260820-3');
-  const current = html.indexOf('/src/hotfix-leads-visual-professional.css?v=20260821-3');
+  const current = html.indexOf('/src/hotfix-leads-visual-professional.css?v=20260821-4');
   assert.ok(previous >= 0, 'Debe conservarse la capa visual PR153.');
   assert.ok(current > previous, 'C13 debe cargar como última capa visual de Leads.');
 });
