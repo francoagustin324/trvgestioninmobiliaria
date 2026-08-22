@@ -262,6 +262,10 @@ async function inspectViewport(page: Page, url: string, width: number, height: n
   assert.equal(await scheduled.isVisible(), true, `${width}: fecha de seguimiento visible.`);
   await assertTextNotClipped(scheduled, `${width}: fecha de seguimiento`);
 
+  const fullSheet = lead.locator('.mvp-lead-full-sheet');
+  await fullSheet.locator(':scope > summary').click();
+  await page.waitForFunction(() => document.querySelector<HTMLDetailsElement>('.mvp-lead-card[data-client-id="1"] .mvp-lead-full-sheet')?.open === true);
+
   const followMenu = lead.locator('.mvp-lead-followup-menu');
   const followSummary = followMenu.locator(':scope > summary');
   await assertTarget(followSummary, `${width}: menú seguimiento`);
@@ -278,9 +282,6 @@ async function inspectViewport(page: Page, url: string, width: number, height: n
   await assertTarget(reschedule, `${width}: Reprogramar`);
   await assertNoOverlap(dateInput, reschedule, `${width}: Nueva fecha/Reprogramar`);
 
-  const fullSheet = lead.locator('.mvp-lead-full-sheet');
-  await fullSheet.locator(':scope > summary').click();
-  await page.waitForFunction(() => document.querySelector<HTMLDetailsElement>('.mvp-lead-card[data-client-id="1"] .mvp-lead-full-sheet')?.open === true);
   const edit = fullSheet.locator('[data-edit-client="1"]');
   const remove = fullSheet.locator('[data-delete="clients"][data-id="1"]');
   assert.equal(await edit.isVisible(), true, `${width}: Editar visible.`);
