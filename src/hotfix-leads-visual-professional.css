@@ -362,6 +362,14 @@
     padding: 0 3px;
   }
 
+  .pc-supervised-attention-list {
+    gap: 1px;
+  }
+
+  #crm.pc-leads-redesign .pc-lead-controls {
+    gap: 4px;
+  }
+
   .pc-supervised-attention-item {
     grid-template-columns: minmax(0, .8fr) minmax(0, 1.14fr) minmax(0, 1.28fr);
     column-gap: 2px;
