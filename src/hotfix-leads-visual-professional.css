@@ -2,8 +2,9 @@
 
 .pc-supervised-attention-queue {
   max-width: 100%;
+  grid-template-columns: minmax(180px, .62fr) minmax(0, 2.38fr);
   padding: 14px 16px 15px;
-  gap: 11px;
+  gap: 12px;
   overflow-x: hidden;
   border-bottom-color: rgba(222, 197, 147, .11);
   background:
@@ -280,15 +281,16 @@
 
 @media (max-width: 720px) {
   .pc-supervised-attention-queue {
+    grid-template-columns: minmax(0, 1fr);
     padding: 10px 12px 12px;
     gap: 8px;
   }
 
   .pc-supervised-attention-heading { gap: 3px; }
   .pc-supervised-attention-heading strong { font-size: .69rem; }
-  .pc-supervised-attention-copy { font-size: .66rem; line-height: 1.3; }
-  .pc-supervised-attention-copy-full { display: none; }
-  .pc-supervised-attention-copy-compact { display: inline; }
+  .pc-supervised-attention-heading .pc-supervised-attention-copy { display: block; font-size: .66rem; line-height: 1.3; }
+  .pc-supervised-attention-heading .pc-supervised-attention-copy-full { display: none; }
+  .pc-supervised-attention-heading .pc-supervised-attention-copy-compact { display: inline; }
 
   .pc-supervised-attention-list {
     grid-template-columns: minmax(0, 1fr);
