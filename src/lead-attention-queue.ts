@@ -69,8 +69,8 @@ export function renderSupervisedAttentionQueue(clients: Client[], today = localI
 
   return `<section class="pc-supervised-attention-queue" data-supervised-attention-queue aria-labelledby="pc-supervised-attention-title">
     <header class="pc-supervised-attention-heading">
-      <strong id="pc-supervised-attention-title">ATENDER AHORA</strong>
-      <span>Prioridad global de tus leads visibles</span>
+      <strong id="pc-supervised-attention-title">LEADS PRIORITARIOS</strong>
+      <span class="pc-supervised-attention-copy"><span class="pc-supervised-attention-copy-full">Gestioná primero los contactos que requieren acción.</span><span class="pc-supervised-attention-copy-compact">Contactos para gestionar primero.</span></span>
     </header>
     ${body}
     <p class="pc-supervised-attention-status" data-attention-navigation-status role="status" aria-live="polite" hidden></p>
