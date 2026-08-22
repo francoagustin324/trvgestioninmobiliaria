@@ -127,7 +127,9 @@ test('B1.4.1 J: calcular y renderizar recomendaciones no muta Client ni contiene
   supervisedAttentionQueue(clients, TODAY);
   const html = renderSupervisedAttentionQueue(clients, TODAY);
   assert.deepEqual(clients, before);
-  assert.match(html, /ATENDER AHORA/);
+  assert.match(html, /LEADS PRIORITARIOS/);
+  assert.match(html, /Gestioná primero los contactos que requieren acción\./);
+  assert.match(html, /Contactos para gestionar primero\./);
 
   const source = readFileSync('src/lead-attention-queue.ts', 'utf8');
   for (const forbidden of ['saveData', 'addActivity', 'Reminder', 'nextFollowUp =', 'nextAction =', 'Math.random', 'score']) {
