@@ -259,6 +259,7 @@ test('CrmData actual conserva exactamente su forma superior y settings legacy', 
     'reminders',
     'settings',
     'teamMembers',
+    'visits',
   ]);
   assert.deepEqual(Object.keys(crm.settings).sort(), [...legacySettingFields].sort());
 });
