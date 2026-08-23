@@ -1,0 +1,255 @@
+.pc-lead-visits {
+  display: grid;
+  gap: 12px;
+  margin-top: 14px;
+  padding: 14px;
+  border: 1px solid rgba(15, 45, 33, .12);
+  border-radius: 16px;
+  background: rgba(255, 255, 255, .72);
+  min-width: 0;
+}
+
+.pc-lead-visits-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+}
+
+.pc-lead-visits-head > div {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.pc-lead-visits-head > div > strong {
+  color: #12382a;
+  font-size: 15px;
+}
+
+.pc-lead-visits-head > div > span,
+.pc-visit-empty,
+.pc-visit-terminal-note {
+  color: #687a72;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.pc-visit-coordinate,
+.pc-visit-result {
+  min-width: 0;
+}
+
+.pc-visit-coordinate > summary,
+.pc-visit-result > summary {
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 13px;
+  border: 1px solid rgba(15, 87, 58, .18);
+  border-radius: 11px;
+  background: rgba(237, 248, 243, .92);
+  color: #155f43;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 700;
+  list-style: none;
+  user-select: none;
+}
+
+.pc-visit-coordinate > summary::-webkit-details-marker,
+.pc-visit-result > summary::-webkit-details-marker {
+  display: none;
+}
+
+.pc-visit-form {
+  display: grid;
+  gap: 10px;
+  margin-top: 10px;
+  padding: 12px;
+  border: 1px solid rgba(15, 45, 33, .1);
+  border-radius: 13px;
+  background: #fff;
+  min-width: 0;
+}
+
+.pc-visit-form label,
+.pc-visit-next-step {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+  color: #40554b;
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.pc-visit-form input,
+.pc-visit-form select,
+.pc-visit-form textarea {
+  width: 100%;
+  min-width: 0;
+  min-height: 44px;
+  box-sizing: border-box;
+  border: 1px solid rgba(15, 45, 33, .16);
+  border-radius: 10px;
+  background: #fff;
+  color: #173c2e;
+  padding: 9px 10px;
+  font: inherit;
+  font-size: 14px;
+}
+
+.pc-visit-form textarea {
+  min-height: 68px;
+  resize: vertical;
+}
+
+.pc-visit-form button[type="submit"] {
+  min-height: 44px;
+  border: 0;
+  border-radius: 11px;
+  background: #176d4c;
+  color: #fff;
+  padding: 0 14px;
+  font-weight: 750;
+  cursor: pointer;
+}
+
+.pc-visit-form button[type="submit"]:disabled {
+  opacity: .58;
+  cursor: wait;
+}
+
+.pc-visit-date-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 10px;
+}
+
+.pc-visit-form-error {
+  margin: 0;
+  color: #a23232;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.pc-visit-list {
+  display: grid;
+  gap: 9px;
+  min-width: 0;
+}
+
+.pc-visit-row {
+  display: grid;
+  gap: 9px;
+  padding: 11px 12px;
+  border: 1px solid rgba(15, 45, 33, .09);
+  border-radius: 13px;
+  background: rgba(250, 253, 251, .96);
+  min-width: 0;
+}
+
+.pc-visit-row-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+}
+
+.pc-visit-row-head > div {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.pc-visit-row-head strong {
+  color: #173c2e;
+  font-size: 13px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.pc-visit-row-head time {
+  color: #708078;
+  font-size: 12px;
+}
+
+.pc-visit-status {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  min-height: 26px;
+  padding: 0 9px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.pc-visit-status.status-coordinada { background: #e9f4ff; color: #245f8b; }
+.pc-visit-status.status-realizada { background: #e8f6ee; color: #236346; }
+.pc-visit-status.status-cancelada { background: #f3f1f0; color: #6d605a; }
+.pc-visit-status.status-no-asistio { background: #fff2e5; color: #8a5522; }
+
+.pc-visit-interest {
+  display: flex;
+  gap: 6px;
+  margin: 0;
+  color: #52675d;
+  font-size: 12px;
+}
+
+.pc-visit-objection {
+  margin: 0;
+  color: #42564d;
+  font-size: 12px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.pc-visit-result > summary {
+  width: fit-content;
+  min-height: 44px;
+  background: #fff;
+}
+
+.pc-visit-next-step {
+  padding-top: 4px;
+  border-top: 1px solid rgba(15, 45, 33, .08);
+}
+
+.pc-visit-next-step > strong {
+  color: #173c2e;
+  font-size: 12px;
+}
+
+@media (max-width: 720px) {
+  .pc-lead-visits {
+    padding: 12px;
+    border-radius: 14px;
+  }
+
+  .pc-lead-visits-head {
+    display: grid;
+  }
+
+  .pc-visit-coordinate > summary {
+    width: 100%;
+    box-sizing: border-box;
+  }
+
+  .pc-visit-date-row {
+    grid-template-columns: 1fr;
+  }
+
+  .pc-visit-row-head {
+    display: grid;
+  }
+
+  .pc-visit-status {
+    width: fit-content;
+  }
+}
