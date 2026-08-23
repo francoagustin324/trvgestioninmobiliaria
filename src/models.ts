@@ -23,6 +23,8 @@ export type AuditEngine = 'Reglas de seguridad' | 'Comprensión por conceptos' |
 export type TeamRole = 'Dueño' | 'Administrador' | 'Corredor';
 export type TeamMemberStatus = 'Activo' | 'Pendiente de acceso' | 'Suspendido';
 export type AssignmentEntity = 'Cliente' | 'Propiedad' | 'Conversación' | 'Tarea';
+export type VisitStatus = 'Coordinada' | 'Realizada' | 'Cancelada' | 'No asistió';
+export type VisitInterest = 'Alto' | 'Medio' | 'Bajo';
 
 export interface OrganizationSettings {
   id: string;
@@ -89,6 +91,20 @@ export interface Property {
   assignedToId?: number; createdById?: number;
 }
 
+export interface Visit {
+  id: number;
+  clientId: number;
+  propertyId: number;
+  scheduledAt: string;
+  status: VisitStatus;
+  interest?: VisitInterest;
+  objection?: string;
+  assignedToId: number;
+  createdById: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface Reminder {
   id: number; date: string; title: string; related: string; priority: string;
   assignedToId?: number; createdById?: number;
@@ -152,6 +168,7 @@ export interface CrmData {
   activityLog: ActivityEntry[];
   clients: Client[];
   properties: Property[];
+  visits: Visit[];
   contacts: CommercialContact[];
   reminders: Reminder[];
   fichas: Ficha[];
@@ -242,6 +259,7 @@ export const initialData: CrmData = {
     paymentMethod: 'Contado', features: 'Balcón, buena luz natural', notes: '',
     sourceContactId: 1, sharedAt: '2026-07-11', sourceLink: '', assignedToId: 1, createdById: 1,
   }],
+  visits: [],
   reminders: [{
     id: 1, date: '2026-07-13', title: 'Llamar a Lucía', related: 'Búsqueda Nueva Córdoba', priority: 'Alta',
     assignedToId: 1, createdById: 1,

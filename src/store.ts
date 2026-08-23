@@ -122,6 +122,11 @@ function normalizedData(value: Partial<CrmData>): CrmData {
       assignedToId: Number(property.assignedToId ?? ownerId),
       createdById: Number(property.createdById ?? ownerId),
     })) : [],
+    visits: Array.isArray(value.visits) ? value.visits.map((visit) => ({
+      ...visit,
+      assignedToId: Number(visit.assignedToId ?? ownerId),
+      createdById: Number(visit.createdById ?? ownerId),
+    })) : [],
     contacts: Array.isArray(value.contacts) ? value.contacts.map((contact) => ({
       ...contact,
       assignedToId: Number(contact.assignedToId ?? contact.createdById ?? ownerId),
