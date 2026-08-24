@@ -237,7 +237,10 @@ test('P1.1-A2 browser desktop coordina una sola visita y registra resultado sin 
     assert.equal(afterCoordinate.client.pipeline, 'Visita coordinada');
     assert.equal(afterCoordinate.client.nextAction, 'Visita · Docta Etapa 3');
     assert.equal(afterCoordinate.reminders.length, 0);
-    assert.equal(afterCoordinate.activity.at(-1)?.action, 'Visita coordinada');
+    assert.deepEqual(
+      afterCoordinate.activity.map((entry) => entry.action),
+      ['Visita coordinada'],
+    );
 
     await openLead(page);
     const row = page.locator('.pc-visit-row[data-visit-id="1"]');
@@ -281,7 +284,13 @@ test('P1.1-A2 browser desktop coordina una sola visita y registra resultado sin 
     assert.equal(afterResult.visits[0]?.status, 'Realizada');
     assert.equal(afterResult.visits[0]?.interest, 'Alto');
     assert.equal(afterResult.client.nextAction, 'Enviar propuesta');
-    assert.equal(afterResult.activity.at(-1)?.action, 'Visita realizada');
+    assert.deepEqual(
+      afterResult.activity.map((entry) => entry.action),
+      [
+        'Visita realizada',
+        'Visita coordinada',
+      ],
+    );
     await openLead(page);
     await page.waitForSelector('.pc-visit-status.status-realizada', { state: 'visible' });
     await assertNoOverflow(page, 'desktop');
