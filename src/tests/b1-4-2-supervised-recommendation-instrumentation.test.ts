@@ -300,7 +300,7 @@ test('R2 CRM isolation: R1+R2 telemetría fuera de activityLog/stale y read-merg
   const oldRow: CloudRecordRow = { ...eventRow, entity_key: 'org-a:recommendation:legacy', payload: { recordKind: 'supervised_recommendation', id: 'legacy' } };
   assert.equal(isSupervisedRecommendationTelemetryPayload(eventRow.payload), true); assert.equal(isSupervisedRecommendationTelemetryPayload(oldRow.payload), true);
   const rows = [...crmRows, eventRow, oldRow]; const loaded = cloudRecordsToCrm(rows, cloudContext, crm);
-  assert.deepEqual(Object.keys(loaded).sort(), ['activityLog', 'clients', 'contacts', 'conversations', 'fichas', 'organization', 'properties', 'reminders', 'settings', 'teamMembers', 'visits'].sort()); assert.equal(loaded.activityLog.length, 1);
+  assert.deepEqual(Object.keys(loaded).sort(), ['activityLog', 'clients', 'contacts', 'conversations', 'fichas', 'offers', 'organization', 'properties', 'reminders', 'settings', 'teamMembers', 'visits'].sort()); assert.equal(loaded.activityLog.length, 1);
   const stale = staleCloudRecords(rows, crmToCloudRecords(loaded, cloudContext, 'user-1'));
   assert.equal(stale.some((row) => row.entity_key === eventRow.entity_key || row.entity_key === oldRow.entity_key), false);
   const telemetry = readFileSync('src/lead-recommendation-telemetry.ts', 'utf8');

@@ -101,7 +101,7 @@ function remoteComparableCrm(crm: CrmData): unknown {
   // La membresía y las asignaciones son normalizadas por el servidor. La verificación
   // remota compara el contenido CRM de negocio y no falla por esos campos autoritativos.
   comparable.teamMembers = [];
-  ['clients', 'properties', 'visits', 'contacts', 'reminders', 'fichas', 'conversations'].forEach((key) => {
+  ['clients', 'properties', 'visits', 'offers', 'contacts', 'reminders', 'fichas', 'conversations'].forEach((key) => {
     const items = comparable[key];
     if (!Array.isArray(items)) return;
     items.forEach((item) => {
