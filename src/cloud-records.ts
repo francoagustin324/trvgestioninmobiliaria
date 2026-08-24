@@ -4,6 +4,7 @@ import type {
   CommercialContact,
   CrmData,
   Ficha,
+  Offer,
   OrganizationSettings,
   Property,
   Reminder,
@@ -14,7 +15,7 @@ import type {
   WhatsAppConversation,
 } from './models.js';
 
-export type CloudEntityType = 'organization' | 'client' | 'property' | 'visit' | 'commercial_contact' | 'reminder' | 'ficha' | 'conversation' | 'activity';
+export type CloudEntityType = 'organization' | 'client' | 'property' | 'visit' | 'offer' | 'commercial_contact' | 'reminder' | 'ficha' | 'conversation' | 'activity';
 
 export interface CloudRecordRow {
   organization_id: string;
@@ -127,6 +128,7 @@ export function reconcileCrmAssignments(crm: CrmData, context: CloudMembershipCo
     clients: crm.clients.map(assigned),
     properties: crm.properties.map(assigned),
     visits: Array.isArray(crm.visits) ? crm.visits.map(assigned) : [],
+    offers: Array.isArray(crm.offers) ? crm.offers.map(assigned) : [],
     contacts: crm.contacts.map(assigned),
     reminders: crm.reminders.map(assigned),
     fichas: crm.fichas.map(assigned),
@@ -183,6 +185,7 @@ export function crmToCloudRecords(
     ...visibleToCurrentMember(reconciled.clients, context).map((item) => row(org, 'client', item.id, assignedId(item, member), item, userId)),
     ...visibleToCurrentMember(reconciled.properties, context).map((item) => row(org, 'property', item.id, assignedId(item, member), item, userId)),
     ...visibleToCurrentMember(reconciled.visits, context).map((item) => row(org, 'visit', item.id, assignedId(item, member), item, userId)),
+    ...visibleToCurrentMember(reconciled.offers, context).map((item) => row(org, 'offer', item.id, assignedId(item, member), item, userId)),
     ...visibleToCurrentMember(reconciled.contacts, context).map((item) => row(org, 'commercial_contact', item.id, assignedId(item, member), item, userId)),
     ...visibleToCurrentMember(reconciled.reminders, context).map((item) => row(org, 'reminder', item.id, assignedId(item, member), item, userId)),
     ...visibleToCurrentMember(reconciled.fichas, context).map((item) => row(org, 'ficha', item.id, assignedId(item, member), item, userId)),
@@ -231,6 +234,7 @@ export function cloudRecordsToCrm(
     clients: recordsOf<Client>(rows, 'client'),
     properties: recordsOf<Property>(rows, 'property'),
     visits: recordsOf<Visit>(rows, 'visit'),
+    offers: recordsOf<Offer>(rows, 'offer'),
     contacts: recordsOf<CommercialContact>(rows, 'commercial_contact'),
     reminders: recordsOf<Reminder>(rows, 'reminder'),
     fichas: recordsOf<Ficha>(rows, 'ficha'),
