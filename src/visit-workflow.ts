@@ -1,3 +1,4 @@
+import { visitReadiness } from './lead-qualification.js';
 import {
   applyCommercialStage,
   commercialStage,
@@ -140,6 +141,12 @@ export function coordinateVisit(input: CoordinateVisitInput): CoordinateVisitRes
   }
   assertAccessible(input.actor, input.client.assignedToId, 'este lead');
   assertAccessible(input.actor, input.property.assignedToId, 'esta propiedad');
+
+  const readiness = visitReadiness(input.client, []);
+  if (readiness.warning) {
+    const blocker = readiness.missing[0] || 'la calificación comercial';
+    throw new Error(`No conviene coordinar todavía. Falta confirmar ${blocker}.`);
+  }
 
   const now = input.now ?? new Date();
   const scheduledAt = localVisitIso(input.localDate, input.localTime);
