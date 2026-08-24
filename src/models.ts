@@ -25,6 +25,9 @@ export type TeamMemberStatus = 'Activo' | 'Pendiente de acceso' | 'Suspendido';
 export type AssignmentEntity = 'Cliente' | 'Propiedad' | 'Conversación' | 'Tarea';
 export type VisitStatus = 'Coordinada' | 'Realizada' | 'Cancelada' | 'No asistió';
 export type VisitInterest = 'Alto' | 'Medio' | 'Bajo';
+export type OfferOrigin = 'Cliente' | 'Propietario';
+export type OfferStatus = 'Pendiente' | 'Aceptada' | 'Rechazada' | 'Contraofertada' | 'Retirada';
+export type OfferCurrency = 'USD' | 'ARS';
 
 export interface OrganizationSettings {
   id: string;
@@ -105,6 +108,24 @@ export interface Visit {
   updatedAt: string;
 }
 
+export interface Offer {
+  id: number;
+  clientId: number;
+  propertyId: number;
+  origin: OfferOrigin;
+  parentOfferId?: number;
+  amount: number;
+  currency: OfferCurrency;
+  paymentTerms?: string;
+  conditions?: string;
+  validUntil?: string;
+  status: OfferStatus;
+  assignedToId: number;
+  createdById: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface Reminder {
   id: number; date: string; title: string; related: string; priority: string;
   assignedToId?: number; createdById?: number;
@@ -169,6 +190,7 @@ export interface CrmData {
   clients: Client[];
   properties: Property[];
   visits: Visit[];
+  offers: Offer[];
   contacts: CommercialContact[];
   reminders: Reminder[];
   fichas: Ficha[];
@@ -260,6 +282,7 @@ export const initialData: CrmData = {
     sourceContactId: 1, sharedAt: '2026-07-11', sourceLink: '', assignedToId: 1, createdById: 1,
   }],
   visits: [],
+  offers: [],
   reminders: [{
     id: 1, date: '2026-07-13', title: 'Llamar a Lucía', related: 'Búsqueda Nueva Córdoba', priority: 'Alta',
     assignedToId: 1, createdById: 1,
