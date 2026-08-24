@@ -358,7 +358,7 @@ test('R3.23 telemetría no modifica CRM/sync/nextAction/followup/reminder/pipeli
     assert.equal(runtime.includes(forbidden), false, `runtime:${forbidden}`);
     assert.equal(telemetry.includes(forbidden), false, `telemetry:${forbidden}`);
   }
-  assert.deepEqual(Object.keys(initialData).sort(), ['activityLog', 'clients', 'contacts', 'conversations', 'fichas', 'organization', 'properties', 'reminders', 'settings', 'teamMembers', 'visits'].sort());
+  assert.deepEqual(Object.keys(initialData).sort(), ['activityLog', 'clients', 'contacts', 'conversations', 'fichas', 'offers', 'organization', 'properties', 'reminders', 'settings', 'teamMembers', 'visits'].sort());
 });
 
 test('R3.24 organization/actor/visibleClients siguen aislados', async () => {
