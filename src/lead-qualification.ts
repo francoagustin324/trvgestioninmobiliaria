@@ -129,6 +129,54 @@ function candidateClient(client: Client, suggestions: QualificationSuggestion[])
   return candidate;
 }
 
+function pushMissing(missing: string[], field: string): void {
+  if (!missing.includes(field)) missing.push(field);
+}
+
+function mortgageCreditReady(value: string | undefined): boolean {
+  const status = normalized(value || '');
+  return status === 'aprobado' || status === 'preaprobado';
+}
+
+export function visitReadiness(client: Client, suggestions: QualificationSuggestion[]): { warning: string | null; missing: string[] } {
+  const base = essential.visitReadiness(client, suggestions);
+  const candidate = candidateClient(client, suggestions);
+  const missing = [...base.missing];
+
+  if (!candidate.budget?.trim()) pushMissing(missing, 'presupuesto');
+  if (!candidate.currency?.trim()) pushMissing(missing, 'moneda');
+  if (!candidate.paymentMethod?.trim()) pushMissing(missing, 'forma de pago');
+  if (!candidate.zones?.trim()) pushMissing(missing, 'zona/barrios');
+  if (!['vivir', 'invertir', 'otra'].includes(normalized(candidate.purpose || ''))) pushMissing(missing, 'finalidad');
+  if (!candidate.purchaseTimeframe?.trim() && !candidate.urgency?.trim()) pushMissing(missing, 'plazo / urgencia');
+
+  const payment = normalized(candidate.paymentMethod || '');
+  const canMove = normalized(candidate.canMoveForward || '');
+  const creditRequired = payment.includes('credito hipotecario') || canMove === 'depende del credito';
+  const creditReady = mortgageCreditReady(candidate.creditPossible);
+  if (creditRequired && !creditReady) pushMissing(missing, 'situación del crédito');
+
+  if (
+    !canMove
+    || canMove === 'no confirmado'
+    || canMove === 'no'
+    || canMove === 'depende de vender'
+    || canMove === 'todavia no'
+    || (canMove === 'depende del credito' && !creditReady)
+  ) {
+    pushMissing(missing, 'capacidad de avance');
+  }
+
+  if (normalized(candidate.knowsArea || '') !== 'si') pushMissing(missing, 'aceptación de la zona');
+
+  return {
+    warning: missing.length
+      ? (base.warning || 'No conviene coordinar todavía. Falta completar la calificación comercial antes de una visita.')
+      : null,
+    missing,
+  };
+}
+
 function reconcilePipeline(client: Client, suggestions: QualificationSuggestion[]): QualificationSuggestion[] {
   const pipeline = suggestions.find((item) => item.field === 'pipeline');
   if (!pipeline || pipeline.value !== 'Contactado') return suggestions;
@@ -166,7 +214,7 @@ export function analyzeLeadQualification(
   }
   suggestions = reconcilePipeline(client, suggestions);
   const missingQuestions = essential.missingQualificationQuestions(client, suggestions);
-  const readiness = essential.visitReadiness(client, suggestions);
+  const readiness = visitReadiness(client, suggestions);
   return {
     ...base,
     suggestions,
