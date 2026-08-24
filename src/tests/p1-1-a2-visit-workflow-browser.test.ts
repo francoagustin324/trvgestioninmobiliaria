@@ -203,6 +203,7 @@ test('P1.1-A2 browser desktop coordina una sola visita y registra resultado sin 
     await form.waitFor({ state: 'visible' });
     assert.equal(await coordinate.locator('input[type="date"]').count(), 1);
     await coordinateSummary.click();
+    await form.waitFor({ state: 'detached' });
     assert.equal(await coordinate.locator('form[data-coordinate-visit="1"]').count(), 0);
     assert.equal(await coordinate.locator('input[type="date"]').count(), 0);
     await coordinateSummary.click();
@@ -242,6 +243,8 @@ test('P1.1-A2 browser desktop coordina una sola visita y registra resultado sin 
     const row = page.locator('.pc-visit-row[data-visit-id="1"]');
     const resultDisclosure = row.locator('.pc-visit-result');
     const resultSummary = resultDisclosure.locator(':scope > summary');
+    const resultSummaryBox = await resultSummary.boundingBox();
+    assert.ok(resultSummaryBox && resultSummaryBox.height >= 43.99, `target Registrar resultado ${JSON.stringify(resultSummaryBox)}`);
     assert.equal(await resultDisclosure.locator('form[data-register-visit-result="1"]').count(), 0);
     assert.equal(await resultDisclosure.locator('input[type="date"]').count(), 0);
     await resultSummary.click();
@@ -249,6 +252,7 @@ test('P1.1-A2 browser desktop coordina una sola visita y registra resultado sin 
     await resultForm.waitFor({ state: 'visible' });
     assert.equal(await resultDisclosure.locator('input[type="date"]').count(), 1);
     await resultSummary.click();
+    await resultForm.waitFor({ state: 'detached' });
     assert.equal(await resultDisclosure.locator('form[data-register-visit-result="1"]').count(), 0);
     assert.equal(await resultDisclosure.locator('input[type="date"]').count(), 0);
     await resultSummary.click();
@@ -303,16 +307,18 @@ test('P1.1-A2 browser mobile mantiene Visitas usable, targets táctiles y sin ov
     const coordinateSummary = coordinate.locator(':scope > summary');
     const box = await coordinateSummary.boundingBox();
     assert.ok(box && box.height >= 43.99, `target Coordinar visita ${JSON.stringify(box)}`);
-    assert.equal(await coordinate.locator('.pc-visit-form').count(), 0);
+    const form = coordinate.locator('.pc-visit-form');
+    assert.equal(await form.count(), 0);
     assert.equal(await coordinate.locator('input[type="date"]').count(), 0);
     await coordinateSummary.click();
-    await coordinate.locator('.pc-visit-form').waitFor({ state: 'visible' });
+    await form.waitFor({ state: 'visible' });
     assert.equal(await coordinate.locator('input[type="date"]').count(), 1);
     await coordinateSummary.click();
-    assert.equal(await coordinate.locator('.pc-visit-form').count(), 0);
+    await form.waitFor({ state: 'detached' });
+    assert.equal(await form.count(), 0);
     assert.equal(await coordinate.locator('input[type="date"]').count(), 0);
     await coordinateSummary.click();
-    await coordinate.locator('.pc-visit-form').waitFor({ state: 'visible' });
+    await form.waitFor({ state: 'visible' });
 
     const inputs = coordinate.locator('.pc-visit-form input, .pc-visit-form select, .pc-visit-form button[type="submit"]');
     for (let index = 0; index < await inputs.count(); index += 1) {

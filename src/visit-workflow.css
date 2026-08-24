@@ -59,6 +59,11 @@
   user-select: none;
 }
 
+#crm.pc-leads-redesign .mvp-lead-full-sheet .pc-visit-coordinate > summary,
+#crm.pc-leads-redesign .mvp-lead-full-sheet .pc-visit-result > summary {
+  min-height: 44px;
+}
+
 .pc-visit-coordinate > summary::-webkit-details-marker,
 .pc-visit-result > summary::-webkit-details-marker {
   display: none;
