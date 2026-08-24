@@ -161,7 +161,14 @@ async function load(page: Page, url: string): Promise<void> {
 async function openLead(page: Page): Promise<void> {
   const sheet = page.locator('[data-lead-full-sheet="1"]');
   if (!(await sheet.evaluate((element) => (element as HTMLDetailsElement).open))) {
-    await sheet.locator(':scope > summary').click();
+    const lead = page.locator('.mvp-lead-card[data-client-id="1"]');
+    const actions = lead.locator('.mvp-lead-actions-menu');
+    await actions.waitFor({ state: 'visible', timeout: 10_000 });
+    const actionsSummary = actions.locator(':scope > summary');
+    if (!(await actions.evaluate((element) => (element as HTMLDetailsElement).open))) {
+      await actionsSummary.click();
+    }
+    await actions.getByRole('button', { name: 'Ver detalles', exact: true }).click();
   }
   await page.waitForSelector('[data-lead-visits="1"]', { state: 'visible', timeout: 10_000 });
 }
@@ -188,8 +195,19 @@ test('P1.1-A2 browser desktop coordina una sola visita y registra resultado sin 
     await openLead(page);
 
     const coordinate = page.locator('.pc-visit-coordinate');
-    await coordinate.locator(':scope > summary').click();
-    const form = coordinate.locator('form[data-coordinate-visit="1"]');
+    const coordinateSummary = coordinate.locator(':scope > summary');
+    assert.equal(await coordinate.locator('form[data-coordinate-visit="1"]').count(), 0);
+    assert.equal(await coordinate.locator('input[type="date"]').count(), 0);
+    await coordinateSummary.click();
+    let form = coordinate.locator('form[data-coordinate-visit="1"]');
+    await form.waitFor({ state: 'visible' });
+    assert.equal(await coordinate.locator('input[type="date"]').count(), 1);
+    await coordinateSummary.click();
+    assert.equal(await coordinate.locator('form[data-coordinate-visit="1"]').count(), 0);
+    assert.equal(await coordinate.locator('input[type="date"]').count(), 0);
+    await coordinateSummary.click();
+    form = coordinate.locator('form[data-coordinate-visit="1"]');
+    await form.waitFor({ state: 'visible' });
     await form.locator('select[name="propertyId"]').selectOption('10');
     await form.locator('input[name="date"]').fill(futureLocalDate(3));
     await form.locator('input[name="time"]').fill('15:30');
@@ -222,8 +240,20 @@ test('P1.1-A2 browser desktop coordina una sola visita y registra resultado sin 
 
     await openLead(page);
     const row = page.locator('.pc-visit-row[data-visit-id="1"]');
-    await row.locator('.pc-visit-result > summary').click();
-    const resultForm = row.locator('form[data-register-visit-result="1"]');
+    const resultDisclosure = row.locator('.pc-visit-result');
+    const resultSummary = resultDisclosure.locator(':scope > summary');
+    assert.equal(await resultDisclosure.locator('form[data-register-visit-result="1"]').count(), 0);
+    assert.equal(await resultDisclosure.locator('input[type="date"]').count(), 0);
+    await resultSummary.click();
+    let resultForm = row.locator('form[data-register-visit-result="1"]');
+    await resultForm.waitFor({ state: 'visible' });
+    assert.equal(await resultDisclosure.locator('input[type="date"]').count(), 1);
+    await resultSummary.click();
+    assert.equal(await resultDisclosure.locator('form[data-register-visit-result="1"]').count(), 0);
+    assert.equal(await resultDisclosure.locator('input[type="date"]').count(), 0);
+    await resultSummary.click();
+    resultForm = row.locator('form[data-register-visit-result="1"]');
+    await resultForm.waitFor({ state: 'visible' });
     await resultForm.locator('select[name="status"]').selectOption('Realizada');
     await resultForm.locator('select[name="interest"]').selectOption('Alto');
     await resultForm.locator('textarea[name="objection"]').fill('Quiere revisar expensas');
@@ -269,13 +299,22 @@ test('P1.1-A2 browser mobile mantiene Visitas usable, targets táctiles y sin ov
     await load(page, `http://127.0.0.1:${port}`);
     await openLead(page);
 
-    const coordinateSummary = page.locator('.pc-visit-coordinate > summary');
+    const coordinate = page.locator('.pc-visit-coordinate');
+    const coordinateSummary = coordinate.locator(':scope > summary');
     const box = await coordinateSummary.boundingBox();
     assert.ok(box && box.height >= 43.99, `target Coordinar visita ${JSON.stringify(box)}`);
+    assert.equal(await coordinate.locator('.pc-visit-form').count(), 0);
+    assert.equal(await coordinate.locator('input[type="date"]').count(), 0);
     await coordinateSummary.click();
-    await page.waitForSelector('.pc-visit-form', { state: 'visible' });
+    await coordinate.locator('.pc-visit-form').waitFor({ state: 'visible' });
+    assert.equal(await coordinate.locator('input[type="date"]').count(), 1);
+    await coordinateSummary.click();
+    assert.equal(await coordinate.locator('.pc-visit-form').count(), 0);
+    assert.equal(await coordinate.locator('input[type="date"]').count(), 0);
+    await coordinateSummary.click();
+    await coordinate.locator('.pc-visit-form').waitFor({ state: 'visible' });
 
-    const inputs = page.locator('.pc-visit-form input, .pc-visit-form select, .pc-visit-form button[type="submit"]');
+    const inputs = coordinate.locator('.pc-visit-form input, .pc-visit-form select, .pc-visit-form button[type="submit"]');
     for (let index = 0; index < await inputs.count(); index += 1) {
       const inputBox = await inputs.nth(index).boundingBox();
       assert.ok(inputBox && inputBox.height >= 43.99, `mobile input ${index}: ${JSON.stringify(inputBox)}`);

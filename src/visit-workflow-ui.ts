@@ -52,6 +52,24 @@ function propertyOptions(): string {
     .join('');
 }
 
+function coordinateForm(client: Client): string {
+  const options = propertyOptions();
+  return `<form class="pc-visit-form" data-coordinate-visit="${client.id}">
+    <label>Propiedad
+      <select name="propertyId" required>
+        <option value="">Seleccionar propiedad</option>
+        ${options}
+      </select>
+    </label>
+    <div class="pc-visit-date-row">
+      <label>Fecha<input type="date" name="date" min="${localIsoDate()}" required></label>
+      <label>Hora<input type="time" name="time" required></label>
+    </div>
+    <p class="pc-visit-form-error" data-visit-form-error role="alert" hidden></p>
+    <button type="submit">Guardar visita</button>
+  </form>`;
+}
+
 function coordinateBlock(client: Client): string {
   if (isTerminalClient(client)) {
     return '<p class="pc-visit-terminal-note">Lead cerrado: no se pueden coordinar nuevas visitas.</p>';
@@ -60,58 +78,49 @@ function coordinateBlock(client: Client): string {
   if (!options) {
     return '<p class="pc-visit-empty">No hay propiedades visibles disponibles para coordinar una visita.</p>';
   }
-  return `<details class="pc-visit-coordinate">
+  return `<details class="pc-visit-coordinate" data-visit-coordinate-disclosure="${client.id}">
     <summary>Coordinar visita</summary>
-    <form class="pc-visit-form" data-coordinate-visit="${client.id}">
-      <label>Propiedad
-        <select name="propertyId" required>
-          <option value="">Seleccionar propiedad</option>
-          ${options}
-        </select>
-      </label>
-      <div class="pc-visit-date-row">
-        <label>Fecha<input type="date" name="date" min="${localIsoDate()}" required></label>
-        <label>Hora<input type="time" name="time" required></label>
-      </div>
-      <p class="pc-visit-form-error" data-visit-form-error role="alert" hidden></p>
-      <button type="submit">Guardar visita</button>
-    </form>
+    <div data-visit-coordinate-body></div>
   </details>`;
 }
 
 function outcomeForm(client: Client, visit: Visit): string {
-  if (visit.status !== 'Coordinada') return '';
   const terminal = isTerminalClient(client);
-  return `<details class="pc-visit-result">
+  return `<form class="pc-visit-form" data-register-visit-result="${visit.id}" data-client-id="${client.id}">
+    <label>Resultado
+      <select name="status" required>
+        <option value="">Seleccionar resultado</option>
+        <option value="Realizada">Realizada</option>
+        <option value="Cancelada">Cancelada</option>
+        <option value="No asistió">No asistió</option>
+      </select>
+    </label>
+    <label data-visit-interest-field>Interés
+      <select name="interest" disabled>
+        <option value="">Seleccionar interés</option>
+        <option value="Alto">Alto</option>
+        <option value="Medio">Medio</option>
+        <option value="Bajo">Bajo</option>
+      </select>
+    </label>
+    <label>Objeción / comentario
+      <textarea name="objection" rows="2" maxlength="240" placeholder="Opcional"></textarea>
+    </label>
+    ${terminal ? '' : `<div class="pc-visit-next-step">
+      <strong>Próximo paso</strong>
+      <label>Próxima acción<input name="nextAction" maxlength="88" placeholder="Ej. Enviar propuesta" required></label>
+      <label>Próxima fecha<input type="date" name="nextFollowUp" min="${localIsoDate()}" required></label>
+    </div>`}
+    <p class="pc-visit-form-error" data-visit-form-error role="alert" hidden></p>
+    <button type="submit">Guardar resultado</button>
+  </form>`;
+}
+
+function outcomeBlock(client: Client, visit: Visit): string {
+  if (visit.status !== 'Coordinada') return '';
+  return `<details class="pc-visit-result" data-visit-result-disclosure="${visit.id}" data-client-id="${client.id}">
     <summary>Registrar resultado</summary>
-    <form class="pc-visit-form" data-register-visit-result="${visit.id}" data-client-id="${client.id}">
-      <label>Resultado
-        <select name="status" required>
-          <option value="">Seleccionar resultado</option>
-          <option value="Realizada">Realizada</option>
-          <option value="Cancelada">Cancelada</option>
-          <option value="No asistió">No asistió</option>
-        </select>
-      </label>
-      <label data-visit-interest-field>Interés
-        <select name="interest" disabled>
-          <option value="">Seleccionar interés</option>
-          <option value="Alto">Alto</option>
-          <option value="Medio">Medio</option>
-          <option value="Bajo">Bajo</option>
-        </select>
-      </label>
-      <label>Objeción / comentario
-        <textarea name="objection" rows="2" maxlength="240" placeholder="Opcional"></textarea>
-      </label>
-      ${terminal ? '' : `<div class="pc-visit-next-step">
-        <strong>Próximo paso</strong>
-        <label>Próxima acción<input name="nextAction" maxlength="88" placeholder="Ej. Enviar propuesta" required></label>
-        <label>Próxima fecha<input type="date" name="nextFollowUp" min="${localIsoDate()}" required></label>
-      </div>`}
-      <p class="pc-visit-form-error" data-visit-form-error role="alert" hidden></p>
-      <button type="submit">Guardar resultado</button>
-    </form>
+    <div data-visit-result-body></div>
   </details>`;
 }
 
@@ -125,7 +134,7 @@ function visitRow(client: Client, visit: Visit): string {
     </div>
     ${visit.interest ? `<p class="pc-visit-interest"><span>Interés</span><strong>${escapeHtml(visit.interest)}</strong></p>` : ''}
     ${visit.objection ? `<p class="pc-visit-objection">${escapeHtml(visit.objection)}</p>` : ''}
-    ${outcomeForm(client, visit)}
+    ${outcomeBlock(client, visit)}
   </article>`;
 }
 
@@ -142,6 +151,44 @@ function renderSection(client: Client): string {
   </section>`;
 }
 
+function bindDeferredForms(section: HTMLElement, client: Client): void {
+  const coordinateDisclosure = section.querySelector<HTMLDetailsElement>('[data-visit-coordinate-disclosure]');
+  if (coordinateDisclosure) {
+    const body = coordinateDisclosure.querySelector<HTMLElement>('[data-visit-coordinate-body]');
+    const syncCoordinateForm = (): void => {
+      if (!body) return;
+      if (!coordinateDisclosure.open) {
+        body.replaceChildren();
+        return;
+      }
+      if (!body.querySelector('[data-coordinate-visit]')) body.innerHTML = coordinateForm(client);
+    };
+    coordinateDisclosure.addEventListener('toggle', syncCoordinateForm);
+    syncCoordinateForm();
+  }
+
+  section.querySelectorAll<HTMLDetailsElement>('[data-visit-result-disclosure]').forEach((resultDisclosure) => {
+    const body = resultDisclosure.querySelector<HTMLElement>('[data-visit-result-body]');
+    const visitId = Number(resultDisclosure.dataset.visitResultDisclosure);
+    const syncOutcomeForm = (): void => {
+      if (!body) return;
+      if (!resultDisclosure.open) {
+        body.replaceChildren();
+        return;
+      }
+      if (body.querySelector('[data-register-visit-result]')) return;
+      const visit = state.crm.visits.find((item) => item.id === visitId && item.clientId === client.id);
+      if (!visit || visit.status !== 'Coordinada') {
+        body.replaceChildren();
+        return;
+      }
+      body.innerHTML = outcomeForm(client, visit);
+    };
+    resultDisclosure.addEventListener('toggle', syncOutcomeForm);
+    syncOutcomeForm();
+  });
+}
+
 function sectionHost(card: HTMLElement): HTMLElement | null {
   return card.querySelector<HTMLElement>('.mvp-lead-full-content');
 }
@@ -156,6 +203,7 @@ function insertVisitSection(card: HTMLElement, client: Client): void {
   if (!(section instanceof HTMLElement)) return;
   const anchor = host.querySelector('.mvp-lead-history, .mvp-lead-matches, .mvp-lead-full-actions');
   host.insertBefore(section, anchor);
+  bindDeferredForms(section, client);
 }
 
 export function enhanceLeadVisits(): void {

@@ -244,9 +244,25 @@ test('P1.1-A2 historial filtra por clientId y prioriza próxima Coordinada deter
 test('P1.1-A2 visita coordinada sobrevive snapshot local/F5 usando persistencia canónica A1', () => {
   const storage = new MemoryStorage();
   const crm = structuredClone(initialData);
-  crm.visits = [coordinate().visit];
+  const visit = coordinate().visit;
+  crm.visits = [visit];
   writeLocalSnapshot(crm, { markDirty: true, reason: 'P1.1-A2 visita coordinada' }, storage);
-  assert.deepEqual(readLocalSnapshot(storage)?.visits, crm.visits);
+  const restored = readLocalSnapshot(storage);
+  assert.deepEqual(restored?.visits, [{
+    id: visit.id,
+    clientId: visit.clientId,
+    propertyId: visit.propertyId,
+    scheduledAt: visit.scheduledAt,
+    status: visit.status,
+    assignedToId: visit.assignedToId,
+    createdById: visit.createdById,
+    createdAt: visit.createdAt,
+    updatedAt: visit.updatedAt,
+  }]);
+  const restoredVisit = restored?.visits[0];
+  assert.ok(restoredVisit);
+  assert.equal(restoredVisit.interest, undefined);
+  assert.equal(restoredVisit.objection, undefined);
 });
 
 test('P1.1-A2 conserva Agenda/Reminder/B1.4.2 fuera del flujo y Visit sin campos prohibidos', () => {
