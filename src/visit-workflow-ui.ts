@@ -1,3 +1,4 @@
+import { missingQualificationQuestions, visitReadiness } from './lead-qualification.js';
 import { isTerminalClient, localIsoDate } from './lead-pipeline.js';
 import type { Client, Property, Visit, VisitInterest, VisitStatus } from './models.js';
 import { saveData, state } from './store.js';
@@ -73,6 +74,14 @@ function coordinateForm(client: Client): string {
 function coordinateBlock(client: Client): string {
   if (isTerminalClient(client)) {
     return '<p class="pc-visit-terminal-note">Lead cerrado: no se pueden coordinar nuevas visitas.</p>';
+  }
+  const readiness = visitReadiness(client, []);
+  if (readiness.warning) {
+    const nextQuestion = missingQualificationQuestions(client, [])[0];
+    const guidance = nextQuestion
+      ? `Próxima pregunta: ${nextQuestion}`
+      : `Falta confirmar ${readiness.missing[0] || 'la calificación comercial'}.`;
+    return `<p class="pc-visit-terminal-note" data-visit-qualification-gate="1"><strong>No conviene coordinar todavía</strong><br><span>${escapeHtml(guidance)}</span></p>`;
   }
   const options = propertyOptions();
   if (!options) {
