@@ -85,5 +85,5 @@ test('P1.1-A4 Agenda/Reminder/UI permanecen bajo contratos existentes y doble su
   const agenda=readFileSync('src/agenda.ts','utf8'), workflow=readFileSync('src/offer-workflow.ts','utf8'), ui=readFileSync('src/offer-workflow-ui.ts','utf8'), css=readFileSync('src/offer-workflow.css','utf8'), index=readFileSync('index.html','utf8');
   assert.match(agenda,/nextFollowUp/); assert.doesNotMatch(agenda,/\boffers\b/); assert.doesNotMatch(`${workflow}\n${ui}`,/state\.crm\.reminders|Reminder|createReminder/i);
   assert.match(ui,/\.mvp-lead-full-content/); assert.match(ui,/Ofertas \/ Negociación/); assert.match(ui,/Registrar oferta/); assert.match(ui,/Registrar contraoferta/); assert.match(ui,/form\.dataset\.submitting === 'true'/); assert.match(ui,/button\.disabled = busy/);
-  assert.match(css,/min-height:\s*44px/); assert.match(css,/@media \(max-width:720px\)/); assert.match(index,/offer-workflow\.css\?v=20260824-1/); assert.match(index,/offer-workflow-ui\.js\?v=20260824-1/); assert.doesNotMatch(index,/data-module=["']ofertas["']/i);
+  assert.match(css,/min-height:\s*44px/); assert.match(css,/@media \(max-width:720px\)/); assert.match(index,/offer-workflow\.css\?v=20260824-3/); assert.match(index,/offer-workflow-ui\.js\?v=20260824-1/); assert.doesNotMatch(index,/data-module=["']ofertas["']/i);
 });
