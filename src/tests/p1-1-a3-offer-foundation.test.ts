@@ -268,7 +268,7 @@ test('P1.1-A3 comparación remota incluye offers y Agenda/Reminder permanecen aj
   const compatible = readFileSync('src/cloud-api-compatible.ts', 'utf8');
   const agenda = readFileSync('src/agenda.ts', 'utf8');
   const models = readFileSync('src/models.ts', 'utf8');
-  assert.match(compatible, /\['clients', 'properties', 'visits', 'offers', 'contacts', 'reminders', 'fichas', 'conversations'\]/);
+  assert.match(compatible, /\['clients', 'properties', 'visits', 'offers', 'reservations', 'contacts', 'reminders', 'fichas', 'conversations'\]/);
   assert.doesNotMatch(agenda, /\boffers\b/);
   assert.doesNotMatch(models.match(/export interface Reminder \{([\s\S]*?)\n\}/)?.[1] ?? '', /Offer|offer/);
 });
