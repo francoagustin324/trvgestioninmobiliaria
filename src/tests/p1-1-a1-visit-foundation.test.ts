@@ -271,7 +271,7 @@ test('P1.1-A1 agrega visits a la comparación remota y Agenda permanece ajena a 
   const agenda = readFileSync('src/agenda.ts', 'utf8');
   assert.match(
     compatible,
-    /\['clients', 'properties', 'visits', 'offers', 'contacts', 'reminders', 'fichas', 'conversations'\]/,
+    /\['clients', 'properties', 'visits', 'offers', 'reservations', 'contacts', 'reminders', 'fichas', 'conversations'\]/,
   );
   assert.doesNotMatch(agenda, /\bvisits\b/);
 });

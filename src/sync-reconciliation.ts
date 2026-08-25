@@ -7,7 +7,7 @@ import {
 } from './sync-safety.js';
 
 export interface ReconciliationDifference {
-  key: keyof Pick<CrmData, 'clients' | 'properties' | 'visits' | 'offers' | 'contacts' | 'reminders' | 'fichas' | 'conversations' | 'activityLog'>;
+  key: keyof Pick<CrmData, 'clients' | 'properties' | 'visits' | 'offers' | 'reservations' | 'contacts' | 'reminders' | 'fichas' | 'conversations' | 'activityLog'>;
   label: string;
   localOnly: string[];
   cloudOnly: string[];
@@ -35,6 +35,7 @@ const COLLECTIONS: Array<{
   { key: 'properties', label: 'propiedades' },
   { key: 'visits', label: 'visitas' },
   { key: 'offers', label: 'ofertas' },
+  { key: 'reservations', label: 'reservas' },
   { key: 'contacts', label: 'contactos' },
   { key: 'reminders', label: 'seguimientos' },
   { key: 'fichas', label: 'fichas' },

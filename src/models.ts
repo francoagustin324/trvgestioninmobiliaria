@@ -28,6 +28,7 @@ export type VisitInterest = 'Alto' | 'Medio' | 'Bajo';
 export type OfferOrigin = 'Cliente' | 'Propietario';
 export type OfferStatus = 'Pendiente' | 'Aceptada' | 'Rechazada' | 'Contraofertada' | 'Retirada';
 export type OfferCurrency = 'USD' | 'ARS';
+export type ReservationStatus = 'Activa' | 'Cancelada' | 'Concretada';
 
 export interface OrganizationSettings {
   id: string;
@@ -126,6 +127,24 @@ export interface Offer {
   updatedAt: string;
 }
 
+export interface Reservation {
+  id: number;
+  clientId: number;
+  propertyId: number;
+  offerId?: number;
+  amount: number;
+  currency: OfferCurrency;
+  paymentMethod?: string;
+  conditions?: string;
+  reservedAt: string;
+  expiresAt?: string;
+  status: ReservationStatus;
+  assignedToId: number;
+  createdById: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface Reminder {
   id: number; date: string; title: string; related: string; priority: string;
   assignedToId?: number; createdById?: number;
@@ -191,6 +210,7 @@ export interface CrmData {
   properties: Property[];
   visits: Visit[];
   offers: Offer[];
+  reservations: Reservation[];
   contacts: CommercialContact[];
   reminders: Reminder[];
   fichas: Ficha[];
@@ -283,6 +303,7 @@ export const initialData: CrmData = {
   }],
   visits: [],
   offers: [],
+  reservations: [],
   reminders: [{
     id: 1, date: '2026-07-13', title: 'Llamar a Lucía', related: 'Búsqueda Nueva Córdoba', priority: 'Alta',
     assignedToId: 1, createdById: 1,
