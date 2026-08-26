@@ -235,7 +235,7 @@ export function activateStorageForCurrentSession(): void {
 }
 
 export function setActiveMemberId(memberId: number): void {
-  const member = state.crm.teamMembers.find((item) => item.id === memberId && member.status !== 'Suspendido');
+  const member = state.crm.teamMembers.find((item) => item.id === memberId && item.status !== 'Suspendido');
   if (!member) return;
   state.activeMemberId = member.id;
   localStorage.setItem(TEAM_VIEW_KEY, String(member.id));
