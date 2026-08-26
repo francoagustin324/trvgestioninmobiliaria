@@ -54,6 +54,6 @@ test('P1.1-A6 historial newest-first y persistencia local/cloud conservan Reserv
 
 test('P1.1-A6 UI/arquitectura: sección, CTA, estados, cache-bust y ausencia de sistemas paralelos',()=>{
   const workflow=readFileSync('src/reservation-workflow.ts','utf8'),ui=readFileSync('src/reservation-workflow-ui.ts','utf8'),css=readFileSync('src/reservation-workflow.css','utf8'),index=readFileSync('index.html','utf8'),agenda=readFileSync('src/agenda.ts','utf8');
-  assert.match(ui,/Reservas/);assert.match(ui,/Registrar reserva/);assert.match(ui,/Oferta vinculada \(opcional\)/);assert.match(ui,/Cancelada/);assert.match(ui,/Concretada/);assert.match(ui,/form\.dataset\.submitting/);assert.match(css,/@media \(max-width:720px\)/);assert.match(css,/min-height:48px/);assert.match(index,/reservation-workflow\.css\?v=20260825-1/);assert.match(index,/reservation-workflow-ui\.js\?v=20260825-1/);
+  assert.match(ui,/Reservas/);assert.match(ui,/Registrar reserva/);assert.match(ui,/Oferta vinculada \(opcional\)/);assert.match(ui,/Cancelada/);assert.match(ui,/Concretada/);assert.match(ui,/form\.dataset\.submitting/);assert.match(css,/@media \(max-width:720px\)/);assert.match(css,/min-height:48px/);assert.match(index,/reservation-workflow\.css\?v=20260826-1/);assert.match(index,/reservation-workflow-ui\.js\?v=20260826-1/);
   assert.doesNotMatch(`${workflow}\n${ui}`,/state\.crm\.reminders|createReminder|Commission|Offer\.reservationId/i);assert.doesNotMatch(agenda,/reservations/);assert.doesNotMatch(index,/data-module=["']reservas/i);
 });
