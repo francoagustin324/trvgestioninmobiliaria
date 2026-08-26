@@ -42,6 +42,12 @@ export function normalizeRevision(value: unknown): number {
   return Number.isSafeInteger(candidate) && candidate >= 0 ? candidate : 0;
 }
 
+export function nextRevision(value: unknown): number {
+  const current = normalizeRevision(value);
+  if (current >= Number.MAX_SAFE_INTEGER) throw new Error('La revisión del registro alcanzó el máximo seguro.');
+  return current + 1;
+}
+
 export function normalizeOperationId(value: unknown): string | undefined {
   return canonicalUuid(value);
 }
