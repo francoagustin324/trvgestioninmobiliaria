@@ -22,6 +22,7 @@ const SYNC_COLLECTIONS: SyncCollectionKey[] = [
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const legacyIdentityBaseline = new Set<string>();
+let legacyBaselineReady = false;
 
 function records(crm: CrmData, collection: SyncCollectionKey): SyncRecord[] {
   return crm[collection] as unknown as SyncRecord[];
@@ -106,11 +107,12 @@ export function captureLegacyIdentityBaseline(crm: CrmData): void {
       if (!record.uid) legacyIdentityBaseline.add(legacyKey(collection, record.id));
     }
   }
+  legacyBaselineReady = true;
 }
 
 function ensureCanonicalIdentity(record: SyncRecord, collection: SyncCollectionKey): void {
   normalizeRecord(record);
-  if (record.uid) return;
+  if (record.uid || !legacyBaselineReady) return;
   if (legacyIdentityBaseline.has(legacyKey(collection, record.id))) return;
   record.uid = newCanonicalUid();
   record.revision = 0;
