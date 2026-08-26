@@ -17,6 +17,11 @@ import {
   restoreLatestBackup,
   writeLocalSnapshot,
 } from './sync-safety.js';
+import {
+  captureLegacyIdentityBaseline,
+  canonicalUuid,
+  normalizedSyncMetadata,
+} from './sync-identity.js';
 import { roleCanManageTeam } from './team-policy.js';
 
 const TEAM_VIEW_KEY = 'propcontrol-active-team-member-v1';
@@ -47,8 +52,10 @@ function normalizedConversation(value: Partial<WhatsAppConversation>, fallbackId
     ? value.messages.map((message, index) => normalizedMessage(message, index + 1))
     : [];
   return {
+    ...normalizedSyncMetadata(value),
     id: Number.isFinite(value.id) ? Number(value.id) : fallbackId,
     clientId: Number(value.clientId ?? 0),
+    clientUid: canonicalUuid(value.clientUid),
     phone: String(value.phone ?? ''),
     mode: value.mode === 'Humano' || value.mode === 'Pausada' ? value.mode : 'IA supervisada',
     unread: Number.isFinite(value.unread) ? Number(value.unread) : 0,
@@ -95,11 +102,13 @@ function normalizedActivityLog(value: unknown): ActivityEntry[] {
   if (!Array.isArray(value)) return [];
   return value.filter((item): item is ActivityEntry => Boolean(item && typeof item === 'object'))
     .map((item, index) => ({
+      ...normalizedSyncMetadata(item),
       id: Number.isFinite(item.id) ? Number(item.id) : index + 1,
       actorId: Number(item.actorId || 1),
       action: String(item.action || 'Actualización'),
       entityType: item.entityType || 'Equipo',
       entityId: Number.isFinite(item.entityId) ? Number(item.entityId) : undefined,
+      entityUid: canonicalUuid(item.entityUid),
       detail: String(item.detail || ''),
       createdAt: String(item.createdAt || new Date().toISOString()),
     }));
@@ -114,41 +123,59 @@ function normalizedData(value: Partial<CrmData>): CrmData {
     activityLog: normalizedActivityLog(value.activityLog),
     clients: Array.isArray(value.clients) ? value.clients.map((client) => ({
       ...client,
+      ...normalizedSyncMetadata(client),
       assignedToId: Number(client.assignedToId ?? ownerId),
       createdById: Number(client.createdById ?? ownerId),
     })) : [],
     properties: Array.isArray(value.properties) ? value.properties.map((property) => ({
       ...property,
+      ...normalizedSyncMetadata(property),
+      sourceContactUid: canonicalUuid(property.sourceContactUid),
       assignedToId: Number(property.assignedToId ?? ownerId),
       createdById: Number(property.createdById ?? ownerId),
     })) : [],
     visits: Array.isArray(value.visits) ? value.visits.map((visit) => ({
       ...visit,
+      ...normalizedSyncMetadata(visit),
+      clientUid: canonicalUuid(visit.clientUid),
+      propertyUid: canonicalUuid(visit.propertyUid),
       assignedToId: Number(visit.assignedToId ?? ownerId),
       createdById: Number(visit.createdById ?? ownerId),
     })) : [],
     offers: Array.isArray(value.offers) ? value.offers.map((offer) => ({
       ...offer,
+      ...normalizedSyncMetadata(offer),
+      clientUid: canonicalUuid(offer.clientUid),
+      propertyUid: canonicalUuid(offer.propertyUid),
+      parentOfferUid: canonicalUuid(offer.parentOfferUid),
       assignedToId: Number(offer.assignedToId ?? ownerId),
       createdById: Number(offer.createdById ?? ownerId),
     })) : [],
     reservations: Array.isArray(value.reservations) ? value.reservations.map((reservation) => ({
       ...reservation,
+      ...normalizedSyncMetadata(reservation),
+      clientUid: canonicalUuid(reservation.clientUid),
+      propertyUid: canonicalUuid(reservation.propertyUid),
+      offerUid: canonicalUuid(reservation.offerUid),
       assignedToId: Number(reservation.assignedToId ?? ownerId),
       createdById: Number(reservation.createdById ?? ownerId),
     })) : [],
     contacts: Array.isArray(value.contacts) ? value.contacts.map((contact) => ({
       ...contact,
+      ...normalizedSyncMetadata(contact),
       assignedToId: Number(contact.assignedToId ?? contact.createdById ?? ownerId),
       createdById: Number(contact.createdById ?? ownerId),
     })) : [],
     reminders: Array.isArray(value.reminders) ? value.reminders.map((reminder) => ({
       ...reminder,
+      ...normalizedSyncMetadata(reminder),
       assignedToId: Number(reminder.assignedToId ?? ownerId),
       createdById: Number(reminder.createdById ?? ownerId),
     })) : [],
     fichas: Array.isArray(value.fichas) ? value.fichas.map((ficha) => ({
       ...ficha,
+      ...normalizedSyncMetadata(ficha),
+      sourcePropertyUid: canonicalUuid(ficha.sourcePropertyUid),
       assignedToId: Number(ficha.assignedToId ?? ficha.createdById ?? ownerId),
       createdById: Number(ficha.createdById ?? ownerId),
     })) : [],
@@ -161,7 +188,9 @@ function normalizedData(value: Partial<CrmData>): CrmData {
 
 function loadData(): CrmData {
   const local = readLocalSnapshot();
-  return local ? normalizedData(local) : structuredClone(initialData);
+  const crm = local ? normalizedData(local) : normalizedData(structuredClone(initialData));
+  captureLegacyIdentityBaseline(crm);
+  return crm;
 }
 
 function loadActiveMemberId(crm: CrmData): number {
@@ -206,7 +235,7 @@ export function activateStorageForCurrentSession(): void {
 }
 
 export function setActiveMemberId(memberId: number): void {
-  const member = state.crm.teamMembers.find((item) => item.id === memberId && item.status !== 'Suspendido');
+  const member = state.crm.teamMembers.find((item) => item.id === memberId && member.status !== 'Suspendido');
   if (!member) return;
   state.activeMemberId = member.id;
   localStorage.setItem(TEAM_VIEW_KEY, String(member.id));
@@ -219,6 +248,7 @@ export function setActiveMemberId(memberId: number): void {
 
 export function replaceData(data: CrmData, syncCloud = false): void {
   state.crm = normalizedData(data);
+  captureLegacyIdentityBaseline(state.crm);
   resetTransientState();
   writeLocalSnapshot(state.crm, {
     markDirty: syncCloud,
@@ -248,6 +278,7 @@ export function restoreLatestLocalBackup(): boolean {
   const restored = restoreLatestBackup();
   if (!restored) return false;
   state.crm = normalizedData(restored);
+  captureLegacyIdentityBaseline(state.crm);
   resetTransientState();
   writeLocalSnapshot(state.crm, { markDirty: true, reason: 'Restauración confirmada', backup: false });
   queueCloudSave(state.crm);
