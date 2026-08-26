@@ -9,12 +9,18 @@ import type {
   Property,
   Reminder,
   Reservation,
+  SyncRecordMetadata,
   TeamMember,
   TeamMemberStatus,
   TeamRole,
   Visit,
   WhatsAppConversation,
 } from './models.js';
+import {
+  cloudIdentityForRecord,
+  normalizedSyncMetadata,
+  prepareCrmSyncContracts,
+} from './sync-identity.js';
 
 export type CloudEntityType = 'organization' | 'client' | 'property' | 'visit' | 'offer' | 'reservation' | 'commercial_contact' | 'reminder' | 'ficha' | 'conversation' | 'activity';
 
@@ -173,33 +179,38 @@ function visibleToCurrentMember<T extends { assignedToId?: number }>(
   return items.filter((item) => item.assignedToId === context.currentMemberId);
 }
 
+function identity(item: SyncRecordMetadata & { id: number }): string | number {
+  return cloudIdentityForRecord(item);
+}
+
 export function crmToCloudRecords(
   crm: CrmData,
   context: CloudMembershipContext,
   userId: string,
 ): CloudRecordRow[] {
   const reconciled = reconcileCrmAssignments(crm, context);
+  prepareCrmSyncContracts(reconciled);
   const org = context.organizationId;
   const member = context.currentMemberId;
   const elevated = context.currentRole !== 'Corredor';
   return [
     ...(elevated ? [row(org, 'organization', 'settings', null, reconciled.organization, userId)] : []),
-    ...visibleToCurrentMember(reconciled.clients, context).map((item) => row(org, 'client', item.id, assignedId(item, member), item, userId)),
-    ...visibleToCurrentMember(reconciled.properties, context).map((item) => row(org, 'property', item.id, assignedId(item, member), item, userId)),
-    ...visibleToCurrentMember(reconciled.visits, context).map((item) => row(org, 'visit', item.id, assignedId(item, member), item, userId)),
-    ...visibleToCurrentMember(reconciled.offers, context).map((item) => row(org, 'offer', item.id, assignedId(item, member), item, userId)),
-    ...visibleToCurrentMember(reconciled.reservations, context).map((item) => row(org, 'reservation', item.id, assignedId(item, member), item, userId)),
-    ...visibleToCurrentMember(reconciled.contacts, context).map((item) => row(org, 'commercial_contact', item.id, assignedId(item, member), item, userId)),
-    ...visibleToCurrentMember(reconciled.reminders, context).map((item) => row(org, 'reminder', item.id, assignedId(item, member), item, userId)),
-    ...visibleToCurrentMember(reconciled.fichas, context).map((item) => row(org, 'ficha', item.id, assignedId(item, member), item, userId)),
-    ...visibleToCurrentMember(reconciled.conversations, context).map((item) => row(org, 'conversation', item.id, assignedId(item, member), item, userId)),
+    ...visibleToCurrentMember(reconciled.clients, context).map((item) => row(org, 'client', identity(item), assignedId(item, member), item, userId)),
+    ...visibleToCurrentMember(reconciled.properties, context).map((item) => row(org, 'property', identity(item), assignedId(item, member), item, userId)),
+    ...visibleToCurrentMember(reconciled.visits, context).map((item) => row(org, 'visit', identity(item), assignedId(item, member), item, userId)),
+    ...visibleToCurrentMember(reconciled.offers, context).map((item) => row(org, 'offer', identity(item), assignedId(item, member), item, userId)),
+    ...visibleToCurrentMember(reconciled.reservations, context).map((item) => row(org, 'reservation', identity(item), assignedId(item, member), item, userId)),
+    ...visibleToCurrentMember(reconciled.contacts, context).map((item) => row(org, 'commercial_contact', identity(item), assignedId(item, member), item, userId)),
+    ...visibleToCurrentMember(reconciled.reminders, context).map((item) => row(org, 'reminder', identity(item), assignedId(item, member), item, userId)),
+    ...visibleToCurrentMember(reconciled.fichas, context).map((item) => row(org, 'ficha', identity(item), assignedId(item, member), item, userId)),
+    ...visibleToCurrentMember(reconciled.conversations, context).map((item) => row(org, 'conversation', identity(item), assignedId(item, member), item, userId)),
     ...reconciled.activityLog
       .filter((item) => elevated || item.actorId === member)
-      .map((item) => row(org, 'activity', item.id, Number(item.actorId || member), item, userId)),
+      .map((item) => row(org, 'activity', identity(item), Number(item.actorId || member), item, userId)),
   ];
 }
 
-function recordsOf<T>(rows: CloudRecordRow[], entityType: CloudEntityType): T[] {
+function recordsOf<T extends SyncRecordMetadata & { id: number }>(rows: CloudRecordRow[], entityType: CloudEntityType): T[] {
   return rows
     .filter((item) => (
       item.entity_type === entityType
@@ -207,8 +218,12 @@ function recordsOf<T>(rows: CloudRecordRow[], entityType: CloudEntityType): T[] 
       && typeof item.payload === 'object'
       && !isSupervisedRecommendationTelemetryPayload(item.payload)
     ))
-    .map((item) => item.payload as T)
-    .sort((left, right) => Number((left as { id?: number }).id ?? 0) - Number((right as { id?: number }).id ?? 0));
+    .map((item) => {
+      const payload = structuredClone(item.payload) as T;
+      Object.assign(payload, normalizedSyncMetadata(payload));
+      return payload;
+    })
+    .sort((left, right) => Number(left.id ?? 0) - Number(right.id ?? 0));
 }
 
 function organizationFromRows(rows: CloudRecordRow[], fallback: OrganizationSettings, organizationId: string): OrganizationSettings {
