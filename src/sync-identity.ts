@@ -21,15 +21,13 @@ const SYNC_COLLECTIONS: SyncCollectionKey[] = [
 ];
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-const legacyIdentityBaseline = new Set<string>();
-let legacyBaselineReady = false;
 
 function records(crm: CrmData, collection: SyncCollectionKey): SyncRecord[] {
   return crm[collection] as unknown as SyncRecord[];
 }
 
-function legacyKey(collection: SyncCollectionKey, id: number): string {
-  return `${collection}:${id}`;
+function hasOwn(value: object, key: PropertyKey): boolean {
+  return Object.prototype.hasOwnProperty.call(value, key);
 }
 
 export function canonicalUuid(value: unknown): string | undefined {
@@ -75,57 +73,50 @@ export function newOperationId(): string {
 }
 
 export function newSyncRecordMetadata(operationId?: string): Required<Pick<SyncRecordMetadata, 'uid' | 'revision'>> & Pick<SyncRecordMetadata, 'operationId'> {
+  const normalizedOperationId = normalizeOperationId(operationId);
   return {
     uid: newCanonicalUid(),
     revision: 0,
-    operationId: normalizeOperationId(operationId),
+    ...(normalizedOperationId ? { operationId: normalizedOperationId } : {}),
   };
-}
-
-export function normalizedSyncMetadata(value: SyncRecordMetadata | undefined): SyncRecordMetadata {
-  return {
-    uid: canonicalUuid(value?.uid),
-    revision: normalizeRevision(value?.revision),
-    operationId: normalizeOperationId(value?.operationId),
-  };
-}
-
-function normalizeRecord(record: SyncRecord): void {
-  const uid = canonicalUuid(record.uid);
-  const operationId = normalizeOperationId(record.operationId);
-  if (uid) record.uid = uid;
-  else delete record.uid;
-  record.revision = normalizeRevision(record.revision);
-  if (operationId) record.operationId = operationId;
-  else delete record.operationId;
 }
 
 /**
- * Registra qué identidades numéricas pertenecían al snapshot histórico cargado.
- * Esas filas conservan su entity_key legacy hasta una migración explícita futura.
- * Los objetos creados después de este baseline reciben UUID antes de persistirse.
+ * Normaliza exclusivamente metadata que ya está materializada en el objeto.
+ * La ausencia de uid/revision/operationId se conserva: un round-trip legacy no
+ * crea identidad ni altera el shape histórico.
  */
-export function captureLegacyIdentityBaseline(crm: CrmData): void {
-  legacyIdentityBaseline.clear();
-  for (const collection of SYNC_COLLECTIONS) {
-    for (const record of records(crm, collection)) {
-      normalizeRecord(record);
-      if (!record.uid) legacyIdentityBaseline.add(legacyKey(collection, record.id));
-    }
-  }
-  legacyBaselineReady = true;
+export function normalizedSyncMetadata(value: SyncRecordMetadata | undefined): SyncRecordMetadata {
+  if (!value) return {};
+  const normalized: SyncRecordMetadata = {};
+  if (hasOwn(value, 'uid')) normalized.uid = canonicalUuid(value.uid);
+  if (hasOwn(value, 'revision')) normalized.revision = normalizeRevision(value.revision);
+  if (hasOwn(value, 'operationId')) normalized.operationId = normalizeOperationId(value.operationId);
+  return normalized;
 }
 
-function ensureCanonicalIdentity(record: SyncRecord, collection: SyncCollectionKey): void {
-  normalizeRecord(record);
-  if (record.uid || !legacyBaselineReady) return;
-  if (legacyIdentityBaseline.has(legacyKey(collection, record.id))) return;
-  record.uid = newCanonicalUid();
-  record.revision = 0;
+function normalizeRecord(record: SyncRecord): void {
+  if (hasOwn(record, 'uid')) record.uid = canonicalUuid(record.uid);
+  if (hasOwn(record, 'revision')) record.revision = normalizeRevision(record.revision);
+  if (hasOwn(record, 'operationId')) record.operationId = normalizeOperationId(record.operationId);
 }
 
 function relationUid(current: string | undefined, target: SyncRecordMetadata | undefined): string | undefined {
   return canonicalUuid(target?.uid) ?? canonicalUuid(current);
+}
+
+function assignRelationUid(
+  record: object,
+  key: string,
+  current: string | undefined,
+  target: SyncRecordMetadata | undefined,
+): void {
+  const uid = relationUid(current, target);
+  if (uid) {
+    (record as Record<string, unknown>)[key] = uid;
+    return;
+  }
+  if (hasOwn(record, key)) (record as Record<string, unknown>)[key] = undefined;
 }
 
 function linkCanonicalRelations(crm: CrmData): void {
@@ -137,27 +128,27 @@ function linkCanonicalRelations(crm: CrmData): void {
   const conversations = new Map(crm.conversations.map((item) => [item.id, item]));
 
   crm.properties.forEach((item) => {
-    if (item.sourceContactId !== undefined) item.sourceContactUid = relationUid(item.sourceContactUid, contacts.get(item.sourceContactId));
+    if (item.sourceContactId !== undefined) assignRelationUid(item, 'sourceContactUid', item.sourceContactUid, contacts.get(item.sourceContactId));
   });
   crm.visits.forEach((item) => {
-    item.clientUid = relationUid(item.clientUid, clients.get(item.clientId));
-    item.propertyUid = relationUid(item.propertyUid, properties.get(item.propertyId));
+    assignRelationUid(item, 'clientUid', item.clientUid, clients.get(item.clientId));
+    assignRelationUid(item, 'propertyUid', item.propertyUid, properties.get(item.propertyId));
   });
   crm.offers.forEach((item) => {
-    item.clientUid = relationUid(item.clientUid, clients.get(item.clientId));
-    item.propertyUid = relationUid(item.propertyUid, properties.get(item.propertyId));
-    if (item.parentOfferId !== undefined) item.parentOfferUid = relationUid(item.parentOfferUid, offers.get(item.parentOfferId));
+    assignRelationUid(item, 'clientUid', item.clientUid, clients.get(item.clientId));
+    assignRelationUid(item, 'propertyUid', item.propertyUid, properties.get(item.propertyId));
+    if (item.parentOfferId !== undefined) assignRelationUid(item, 'parentOfferUid', item.parentOfferUid, offers.get(item.parentOfferId));
   });
   crm.reservations.forEach((item) => {
-    item.clientUid = relationUid(item.clientUid, clients.get(item.clientId));
-    item.propertyUid = relationUid(item.propertyUid, properties.get(item.propertyId));
-    if (item.offerId !== undefined) item.offerUid = relationUid(item.offerUid, offers.get(item.offerId));
+    assignRelationUid(item, 'clientUid', item.clientUid, clients.get(item.clientId));
+    assignRelationUid(item, 'propertyUid', item.propertyUid, properties.get(item.propertyId));
+    if (item.offerId !== undefined) assignRelationUid(item, 'offerUid', item.offerUid, offers.get(item.offerId));
   });
   crm.fichas.forEach((item) => {
-    if (item.sourcePropertyId !== undefined) item.sourcePropertyUid = relationUid(item.sourcePropertyUid, properties.get(item.sourcePropertyId));
+    if (item.sourcePropertyId !== undefined) assignRelationUid(item, 'sourcePropertyUid', item.sourcePropertyUid, properties.get(item.sourcePropertyId));
   });
   crm.conversations.forEach((item) => {
-    item.clientUid = relationUid(item.clientUid, clients.get(item.clientId));
+    assignRelationUid(item, 'clientUid', item.clientUid, clients.get(item.clientId));
   });
   crm.activityLog.forEach((item: ActivityEntry) => {
     if (item.entityId === undefined) return;
@@ -166,13 +157,18 @@ function linkCanonicalRelations(crm: CrmData): void {
         : item.entityType === 'Conversación' ? conversations.get(item.entityId)
           : item.entityType === 'Tarea' ? reminders.get(item.entityId)
             : undefined;
-    item.entityUid = relationUid(item.entityUid, target);
+    assignRelationUid(item, 'entityUid', item.entityUid, target);
   });
 }
 
+/**
+ * Prepara contratos de sync sin inferir historia de identidad.
+ * Nunca genera UID: una entidad nueva debe llegar ya estampada desde su boundary
+ * explícito de creación. Un registro legacy id-only conserva identidad numérica.
+ */
 export function prepareCrmSyncContracts(crm: CrmData): CrmData {
   for (const collection of SYNC_COLLECTIONS) {
-    records(crm, collection).forEach((record) => ensureCanonicalIdentity(record, collection));
+    records(crm, collection).forEach(normalizeRecord);
   }
   linkCanonicalRelations(crm);
   return crm;

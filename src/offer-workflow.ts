@@ -17,6 +17,7 @@ import type {
   Property,
   TeamRole,
 } from './models.js';
+import { newSyncRecordMetadata } from './sync-identity.js';
 import { assignmentVisible } from './team-policy.js';
 
 export interface OfferActor {
@@ -178,6 +179,7 @@ function addDerivedActivity(
   now: Date,
 ): void {
   const entry: ActivityEntry = {
+    ...newSyncRecordMetadata(),
     id: nextActivityId(crm.activityLog),
     actorId: actor.id,
     action,
@@ -231,6 +233,7 @@ export function registerOffer(crm: CrmData, actor: OfferActor, input: RegisterOf
 
   const next = structuredClone(crm);
   const offer: Offer = {
+    ...newSyncRecordMetadata(),
     id: nextOfferId(next.offers),
     clientId: client.id,
     propertyId: property.id,
@@ -272,6 +275,7 @@ export function registerCounterOffer(crm: CrmData, actor: OfferActor, input: Reg
   if (parentIndex < 0) throw new Error('La oferta ya no está disponible.');
   next.offers[parentIndex] = { ...next.offers[parentIndex]!, status: 'Contraofertada', updatedAt: now.toISOString() };
   const child: Offer = {
+    ...newSyncRecordMetadata(),
     id: nextOfferId(next.offers),
     clientId: client.id,
     propertyId: property.id,

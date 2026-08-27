@@ -18,13 +18,16 @@ import {
   writeLocalSnapshot,
 } from './sync-safety.js';
 import {
-  captureLegacyIdentityBaseline,
   canonicalUuid,
   normalizedSyncMetadata,
 } from './sync-identity.js';
 import { roleCanManageTeam } from './team-policy.js';
 
 const TEAM_VIEW_KEY = 'propcontrol-active-team-member-v1';
+
+function hasOwn(value: object, key: PropertyKey): boolean {
+  return Object.prototype.hasOwnProperty.call(value, key);
+}
 
 function normalizedMessage(value: Partial<ConversationMessage>, fallbackId: number): ConversationMessage {
   const kind = value.kind === 'audio' ? 'audio' : 'text';
@@ -55,7 +58,7 @@ function normalizedConversation(value: Partial<WhatsAppConversation>, fallbackId
     ...normalizedSyncMetadata(value),
     id: Number.isFinite(value.id) ? Number(value.id) : fallbackId,
     clientId: Number(value.clientId ?? 0),
-    clientUid: canonicalUuid(value.clientUid),
+    ...(hasOwn(value, 'clientUid') ? { clientUid: canonicalUuid(value.clientUid) } : {}),
     phone: String(value.phone ?? ''),
     mode: value.mode === 'Humano' || value.mode === 'Pausada' ? value.mode : 'IA supervisada',
     unread: Number.isFinite(value.unread) ? Number(value.unread) : 0,
@@ -108,7 +111,7 @@ function normalizedActivityLog(value: unknown): ActivityEntry[] {
       action: String(item.action || 'Actualización'),
       entityType: item.entityType || 'Equipo',
       entityId: Number.isFinite(item.entityId) ? Number(item.entityId) : undefined,
-      entityUid: canonicalUuid(item.entityUid),
+      ...(hasOwn(item, 'entityUid') ? { entityUid: canonicalUuid(item.entityUid) } : {}),
       detail: String(item.detail || ''),
       createdAt: String(item.createdAt || new Date().toISOString()),
     }));
@@ -130,33 +133,24 @@ function normalizedData(value: Partial<CrmData>): CrmData {
     properties: Array.isArray(value.properties) ? value.properties.map((property) => ({
       ...property,
       ...normalizedSyncMetadata(property),
-      sourceContactUid: canonicalUuid(property.sourceContactUid),
       assignedToId: Number(property.assignedToId ?? ownerId),
       createdById: Number(property.createdById ?? ownerId),
     })) : [],
     visits: Array.isArray(value.visits) ? value.visits.map((visit) => ({
       ...visit,
       ...normalizedSyncMetadata(visit),
-      clientUid: canonicalUuid(visit.clientUid),
-      propertyUid: canonicalUuid(visit.propertyUid),
       assignedToId: Number(visit.assignedToId ?? ownerId),
       createdById: Number(visit.createdById ?? ownerId),
     })) : [],
     offers: Array.isArray(value.offers) ? value.offers.map((offer) => ({
       ...offer,
       ...normalizedSyncMetadata(offer),
-      clientUid: canonicalUuid(offer.clientUid),
-      propertyUid: canonicalUuid(offer.propertyUid),
-      parentOfferUid: canonicalUuid(offer.parentOfferUid),
       assignedToId: Number(offer.assignedToId ?? ownerId),
       createdById: Number(offer.createdById ?? ownerId),
     })) : [],
     reservations: Array.isArray(value.reservations) ? value.reservations.map((reservation) => ({
       ...reservation,
       ...normalizedSyncMetadata(reservation),
-      clientUid: canonicalUuid(reservation.clientUid),
-      propertyUid: canonicalUuid(reservation.propertyUid),
-      offerUid: canonicalUuid(reservation.offerUid),
       assignedToId: Number(reservation.assignedToId ?? ownerId),
       createdById: Number(reservation.createdById ?? ownerId),
     })) : [],
@@ -175,7 +169,6 @@ function normalizedData(value: Partial<CrmData>): CrmData {
     fichas: Array.isArray(value.fichas) ? value.fichas.map((ficha) => ({
       ...ficha,
       ...normalizedSyncMetadata(ficha),
-      sourcePropertyUid: canonicalUuid(ficha.sourcePropertyUid),
       assignedToId: Number(ficha.assignedToId ?? ficha.createdById ?? ownerId),
       createdById: Number(ficha.createdById ?? ownerId),
     })) : [],
@@ -188,9 +181,7 @@ function normalizedData(value: Partial<CrmData>): CrmData {
 
 function loadData(): CrmData {
   const local = readLocalSnapshot();
-  const crm = local ? normalizedData(local) : normalizedData(structuredClone(initialData));
-  captureLegacyIdentityBaseline(crm);
-  return crm;
+  return local ? normalizedData(local) : normalizedData(structuredClone(initialData));
 }
 
 function loadActiveMemberId(crm: CrmData): number {
@@ -248,7 +239,6 @@ export function setActiveMemberId(memberId: number): void {
 
 export function replaceData(data: CrmData, syncCloud = false): void {
   state.crm = normalizedData(data);
-  captureLegacyIdentityBaseline(state.crm);
   resetTransientState();
   writeLocalSnapshot(state.crm, {
     markDirty: syncCloud,
@@ -278,7 +268,6 @@ export function restoreLatestLocalBackup(): boolean {
   const restored = restoreLatestBackup();
   if (!restored) return false;
   state.crm = normalizedData(restored);
-  captureLegacyIdentityBaseline(state.crm);
   resetTransientState();
   writeLocalSnapshot(state.crm, { markDirty: true, reason: 'Restauración confirmada', backup: false });
   queueCloudSave(state.crm);

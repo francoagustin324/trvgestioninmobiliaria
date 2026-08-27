@@ -11,6 +11,7 @@ import type {
 } from './models.js';
 import { modules } from './models.js';
 import { state } from './store.js';
+import { newSyncRecordMetadata } from './sync-identity.js';
 import {
   activeMembers,
   assignmentVisible,
@@ -122,6 +123,7 @@ export function addActivity(entry: Omit<ActivityEntry, 'id' | 'createdAt' | 'act
   const id = Math.max(0, ...state.crm.activityLog.map((item) => item.id)) + 1;
   state.crm.activityLog.unshift({
     ...entry,
+    ...newSyncRecordMetadata(entry.operationId),
     id,
     actorId: activeMember().id,
     createdAt: new Date().toISOString(),

@@ -9,6 +9,7 @@ import type { CommercialContact, CommercialContactType } from './models.js';
 import { formatPhone, isPlausiblePhone, normalizePhone } from './phone-normalizer.js';
 import { enhancePropertyNetwork } from './property-network-ui.js';
 import { saveData, state } from './store.js';
+import { newSyncRecordMetadata } from './sync-identity.js';
 import { escapeHtml, field, formValues, nextId } from './utils.js';
 
 const contactTypes: CommercialContactType[] = ['Colega / Inmobiliaria', 'Constructor / Desarrollista', 'Propietario'];
@@ -165,6 +166,7 @@ export function renderCommercialNetwork(container: HTMLElement): void {
     }
 
     const contact: CommercialContact = {
+      ...(editing || newSyncRecordMetadata()),
       id: editing?.id ?? nextId(state.crm.contacts),
       type: field(values, 'type') as CommercialContactType,
       name: field(values, 'name'),

@@ -16,6 +16,7 @@ import type {
   VisitInterest,
   VisitStatus,
 } from './models.js';
+import { newSyncRecordMetadata } from './sync-identity.js';
 import { assignmentVisible } from './team-policy.js';
 
 export interface VisitActor {
@@ -171,6 +172,7 @@ export function coordinateVisit(input: CoordinateVisitInput): CoordinateVisitRes
     nextFollowUp: input.localDate.trim(),
   };
   const visit: Visit = {
+    ...newSyncRecordMetadata(),
     id: nextVisitId(input.visits),
     clientId: input.client.id,
     propertyId: input.property.id,

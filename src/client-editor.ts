@@ -1,6 +1,7 @@
 import { applyCommercialStage, normalizeCommercialStage } from './lead-pipeline.js';
 import { Client, Temperature } from './models.js';
 import { normalizePhone } from './phone-normalizer.js';
+import { newSyncRecordMetadata } from './sync-identity.js';
 
 const temperatures: Temperature[] = ['Caliente', 'Tibio', 'Frío'];
 const essentialKeys: Array<keyof Client> = [
@@ -50,6 +51,7 @@ function essentialChanged(current: Client | null | undefined, next: Client): boo
 
 export function clientFromFormValues(id: number, values: Record<string, string>, current?: Client | null): Client {
   const client: Client = {
+    ...(current || newSyncRecordMetadata()),
     id,
     name: clean(values, 'name'),
     phone: normalizePhone(clean(values, 'phone')),

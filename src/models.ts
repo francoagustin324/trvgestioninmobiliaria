@@ -109,7 +109,10 @@ export interface Property extends SyncRecordMetadata {
   assignedToId?: number; createdById?: number;
 }
 
-export interface Visit extends SyncRecordMetadata {
+export interface Visit {
+  uid?: string;
+  revision?: number;
+  operationId?: string;
   id: number;
   clientId: number;
   clientUid?: string;
@@ -125,7 +128,10 @@ export interface Visit extends SyncRecordMetadata {
   updatedAt: string;
 }
 
-export interface Offer extends SyncRecordMetadata {
+export interface Offer {
+  uid?: string;
+  revision?: number;
+  operationId?: string;
   id: number;
   clientId: number;
   clientUid?: string;
@@ -146,7 +152,10 @@ export interface Offer extends SyncRecordMetadata {
   updatedAt: string;
 }
 
-export interface Reservation extends SyncRecordMetadata {
+export interface Reservation {
+  uid?: string;
+  revision?: number;
+  operationId?: string;
   id: number;
   clientId: number;
   clientUid?: string;
