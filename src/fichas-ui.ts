@@ -2,6 +2,7 @@ import { Ficha, FichaMode, Property } from './models.js';
 import { publicFichaHtml, publicLink, publicPayload, whatsappText } from './public-ficha.js';
 import { saveData, state } from './store.js';
 import type { ImportedPropertyData, ImportPropertyResponse } from './shared/import-types.js';
+import { newSyncRecordMetadata } from './sync-identity.js';
 import { copyText, escapeHtml, field, formValues, nextId, safePhotoUrl } from './utils.js';
 
 function propertyToFicha(property: Property): Partial<Ficha> {
@@ -26,6 +27,7 @@ function createFicha(values: Record<string, string>): Ficha {
   const base = selectedProperty ? propertyToFicha(selectedProperty) : {};
   const current = state.editingFichaId ? state.crm.fichas.find((item) => item.id === state.editingFichaId) : undefined;
   return {
+    ...(current || newSyncRecordMetadata()),
     id: state.editingFichaId ?? nextId(state.crm.fichas),
     mode: visibleMode(),
     title: field(values, 'title') || String(base.title || ''),
@@ -198,7 +200,7 @@ export function handleFichaAction(action: string, id: number): void {
   if (!ficha) return;
   if (action === 'view') state.selectedFichaId = id;
   if (action === 'edit') { state.selectedFichaId = id; state.editingFichaId = id; state.fichaMode = ficha.mode === 'external' ? 'external' : 'property'; state.openForms.ficha = true; }
-  if (action === 'duplicate') { const copy = { ...ficha, id: nextId(state.crm.fichas), title: `${ficha.title} (copia)`, createdAt: new Date().toISOString() }; state.crm.fichas.push(copy); state.selectedFichaId = copy.id; saveData(); }
+  if (action === 'duplicate') { const copy = { ...ficha, ...newSyncRecordMetadata(), id: nextId(state.crm.fichas), title: `${ficha.title} (copia)`, createdAt: new Date().toISOString() }; state.crm.fichas.push(copy); state.selectedFichaId = copy.id; saveData(); }
   if (action === 'copy-link') copyText(publicLink(ficha));
   if (action === 'copy-text') copyText(whatsappText(ficha));
   if (action === 'share') window.open(`https://wa.me/?text=${encodeURIComponent(whatsappText(ficha))}`, '_blank', 'noopener');

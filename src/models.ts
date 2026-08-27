@@ -30,6 +30,19 @@ export type OfferStatus = 'Pendiente' | 'Aceptada' | 'Rechazada' | 'Contraoferta
 export type OfferCurrency = 'USD' | 'ARS';
 export type ReservationStatus = 'Activa' | 'Cancelada' | 'Concretada';
 
+/**
+ * Foundation A7-R1. `id:number` permanece como identidad legacy/backward-compatible.
+ * `uid` es la identidad canónica distribuida para registros nuevos.
+ * `revision` comienza en 0 y será usada por optimistic concurrency en R3.
+ * `operationId` identifica una intención comercial cuando el caller la provee;
+ * la idempotencia transaccional end-to-end se implementará recién en R2.
+ */
+export interface SyncRecordMetadata {
+  uid?: string;
+  revision?: number;
+  operationId?: string;
+}
+
 export interface OrganizationSettings {
   id: string;
   name: string;
@@ -49,17 +62,18 @@ export interface TeamMember {
   lastActiveAt?: string;
 }
 
-export interface ActivityEntry {
+export interface ActivityEntry extends SyncRecordMetadata {
   id: number;
   actorId: number;
   action: string;
   entityType: AssignmentEntity | 'Equipo';
   entityId?: number;
+  entityUid?: string;
   detail: string;
   createdAt: string;
 }
 
-export interface Client {
+export interface Client extends SyncRecordMetadata {
   id: number; name: string; phone: string; email?: string; interest: string; status: string;
   temperature: Temperature; pipeline: CommercialStage | string; lastContact?: string; nextFollowUp?: string;
   nextAction?: string; budget?: string; paymentMethod?: string; purchaseTimeframe?: string; purpose?: string;
@@ -71,7 +85,7 @@ export interface Client {
   assignedToId?: number; createdById?: number;
 }
 
-export interface CommercialContact {
+export interface CommercialContact extends SyncRecordMetadata {
   id: number;
   type: CommercialContactType;
   name: string;
@@ -87,11 +101,11 @@ export interface CommercialContact {
   createdById?: number;
 }
 
-export interface Property {
+export interface Property extends SyncRecordMetadata {
   id: number; title: string; address: string; type: string; operation: string;
   price: number; owner: string; status: string; bedrooms?: number; bathrooms?: number;
   paymentMethod?: string; features?: string; notes?: string;
-  sourceContactId?: number; sharedAt?: string; sourceLink?: string;
+  sourceContactId?: number; sourceContactUid?: string; sharedAt?: string; sourceLink?: string;
   assignedToId?: number; createdById?: number;
 }
 
@@ -108,6 +122,11 @@ export interface Visit {
   createdAt: string;
   updatedAt: string;
 }
+
+export type SyncedVisit = Visit & SyncRecordMetadata & {
+  clientUid?: string;
+  propertyUid?: string;
+};
 
 export interface Offer {
   id: number;
@@ -127,6 +146,12 @@ export interface Offer {
   updatedAt: string;
 }
 
+export type SyncedOffer = Offer & SyncRecordMetadata & {
+  clientUid?: string;
+  propertyUid?: string;
+  parentOfferUid?: string;
+};
+
 export interface Reservation {
   id: number;
   clientId: number;
@@ -145,7 +170,13 @@ export interface Reservation {
   updatedAt: string;
 }
 
-export interface Reminder {
+export type SyncedReservation = Reservation & SyncRecordMetadata & {
+  clientUid?: string;
+  propertyUid?: string;
+  offerUid?: string;
+};
+
+export interface Reminder extends SyncRecordMetadata {
   id: number; date: string; title: string; related: string; priority: string;
   assignedToId?: number; createdById?: number;
 }
@@ -175,9 +206,10 @@ export interface ConversationAudit {
   engine?: AuditEngine;
 }
 
-export interface WhatsAppConversation {
+export interface WhatsAppConversation extends SyncRecordMetadata {
   id: number;
   clientId: number;
+  clientUid?: string;
   phone: string;
   mode: ConversationMode;
   unread: number;
@@ -196,8 +228,8 @@ export interface FichaPublica {
   photoEnhancement?: PhotoEnhancement;
 }
 
-export interface Ficha extends FichaPublica {
-  id: number; mode: FichaMode; sourcePropertyId?: number; internalOriginalLink?: string;
+export interface Ficha extends FichaPublica, SyncRecordMetadata {
+  id: number; mode: FichaMode; sourcePropertyId?: number; sourcePropertyUid?: string; internalOriginalLink?: string;
   source?: string; internalNotes?: string; createdAt: string;
   assignedToId?: number; createdById?: number;
 }

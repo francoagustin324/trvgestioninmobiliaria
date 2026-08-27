@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import { initialData, type Client, type Property, type Visit } from '../models.js';
+import { hasSyncMetadata } from '../sync-identity.js';
 import { readLocalSnapshot, writeLocalSnapshot } from '../sync-safety.js';
 import {
   coordinateVisit,
@@ -254,7 +255,16 @@ test('P1.1-A2 visita coordinada sobrevive snapshot local/F5 usando persistencia 
   crm.visits = [visit];
   writeLocalSnapshot(crm, { markDirty: true, reason: 'P1.1-A2 visita coordinada' }, storage);
   const restored = readLocalSnapshot(storage);
+  const restoredVisit = restored?.visits[0];
+  assert.ok(restoredVisit);
+  assert.ok(hasSyncMetadata(restoredVisit));
+  assert.match(restoredVisit.uid ?? '', /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+  assert.equal(restoredVisit.revision, 0);
+  assert.equal(restoredVisit.interest, undefined);
+  assert.equal(restoredVisit.objection, undefined);
   assert.deepEqual(restored?.visits, [{
+    uid: visit.uid,
+    revision: visit.revision,
     id: visit.id,
     clientId: visit.clientId,
     propertyId: visit.propertyId,
@@ -265,10 +275,6 @@ test('P1.1-A2 visita coordinada sobrevive snapshot local/F5 usando persistencia 
     createdAt: visit.createdAt,
     updatedAt: visit.updatedAt,
   }]);
-  const restoredVisit = restored?.visits[0];
-  assert.ok(restoredVisit);
-  assert.equal(restoredVisit.interest, undefined);
-  assert.equal(restoredVisit.objection, undefined);
 });
 
 test('P1.1-A2 conserva Agenda/Reminder/B1.4.2 fuera del flujo y Visit sin campos prohibidos', () => {

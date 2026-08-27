@@ -12,6 +12,7 @@ import {
 } from './agenda.js';
 import { completeClientFollowUp, reprogramClientFollowUp } from './lead-pipeline.js';
 import { saveData, state } from './store.js';
+import { newSyncRecordMetadata } from './sync-identity.js';
 import { addActivity, visibleClients, visibleReminders } from './team-access.js';
 import { escapeHtml, field, formValues, nextId } from './utils.js';
 
@@ -222,7 +223,7 @@ export function renderAgenda(container: HTMLElement): void {
     const values = formValues(event.currentTarget as HTMLFormElement);
     const existing = editingReminderId === null ? null : reminderRecords().find((reminder) => reminder.id === editingReminderId) ?? null;
     const reminder: ReminderWithStatus = {
-      ...(existing || {}),
+      ...(existing || newSyncRecordMetadata()),
       id: existing?.id ?? nextId(state.crm.reminders),
       date: field(values, 'date'),
       title: field(values, 'title').trim(),

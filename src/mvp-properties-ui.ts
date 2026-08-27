@@ -3,6 +3,7 @@ import { MAX_PROPERTY_PHOTOS, uploadPropertyPhoto } from './property-photo-uploa
 import type { PropertyWithFicha } from './property-ficha.js';
 import { publishPropertyFicha } from './public-property-share.js';
 import { saveData, state } from './store.js';
+import { newSyncRecordMetadata } from './sync-identity.js';
 import { escapeHtml, field, formValues, nextId, safePhotoUrl } from './utils.js';
 
 let searchText = '';
@@ -439,7 +440,7 @@ export function renderMvpProperties(container: HTMLElement): void {
     }
 
     const property: PropertyWithFicha = {
-      ...(editing || {}),
+      ...(editing || newSyncRecordMetadata()),
       id: editing?.id ?? formPropertyId,
       title: field(values, 'title').trim(),
       address: field(values, 'address').trim(),

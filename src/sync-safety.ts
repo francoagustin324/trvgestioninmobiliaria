@@ -1,5 +1,6 @@
 import type { CrmData } from './models.js';
 import { STORAGE_KEY } from './models.js';
+import { prepareCrmSyncContracts } from './sync-identity.js';
 
 const SESSION_KEY = 'propcontrol-cloud-session-v1';
 const BACKUP_LIMIT = 5;
@@ -120,6 +121,7 @@ export function writeLocalSnapshot(
 ): void {
   const target = activeStorage(storage);
   activateAccountStorage(target);
+  prepareCrmSyncContracts(crm);
   const key = scopedStorageKey(target);
   const serialized = JSON.stringify(crm);
   const previous = target.getItem(key);

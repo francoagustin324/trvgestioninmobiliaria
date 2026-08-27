@@ -1,6 +1,7 @@
 import { isStrictLocalDate } from './lead-create-schedule.js';
 import { applyCommercialStage, commercialStage, COMMERCIAL_STAGES, localIsoDate } from './lead-pipeline.js';
-import type { ActivityEntry, Client, CrmData, Offer, OfferCurrency, Property, Reservation, ReservationStatus, TeamRole } from './models.js';
+import type { ActivityEntry, Client, CrmData, Offer, OfferCurrency, Property, Reservation, ReservationStatus, SyncedReservation, TeamRole } from './models.js';
+import { newSyncRecordMetadata } from './sync-identity.js';
 import { assignmentVisible } from './team-policy.js';
 
 export interface ReservationActor { id: number; role: TeamRole }
@@ -11,7 +12,7 @@ export interface RegisterReservationInput {
 export interface UpdateReservationStatusInput {
   reservationId: number; status: Extract<ReservationStatus, 'Cancelada' | 'Concretada'> | string; now?: Date;
 }
-export interface ReservationWorkflowResult { crm: CrmData; reservation: Reservation }
+export interface ReservationWorkflowResult { crm: CrmData; reservation: SyncedReservation }
 
 const CURRENCIES = new Set<OfferCurrency>(['USD', 'ARS']);
 const FINAL_STATUSES = new Set<ReservationStatus>(['Cancelada', 'Concretada']);
@@ -71,7 +72,7 @@ function replaceClient(crm: CrmData, client: Client): void {
 }
 function moneyLabel(value: Pick<Reservation, 'amount' | 'currency'>): string { return `${value.currency} ${value.amount.toLocaleString('es-AR', { maximumFractionDigits: 2 })}`; }
 function addActivity(crm: CrmData, actor: ReservationActor, action: string, client: Client, property: Property, reservation: Reservation, now: Date): void {
-  const entry: ActivityEntry = { id: nextId(crm.activityLog), actorId: actor.id, action, entityType: 'Cliente', entityId: client.id,
+  const entry: ActivityEntry = { ...newSyncRecordMetadata(), id: nextId(crm.activityLog), actorId: actor.id, action, entityType: 'Cliente', entityId: client.id,
     detail: `${compact(client.name, 48)} · ${propertyLabel(property)} · ${moneyLabel(reservation)} · ${reservation.status}${reservation.expiresAt ? ` · vence ${reservation.expiresAt}` : ''}`,
     createdAt: now.toISOString() };
   crm.activityLog.unshift(entry); crm.activityLog = crm.activityLog.slice(0, 250);
@@ -95,7 +96,7 @@ export function registerReservation(crm: CrmData, actor: ReservationActor, input
   const assignedToId = client.assignedToId ?? actor.id; assertAccessible(actor, assignedToId, 'este lead');
   const now = input.now ?? new Date(); const next = structuredClone(crm);
   const paymentMethod = optionalText(input.paymentMethod); const conditions = optionalText(input.conditions);
-  const reservation: Reservation = { id: nextId(next.reservations), clientId: client.id, propertyId: property.id, ...(offer ? { offerId: offer.id } : {}), amount, currency,
+  const reservation: SyncedReservation = { ...newSyncRecordMetadata(), id: nextId(next.reservations), clientId: client.id, propertyId: property.id, ...(offer ? { offerId: offer.id } : {}), amount, currency,
     ...(paymentMethod ? { paymentMethod } : {}), ...(conditions ? { conditions } : {}), reservedAt, ...(expiresAt ? { expiresAt } : {}), status: 'Activa', assignedToId,
     createdById: actor.id, createdAt: now.toISOString(), updatedAt: now.toISOString() };
   const commitment = activeCommitment(reservation, property, now);
