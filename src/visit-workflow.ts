@@ -13,6 +13,7 @@ import type {
   Property,
   TeamRole,
   Visit,
+  SyncedVisit,
   VisitInterest,
   VisitStatus,
 } from './models.js';
@@ -36,7 +37,7 @@ export interface CoordinateVisitInput {
 
 export interface CoordinateVisitResult {
   client: Client;
-  visit: Visit;
+  visit: SyncedVisit;
   activity: Omit<ActivityEntry, 'id' | 'actorId' | 'createdAt'>;
 }
 
@@ -171,7 +172,7 @@ export function coordinateVisit(input: CoordinateVisitInput): CoordinateVisitRes
     nextAction: visitNextAction(input.property),
     nextFollowUp: input.localDate.trim(),
   };
-  const visit: Visit = {
+  const visit: SyncedVisit = {
     ...newSyncRecordMetadata(),
     id: nextVisitId(input.visits),
     clientId: input.client.id,

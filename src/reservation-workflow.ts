@@ -1,6 +1,6 @@
 import { isStrictLocalDate } from './lead-create-schedule.js';
 import { applyCommercialStage, commercialStage, COMMERCIAL_STAGES, localIsoDate } from './lead-pipeline.js';
-import type { ActivityEntry, Client, CrmData, Offer, OfferCurrency, Property, Reservation, ReservationStatus, TeamRole } from './models.js';
+import type { ActivityEntry, Client, CrmData, Offer, OfferCurrency, Property, Reservation, ReservationStatus, SyncedReservation, TeamRole } from './models.js';
 import { newSyncRecordMetadata } from './sync-identity.js';
 import { assignmentVisible } from './team-policy.js';
 
@@ -12,7 +12,7 @@ export interface RegisterReservationInput {
 export interface UpdateReservationStatusInput {
   reservationId: number; status: Extract<ReservationStatus, 'Cancelada' | 'Concretada'> | string; now?: Date;
 }
-export interface ReservationWorkflowResult { crm: CrmData; reservation: Reservation }
+export interface ReservationWorkflowResult { crm: CrmData; reservation: SyncedReservation }
 
 const CURRENCIES = new Set<OfferCurrency>(['USD', 'ARS']);
 const FINAL_STATUSES = new Set<ReservationStatus>(['Cancelada', 'Concretada']);
@@ -96,7 +96,7 @@ export function registerReservation(crm: CrmData, actor: ReservationActor, input
   const assignedToId = client.assignedToId ?? actor.id; assertAccessible(actor, assignedToId, 'este lead');
   const now = input.now ?? new Date(); const next = structuredClone(crm);
   const paymentMethod = optionalText(input.paymentMethod); const conditions = optionalText(input.conditions);
-  const reservation: Reservation = { ...newSyncRecordMetadata(), id: nextId(next.reservations), clientId: client.id, propertyId: property.id, ...(offer ? { offerId: offer.id } : {}), amount, currency,
+  const reservation: SyncedReservation = { ...newSyncRecordMetadata(), id: nextId(next.reservations), clientId: client.id, propertyId: property.id, ...(offer ? { offerId: offer.id } : {}), amount, currency,
     ...(paymentMethod ? { paymentMethod } : {}), ...(conditions ? { conditions } : {}), reservedAt, ...(expiresAt ? { expiresAt } : {}), status: 'Activa', assignedToId,
     createdById: actor.id, createdAt: now.toISOString(), updatedAt: now.toISOString() };
   const commitment = activeCommitment(reservation, property, now);

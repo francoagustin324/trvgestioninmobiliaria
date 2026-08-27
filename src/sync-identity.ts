@@ -1,7 +1,11 @@
 import type {
   ActivityEntry,
   CrmData,
+  SyncedOffer,
+  SyncedReservation,
+  SyncedVisit,
   SyncRecordMetadata,
+  Visit,
 } from './models.js';
 
 type SyncCollectionKey = 'clients' | 'properties' | 'visits' | 'offers' | 'reservations' | 'contacts' | 'reminders' | 'fichas' | 'conversations' | 'activityLog';
@@ -28,6 +32,22 @@ function records(crm: CrmData, collection: SyncCollectionKey): SyncRecord[] {
 
 function hasOwn(value: object, key: PropertyKey): boolean {
   return Object.prototype.hasOwnProperty.call(value, key);
+}
+
+function ownValue(value: object, key: PropertyKey): unknown {
+  return hasOwn(value, key) ? (value as Record<PropertyKey, unknown>)[key] : undefined;
+}
+
+export function hasSyncMetadata<T extends object>(value: T): value is T & SyncRecordMetadata {
+  return hasOwn(value, 'uid') || hasOwn(value, 'revision') || hasOwn(value, 'operationId');
+}
+
+export function hasVisitSyncRelations(value: Visit): value is SyncedVisit {
+  const clientUid = ownValue(value, 'clientUid');
+  const propertyUid = ownValue(value, 'propertyUid');
+  return (typeof clientUid === 'string' || typeof propertyUid === 'string')
+    && (clientUid === undefined || canonicalUuid(clientUid) !== undefined)
+    && (propertyUid === undefined || canonicalUuid(propertyUid) !== undefined);
 }
 
 export function canonicalUuid(value: unknown): string | undefined {
@@ -86,12 +106,12 @@ export function newSyncRecordMetadata(operationId?: string): Required<Pick<SyncR
  * La ausencia de uid/revision/operationId se conserva: un round-trip legacy no
  * crea identidad ni altera el shape histórico.
  */
-export function normalizedSyncMetadata(value: SyncRecordMetadata | undefined): SyncRecordMetadata {
+export function normalizedSyncMetadata(value: object | undefined): SyncRecordMetadata {
   if (!value) return {};
   const normalized: SyncRecordMetadata = {};
-  if (hasOwn(value, 'uid')) normalized.uid = canonicalUuid(value.uid);
-  if (hasOwn(value, 'revision')) normalized.revision = normalizeRevision(value.revision);
-  if (hasOwn(value, 'operationId')) normalized.operationId = normalizeOperationId(value.operationId);
+  if (hasOwn(value, 'uid')) normalized.uid = canonicalUuid(ownValue(value, 'uid'));
+  if (hasOwn(value, 'revision')) normalized.revision = normalizeRevision(ownValue(value, 'revision'));
+  if (hasOwn(value, 'operationId')) normalized.operationId = normalizeOperationId(ownValue(value, 'operationId'));
   return normalized;
 }
 
@@ -123,26 +143,29 @@ function linkCanonicalRelations(crm: CrmData): void {
   const clients = new Map(crm.clients.map((item) => [item.id, item]));
   const properties = new Map(crm.properties.map((item) => [item.id, item]));
   const contacts = new Map(crm.contacts.map((item) => [item.id, item]));
-  const offers = new Map(crm.offers.map((item) => [item.id, item]));
+  const visits: SyncedVisit[] = crm.visits;
+  const offers: SyncedOffer[] = crm.offers;
+  const reservations: SyncedReservation[] = crm.reservations;
+  const offersById = new Map(offers.map((item) => [item.id, item]));
   const reminders = new Map(crm.reminders.map((item) => [item.id, item]));
   const conversations = new Map(crm.conversations.map((item) => [item.id, item]));
 
   crm.properties.forEach((item) => {
     if (item.sourceContactId !== undefined) assignRelationUid(item, 'sourceContactUid', item.sourceContactUid, contacts.get(item.sourceContactId));
   });
-  crm.visits.forEach((item) => {
+  visits.forEach((item) => {
     assignRelationUid(item, 'clientUid', item.clientUid, clients.get(item.clientId));
     assignRelationUid(item, 'propertyUid', item.propertyUid, properties.get(item.propertyId));
   });
-  crm.offers.forEach((item) => {
+  offers.forEach((item) => {
     assignRelationUid(item, 'clientUid', item.clientUid, clients.get(item.clientId));
     assignRelationUid(item, 'propertyUid', item.propertyUid, properties.get(item.propertyId));
-    if (item.parentOfferId !== undefined) assignRelationUid(item, 'parentOfferUid', item.parentOfferUid, offers.get(item.parentOfferId));
+    if (item.parentOfferId !== undefined) assignRelationUid(item, 'parentOfferUid', item.parentOfferUid, offersById.get(item.parentOfferId));
   });
-  crm.reservations.forEach((item) => {
+  reservations.forEach((item) => {
     assignRelationUid(item, 'clientUid', item.clientUid, clients.get(item.clientId));
     assignRelationUid(item, 'propertyUid', item.propertyUid, properties.get(item.propertyId));
-    if (item.offerId !== undefined) assignRelationUid(item, 'offerUid', item.offerUid, offers.get(item.offerId));
+    if (item.offerId !== undefined) assignRelationUid(item, 'offerUid', item.offerUid, offersById.get(item.offerId));
   });
   crm.fichas.forEach((item) => {
     if (item.sourcePropertyId !== undefined) assignRelationUid(item, 'sourcePropertyUid', item.sourcePropertyUid, properties.get(item.sourcePropertyId));

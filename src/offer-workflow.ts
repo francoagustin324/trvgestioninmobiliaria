@@ -11,6 +11,7 @@ import type {
   Client,
   CrmData,
   Offer,
+  SyncedOffer,
   OfferCurrency,
   OfferOrigin,
   OfferStatus,
@@ -62,7 +63,7 @@ export interface ResolveOfferInput {
 
 export interface OfferWorkflowResult {
   crm: CrmData;
-  offer: Offer;
+  offer: SyncedOffer;
 }
 
 const CURRENCIES = new Set<OfferCurrency>(['USD', 'ARS']);
@@ -232,7 +233,7 @@ export function registerOffer(crm: CrmData, actor: OfferActor, input: RegisterOf
   assertAccessible(actor, assignedToId, 'este lead');
 
   const next = structuredClone(crm);
-  const offer: Offer = {
+  const offer: SyncedOffer = {
     ...newSyncRecordMetadata(),
     id: nextOfferId(next.offers),
     clientId: client.id,
@@ -274,7 +275,7 @@ export function registerCounterOffer(crm: CrmData, actor: OfferActor, input: Reg
   const parentIndex = next.offers.findIndex((offer) => offer.id === parent.id);
   if (parentIndex < 0) throw new Error('La oferta ya no está disponible.');
   next.offers[parentIndex] = { ...next.offers[parentIndex]!, status: 'Contraofertada', updatedAt: now.toISOString() };
-  const child: Offer = {
+  const child: SyncedOffer = {
     ...newSyncRecordMetadata(),
     id: nextOfferId(next.offers),
     clientId: client.id,

@@ -13,6 +13,7 @@ import {
 import { initialData, STORAGE_KEY, type CrmData } from '../models.js';
 import {
   canonicalUuid,
+  hasVisitSyncRelations,
   newOperationId,
   newSyncRecordMetadata,
   normalizeRevision,
@@ -152,6 +153,18 @@ test('R1C Visit Offer Reservation legacy conservan numeric entity_key y stale re
   assert.ok(stale.some((row) => row.entity_type === 'reservation' && row.entity_key === organizationScopedEntityKey(organizationId, 5)));
 });
 
+test('R1D separa contratos de dominio exactos de la metadata de sincronización', () => {
+  const source = readFileSync('src/models.ts', 'utf8');
+  for (const name of ['Visit', 'Offer', 'Reservation']) {
+    const block = source.match(new RegExp(`export interface ${name} \\{([\\s\\S]*?)\\n\\}`))?.[1] ?? '';
+    assert.ok(block);
+    assert.doesNotMatch(block, /uid|revision|operationId/);
+  }
+  assert.match(source, /type SyncedVisit = Visit & SyncRecordMetadata/);
+  assert.match(source, /type SyncedOffer = Offer & SyncRecordMetadata/);
+  assert.match(source, /type SyncedReservation = Reservation & SyncRecordMetadata/);
+});
+
 test('R1C entidad nueva tiene UID antes de writeLocalSnapshot y reload lo mantiene estable', () => {
   const storage = new MemoryStorage();
   const crm = baseCrm();
@@ -211,8 +224,10 @@ test('R1C relaciones duales completan UID sólo desde el target numérico actual
   crm.properties.push(property);
   crm.visits.push({ ...newSyncRecordMetadata(), id: 1, clientId: 2, propertyId: 2, scheduledAt: '2026-08-30T15:00:00.000Z', status: 'Coordinada', assignedToId: 10, createdById: 10, createdAt: '2026-08-26T20:00:00.000Z', updatedAt: '2026-08-26T20:00:00.000Z' });
   prepareCrmSyncContracts(crm);
-  assert.equal(crm.visits[0]!.clientUid, client.uid);
-  assert.equal(crm.visits[0]!.propertyUid, property.uid);
+  const visit = crm.visits[0]!;
+  assert.ok(hasVisitSyncRelations(visit));
+  assert.equal(visit.clientUid, client.uid);
+  assert.equal(visit.propertyUid, property.uid);
   assert.equal(crm.clients[0]!.uid, undefined);
 });
 

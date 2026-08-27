@@ -110,14 +110,9 @@ export interface Property extends SyncRecordMetadata {
 }
 
 export interface Visit {
-  uid?: string;
-  revision?: number;
-  operationId?: string;
   id: number;
   clientId: number;
-  clientUid?: string;
   propertyId: number;
-  propertyUid?: string;
   scheduledAt: string;
   status: VisitStatus;
   interest?: VisitInterest;
@@ -128,18 +123,17 @@ export interface Visit {
   updatedAt: string;
 }
 
+export type SyncedVisit = Visit & SyncRecordMetadata & {
+  clientUid?: string;
+  propertyUid?: string;
+};
+
 export interface Offer {
-  uid?: string;
-  revision?: number;
-  operationId?: string;
   id: number;
   clientId: number;
-  clientUid?: string;
   propertyId: number;
-  propertyUid?: string;
   origin: OfferOrigin;
   parentOfferId?: number;
-  parentOfferUid?: string;
   amount: number;
   currency: OfferCurrency;
   paymentTerms?: string;
@@ -152,17 +146,17 @@ export interface Offer {
   updatedAt: string;
 }
 
+export type SyncedOffer = Offer & SyncRecordMetadata & {
+  clientUid?: string;
+  propertyUid?: string;
+  parentOfferUid?: string;
+};
+
 export interface Reservation {
-  uid?: string;
-  revision?: number;
-  operationId?: string;
   id: number;
   clientId: number;
-  clientUid?: string;
   propertyId: number;
-  propertyUid?: string;
   offerId?: number;
-  offerUid?: string;
   amount: number;
   currency: OfferCurrency;
   paymentMethod?: string;
@@ -175,6 +169,12 @@ export interface Reservation {
   createdAt: string;
   updatedAt: string;
 }
+
+export type SyncedReservation = Reservation & SyncRecordMetadata & {
+  clientUid?: string;
+  propertyUid?: string;
+  offerUid?: string;
+};
 
 export interface Reminder extends SyncRecordMetadata {
   id: number; date: string; title: string; related: string; priority: string;
