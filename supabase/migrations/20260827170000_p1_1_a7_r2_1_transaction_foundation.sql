@@ -38,12 +38,13 @@ create index commercial_operations_org_created_idx
 
 alter table private.commercial_operations enable row level security;
 
-create policy commercial_operations_select_tenant
+create policy commercial_operations_select_own
 on private.commercial_operations
 for select
 to authenticated
 using (
   private.is_active_org_member(organization_id)
+  and actor_user_id = auth.uid()
 );
 
 create policy commercial_operations_insert_own
@@ -213,19 +214,8 @@ begin
   inserted := found;
 
   if not inserted then
-    select operation.* into existing_operation
-    from private.commercial_operations as operation
-    where operation.organization_id = p_organization_id
-      and operation.operation_id = p_operation_id;
-    if existing_operation.actor_user_id <> current_user_id
-      or existing_operation.operation_type <> pg_catalog.btrim(p_operation_type)
-      or existing_operation.request_hash <> computed_hash then
-      raise exception using errcode = '23505', message = 'CONFLICT';
-    end if;
-    return existing_operation.result_payload || pg_catalog.jsonb_build_object(
-      'replayed', true,
-      'errorCode', 'IDEMPOTENCY_REPLAY'
-    );
+    -- La PK detecta una fila invisible de otro actor sin exponer su payload.
+    raise exception using errcode = '23505', message = 'CONFLICT';
   end if;
 
   if p_force_rollback then

@@ -2,8 +2,8 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import {
-  canonicalCommercialRequest,
-  commercialRequestHash,
+  canonicalLocalCommercialIntent,
+  localCommercialIntentFingerprint,
   type CommercialMutationError,
   type CommercialMutationRequest,
   type CommercialMutationResponse,
@@ -39,10 +39,11 @@ class FoundationLedger {
     actualRevision = value.expectedRevision ?? 0,
   ): Promise<CommercialMutationResponse> {
     const key = `${value.organizationId}:${value.operationId}`;
-    const hash = await commercialRequestHash(value);
-    const existing = this.rows.get(key);
+    const hash = await localCommercialIntentFingerprint(value);
+    const stored = this.rows.get(key);
+    const existing = stored?.actorUserId === actorUserId ? stored : undefined;
     if (existing) {
-      if (existing.actorUserId !== actorUserId || existing.hash !== hash) throw new Error('CONFLICT');
+      if (existing.hash !== hash) throw new Error('CONFLICT');
       return { ...existing.response, replayed: true, errorCode: 'IDEMPOTENCY_REPLAY' };
     }
     if (value.expectedRevision !== undefined && value.expectedRevision !== actualRevision) {
@@ -56,8 +57,13 @@ class FoundationLedger {
       revision: actualRevision + 1,
       serverTimestamp: '2026-08-27T20:00:01.000Z',
     };
+    if (stored) throw new Error('CONFLICT');
     this.rows.set(key, { actorUserId, hash, response });
     return response;
+  }
+
+  canSelect(value: CommercialMutationRequest, actorUserId: string): boolean {
+    return this.rows.get(`${value.organizationId}:${value.operationId}`)?.actorUserId === actorUserId;
   }
 }
 
@@ -96,7 +102,7 @@ test('R2.1 operationId usa UUID canónico válido', () => {
   assert.match(newOperationId(), /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
 });
 
-test('R2.1 hash canónico ignora orden de propiedades, whitespace JSON y campos derivados', async () => {
+test('R2.1 fingerprint local ignora orden y se declara distinto del hash autoritativo SQL', async () => {
   const operationId = newOperationId();
   const first = request({ operationId, payload: { b: 2, a: { y: true, x: 'value' } } });
   const second = request({
@@ -105,9 +111,13 @@ test('R2.1 hash canónico ignora orden de propiedades, whitespace JSON y campos 
     requestedAt: '2030-01-01T00:00:00.000Z',
     payload: JSON.parse('{  "a" : { "x": "value", "y": true }, "b": 2 }'),
   });
-  assert.equal(canonicalCommercialRequest(first), canonicalCommercialRequest(second));
-  assert.equal(await commercialRequestHash(first), await commercialRequestHash(second));
-  assert.match(await commercialRequestHash(first), /^[0-9a-f]{64}$/);
+  assert.equal(canonicalLocalCommercialIntent(first), canonicalLocalCommercialIntent(second));
+  assert.equal(await localCommercialIntentFingerprint(first), await localCommercialIntentFingerprint(second));
+  assert.match(await localCommercialIntentFingerprint(first), /^[0-9a-f]{64}$/);
+  const contract = readFileSync('src/commercial-mutation-contract.ts', 'utf8');
+  assert.match(contract, /No equivale al request_hash de la RPC/i);
+  assert.match(contract, /servidor recalcula y persiste el hash autoritativo/i);
+  assert.doesNotMatch(contract, /export (?:async )?function (?:canonicalCommercialRequest|commercialRequestHash)\b/);
 });
 
 test('R2.1 mismo tenant operationId y request hace replay; request distinto hace conflict', async () => {
@@ -135,6 +145,8 @@ test('R2.1E mismo tenant y operationId de actor diferente siempre produce CONFLI
   const ledger = new FoundationLedger();
   const value = request();
   await ledger.execute(value, 'actor-a');
+  assert.equal(ledger.canSelect(value, 'actor-a'), true);
+  assert.equal(ledger.canSelect(value, 'actor-b'), false);
   await assert.rejects(ledger.execute(structuredClone(value), 'actor-b'), /CONFLICT/);
 });
 
@@ -205,14 +217,17 @@ test('R2.1 RPC demuestra hash servidor, CAS bajo lock, replay, conflict y rollba
   assert.match(migration, /existing_operation\.actor_user_id <> current_user_id/i);
 });
 
-test('R2.1 policy y grants son nuevos, mínimos y niegan anon/PUBLIC', () => {
+test('R2.1F policy limita SELECT al actor y colisión invisible termina en CONFLICT', () => {
   assert.match(migration, /alter table private\.commercial_operations enable row level security/i);
-  assert.match(migration, /create policy commercial_operations_select_tenant/i);
+  assert.match(migration, /create policy commercial_operations_select_own/i);
   assert.match(migration, /create policy commercial_operations_insert_own/i);
   assert.match(migration, /private\.is_active_org_member\(organization_id\)/i);
-  const selectPolicy = migration.match(/create policy commercial_operations_select_tenant([\s\S]*?)create policy commercial_operations_insert_own/i)?.[1] ?? '';
+  const selectPolicy = migration.match(/create policy commercial_operations_select_own([\s\S]*?)create policy commercial_operations_insert_own/i)?.[1] ?? '';
   assert.match(selectPolicy, /private\.is_active_org_member\(organization_id\)/i);
-  assert.doesNotMatch(selectPolicy, /actor_user_id = auth\.uid\(\)/i);
+  assert.match(selectPolicy, /actor_user_id = auth\.uid\(\)/i);
+  const insertCollision = migration.match(/if not inserted then([\s\S]*?)end if;/i)?.[1] ?? '';
+  assert.match(insertCollision, /message = 'CONFLICT'/i);
+  assert.doesNotMatch(insertCollision, /select\s+operation|result_payload|IDEMPOTENCY_REPLAY/i);
   assert.match(migration, /actor_user_id = auth\.uid\(\)/i);
   assert.match(migration, /actor_member_id = private\.org_member_number\(organization_id\)/i);
   assert.match(migration, /revoke all on table private\.commercial_operations from public/i);

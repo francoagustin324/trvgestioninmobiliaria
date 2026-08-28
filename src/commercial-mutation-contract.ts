@@ -67,7 +67,11 @@ function canonicalValue(value: unknown): unknown {
   throw new Error('El request contiene un valor no serializable.');
 }
 
-export function canonicalCommercialRequest(request: CommercialMutationRequest): string {
+/**
+ * Forma estable para deduplicación local. No equivale al request_hash de la RPC:
+ * el servidor recalcula y persiste el hash autoritativo desde sus propios argumentos.
+ */
+export function canonicalLocalCommercialIntent(request: CommercialMutationRequest): string {
   const hashInput = {
     operationType: request.operationType.trim(),
     ...(request.entityUid ? { entityUid: canonicalUuid(request.entityUid) ?? request.entityUid.trim().toLowerCase() } : {}),
@@ -80,8 +84,9 @@ export function canonicalCommercialRequest(request: CommercialMutationRequest): 
   return JSON.stringify(canonicalValue(hashInput));
 }
 
-export async function commercialRequestHash(request: CommercialMutationRequest): Promise<string> {
-  const bytes = new TextEncoder().encode(canonicalCommercialRequest(request));
+/** Fingerprint local no autoritativo; nunca sustituye el hash calculado por la RPC. */
+export async function localCommercialIntentFingerprint(request: CommercialMutationRequest): Promise<string> {
+  const bytes = new TextEncoder().encode(canonicalLocalCommercialIntent(request));
   const digest = await globalThis.crypto.subtle.digest('SHA-256', bytes);
   return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('');
 }
