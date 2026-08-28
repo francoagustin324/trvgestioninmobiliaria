@@ -31,24 +31,32 @@ function request(overrides: Partial<CommercialMutationRequest> = {}): Commercial
 }
 
 class FoundationLedger {
-  private readonly rows = new Map<string, { hash: string; response: CommercialMutationResponse }>();
+  private readonly rows = new Map<string, { actorUserId: string; hash: string; response: CommercialMutationResponse }>();
 
-  async execute(value: CommercialMutationRequest): Promise<CommercialMutationResponse> {
+  async execute(
+    value: CommercialMutationRequest,
+    actorUserId = 'actor-a',
+    actualRevision = value.expectedRevision ?? 0,
+  ): Promise<CommercialMutationResponse> {
     const key = `${value.organizationId}:${value.operationId}`;
     const hash = await commercialRequestHash(value);
     const existing = this.rows.get(key);
     if (existing) {
-      if (existing.hash !== hash) throw new Error('CONFLICT');
+      if (existing.actorUserId !== actorUserId || existing.hash !== hash) throw new Error('CONFLICT');
       return { ...existing.response, replayed: true, errorCode: 'IDEMPOTENCY_REPLAY' };
+    }
+    if (value.expectedRevision !== undefined && value.expectedRevision !== actualRevision) {
+      throw new Error('CONFLICT');
     }
     const response: CommercialMutationResponse = {
       success: true,
       replayed: false,
       operationId: value.operationId,
       operationType: value.operationType,
+      revision: actualRevision + 1,
       serverTimestamp: '2026-08-27T20:00:01.000Z',
     };
-    this.rows.set(key, { hash, response });
+    this.rows.set(key, { actorUserId, hash, response });
     return response;
   }
 }
@@ -112,6 +120,24 @@ test('R2.1 mismo tenant operationId y request hace replay; request distinto hace
   await assert.rejects(ledger.execute({ ...value, payload: { amount: 101 } }), /CONFLICT/);
 });
 
+test('R2.1E replay se resuelve antes de CAS aunque revision haya avanzado N a N+1', async () => {
+  const ledger = new FoundationLedger();
+  const value = request({ expectedRevision: 3 });
+  const first = await ledger.execute(value, 'actor-a', 3);
+  assert.equal(first.revision, 4);
+  const replay = await ledger.execute(structuredClone(value), 'actor-a', 4);
+  assert.equal(replay.replayed, true);
+  assert.equal(replay.errorCode, 'IDEMPOTENCY_REPLAY');
+  assert.equal(replay.revision, 4);
+});
+
+test('R2.1E mismo tenant y operationId de actor diferente siempre produce CONFLICT', async () => {
+  const ledger = new FoundationLedger();
+  const value = request();
+  await ledger.execute(value, 'actor-a');
+  await assert.rejects(ledger.execute(structuredClone(value), 'actor-b'), /CONFLICT/);
+});
+
 test('R2.1 mismo operationId queda aislado por organización', async () => {
   const ledger = new FoundationLedger();
   const operationId = newOperationId();
@@ -171,13 +197,22 @@ test('R2.1 RPC demuestra hash servidor, CAS bajo lock, replay, conflict y rollba
   assert.match(migration, /'errorCode', 'IDEMPOTENCY_REPLAY'/i);
   assert.match(migration, /if p_force_rollback then[\s\S]*message = 'INTERNAL_ERROR'/i);
   assert.match(migration, /insert into private\.commercial_operations/i);
+  assert.match(migration, /pg_advisory_xact_lock/i);
+  assert.match(migration, /hashtextextended\(p_organization_id::text \|\| ':' \|\| p_operation_id::text, 0\)/i);
+  const replayLookup = migration.indexOf('select operation.* into existing_operation');
+  const casLock = migration.indexOf('select record.revision');
+  assert.ok(replayLookup >= 0 && casLock > replayLookup, 'idempotencia debe resolverse antes de CAS');
+  assert.match(migration, /existing_operation\.actor_user_id <> current_user_id/i);
 });
 
 test('R2.1 policy y grants son nuevos, mínimos y niegan anon/PUBLIC', () => {
   assert.match(migration, /alter table private\.commercial_operations enable row level security/i);
-  assert.match(migration, /create policy commercial_operations_select_own/i);
+  assert.match(migration, /create policy commercial_operations_select_tenant/i);
   assert.match(migration, /create policy commercial_operations_insert_own/i);
   assert.match(migration, /private\.is_active_org_member\(organization_id\)/i);
+  const selectPolicy = migration.match(/create policy commercial_operations_select_tenant([\s\S]*?)create policy commercial_operations_insert_own/i)?.[1] ?? '';
+  assert.match(selectPolicy, /private\.is_active_org_member\(organization_id\)/i);
+  assert.doesNotMatch(selectPolicy, /actor_user_id = auth\.uid\(\)/i);
   assert.match(migration, /actor_user_id = auth\.uid\(\)/i);
   assert.match(migration, /actor_member_id = private\.org_member_number\(organization_id\)/i);
   assert.match(migration, /revoke all on table private\.commercial_operations from public/i);

@@ -38,13 +38,12 @@ create index commercial_operations_org_created_idx
 
 alter table private.commercial_operations enable row level security;
 
-create policy commercial_operations_select_own
+create policy commercial_operations_select_tenant
 on private.commercial_operations
 for select
 to authenticated
 using (
   private.is_active_org_member(organization_id)
-  and actor_user_id = auth.uid()
 );
 
 create policy commercial_operations_insert_own
@@ -127,6 +126,43 @@ begin
     raise exception using errcode = '22023', message = 'VALIDATION_ERROR';
   end if;
 
+  canonical_request := pg_catalog.jsonb_build_object(
+    'operationType', pg_catalog.btrim(p_operation_type),
+    'entityType', p_entity_type,
+    'entityKey', p_entity_key,
+    'expectedRevision', p_expected_revision,
+    'payload', p_request
+  );
+  computed_hash := pg_catalog.encode(
+    pg_catalog.sha256(pg_catalog.convert_to(canonical_request::text, 'UTF8')),
+    'hex'
+  );
+
+  -- Serializa intents iguales antes de observar idempotencia. El lock vive sólo
+  -- durante esta transacción y evita que dos actores atraviesen CAS en paralelo.
+  perform pg_catalog.pg_advisory_xact_lock(
+    pg_catalog.hashtextextended(p_organization_id::text || ':' || p_operation_id::text, 0)
+  );
+
+  select operation.* into existing_operation
+  from private.commercial_operations as operation
+  where operation.organization_id = p_organization_id
+    and operation.operation_id = p_operation_id;
+
+  if found then
+    if existing_operation.actor_user_id <> current_user_id
+      or existing_operation.operation_type <> pg_catalog.btrim(p_operation_type)
+      or existing_operation.request_hash <> computed_hash then
+      raise exception using errcode = '23505', message = 'CONFLICT';
+    end if;
+    return existing_operation.result_payload || pg_catalog.jsonb_build_object(
+      'replayed', true,
+      'errorCode', 'IDEMPOTENCY_REPLAY'
+    );
+  end if;
+
+  -- CAS sólo pertenece al camino de una operación nueva. Un replay confirmado
+  -- retorna arriba aunque la mutación original ya haya incrementado revision.
   if p_entity_type is not null then
     select record.revision
     into current_revision
@@ -148,34 +184,6 @@ begin
           'actualRevision', current_revision
         )::text;
     end if;
-  end if;
-
-  canonical_request := pg_catalog.jsonb_build_object(
-    'operationType', pg_catalog.btrim(p_operation_type),
-    'entityType', p_entity_type,
-    'entityKey', p_entity_key,
-    'expectedRevision', p_expected_revision,
-    'payload', p_request
-  );
-  computed_hash := pg_catalog.encode(
-    pg_catalog.sha256(pg_catalog.convert_to(canonical_request::text, 'UTF8')),
-    'hex'
-  );
-
-  select operation.* into existing_operation
-  from private.commercial_operations as operation
-  where operation.organization_id = p_organization_id
-    and operation.operation_id = p_operation_id;
-
-  if found then
-    if existing_operation.operation_type <> pg_catalog.btrim(p_operation_type)
-      or existing_operation.request_hash <> computed_hash then
-      raise exception using errcode = '23505', message = 'CONFLICT';
-    end if;
-    return existing_operation.result_payload || pg_catalog.jsonb_build_object(
-      'replayed', true,
-      'errorCode', 'IDEMPOTENCY_REPLAY'
-    );
   end if;
 
   operation_result := pg_catalog.jsonb_build_object(
@@ -209,7 +217,8 @@ begin
     from private.commercial_operations as operation
     where operation.organization_id = p_organization_id
       and operation.operation_id = p_operation_id;
-    if existing_operation.operation_type <> pg_catalog.btrim(p_operation_type)
+    if existing_operation.actor_user_id <> current_user_id
+      or existing_operation.operation_type <> pg_catalog.btrim(p_operation_type)
       or existing_operation.request_hash <> computed_hash then
       raise exception using errcode = '23505', message = 'CONFLICT';
     end if;
