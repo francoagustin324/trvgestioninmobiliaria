@@ -106,15 +106,15 @@ begin
 
   select member.member_id,
     case
-      when pg_catalog.lower(pg_catalog.coalesce(member.role, '')) in ('owner', 'dueño', 'dueno') then 'owner'
-      when pg_catalog.lower(pg_catalog.coalesce(member.role, '')) in ('admin', 'administrator', 'administrador') then 'admin'
+      when pg_catalog.lower(coalesce(member.role, '')) in ('owner', 'dueño', 'dueno') then 'owner'
+      when pg_catalog.lower(coalesce(member.role, '')) in ('admin', 'administrator', 'administrador') then 'admin'
       else 'agent'
     end
   into current_member_id, current_role
   from public.organization_members as member
   where member.organization_id = p_organization_id
     and member.user_id = current_user_id
-    and pg_catalog.lower(pg_catalog.coalesce(member.status, '')) = 'active'
+    and pg_catalog.lower(coalesce(member.status, '')) = 'active'
   limit 1;
 
   if current_member_id is null then

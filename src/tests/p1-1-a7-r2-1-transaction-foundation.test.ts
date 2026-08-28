@@ -201,6 +201,10 @@ test('R2.1 RPC es SECURITY INVOKER, deriva actor/membership y bloquea operacione
   ]) assert.match(migration, new RegExp(`'${forbidden}'`));
 });
 
+test('R2.1G RPC no califica COALESCE como función de pg_catalog', () => {
+  assert.doesNotMatch(migration, /\bpg_catalog\.coalesce\s*\(/i);
+});
+
 test('R2.1 RPC demuestra hash servidor, CAS bajo lock, replay, conflict y rollback', () => {
   assert.match(migration, /sha256\(pg_catalog\.convert_to\(canonical_request::text, 'UTF8'\)\)/i);
   assert.match(migration, /for update;/i);
