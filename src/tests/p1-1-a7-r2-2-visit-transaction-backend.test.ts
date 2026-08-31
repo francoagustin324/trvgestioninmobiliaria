@@ -604,15 +604,29 @@ test('R2.2B ejecuta migration, RPC, RLS, idempotencia, CAS, rollback y fences en
     })), /WRONG_CLIENT/);
 
     const terminalResolveCreate = parseJson(asUser(actorA, visitCall(randomUUID(), 'VISIT_CREATE', createRequest(10,1,0,'2035-05-01','12:00'))));
-    psql(`update public.propcontrol_records set payload=payload||'{"pipeline":"Ganado","status":"Operación ganada"}'::jsonb
-      where organization_id='${orgA}' and entity_type='client' and entity_key='${scopedKey(orgA, 10)}';`);
+    assert.equal(terminalResolveCreate.client.revision, 1);
+    const terminalPayload = parseJson(psql(`select payload::text from public.propcontrol_records
+      where organization_id='${orgA}' and entity_type='client' and entity_key='${scopedKey(orgA, 10)}';`));
+    const terminalCas = parseJson(asUser(actorA, `select public.client_snapshot_cas(${jsonSql({
+      action:'update',client:{legacyId:10},expectedRevision:1,
+      payload:{...terminalPayload,pipeline:'Ganado',status:'Operación ganada'},
+    })},false);`));
+    assert.equal(terminalCas.client.revision, 2);
+    assert.equal(terminalCas.client.pipeline, 'Ganado');
+    assert.equal(terminalCas.client.status, 'Operación ganada');
     const terminalBefore = psql(`select payload::text||':'||revision from public.propcontrol_records where organization_id='${orgA}' and entity_type='client' and entity_key='${scopedKey(orgA, 10)}';`);
-    const terminalResolved = parseJson(asUser(actorA, visitCall(randomUUID(), 'VISIT_RESOLVE', {
-      client:{legacyId:10},visitUid:terminalResolveCreate.visit.uid,expectedVisitRevision:0,expectedClientRevision:1,status:'Cancelada',
+    const terminalResolveOperation = randomUUID();
+    const terminalResolved = parseJson(asUser(actorA, visitCall(terminalResolveOperation, 'VISIT_RESOLVE', {
+      client:{legacyId:10},visitUid:terminalResolveCreate.visit.uid,expectedVisitRevision:0,expectedClientRevision:2,status:'Cancelada',
     })));
     assert.equal(terminalResolved.visit.status, 'Cancelada');
+    assert.equal(terminalResolved.client.revision, 2);
+    assert.equal(terminalResolved.client.pipeline, 'Ganado');
+    assert.equal(terminalResolved.client.status, 'Operación ganada');
     const terminalAfter = psql(`select payload::text||':'||revision from public.propcontrol_records where organization_id='${orgA}' and entity_type='client' and entity_key='${scopedKey(orgA, 10)}';`);
     assert.equal(terminalAfter, terminalBefore);
+    assert.equal(psql(`select count(*) from public.propcontrol_records where organization_id='${orgA}' and entity_type='visit' and uid='${terminalResolveCreate.visit.uid}';`), '1');
+    assert.equal(psql(`select count(*) from public.propcontrol_records where organization_id='${orgA}' and entity_type='activity' and payload->>'operationId'='${terminalResolveOperation}';`), '1');
 
     const collisionCreate = parseJson(asUser(actorA, visitCall(randomUUID(), 'VISIT_CREATE', createRequest(11,1,0,'2035-06-01','12:00'))));
     const collisionOperation = collisionCreate.operationId as string;
