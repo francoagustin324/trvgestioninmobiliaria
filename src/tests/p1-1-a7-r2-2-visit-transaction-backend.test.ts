@@ -88,6 +88,7 @@ test('R2.2B crea una migration nueva y conserva R2.1 byte a byte', () => {
   assert.equal(createHash('sha256').update(r21).digest('hex'), '4a443a0a5a1c8a065834f0cf9b019aa92547054e6f6613b283fa3658dccbbaf4');
   assert.match(migration, /^begin;/m);
   assert.match(migration, /commit;\s*$/);
+  assert.doesNotMatch(migration, /pg_catalog\.extract\s*\(/i);
   assert.doesNotMatch(migration, /offer|counteroffer|reservation/i);
   assert.doesNotMatch(migration, /alter\s+policy|drop\s+policy\s+propcontrol_records|create\s+policy\s+propcontrol_records/i);
 });

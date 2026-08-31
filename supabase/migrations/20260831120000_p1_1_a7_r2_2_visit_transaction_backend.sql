@@ -512,11 +512,11 @@ begin
       raise exception using errcode = '22023', message = 'VALIDATION_ERROR';
     end if;
     scheduled_at := pg_catalog.make_timestamptz(
-      pg_catalog.extract(year from local_date)::int,
-      pg_catalog.extract(month from local_date)::int,
-      pg_catalog.extract(day from local_date)::int,
-      pg_catalog.extract(hour from local_time)::int,
-      pg_catalog.extract(minute from local_time)::int,
+      extract(year from local_date)::int,
+      extract(month from local_date)::int,
+      extract(day from local_date)::int,
+      extract(hour from local_time)::int,
+      extract(minute from local_time)::int,
       0, 'America/Argentina/Buenos_Aires'
     );
     if scheduled_at < timestamp_value then
