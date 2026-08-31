@@ -115,9 +115,11 @@ security invoker
 set search_path = ''
 as $function$
 declare
-  target_org uuid := case when tg_op = 'DELETE' then old.organization_id else new.organization_id end;
-  target_type text := case when tg_op = 'DELETE' then old.entity_type else new.entity_type end;
-  target_payload jsonb := case when tg_op = 'DELETE' then old.payload else new.payload end;
+  target_org uuid := case when tg_op = 'INSERT' then new.organization_id else old.organization_id end;
+  old_type text := case when tg_op = 'INSERT' then null else old.entity_type end;
+  new_type text := case when tg_op = 'DELETE' then null else new.entity_type end;
+  old_payload jsonb := case when tg_op = 'INSERT' then null else old.payload end;
+  new_payload jsonb := case when tg_op = 'DELETE' then null else new.payload end;
   transaction_path text := coalesce(
     pg_catalog.current_setting('propcontrol.transaction_path', true), ''
   );
@@ -126,15 +128,19 @@ begin
     return case when tg_op = 'DELETE' then old else new end;
   end if;
 
-  if target_type = 'visit' and transaction_path <> 'visit_rpc' then
+  -- INSERT se clasifica con NEW. UPDATE/DELETE siempre se clasifican con OLD,
+  -- y UPDATE también bloquea una transición NEW hacia identidad protegida.
+  if (old_type = 'visit' or new_type = 'visit') and transaction_path <> 'visit_rpc' then
     raise exception using errcode = '42501', message = 'TRANSACTION_AUTHORITY_REQUIRED';
   end if;
-  if target_type = 'client' and tg_op in ('UPDATE', 'DELETE')
+  if (old_type = 'client' or new_type = 'client') and tg_op in ('UPDATE', 'DELETE')
     and transaction_path not in ('visit_rpc', 'client_snapshot_cas') then
     raise exception using errcode = '40001', message = 'CLIENT_CAS_REQUIRED';
   end if;
-  if target_type = 'activity'
-    and target_payload ->> 'transactionOwner' = 'visit'
+  if (
+    (old_type = 'activity' and old_payload ->> 'transactionOwner' = 'visit')
+    or (new_type = 'activity' and new_payload ->> 'transactionOwner' = 'visit')
+  )
     and transaction_path <> 'visit_rpc' then
     raise exception using errcode = '42501', message = 'TRANSACTION_AUTHORITY_REQUIRED';
   end if;
@@ -191,7 +197,8 @@ begin
   from public.propcontrol_records as candidate
   where candidate.entity_type = 'client'
     and ((requested_uid is not null and candidate.uid = requested_uid)
-      or (requested_legacy_id is not null and candidate.entity_key = requested_legacy_id::text));
+      or (requested_legacy_id is not null and candidate.entity_key =
+        candidate.organization_id::text || ':' || requested_legacy_id::text));
   if coalesce(pg_catalog.array_length(matching_orgs, 1), 0) = 0 then
     raise exception using errcode = 'P0002', message = 'NOT_FOUND';
   end if;
@@ -208,7 +215,8 @@ begin
   where record.organization_id = target_org
     and record.entity_type = 'client'
     and ((requested_uid is not null and record.uid = requested_uid)
-      or (requested_legacy_id is not null and record.entity_key = requested_legacy_id::text))
+      or (requested_legacy_id is not null and record.entity_key =
+        target_org::text || ':' || requested_legacy_id::text))
   for update;
   if not found then
     raise exception using errcode = 'P0002', message = 'NOT_FOUND';
@@ -348,9 +356,11 @@ begin
       on property.organization_id = client.organization_id and property.entity_type = 'property'
     where client.entity_type = 'client'
       and ((requested_client_uid is not null and client.uid = requested_client_uid)
-        or (requested_client_id is not null and client.entity_key = requested_client_id::text))
+        or (requested_client_id is not null and client.entity_key =
+          client.organization_id::text || ':' || requested_client_id::text))
       and ((requested_property_uid is not null and property.uid = requested_property_uid)
-        or (requested_property_id is not null and property.entity_key = requested_property_id::text));
+        or (requested_property_id is not null and property.entity_key =
+          property.organization_id::text || ':' || requested_property_id::text));
   else
     select pg_catalog.array_agg(distinct visit.organization_id)
     into candidate_orgs
@@ -359,7 +369,8 @@ begin
       on client.organization_id = visit.organization_id and client.entity_type = 'client'
     where visit.entity_type = 'visit' and visit.uid = requested_visit_uid
       and ((requested_client_uid is not null and client.uid = requested_client_uid)
-        or (requested_client_id is not null and client.entity_key = requested_client_id::text));
+        or (requested_client_id is not null and client.entity_key =
+          client.organization_id::text || ':' || requested_client_id::text));
   end if;
   if coalesce(pg_catalog.array_length(candidate_orgs, 1), 0) = 0 then
     raise exception using errcode = 'P0002', message = 'NOT_FOUND';
@@ -431,7 +442,8 @@ begin
   from public.propcontrol_records as record
   where record.organization_id = target_org and record.entity_type = 'client'
     and ((requested_client_uid is not null and record.uid = requested_client_uid)
-      or (requested_client_id is not null and record.entity_key = requested_client_id::text))
+      or (requested_client_id is not null and record.entity_key =
+        target_org::text || ':' || requested_client_id::text))
   for update;
   if not found then raise exception using errcode = 'P0002', message = 'NOT_FOUND'; end if;
   if client_record.revision <> expected_client_revision then
@@ -446,7 +458,8 @@ begin
     from public.propcontrol_records as record
     where record.organization_id = target_org and record.entity_type = 'property'
       and ((requested_property_uid is not null and record.uid = requested_property_uid)
-        or (requested_property_id is not null and record.entity_key = requested_property_id::text))
+        or (requested_property_id is not null and record.entity_key =
+          target_org::text || ':' || requested_property_id::text))
     for share;
   else
     if (visit_record.payload ->> 'clientId')::bigint <> (client_record.payload ->> 'id')::bigint
@@ -457,7 +470,8 @@ begin
     from public.propcontrol_records as record
     where record.organization_id = target_org and record.entity_type = 'property'
       and ((visit_record.payload ? 'propertyUid' and record.uid::text = visit_record.payload ->> 'propertyUid')
-        or (not (visit_record.payload ? 'propertyUid') and record.entity_key = visit_record.payload ->> 'propertyId'))
+        or (not (visit_record.payload ? 'propertyUid') and record.entity_key =
+          target_org::text || ':' || (visit_record.payload ->> 'propertyId')))
     for share;
   end if;
   if not found then raise exception using errcode = 'P0002', message = 'NOT_FOUND'; end if;
@@ -598,7 +612,8 @@ begin
       organization_id, entity_type, entity_key, assigned_member_id, payload,
       created_by, uid, revision
     ) values (
-      target_org, 'visit', visit_uid::text, assigned_member_id, visit_payload,
+      target_org, 'visit', target_org::text || ':' || visit_uid::text,
+      assigned_member_id, visit_payload,
       current_user_id, visit_uid, 0
     );
     activity_action := 'Visita coordinada';
@@ -641,7 +656,8 @@ begin
     organization_id, entity_type, entity_key, assigned_member_id, payload,
     created_by, uid, revision
   ) values (
-    target_org, 'activity', activity_uid::text, assigned_member_id, activity_payload,
+    target_org, 'activity', target_org::text || ':' || activity_uid::text,
+    assigned_member_id, activity_payload,
     current_user_id, activity_uid, 0
   );
 

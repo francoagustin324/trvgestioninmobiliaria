@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { createHash, randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
+import { organizationScopedEntityKey } from '../cloud-records.js';
 import { visitReadiness } from '../lead-qualification.js';
 import type { Client } from '../models.js';
 import type {
@@ -96,9 +97,21 @@ test('R2.2B instala autoridad explícita OFF y fences server-side para Visit, Cl
   assert.match(migration, /transaction_owned boolean not null default false/i);
   assert.doesNotMatch(migration, /insert into private\.commercial_entity_authority/i);
   assert.match(migration, /create trigger guard_transaction_owned_records/i);
-  assert.match(migration, /target_type = 'visit'[\s\S]*TRANSACTION_AUTHORITY_REQUIRED/i);
-  assert.match(migration, /target_type = 'client'[\s\S]*tg_op in \('UPDATE', 'DELETE'\)[\s\S]*CLIENT_CAS_REQUIRED/i);
-  assert.match(migration, /transactionOwner'[\s\S]*= 'visit'/i);
+  assert.match(migration, /old_type = 'visit' or new_type = 'visit'[\s\S]*TRANSACTION_AUTHORITY_REQUIRED/i);
+  assert.match(migration, /old_type = 'client' or new_type = 'client'[\s\S]*tg_op in \('UPDATE', 'DELETE'\)[\s\S]*CLIENT_CAS_REQUIRED/i);
+  assert.match(migration, /old_payload ->> 'transactionOwner' = 'visit'[\s\S]*new_payload ->> 'transactionOwner' = 'visit'/i);
+});
+
+test('R2.2B usa exactamente la entity_key canónica del snapshot writer', () => {
+  const org = '11111111-1111-4111-8111-111111111111';
+  const uid = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+  assert.equal(organizationScopedEntityKey(org, 17), `${org}:17`);
+  assert.equal(organizationScopedEntityKey(org, uid), `${org}:${uid}`);
+  assert.match(migration, /target_org::text \|\| ':' \|\| visit_uid::text/i);
+  assert.match(migration, /target_org::text \|\| ':' \|\| activity_uid::text/i);
+  assert.match(migration, /candidate\.organization_id::text \|\| ':' \|\| requested_legacy_id::text/i);
+  assert.doesNotMatch(migration, /target_org, 'visit', visit_uid::text/i);
+  assert.doesNotMatch(migration, /target_org, 'activity', activity_uid::text/i);
 });
 
 test('R2.2B Client snapshot CAS es el único bypass legítimo para update/delete stale', () => {
@@ -183,6 +196,7 @@ test('R2.2B matriz de qualification conserva paridad de decisión TS ↔ SQL', (
     readyClient({ paymentMethod: 'Crédito hipotecario', creditPossible: 'Preaprobado' }),
     readyClient({ canMoveForward: 'Depende del crédito', creditPossible: 'Aprobado' }),
     readyClient({ knowsArea: 'No' }),
+    readyClient({ operation: undefined, propertyType: undefined, bedrooms: undefined }),
   ];
   for (const client of cases) {
     const tsReady = visitReadiness(client, []).missing.length === 0;
@@ -212,21 +226,33 @@ test('R2.2B no conecta todavía UI, snapshot writer ni dominios R2.3+', () => {
   assert.doesNotMatch(migration, /offer|counteroffer|reservation|won|lost|whatsapp/i);
 });
 
-test('R2.2B ejecuta migration, RPC, RLS, idempotencia, CAS, rollback y fences en PostgreSQL 17', { timeout: 240_000 }, async (t) => {
-  if (process.env.GITHUB_ACTIONS !== 'true') {
-    t.skip('La validación efímera PostgreSQL 17 se ejecuta en GitHub Actions.');
-    return;
-  }
-
+test('R2.2B ejecuta migration, RPC, RLS, idempotencia, CAS, rollback y fences en PostgreSQL 17', { timeout: 240_000 }, async () => {
   const { spawn, spawnSync } = await import('node:child_process');
   const containerName = `r22b-visit-${randomUUID().slice(0, 8)}`;
   const actorA = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
   const actorB = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
   const actorC = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
+  const actorD = 'dddddddd-dddd-4ddd-8ddd-dddddddddddd';
   const orgA = '11111111-1111-4111-8111-111111111111';
   const orgB = '22222222-2222-4222-8222-222222222222';
   const orgBClientUid = '33333333-3333-4333-8333-333333333333';
   const orgBPropertyUid = '44444444-4444-4444-8444-444444444444';
+  const scopedKey = (organizationId: string, identity: string | number): string =>
+    organizationScopedEntityKey(organizationId, identity);
+  const docker = (args: string[]) => spawnSync('docker', args, {
+    encoding: 'utf8', maxBuffer: 30 * 1024 * 1024,
+  });
+  const containerDiagnostics = (): string => {
+    const inspect = docker(['inspect', containerName, '--format',
+      'running={{.State.Running}} status={{.State.Status}} health={{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}} exit={{.State.ExitCode}} error={{.State.Error}}']);
+    const ready = docker(['exec', containerName, 'pg_isready', '-U', 'postgres', '-d', 'postgres']);
+    const logs = docker(['logs', '--tail', '120', containerName]);
+    return [
+      `inspect: ${inspect.stdout || inspect.stderr}`,
+      `pg_isready: ${ready.stdout || ready.stderr}`,
+      `logs:\n${logs.stdout || logs.stderr}`,
+    ].join('\n');
+  };
 
   const rawPsql = (sql: string) => spawnSync(
     'docker',
@@ -235,7 +261,7 @@ test('R2.2B ejecuta migration, RPC, RLS, idempotencia, CAS, rollback y fences en
   );
   const psql = (sql: string): string => {
     const result = rawPsql(sql);
-    assert.equal(result.status, 0, result.stderr || result.stdout);
+    assert.equal(result.status, 0, `${result.stderr || result.stdout}\n${containerDiagnostics()}`);
     return result.stdout.trim();
   };
   const asUser = (userId: string, sql: string): string => psql(`
@@ -263,20 +289,34 @@ test('R2.2B ejecuta migration, RPC, RLS, idempotencia, CAS, rollback y fences en
 
   const started = spawnSync(
     'docker',
-    ['run', '--detach', '--rm', '--name', containerName, '--env', 'POSTGRES_PASSWORD=postgres', 'postgres:17'],
+    [
+      'run', '--detach', '--name', containerName,
+      '--env', 'POSTGRES_PASSWORD=postgres',
+      '--health-cmd', 'pg_isready -U postgres -d postgres',
+      '--health-interval', '1s', '--health-timeout', '5s',
+      '--health-start-period', '2s', '--health-retries', '60',
+      'postgres:17',
+    ],
     { encoding: 'utf8', maxBuffer: 10 * 1024 * 1024 },
   );
   assert.equal(started.status, 0, started.stderr || started.stdout);
 
   try {
-    let ready = false;
-    for (let attempt = 0; attempt < 60; attempt += 1) {
-      const probe = spawnSync('docker', ['exec', containerName, 'pg_isready', '-U', 'postgres', '-d', 'postgres'], { encoding: 'utf8' });
-      if (probe.status === 0) { ready = true; break; }
+    let healthy = false;
+    for (let attempt = 0; attempt < 90; attempt += 1) {
+      const probe = docker(['inspect', containerName, '--format',
+        '{{.State.Running}}|{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}']);
+      if (probe.status === 0 && probe.stdout.trim() === 'true|healthy') { healthy = true; break; }
+      if (probe.status === 0 && probe.stdout.trim().startsWith('false|')) break;
       await new Promise((resolve) => setTimeout(resolve, 500));
     }
-    assert.equal(ready, true, 'PostgreSQL 17 no quedó disponible.');
+    assert.equal(healthy, true, `PostgreSQL 17 no quedó healthy.\n${containerDiagnostics()}`);
+    assert.equal(docker(['exec', containerName, 'pg_isready', '-U', 'postgres', '-d', 'postgres']).status, 0,
+      containerDiagnostics());
+    assert.equal(psql('select 1;'), '1');
     assert.match(psql('show server_version;'), /^17(?:\.|$)/);
+    assert.equal(docker(['inspect', containerName, '--format', '{{.State.Running}}']).stdout.trim(), 'true',
+      containerDiagnostics());
 
     psql(`
       create role anon nologin;
@@ -358,30 +398,57 @@ test('R2.2B ejecuta migration, RPC, RLS, idempotencia, CAS, rollback y fences en
         ('${orgA}','${actorA}',1,'owner','active'),
         ('${orgA}','${actorB}',2,'admin','active'),
         ('${orgA}','${actorC}',3,'agent','active'),
+        ('${orgA}','${actorD}',4,'agent','suspended'),
         ('${orgB}','${actorA}',5,'owner','active');
-      ${Array.from({ length: 12 }, (_, index) => {
+      ${Array.from({ length: 18 }, (_, index) => {
         const id = index + 1;
         const overrides = id === 2 ? { pipeline: 'Ganado', status: 'Operación ganada' }
-          : id === 6 ? { budget: '' } : {};
+          : id === 6 ? { budget: '' }
+            : id === 15 ? { pipeline: 'Negociación' }
+              : id === 16 ? { pipeline: 'Reservado' } : {};
         return `insert into public.propcontrol_records(organization_id,entity_type,entity_key,assigned_member_id,payload,created_by,revision)
-          values('${orgA}','client','${id}',${id === 3 ? 3 : 1},${jsonSql(clientPayload(id, overrides))},'${actorA}',0);`;
+          values('${orgA}','client','${scopedKey(orgA, id)}',${id === 3 ? 3 : id === 14 ? 'null' : 1},${jsonSql(clientPayload(id, overrides))},'${actorA}',0);`;
       }).join('\n')}
       insert into public.propcontrol_records(organization_id,entity_type,entity_key,assigned_member_id,payload,created_by,revision)
-        values('${orgA}','property','1',1,${jsonSql({ id: 1, title: 'Depto Centro', address: 'Calle 1', assignedToId: 1, revision: 0 })},'${actorA}',0);
+        values('${orgA}','property','${scopedKey(orgA, 1)}',1,${jsonSql({ id: 1, title: 'Depto Centro', address: 'Calle 1', assignedToId: 1, revision: 0 })},'${actorA}',0);
       insert into public.propcontrol_records(organization_id,entity_type,entity_key,assigned_member_id,payload,created_by,revision)
-        values('${orgA}','property','2',3,${jsonSql({ id: 2, title: 'Depto Agente', address: 'Calle 2', assignedToId: 3, revision: 0 })},'${actorA}',0);
+        values('${orgA}','property','${scopedKey(orgA, 2)}',3,${jsonSql({ id: 2, title: 'Depto Agente', address: 'Calle 2', assignedToId: 3, revision: 0 })},'${actorA}',0);
       insert into public.propcontrol_records(organization_id,entity_type,entity_key,assigned_member_id,payload,created_by,uid,revision)
-        values('${orgB}','client','1',5,${jsonSql({ ...clientPayload(1), assignedToId: 5, uid: orgBClientUid })},'${actorA}','${orgBClientUid}',0),
-          ('${orgB}','property','1',5,${jsonSql({ id:1,title:'UID Property',address:'B',assignedToId:5,uid:orgBPropertyUid,revision:0 })},'${actorA}','${orgBPropertyUid}',0);
+        values('${orgB}','client','${scopedKey(orgB, orgBClientUid)}',5,${jsonSql({ ...clientPayload(1), assignedToId: 5, uid: orgBClientUid })},'${actorA}','${orgBClientUid}',0),
+          ('${orgB}','property','${scopedKey(orgB, orgBPropertyUid)}',5,${jsonSql({ id:1,title:'UID Property',address:'B',assignedToId:5,uid:orgBPropertyUid,revision:0 })},'${actorA}','${orgBPropertyUid}',0);
     `);
+
+    const qualificationCases: Client[] = [
+      readyClient(), readyClient({ budget: '' }), readyClient({ currency: '' }),
+      readyClient({ paymentMethod: '' }), readyClient({ zones: '' }),
+      readyClient({ purpose: 'Vacaciones' }), readyClient({ purchaseTimeframe: '', urgency: '' }),
+      readyClient({ canMoveForward: 'No confirmado' }),
+      readyClient({ paymentMethod: 'Crédito hipotecario', creditPossible: 'En trámite' }),
+      readyClient({ paymentMethod: 'Crédito hipotecario', creditPossible: 'Preaprobado' }),
+      readyClient({ canMoveForward: 'Depende del crédito', creditPossible: 'Aprobado' }),
+      readyClient({ knowsArea: 'No' }),
+      readyClient({ operation: undefined, propertyType: undefined, bedrooms: undefined }),
+    ];
+    for (const candidate of qualificationCases) {
+      const expectedMissing = visitReadiness(candidate, []).missing;
+      assert.deepEqual(sqlContractMissing(candidate), expectedMissing);
+      const actualMissing = JSON.parse(psql(`select pg_catalog.to_json(private.visit_qualification_missing(${jsonSql(candidate)}));`));
+      assert.deepEqual(actualMissing, expectedMissing, JSON.stringify(candidate));
+    }
 
     assert.equal(psql(`select count(*) from pg_proc where proname in ('commercial_visit_mutation','client_snapshot_cas') and prosecdef;`), '0');
     assert.equal(psql(`select count(*) from private.commercial_entity_authority;`), '0');
+    assert.match(asUserError(actorA, `insert into private.commercial_entity_authority values('${orgA}','visit',true,now(),'${actorA}');`), /permission denied/i);
+    assert.match(asUserError(actorD, visitCall(randomUUID(), 'VISIT_CREATE', createRequest(1))), /NOT_FOUND|PERMISSION_DENIED/);
+    const anonCall = rawPsql(`set role anon; ${visitCall(randomUUID(), 'VISIT_CREATE', createRequest(1))}`);
+    assert.notEqual(anonCall.status, 0);
+    assert.match(`${anonCall.stderr}\n${anonCall.stdout}`, /permission denied/i);
     const offError = asUserError(actorA, visitCall(randomUUID(), 'VISIT_CREATE', createRequest(1)));
     assert.match(offError, /TERMINAL_STATE/);
+    const offProbeUid = randomUUID();
     asUser(actorA, `insert into public.propcontrol_records(organization_id,entity_type,entity_key,assigned_member_id,payload,created_by,uid,revision)
-      values('${orgA}','visit','off-probe',1,'{"id":999,"status":"Coordinada"}'::jsonb,'${actorA}',pg_catalog.gen_random_uuid(),0);`);
-    asUser(actorA, `delete from public.propcontrol_records where organization_id='${orgA}' and entity_type='visit' and entity_key='off-probe';`);
+      values('${orgA}','visit','${scopedKey(orgA, offProbeUid)}',1,'{"id":999,"uid":"${offProbeUid}","status":"Coordinada"}'::jsonb,'${actorA}','${offProbeUid}',0);`);
+    asUser(actorA, `delete from public.propcontrol_records where organization_id='${orgA}' and entity_type='visit' and entity_key='${scopedKey(orgA, offProbeUid)}';`);
 
     psql(`insert into private.commercial_entity_authority(organization_id,entity_type,transaction_owned,activated_at,activated_by)
       values('${orgA}','visit',true,now(),'${actorA}'),('${orgB}','visit',true,now(),'${actorA}');`);
@@ -397,25 +464,53 @@ test('R2.2B ejecuta migration, RPC, RLS, idempotencia, CAS, rollback y fences en
     assert.equal(created.activity.transactionOwner, 'visit');
     assert.equal(psql(`select count(*) from public.propcontrol_records where organization_id='${orgA}' and entity_type='visit';`), '1');
     assert.equal(psql(`select count(*) from public.propcontrol_records where organization_id='${orgA}' and entity_type='activity';`), '1');
+    assert.equal(psql(`select entity_key from public.propcontrol_records where organization_id='${orgA}' and entity_type='visit' and uid='${created.visit.uid}';`),
+      scopedKey(orgA, created.visit.uid));
+    assert.equal(psql(`select entity_key from public.propcontrol_records where organization_id='${orgA}' and entity_type='activity' and uid='${created.activity.uid}';`),
+      scopedKey(orgA, created.activity.uid));
+    assert.equal(psql(`select count(*) from public.propcontrol_records where entity_type in ('offer','counteroffer','reservation');`), '0');
+
+    const injectedVisitUid = randomUUID();
+    assert.match(asUserError(actorA, `insert into public.propcontrol_records(organization_id,entity_type,entity_key,assigned_member_id,payload,created_by,uid,revision)
+      values('${orgA}','visit','${scopedKey(orgA, injectedVisitUid)}',1,'{"id":998,"uid":"${injectedVisitUid}","status":"Coordinada"}'::jsonb,'${actorA}','${injectedVisitUid}',0);`), /TRANSACTION_AUTHORITY_REQUIRED/);
+    assert.match(asUserError(actorA, `update public.propcontrol_records set entity_type='activity' where organization_id='${orgA}' and entity_type='visit' and uid='${created.visit.uid}';`), /TRANSACTION_AUTHORITY_REQUIRED/);
+    assert.match(asUserError(actorA, `update public.propcontrol_records set payload=payload-'transactionOwner' where organization_id='${orgA}' and entity_type='activity' and uid='${created.activity.uid}';`), /TRANSACTION_AUTHORITY_REQUIRED/);
+    assert.match(asUserError(actorA, `update public.propcontrol_records set payload=jsonb_set(payload,'{transactionOwner}','"other"') where organization_id='${orgA}' and entity_type='activity' and uid='${created.activity.uid}';`), /TRANSACTION_AUTHORITY_REQUIRED/);
+    assert.match(asUserError(actorA, `delete from public.propcontrol_records where organization_id='${orgA}' and entity_type='activity' and uid='${created.activity.uid}';`), /TRANSACTION_AUTHORITY_REQUIRED/);
+    const injectedActivityUid = randomUUID();
+    assert.match(asUserError(actorA, `insert into public.propcontrol_records(organization_id,entity_type,entity_key,assigned_member_id,payload,created_by,uid,revision)
+      values('${orgA}','activity','${scopedKey(orgA, injectedActivityUid)}',1,'{"id":997,"uid":"${injectedActivityUid}","transactionOwner":"visit"}'::jsonb,'${actorA}','${injectedActivityUid}',0);`), /TRANSACTION_AUTHORITY_REQUIRED/);
 
     const replay = parseJson(asUser(actorA, visitCall(createOperation, 'VISIT_CREATE', createIntent)));
     assert.equal(replay.replayed, true);
     assert.equal(replay.errorCode, 'IDEMPOTENCY_REPLAY');
     assert.equal(replay.visit.uid, created.visit.uid);
     assert.equal(psql(`select count(*) from private.commercial_operations where organization_id='${orgA}' and operation_id='${createOperation}';`), '1');
+    assert.equal(psql(`select count(*) from public.propcontrol_records where organization_id='${orgA}' and entity_type='activity' and payload->>'operationId'='${createOperation}';`), '1');
     assert.match(asUserError(actorA, visitCall(createOperation, 'VISIT_CREATE', { ...createIntent, localTime: '11:00' })), /CONFLICT/);
 
-    assert.match(asUserError(actorA, `update public.propcontrol_records set payload=payload where organization_id='${orgA}' and entity_type='client' and entity_key='1';`), /CLIENT_CAS_REQUIRED/);
-    assert.match(asUserError(actorA, `delete from public.propcontrol_records where organization_id='${orgA}' and entity_type='client' and entity_key='1';`), /CLIENT_CAS_REQUIRED/);
+    assert.match(asUserError(actorA, `update public.propcontrol_records set payload=payload where organization_id='${orgA}' and entity_type='client' and entity_key='${scopedKey(orgA, 1)}';`), /CLIENT_CAS_REQUIRED/);
+    assert.match(asUserError(actorA, `delete from public.propcontrol_records where organization_id='${orgA}' and entity_type='client' and entity_key='${scopedKey(orgA, 1)}';`), /CLIENT_CAS_REQUIRED/);
     assert.match(asUserError(actorA, `update public.propcontrol_records set payload=payload where organization_id='${orgA}' and entity_type='visit' and uid='${created.visit.uid}';`), /TRANSACTION_AUTHORITY_REQUIRED/);
     assert.match(asUserError(actorA, `delete from public.propcontrol_records where organization_id='${orgA}' and entity_type='visit' and uid='${created.visit.uid}';`), /TRANSACTION_AUTHORITY_REQUIRED/);
     assert.match(asUserError(actorA, `select public.client_snapshot_cas(${jsonSql({ action:'update',client:{legacyId:1},expectedRevision:0,payload:clientPayload(1) })},false);`), /CONFLICT/);
-    const cas = parseJson(asUser(actorA, `select public.client_snapshot_cas(${jsonSql({ action:'update',client:{legacyId:1},expectedRevision:1,payload:clientPayload(1) })},false);`));
+    const cas = parseJson(asUser(actorA, `select public.client_snapshot_cas(${jsonSql({
+      action:'update',client:{legacyId:1},expectedRevision:1,
+      payload:clientPayload(999,{uid:randomUUID(),operationId:randomUUID()}),
+    })},false);`));
     assert.equal(cas.client.revision, 2);
+    assert.equal(cas.client.id, 1);
+    assert.equal(cas.client.uid, undefined);
+    assert.equal(psql(`select entity_key||':'||revision from public.propcontrol_records where organization_id='${orgA}' and entity_type='client' and entity_key='${scopedKey(orgA, 1)}';`),
+      `${scopedKey(orgA, 1)}:2`);
+    assert.match(asUserError(actorA, `select public.client_snapshot_cas(${jsonSql({ action:'delete',client:{legacyId:13},expectedRevision:1 })},false);`), /CONFLICT/);
+    const deleted = parseJson(asUser(actorA, `select public.client_snapshot_cas(${jsonSql({ action:'delete',client:{legacyId:13},expectedRevision:0 })},false);`));
+    assert.equal(deleted.action, 'delete');
+    assert.equal(psql(`select count(*) from public.propcontrol_records where organization_id='${orgA}' and entity_type='client' and entity_key='${scopedKey(orgA, 13)}';`), '0');
 
-    const rollbackBefore = psql(`select revision||':'||(select count(*) from public.propcontrol_records where organization_id='${orgA}' and entity_type in ('visit','activity')) from public.propcontrol_records where organization_id='${orgA}' and entity_type='client' and entity_key='4';`);
+    const rollbackBefore = psql(`select revision||':'||(select count(*) from public.propcontrol_records where organization_id='${orgA}' and entity_type in ('visit','activity')) from public.propcontrol_records where organization_id='${orgA}' and entity_type='client' and entity_key='${scopedKey(orgA, 4)}';`);
     assert.match(asUserError(actorA, visitCall(randomUUID(), 'VISIT_CREATE', createRequest(4), true)), /INTERNAL_ERROR/);
-    const rollbackAfter = psql(`select revision||':'||(select count(*) from public.propcontrol_records where organization_id='${orgA}' and entity_type in ('visit','activity')) from public.propcontrol_records where organization_id='${orgA}' and entity_type='client' and entity_key='4';`);
+    const rollbackAfter = psql(`select revision||':'||(select count(*) from public.propcontrol_records where organization_id='${orgA}' and entity_type in ('visit','activity')) from public.propcontrol_records where organization_id='${orgA}' and entity_type='client' and entity_key='${scopedKey(orgA, 4)}';`);
     assert.equal(rollbackAfter, rollbackBefore);
 
     asUser(actorA, `select public.client_snapshot_cas(${jsonSql({ action:'update',client:{legacyId:5},expectedRevision:0,payload:clientPayload(5,{notes:'delayed snapshot'}) })},false);`);
@@ -430,6 +525,34 @@ test('R2.2B ejecuta migration, RPC, RLS, idempotencia, CAS, rollback y fences en
     })));
     assert.equal(uidCreated.visit.clientUid, orgBClientUid);
     assert.equal(uidCreated.visit.propertyUid, orgBPropertyUid);
+    const uidIdentity = psql(`select organization_id||':'||entity_type||':'||entity_key||':'||uid||':'||revision
+      from public.propcontrol_records where organization_id='${orgB}' and entity_type='client' and uid='${orgBClientUid}';`);
+    const uidCas = parseJson(asUser(actorA, `select public.client_snapshot_cas(${jsonSql({
+      action:'update',client:{uid:orgBClientUid},expectedRevision:1,
+      payload:{...clientPayload(999),uid:randomUUID(),operationId:randomUUID()},
+    })},false);`));
+    assert.equal(uidCas.client.id, 1);
+    assert.equal(uidCas.client.uid, orgBClientUid);
+    assert.equal(psql(`select organization_id||':'||entity_type||':'||entity_key||':'||uid||':'||(revision-1)
+      from public.propcontrol_records where organization_id='${orgB}' and entity_type='client' and uid='${orgBClientUid}';`), uidIdentity);
+    const crossTenantOperation = randomUUID();
+    const crossA = parseJson(asUser(actorA, visitCall(crossTenantOperation, 'VISIT_CREATE', createRequest(18,1,0,'2035-02-05','08:00'))));
+    const crossB = parseJson(asUser(actorA, visitCall(crossTenantOperation, 'VISIT_CREATE', {
+      client:{uid:orgBClientUid},property:{uid:orgBPropertyUid},expectedClientRevision:2,localDate:'2035-02-05',localTime:'08:00',
+    })));
+    assert.equal(crossA.operationId, crossTenantOperation);
+    assert.equal(crossB.operationId, crossTenantOperation);
+    assert.notEqual(crossA.organizationId, crossB.organizationId);
+    assert.equal(psql(`select count(*) from private.commercial_operations where operation_id='${crossTenantOperation}';`), '2');
+    assert.equal(asUser(actorB, `select count(*) from public.propcontrol_records where organization_id='${orgB}';`), '0');
+
+    const fallbackCreated = parseJson(asUser(actorA, visitCall(randomUUID(), 'VISIT_CREATE', createRequest(14,1,0,'2035-02-10','09:30'))));
+    assert.equal(fallbackCreated.visit.assignedToId, 1);
+    assert.equal(fallbackCreated.activity.actorId, 1);
+    assert.match(asUserError(actorA, visitCall(randomUUID(), 'VISIT_CREATE', createRequest(14,1,1,'2035-02-10','09:30'))), /DUPLICATE_VISIT/);
+
+    const agentCreated = parseJson(asUser(actorC, visitCall(randomUUID(), 'VISIT_CREATE', createRequest(3,2,0,'2035-02-11','10:00'))));
+    assert.equal(agentCreated.visit.assignedToId, 3);
 
     const resolveCreate = parseJson(asUser(actorA, visitCall(randomUUID(), 'VISIT_CREATE', createRequest(8,1,0,'2035-03-01','12:00'))));
     const resolveOperation = randomUUID();
@@ -451,15 +574,43 @@ test('R2.2B ejecuta migration, RPC, RLS, idempotencia, CAS, rollback y fences en
       status:'Realizada',nextAction:'Llamar',nextFollowUp:'2035-04-02',
     })), /VALIDATION_ERROR/);
 
+    const cancelledCreate = parseJson(asUser(actorA, visitCall(randomUUID(), 'VISIT_CREATE', createRequest(15,1,0,'2035-04-10','12:00'))));
+    const cancelledOperation = randomUUID();
+    const cancelled = parseJson(asUser(actorA, visitCall(cancelledOperation, 'VISIT_RESOLVE', {
+      client:{legacyId:15},visitUid:cancelledCreate.visit.uid,expectedVisitRevision:0,expectedClientRevision:1,
+      status:'Cancelada',interest:'Alto',objection:'Cambio de planes',nextAction:'Reagendar',nextFollowUp:'2035-04-11',
+    })));
+    assert.equal(cancelled.visit.status, 'Cancelada');
+    assert.equal(cancelled.visit.interest, undefined);
+    assert.equal(cancelled.activity.action, 'Visita cancelada');
+    assert.equal(cancelled.client.pipeline, 'Negociación');
+    assert.equal(psql(`select count(*) from public.propcontrol_records where organization_id='${orgA}' and entity_type='activity' and payload->>'operationId'='${cancelledOperation}';`), '1');
+
+    const noShowCreate = parseJson(asUser(actorA, visitCall(randomUUID(), 'VISIT_CREATE', createRequest(16,1,0,'2035-04-20','12:00'))));
+    const noShow = parseJson(asUser(actorA, visitCall(randomUUID(), 'VISIT_RESOLVE', {
+      client:{legacyId:16},visitUid:noShowCreate.visit.uid,expectedVisitRevision:0,expectedClientRevision:1,
+      status:'No asistió',interest:'Medio',nextAction:'Contactar',nextFollowUp:'2035-04-21',
+    })));
+    assert.equal(noShow.visit.status, 'No asistió');
+    assert.equal(noShow.visit.interest, undefined);
+    assert.equal(noShow.activity.action, 'Cliente no asistió');
+    assert.equal(noShow.client.pipeline, 'Reservado');
+
+    const wrongClientCreate = parseJson(asUser(actorA, visitCall(randomUUID(), 'VISIT_CREATE', createRequest(17,1,0,'2035-04-25','12:00'))));
+    assert.match(asUserError(actorA, visitCall(randomUUID(), 'VISIT_RESOLVE', {
+      client:{legacyId:4},visitUid:wrongClientCreate.visit.uid,expectedVisitRevision:0,expectedClientRevision:0,
+      status:'Cancelada',nextAction:'Seguimiento',nextFollowUp:'2035-04-26',
+    })), /WRONG_CLIENT/);
+
     const terminalResolveCreate = parseJson(asUser(actorA, visitCall(randomUUID(), 'VISIT_CREATE', createRequest(10,1,0,'2035-05-01','12:00'))));
     psql(`update public.propcontrol_records set payload=payload||'{"pipeline":"Ganado","status":"Operación ganada"}'::jsonb
-      where organization_id='${orgA}' and entity_type='client' and entity_key='10';`);
-    const terminalBefore = psql(`select payload::text||':'||revision from public.propcontrol_records where organization_id='${orgA}' and entity_type='client' and entity_key='10';`);
+      where organization_id='${orgA}' and entity_type='client' and entity_key='${scopedKey(orgA, 10)}';`);
+    const terminalBefore = psql(`select payload::text||':'||revision from public.propcontrol_records where organization_id='${orgA}' and entity_type='client' and entity_key='${scopedKey(orgA, 10)}';`);
     const terminalResolved = parseJson(asUser(actorA, visitCall(randomUUID(), 'VISIT_RESOLVE', {
       client:{legacyId:10},visitUid:terminalResolveCreate.visit.uid,expectedVisitRevision:0,expectedClientRevision:1,status:'Cancelada',
     })));
     assert.equal(terminalResolved.visit.status, 'Cancelada');
-    const terminalAfter = psql(`select payload::text||':'||revision from public.propcontrol_records where organization_id='${orgA}' and entity_type='client' and entity_key='10';`);
+    const terminalAfter = psql(`select payload::text||':'||revision from public.propcontrol_records where organization_id='${orgA}' and entity_type='client' and entity_key='${scopedKey(orgA, 10)}';`);
     assert.equal(terminalAfter, terminalBefore);
 
     const collisionCreate = parseJson(asUser(actorA, visitCall(randomUUID(), 'VISIT_CREATE', createRequest(11,1,0,'2035-06-01','12:00'))));
@@ -468,13 +619,19 @@ test('R2.2B ejecuta migration, RPC, RLS, idempotencia, CAS, rollback y fences en
     assert.match(actorCollision, /CONFLICT/);
     assert.doesNotMatch(actorCollision, /result_payload|transactionOwner|Depto Centro/);
 
+    const ordinaryActivityUid = randomUUID();
     asUser(actorA, `insert into public.propcontrol_records(organization_id,entity_type,entity_key,assigned_member_id,payload,created_by,uid,revision)
-      values('${orgA}','activity','ordinary',1,'{"id":999,"action":"Manual"}'::jsonb,'${actorA}',pg_catalog.gen_random_uuid(),0);`);
+      values('${orgA}','activity','${scopedKey(orgA, ordinaryActivityUid)}',1,'{"id":${created.activity.id},"uid":"${ordinaryActivityUid}","action":"Manual"}'::jsonb,'${actorA}','${ordinaryActivityUid}',0);`);
+    assert.equal(psql(`select count(*) from public.propcontrol_records where organization_id='${orgA}' and entity_type='activity' and payload->>'id'='${created.activity.id}';`), '2');
     asUser(actorA, `update public.propcontrol_records set payload=payload||'{"detail":"ok"}'::jsonb
-      where organization_id='${orgA}' and entity_type='activity' and entity_key='ordinary';`);
+      where organization_id='${orgA}' and entity_type='activity' and entity_key='${scopedKey(orgA, ordinaryActivityUid)}';`);
+    assert.match(asUserError(actorA, `update public.propcontrol_records set payload=payload||'{"transactionOwner":"visit"}'::jsonb
+      where organization_id='${orgA}' and entity_type='activity' and entity_key='${scopedKey(orgA, ordinaryActivityUid)}';`), /TRANSACTION_AUTHORITY_REQUIRED/);
+    assert.match(asUserError(actorA, `update public.propcontrol_records set entity_type='visit'
+      where organization_id='${orgA}' and entity_type='activity' and entity_key='${scopedKey(orgA, ordinaryActivityUid)}';`), /TRANSACTION_AUTHORITY_REQUIRED/);
 
     assert.equal(asUser(actorB, `select count(*) from private.commercial_operations where organization_id='${orgA}' and actor_user_id='${actorA}';`), '0');
-    assert.equal(psql(`select count(*) from public.propcontrol_records where organization_id='${orgA}' and entity_type='client' and entity_key='4' and revision=0;`), '1');
+    assert.equal(psql(`select count(*) from public.propcontrol_records where organization_id='${orgA}' and entity_type='client' and entity_key='${scopedKey(orgA, 4)}' and revision=0;`), '1');
     assert.equal(psql(`select count(*) from pg_proc where proname in ('commercial_visit_mutation','client_snapshot_cas','visit_authority_active','visit_qualification_missing') and proconfig @> array['search_path='];`), '4');
 
     // Dos resoluciones incompatibles con el mismo CAS: una confirma y la otra observa conflicto/terminal.
