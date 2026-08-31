@@ -324,7 +324,7 @@ test('R2.2B ejecuta migration, RPC, RLS, idempotencia, CAS, rollback y fences en
       create role authenticated nologin;
       create schema auth;
       create schema private;
-      grant usage on schema public, private to authenticated;
+      grant usage on schema public, private, auth to authenticated;
       create function auth.uid() returns uuid language sql stable security invoker set search_path = ''
       as $f$ select nullif(pg_catalog.current_setting('request.jwt.claim.sub', true), '')::uuid $f$;
       create table public.organizations (id uuid primary key, name text not null);
