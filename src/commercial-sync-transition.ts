@@ -2,9 +2,8 @@ export type TransactionalCommercialEntityType = 'visit' | 'offer' | 'reservation
 
 /**
  * R2.1 mantiene el snapshot como writer de todas las entidades comerciales.
- * R2.2+ podrá declarar una familia migrada para impedir que el writer histórico
- * sobrescriba revisiones producidas por una RPC. Esta interfaz no está conectada
- * todavía al push productivo.
+ * R2.2+ puede declarar una familia migrada para impedir que el writer histórico
+ * sobrescriba revisiones producidas por una RPC.
  */
 export interface CommercialSyncAuthority {
   transactionOwnedEntityTypes: ReadonlySet<TransactionalCommercialEntityType>;
@@ -12,6 +11,10 @@ export interface CommercialSyncAuthority {
 
 export const SNAPSHOT_ONLY_COMMERCIAL_AUTHORITY: CommercialSyncAuthority = {
   transactionOwnedEntityTypes: new Set(),
+};
+
+export const VISIT_TRANSACTION_COMMERCIAL_AUTHORITY: CommercialSyncAuthority = {
+  transactionOwnedEntityTypes: new Set<TransactionalCommercialEntityType>(['visit']),
 };
 
 export function snapshotMayWriteCommercialEntity(
