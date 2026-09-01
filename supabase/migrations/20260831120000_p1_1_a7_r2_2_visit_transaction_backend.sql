@@ -108,6 +108,54 @@ begin
 end;
 $function$;
 
+create function private.next_commercial_legacy_id(
+  target_organization_id uuid,
+  target_entity_type text
+)
+returns bigint
+language plpgsql
+volatile
+security definer
+set search_path = ''
+as $function$
+declare
+  current_user_id uuid := auth.uid();
+  maximum_existing_id numeric;
+  maximum_safe_id constant numeric := 9007199254740991;
+begin
+  if current_user_id is null then
+    raise exception using errcode = '42501', message = 'PERMISSION_DENIED';
+  end if;
+  if target_organization_id is null
+    or target_entity_type is null
+    or target_entity_type not in ('visit', 'activity') then
+    raise exception using errcode = '22023', message = 'VALIDATION_ERROR';
+  end if;
+  if not private.is_active_org_member(target_organization_id, current_user_id) then
+    raise exception using errcode = '42501', message = 'PERMISSION_DENIED';
+  end if;
+  if not private.visit_authority_active(target_organization_id) then
+    raise exception using errcode = '22023', message = 'TERMINAL_STATE';
+  end if;
+
+  perform pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended(
+    'propcontrol:commercial:legacy-id:' || target_organization_id::text || ':' || target_entity_type,
+    0
+  ));
+  select coalesce(pg_catalog.max((record.payload ->> 'id')::numeric), 0)
+  into maximum_existing_id
+  from public.propcontrol_records as record
+  where record.organization_id = target_organization_id
+    and record.entity_type = target_entity_type
+    and record.payload ->> 'id' ~ '^\d+$';
+
+  if maximum_existing_id >= maximum_safe_id then
+    raise exception using errcode = '22003', message = 'LEGACY_ID_EXHAUSTED';
+  end if;
+  return (maximum_existing_id + 1)::bigint;
+end;
+$function$;
+
 create function private.guard_transaction_owned_records()
 returns trigger
 language plpgsql
@@ -533,11 +581,7 @@ begin
       raise exception using errcode = '23505', message = 'DUPLICATE_VISIT';
     end if;
 
-    perform pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended(target_org::text || ':visit:id', 0));
-    select coalesce(pg_catalog.max((record.payload ->> 'id')::bigint), 0) + 1 into next_visit_id
-    from public.propcontrol_records as record
-    where record.organization_id = target_org and record.entity_type = 'visit'
-      and record.payload ->> 'id' ~ '^\d+$';
+    next_visit_id := private.next_commercial_legacy_id(target_org, 'visit');
     visit_uid := pg_catalog.gen_random_uuid();
     stage_name := private.visit_normalized(client_record.payload ->> 'pipeline');
     client_payload := client_record.payload || pg_catalog.jsonb_build_object(
@@ -637,11 +681,7 @@ begin
         else objection_text end end;
   end if;
 
-  perform pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended(target_org::text || ':activity:id', 0));
-  select coalesce(pg_catalog.max((record.payload ->> 'id')::bigint), 0) + 1 into next_activity_id
-  from public.propcontrol_records as record
-  where record.organization_id = target_org and record.entity_type = 'activity'
-    and record.payload ->> 'id' ~ '^\d+$';
+  next_activity_id := private.next_commercial_legacy_id(target_org, 'activity');
   activity_uid := pg_catalog.gen_random_uuid();
   activity_payload := pg_catalog.jsonb_build_object(
     'uid', activity_uid, 'revision', 0, 'operationId', p_operation_id,
@@ -688,10 +728,13 @@ $function$;
 revoke all on function private.visit_authority_active(uuid) from public;
 revoke all on function private.visit_normalized(text) from public;
 revoke all on function private.visit_qualification_missing(jsonb) from public;
+revoke all on function private.next_commercial_legacy_id(uuid, text) from public;
+revoke all on function private.next_commercial_legacy_id(uuid, text) from anon;
 revoke all on function private.guard_transaction_owned_records() from public;
 grant execute on function private.visit_authority_active(uuid) to authenticated;
 grant execute on function private.visit_normalized(text) to authenticated;
 grant execute on function private.visit_qualification_missing(jsonb) to authenticated;
+grant execute on function private.next_commercial_legacy_id(uuid, text) to authenticated;
 
 revoke all on function public.client_snapshot_cas(jsonb, boolean) from public;
 revoke all on function public.client_snapshot_cas(jsonb, boolean) from anon;

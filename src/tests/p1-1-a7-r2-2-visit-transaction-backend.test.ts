@@ -143,7 +143,8 @@ test('R2.2B idempotencia propia ocurre antes de CAS y colisión no lee payload a
   const replay = migration.indexOf('select operation.* into existing_operation');
   const visitCas = migration.indexOf('select record.* into visit_record');
   const clientCas = migration.indexOf('select record.* into client_record');
-  assert.ok(replay >= 0 && visitCas > replay && clientCas > replay);
+  const allocator = migration.indexOf("next_visit_id := private.next_commercial_legacy_id(target_org, 'visit')");
+  assert.ok(replay >= 0 && visitCas > replay && clientCas > replay && allocator > replay);
   assert.match(migration, /pg_advisory_xact_lock/i);
   assert.match(migration, /request_hash <> computed_hash/i);
   assert.match(migration, /'errorCode', 'IDEMPOTENCY_REPLAY'/i);
@@ -159,7 +160,8 @@ test('R2.2B VISIT_CREATE conserva reglas, dual refs y agregado atómico', () => 
     "'clientUid'", "'propertyUid'", "'operationId'",
   ]) assert.ok(migration.includes(token), `falta ${token}`);
   assert.match(migration, /visit_uid := pg_catalog\.gen_random_uuid\(\)/i);
-  assert.match(migration, /max\(\(record\.payload ->> 'id'\)::bigint\)[\s\S]*entity_type = 'visit'/i);
+  assert.match(migration, /next_visit_id := private\.next_commercial_legacy_id\(target_org, 'visit'\)/i);
+  assert.match(migration, /next_activity_id := private\.next_commercial_legacy_id\(target_org, 'activity'\)/i);
   const operationInsert = migration.lastIndexOf('insert into private.commercial_operations');
   assert.ok(migration.indexOf("set payload = client_payload") < operationInsert);
   assert.ok(migration.indexOf("target_org, 'visit'") < operationInsert);
@@ -209,13 +211,36 @@ test('R2.2B matriz de qualification conserva paridad de decisión TS ↔ SQL', (
   }
 });
 
-test('R2.2B mantiene mínimo privilegio, INVOKER y search_path vacío', () => {
-  assert.equal((migration.match(/security definer/gi) ?? []).length, 0);
+test('R2.2B4 limita SECURITY DEFINER al allocator tenant-safe y mantiene la RPC INVOKER', () => {
+  const helperStart = migration.indexOf('create function private.next_commercial_legacy_id');
+  const helperEnd = migration.indexOf('create function private.guard_transaction_owned_records', helperStart);
+  const helper = migration.slice(helperStart, helperEnd);
+  const rpcStart = migration.indexOf('create function public.commercial_visit_mutation');
+  const rpcEnd = migration.indexOf('revoke all on function private.visit_authority_active', rpcStart);
+  const rpc = migration.slice(rpcStart, rpcEnd);
+
+  assert.ok(helperStart >= 0 && helperEnd > helperStart);
+  assert.equal((migration.match(/security definer/gi) ?? []).length, 1);
+  assert.match(helper, /returns bigint[\s\S]*language plpgsql[\s\S]*volatile[\s\S]*security definer[\s\S]*set search_path = ''/i);
+  assert.match(helper, /current_user_id uuid := auth\.uid\(\)/i);
+  assert.match(helper, /target_entity_type not in \('visit', 'activity'\)/i);
+  assert.match(helper, /private\.is_active_org_member\(target_organization_id, current_user_id\)/i);
+  assert.match(helper, /private\.visit_authority_active\(target_organization_id\)/i);
+  assert.match(helper, /pg_advisory_xact_lock[\s\S]*target_organization_id::text[\s\S]*target_entity_type/i);
+  assert.match(helper, /max\(\(record\.payload ->> 'id'\)::numeric\)[\s\S]*record\.organization_id = target_organization_id[\s\S]*record\.entity_type = target_entity_type/i);
+  assert.match(helper, /maximum_safe_id constant numeric := 9007199254740991/i);
+  assert.doesNotMatch(helper, /\bexecute\b|\b(?:insert|update|delete|alter|drop|truncate)\s+/i);
+  assert.match(rpc, /security invoker/i);
+  assert.doesNotMatch(rpc, /security definer/i);
   assert.ok((migration.match(/security invoker/gi) ?? []).length >= 6);
-  assert.ok((migration.match(/set search_path = ''/gi) ?? []).length >= 6);
+  assert.ok((migration.match(/set search_path = ''/gi) ?? []).length >= 7);
   assert.doesNotMatch(migration, /service_role/i);
+  assert.doesNotMatch(migration, /create\s+sequence|create\s+unique\s+index|create\s+table\s+private\.[^;]*(?:counter|sequence)/i);
   assert.match(migration, /grant select on table private\.commercial_entity_authority to authenticated/i);
   assert.doesNotMatch(migration, /grant (?:insert|update|delete|all)[^;]*commercial_entity_authority/i);
+  assert.match(migration, /revoke all on function private\.next_commercial_legacy_id\(uuid, text\) from public/i);
+  assert.match(migration, /revoke all on function private\.next_commercial_legacy_id\(uuid, text\) from anon/i);
+  assert.match(migration, /grant execute on function private\.next_commercial_legacy_id\(uuid, text\) to authenticated/i);
   assert.match(migration, /grant execute on function public\.commercial_visit_mutation[\s\S]*to authenticated/i);
   assert.match(migration, /revoke all on function public\.commercial_visit_mutation[\s\S]*from anon/i);
 });
@@ -234,10 +259,15 @@ test('R2.2B ejecuta migration, RPC, RLS, idempotencia, CAS, rollback y fences en
   const actorB = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
   const actorC = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
   const actorD = 'dddddddd-dddd-4ddd-8ddd-dddddddddddd';
+  const actorE = 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee';
+  const actorF = 'ffffffff-ffff-4fff-8fff-ffffffffffff';
   const orgA = '11111111-1111-4111-8111-111111111111';
   const orgB = '22222222-2222-4222-8222-222222222222';
+  const orgC = '55555555-5555-4555-8555-555555555555';
   const orgBClientUid = '33333333-3333-4333-8333-333333333333';
   const orgBPropertyUid = '44444444-4444-4444-8444-444444444444';
+  const orgCClientUid = '66666666-6666-4666-8666-666666666666';
+  const orgCPropertyUid = '77777777-7777-4777-8777-777777777777';
   const scopedKey = (organizationId: string, identity: string | number): string =>
     organizationScopedEntityKey(organizationId, identity);
   const docker = (args: string[]) => spawnSync('docker', args, {
@@ -394,29 +424,39 @@ test('R2.2B ejecuta migration, RPC, RLS, idempotencia, CAS, rollback y fences en
       canMoveForward: 'Sí', knowsArea: 'Sí', assignedToId: 1, revision: 0, ...overrides,
     });
     psql(`
-      insert into public.organizations values ('${orgA}','A'),('${orgB}','B');
+      insert into public.organizations values ('${orgA}','A'),('${orgB}','B'),('${orgC}','C');
       insert into public.organization_members values
         ('${orgA}','${actorA}',1,'owner','active'),
         ('${orgA}','${actorB}',2,'admin','active'),
         ('${orgA}','${actorC}',3,'agent','active'),
         ('${orgA}','${actorD}',4,'agent','suspended'),
-        ('${orgB}','${actorA}',5,'owner','active');
-      ${Array.from({ length: 18 }, (_, index) => {
+        ('${orgA}','${actorE}',6,'agent','active'),
+        ('${orgB}','${actorA}',5,'owner','active'),
+        ('${orgC}','${actorA}',7,'owner','active');
+      ${Array.from({ length: 21 }, (_, index) => {
         const id = index + 1;
         const overrides = id === 2 ? { pipeline: 'Ganado', status: 'Operación ganada' }
           : id === 6 ? { budget: '' }
             : id === 15 ? { pipeline: 'Negociación' }
               : id === 16 ? { pipeline: 'Reservado' } : {};
+        const agentAssignment = id === 3 || id === 20 ? { assignedToId: 3 }
+          : id === 19 || id === 21 ? { assignedToId: 6 } : {};
+        const assignedMemberId = id === 3 || id === 20 ? 3 : id === 19 || id === 21 ? 6 : id === 14 ? 'null' : 1;
         return `insert into public.propcontrol_records(organization_id,entity_type,entity_key,assigned_member_id,payload,created_by,revision)
-          values('${orgA}','client','${scopedKey(orgA, id)}',${id === 3 ? 3 : id === 14 ? 'null' : 1},${jsonSql(clientPayload(id, overrides))},'${actorA}',0);`;
+          values('${orgA}','client','${scopedKey(orgA, id)}',${assignedMemberId},${jsonSql(clientPayload(id, { ...overrides, ...agentAssignment }))},'${actorA}',0);`;
       }).join('\n')}
       insert into public.propcontrol_records(organization_id,entity_type,entity_key,assigned_member_id,payload,created_by,revision)
         values('${orgA}','property','${scopedKey(orgA, 1)}',1,${jsonSql({ id: 1, title: 'Depto Centro', address: 'Calle 1', assignedToId: 1, revision: 0 })},'${actorA}',0);
       insert into public.propcontrol_records(organization_id,entity_type,entity_key,assigned_member_id,payload,created_by,revision)
         values('${orgA}','property','${scopedKey(orgA, 2)}',3,${jsonSql({ id: 2, title: 'Depto Agente', address: 'Calle 2', assignedToId: 3, revision: 0 })},'${actorA}',0);
+      insert into public.propcontrol_records(organization_id,entity_type,entity_key,assigned_member_id,payload,created_by,revision)
+        values('${orgA}','property','${scopedKey(orgA, 3)}',6,${jsonSql({ id: 3, title: 'Casa Agente B', address: 'Calle 3', assignedToId: 6, revision: 0 })},'${actorA}',0);
       insert into public.propcontrol_records(organization_id,entity_type,entity_key,assigned_member_id,payload,created_by,uid,revision)
         values('${orgB}','client','${scopedKey(orgB, orgBClientUid)}',5,${jsonSql({ ...clientPayload(1), assignedToId: 5, uid: orgBClientUid })},'${actorA}','${orgBClientUid}',0),
           ('${orgB}','property','${scopedKey(orgB, orgBPropertyUid)}',5,${jsonSql({ id:1,title:'UID Property',address:'B',assignedToId:5,uid:orgBPropertyUid,revision:0 })},'${actorA}','${orgBPropertyUid}',0);
+      insert into public.propcontrol_records(organization_id,entity_type,entity_key,assigned_member_id,payload,created_by,uid,revision)
+        values('${orgC}','client','${scopedKey(orgC, orgCClientUid)}',7,${jsonSql({ ...clientPayload(1), assignedToId: 7, uid: orgCClientUid })},'${actorA}','${orgCClientUid}',0),
+          ('${orgC}','property','${scopedKey(orgC, orgCPropertyUid)}',7,${jsonSql({ id:1,title:'UID Property C',address:'C',assignedToId:7,uid:orgCPropertyUid,revision:0 })},'${actorA}','${orgCPropertyUid}',0);
     `);
 
     const qualificationCases: Client[] = [
@@ -438,6 +478,11 @@ test('R2.2B ejecuta migration, RPC, RLS, idempotencia, CAS, rollback y fences en
     }
 
     assert.equal(psql(`select count(*) from pg_proc where proname in ('commercial_visit_mutation','client_snapshot_cas') and prosecdef;`), '0');
+    assert.equal(psql(`select count(*) from pg_proc as procedure
+      join pg_namespace as namespace on namespace.oid=procedure.pronamespace
+      where namespace.nspname='private' and procedure.proname='next_commercial_legacy_id'
+        and procedure.prosecdef and procedure.provolatile='v'
+        and procedure.proconfig @> array['search_path='];`), '1');
     assert.equal(psql(`select count(*) from private.commercial_entity_authority;`), '0');
     assert.match(asUserError(actorA, `insert into private.commercial_entity_authority values('${orgA}','visit',true,now(),'${actorA}');`), /permission denied/i);
     assert.match(asUserError(actorD, visitCall(randomUUID(), 'VISIT_CREATE', createRequest(1))), /NOT_FOUND|PERMISSION_DENIED/);
@@ -452,7 +497,19 @@ test('R2.2B ejecuta migration, RPC, RLS, idempotencia, CAS, rollback y fences en
     asUser(actorA, `delete from public.propcontrol_records where organization_id='${orgA}' and entity_type='visit' and entity_key='${scopedKey(orgA, offProbeUid)}';`);
 
     psql(`insert into private.commercial_entity_authority(organization_id,entity_type,transaction_owned,activated_at,activated_by)
-      values('${orgA}','visit',true,now(),'${actorA}'),('${orgB}','visit',true,now(),'${actorA}');`);
+      values('${orgA}','visit',true,now(),'${actorA}'),('${orgB}','visit',true,now(),'${actorA}'),
+        ('${orgC}','visit',true,now(),'${actorA}');`);
+
+    assert.equal(asUser(actorC, `select pg_catalog.pg_typeof(private.next_commercial_legacy_id('${orgA}','visit'))::text;`), 'bigint');
+    const crossTenantHelper = asUserError(actorC, `select private.next_commercial_legacy_id('${orgB}','visit');`);
+    assert.match(crossTenantHelper, /PERMISSION_DENIED/);
+    assert.doesNotMatch(crossTenantHelper, /Cliente|Depto|payload|transactionOwner/);
+    assert.match(asUserError(actorD, `select private.next_commercial_legacy_id('${orgA}','activity');`), /PERMISSION_DENIED/);
+    assert.match(asUserError(actorF, `select private.next_commercial_legacy_id('${orgA}','visit');`), /PERMISSION_DENIED/);
+    assert.match(asUserError(actorC, `select private.next_commercial_legacy_id('${orgA}','offer');`), /VALIDATION_ERROR/);
+    const anonAllocator = rawPsql(`set role anon; select private.next_commercial_legacy_id('${orgA}','visit');`);
+    assert.notEqual(anonAllocator.status, 0);
+    assert.match(`${anonAllocator.stderr}\n${anonAllocator.stdout}`, /permission denied/i);
 
     const createOperation = randomUUID();
     const createIntent = createRequest(1);
@@ -486,6 +543,8 @@ test('R2.2B ejecuta migration, RPC, RLS, idempotencia, CAS, rollback y fences en
     assert.equal(replay.replayed, true);
     assert.equal(replay.errorCode, 'IDEMPOTENCY_REPLAY');
     assert.equal(replay.visit.uid, created.visit.uid);
+    assert.equal(replay.visit.id, created.visit.id);
+    assert.equal(replay.activity.id, created.activity.id);
     assert.equal(psql(`select count(*) from private.commercial_operations where organization_id='${orgA}' and operation_id='${createOperation}';`), '1');
     assert.equal(psql(`select count(*) from public.propcontrol_records where organization_id='${orgA}' and entity_type='activity' and payload->>'operationId'='${createOperation}';`), '1');
     assert.match(asUserError(actorA, visitCall(createOperation, 'VISIT_CREATE', { ...createIntent, localTime: '11:00' })), /CONFLICT/);
@@ -510,9 +569,13 @@ test('R2.2B ejecuta migration, RPC, RLS, idempotencia, CAS, rollback y fences en
     assert.equal(psql(`select count(*) from public.propcontrol_records where organization_id='${orgA}' and entity_type='client' and entity_key='${scopedKey(orgA, 13)}';`), '0');
 
     const rollbackBefore = psql(`select revision||':'||(select count(*) from public.propcontrol_records where organization_id='${orgA}' and entity_type in ('visit','activity')) from public.propcontrol_records where organization_id='${orgA}' and entity_type='client' and entity_key='${scopedKey(orgA, 4)}';`);
+    const rollbackVisitId = asUser(actorA, `select private.next_commercial_legacy_id('${orgA}','visit');`);
+    const rollbackActivityId = asUser(actorA, `select private.next_commercial_legacy_id('${orgA}','activity');`);
     assert.match(asUserError(actorA, visitCall(randomUUID(), 'VISIT_CREATE', createRequest(4), true)), /INTERNAL_ERROR/);
     const rollbackAfter = psql(`select revision||':'||(select count(*) from public.propcontrol_records where organization_id='${orgA}' and entity_type in ('visit','activity')) from public.propcontrol_records where organization_id='${orgA}' and entity_type='client' and entity_key='${scopedKey(orgA, 4)}';`);
     assert.equal(rollbackAfter, rollbackBefore);
+    assert.equal(asUser(actorA, `select private.next_commercial_legacy_id('${orgA}','visit');`), rollbackVisitId);
+    assert.equal(asUser(actorA, `select private.next_commercial_legacy_id('${orgA}','activity');`), rollbackActivityId);
 
     asUser(actorA, `select public.client_snapshot_cas(${jsonSql({ action:'update',client:{legacyId:5},expectedRevision:0,payload:clientPayload(5,{notes:'delayed snapshot'}) })},false);`);
     assert.match(asUserError(actorA, visitCall(randomUUID(), 'VISIT_CREATE', createRequest(5, 1, 0, '2035-01-03'))), /CONFLICT/);
@@ -526,6 +589,12 @@ test('R2.2B ejecuta migration, RPC, RLS, idempotencia, CAS, rollback y fences en
     })));
     assert.equal(uidCreated.visit.clientUid, orgBClientUid);
     assert.equal(uidCreated.visit.propertyUid, orgBPropertyUid);
+    const otherTenantCreated = parseJson(asUser(actorA, visitCall(randomUUID(), 'VISIT_CREATE', {
+      client:{uid:orgCClientUid},property:{uid:orgCPropertyUid},expectedClientRevision:0,localDate:'2035-02-01',localTime:'09:00',
+    })));
+    assert.notEqual(otherTenantCreated.organizationId, uidCreated.organizationId);
+    assert.equal(otherTenantCreated.visit.id, uidCreated.visit.id);
+    assert.equal(otherTenantCreated.activity.id, uidCreated.activity.id);
     const uidIdentity = psql(`select organization_id||':'||entity_type||':'||entity_key||':'||uid||':'||revision
       from public.propcontrol_records where organization_id='${orgB}' and entity_type='client' and uid='${orgBClientUid}';`);
     const uidCas = parseJson(asUser(actorA, `select public.client_snapshot_cas(${jsonSql({
@@ -552,10 +621,23 @@ test('R2.2B ejecuta migration, RPC, RLS, idempotencia, CAS, rollback y fences en
     assert.equal(fallbackCreated.activity.actorId, 1);
     assert.match(asUserError(actorA, visitCall(randomUUID(), 'VISIT_CREATE', createRequest(14,1,1,'2035-02-10','09:30'))), /DUPLICATE_VISIT/);
 
+    // Owner -> agent con visibilidad disjunta.
     const agentCreated = parseJson(asUser(actorC, visitCall(randomUUID(), 'VISIT_CREATE', createRequest(3,2,0,'2035-02-11','10:00'))));
     assert.equal(agentCreated.visit.assignedToId, 3);
+    assert.notEqual(agentCreated.visit.id, fallbackCreated.visit.id);
+    assert.notEqual(agentCreated.activity.id, fallbackCreated.activity.id);
 
+    // Agent A -> agent B con asignaciones distintas.
+    const secondAgentCreated = parseJson(asUser(actorE, visitCall(randomUUID(), 'VISIT_CREATE', createRequest(19,3,0,'2035-02-12','10:30'))));
+    assert.equal(secondAgentCreated.visit.assignedToId, 6);
+    assert.equal(secondAgentCreated.activity.actorId, 6);
+    assert.notEqual(secondAgentCreated.visit.id, agentCreated.visit.id);
+    assert.notEqual(secondAgentCreated.activity.id, agentCreated.activity.id);
+
+    // Agent -> owner.
     const resolveCreate = parseJson(asUser(actorA, visitCall(randomUUID(), 'VISIT_CREATE', createRequest(8,1,0,'2035-03-01','12:00'))));
+    assert.notEqual(resolveCreate.visit.id, secondAgentCreated.visit.id);
+    assert.notEqual(resolveCreate.activity.id, secondAgentCreated.activity.id);
     const resolveOperation = randomUUID();
     const resolveIntent = {
       client:{legacyId:8},visitUid:resolveCreate.visit.uid,expectedVisitRevision:0,expectedClientRevision:1,
@@ -648,6 +730,30 @@ test('R2.2B ejecuta migration, RPC, RLS, idempotencia, CAS, rollback y fences en
     assert.equal(asUser(actorB, `select count(*) from private.commercial_operations where organization_id='${orgA}' and actor_user_id='${actorA}';`), '0');
     assert.equal(psql(`select count(*) from public.propcontrol_records where organization_id='${orgA}' and entity_type='client' and entity_key='${scopedKey(orgA, 4)}' and revision=0;`), '1');
     assert.equal(psql(`select count(*) from pg_proc where proname in ('commercial_visit_mutation','client_snapshot_cas','visit_authority_active','visit_qualification_missing') and proconfig @> array['search_path='];`), '4');
+
+    // Dos agentes con visibilidad disjunta crean en paralelo y comparten el allocator tenant-wide.
+    const parallelOperations = [randomUUID(), randomUUID()];
+    const parallelCreateCommands = [
+      { actor: actorC, sql: visitCall(parallelOperations[0]!, 'VISIT_CREATE', createRequest(20,2,0,'2035-06-15','10:00')) },
+      { actor: actorE, sql: visitCall(parallelOperations[1]!, 'VISIT_CREATE', createRequest(21,3,0,'2035-06-15','10:30')) },
+    ].map(({ actor, sql }) => `set role authenticated;
+      select pg_catalog.set_config('request.jwt.claim.sub','${actor}',false);
+      ${sql}`);
+    const parallelCreates = await Promise.all(parallelCreateCommands.map((sql) => new Promise<{ code: number | null; output: string }>((resolve) => {
+      const child = spawn('docker', ['exec','-i',containerName,'psql','-U','postgres','-d','postgres','-X','-A','-t','-v','ON_ERROR_STOP=1']);
+      let output = '';
+      child.stdout.on('data', (chunk) => { output += String(chunk); });
+      child.stderr.on('data', (chunk) => { output += String(chunk); });
+      child.on('close', (code) => resolve({ code, output }));
+      child.stdin.end(sql);
+    })));
+    assert.equal(parallelCreates.every((item) => item.code === 0), true, parallelCreates.map((item) => item.output).join('\n'));
+    const parallelResults = parallelCreates.map((item) => parseJson(
+      item.output.split(/\r?\n/).map((line) => line.trim()).filter(Boolean).at(-1) ?? '',
+    ));
+    assert.notEqual(parallelResults[0]!.visit.id, parallelResults[1]!.visit.id);
+    assert.notEqual(parallelResults[0]!.activity.id, parallelResults[1]!.activity.id);
+    assert.equal(psql(`select count(*) from private.commercial_operations where operation_id in ('${parallelOperations[0]}','${parallelOperations[1]}');`), '2');
 
     // Dos resoluciones incompatibles con el mismo CAS: una confirma y la otra observa conflicto/terminal.
     const concurrentCreate = parseJson(asUser(actorA, visitCall(randomUUID(), 'VISIT_CREATE', createRequest(12,1,0,'2035-07-01','12:00'))));
