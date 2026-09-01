@@ -478,11 +478,25 @@ test('R2.2B ejecuta migration, RPC, RLS, idempotencia, CAS, rollback y fences en
     }
 
     assert.equal(psql(`select count(*) from pg_proc where proname in ('commercial_visit_mutation','client_snapshot_cas') and prosecdef;`), '0');
-    assert.equal(psql(`select count(*) from pg_proc as procedure
-      join pg_namespace as namespace on namespace.oid=procedure.pronamespace
-      where namespace.nspname='private' and procedure.proname='next_commercial_legacy_id'
-        and procedure.prosecdef and procedure.provolatile='v'
-        and procedure.proconfig @> array['search_path='];`), '1');
+    assert.equal(psql(`select count(*) from pg_catalog.pg_proc
+      where proname='next_commercial_legacy_id';`), '1');
+    const helperCatalog = parseJson(psql(`select pg_catalog.jsonb_build_object(
+        'namespace', namespace.nspname,
+        'name', procedure.proname,
+        'securityDefiner', procedure.prosecdef,
+        'volatility', procedure.provolatile,
+        'config', procedure.proconfig,
+        'definition', pg_catalog.pg_get_functiondef(procedure.oid)
+      )
+      from pg_catalog.pg_proc as procedure
+      join pg_catalog.pg_namespace as namespace on namespace.oid=procedure.pronamespace
+      where procedure.oid='private.next_commercial_legacy_id(uuid,text)'::pg_catalog.regprocedure;`));
+    assert.equal(helperCatalog.namespace, 'private');
+    assert.equal(helperCatalog.name, 'next_commercial_legacy_id');
+    assert.equal(helperCatalog.securityDefiner, true);
+    assert.equal(helperCatalog.volatility, 'v');
+    assert.deepEqual(helperCatalog.config, ['search_path=""']);
+    assert.match(String(helperCatalog.definition), /security definer[\s\S]*set search_path to ''/i);
     assert.equal(psql(`select count(*) from private.commercial_entity_authority;`), '0');
     assert.match(asUserError(actorA, `insert into private.commercial_entity_authority values('${orgA}','visit',true,now(),'${actorA}');`), /permission denied/i);
     assert.match(asUserError(actorD, visitCall(randomUUID(), 'VISIT_CREATE', createRequest(1))), /NOT_FOUND|PERMISSION_DENIED/);
