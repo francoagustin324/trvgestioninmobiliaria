@@ -743,7 +743,9 @@ test('R2.2B ejecuta migration, RPC, RLS, idempotencia, CAS, rollback y fences en
 
     assert.equal(asUser(actorB, `select count(*) from private.commercial_operations where organization_id='${orgA}' and actor_user_id='${actorA}';`), '0');
     assert.equal(psql(`select count(*) from public.propcontrol_records where organization_id='${orgA}' and entity_type='client' and entity_key='${scopedKey(orgA, 4)}' and revision=0;`), '1');
-    assert.equal(psql(`select count(*) from pg_proc where proname in ('commercial_visit_mutation','client_snapshot_cas','visit_authority_active','visit_qualification_missing') and proconfig @> array['search_path='];`), '4');
+    assert.equal(psql(`select count(*) from pg_catalog.pg_proc
+      where proname in ('commercial_visit_mutation','client_snapshot_cas','visit_authority_active','visit_qualification_missing')
+        and proconfig = array['search_path=""']::text[];`), '4');
 
     // Dos agentes con visibilidad disjunta crean en paralelo y comparten el allocator tenant-wide.
     const parallelOperations = [randomUUID(), randomUUID()];
