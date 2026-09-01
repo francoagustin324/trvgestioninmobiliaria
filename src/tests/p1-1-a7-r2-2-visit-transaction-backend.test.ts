@@ -143,8 +143,9 @@ test('R2.2B idempotencia propia ocurre antes de CAS y colisión no lee payload a
   const replay = migration.indexOf('select operation.* into existing_operation');
   const visitCas = migration.indexOf('select record.* into visit_record');
   const clientCas = migration.indexOf('select record.* into client_record');
+  const duplicateGuard = migration.indexOf('if private.commercial_visit_duplicate_exists(');
   const allocator = migration.indexOf("next_visit_id := private.next_commercial_legacy_id(target_org, 'visit')");
-  assert.ok(replay >= 0 && visitCas > replay && clientCas > replay && allocator > replay);
+  assert.ok(replay >= 0 && visitCas > replay && clientCas > replay && duplicateGuard > replay && allocator > duplicateGuard);
   assert.match(migration, /pg_advisory_xact_lock/i);
   assert.match(migration, /request_hash <> computed_hash/i);
   assert.match(migration, /'errorCode', 'IDEMPOTENCY_REPLAY'/i);
@@ -159,6 +160,8 @@ test('R2.2B VISIT_CREATE conserva reglas, dual refs y agregado atómico', () => 
     "'pipeline', 'Visita coordinada'", "'nextAction'", "'nextFollowUp'",
     "'clientUid'", "'propertyUid'", "'operationId'",
   ]) assert.ok(migration.includes(token), `falta ${token}`);
+  assert.match(migration, /if private\.commercial_visit_duplicate_exists\([\s\S]*target_org[\s\S]*client_record\.payload[\s\S]*property_record\.payload[\s\S]*scheduled_at/i);
+  assert.doesNotMatch(migration, /if exists \(\s*select 1 from public\.propcontrol_records as duplicate/i);
   assert.match(migration, /visit_uid := pg_catalog\.gen_random_uuid\(\)/i);
   assert.match(migration, /next_visit_id := private\.next_commercial_legacy_id\(target_org, 'visit'\)/i);
   assert.match(migration, /next_activity_id := private\.next_commercial_legacy_id\(target_org, 'activity'\)/i);
@@ -211,29 +214,47 @@ test('R2.2B matriz de qualification conserva paridad de decisión TS ↔ SQL', (
   }
 });
 
-test('R2.2B4 limita SECURITY DEFINER al allocator tenant-safe y mantiene la RPC INVOKER', () => {
-  const helperStart = migration.indexOf('create function private.next_commercial_legacy_id');
-  const helperEnd = migration.indexOf('create function private.guard_transaction_owned_records', helperStart);
-  const helper = migration.slice(helperStart, helperEnd);
+test('R2.2B7 limita SECURITY DEFINER al allocator y duplicate guard tenant-wide, manteniendo RPC INVOKER', () => {
+  const allocatorStart = migration.indexOf('create function private.next_commercial_legacy_id');
+  const duplicateStart = migration.indexOf('create function private.commercial_visit_duplicate_exists');
+  const helperEnd = migration.indexOf('create function private.guard_transaction_owned_records', duplicateStart);
+  const allocator = migration.slice(allocatorStart, duplicateStart);
+  const duplicate = migration.slice(duplicateStart, helperEnd);
   const rpcStart = migration.indexOf('create function public.commercial_visit_mutation');
   const rpcEnd = migration.indexOf('revoke all on function private.visit_authority_active', rpcStart);
   const rpc = migration.slice(rpcStart, rpcEnd);
 
-  assert.ok(helperStart >= 0 && helperEnd > helperStart);
-  assert.equal((migration.match(/security definer/gi) ?? []).length, 1);
-  assert.match(helper, /returns bigint[\s\S]*language plpgsql[\s\S]*volatile[\s\S]*security definer[\s\S]*set search_path = ''/i);
-  assert.match(helper, /current_user_id uuid := auth\.uid\(\)/i);
-  assert.match(helper, /target_entity_type not in \('visit', 'activity'\)/i);
-  assert.match(helper, /private\.is_active_org_member\(target_organization_id, current_user_id\)/i);
-  assert.match(helper, /private\.visit_authority_active\(target_organization_id\)/i);
-  assert.match(helper, /pg_advisory_xact_lock[\s\S]*target_organization_id::text[\s\S]*target_entity_type/i);
-  assert.match(helper, /max\(\(record\.payload ->> 'id'\)::numeric\)[\s\S]*record\.organization_id = target_organization_id[\s\S]*record\.entity_type = target_entity_type/i);
-  assert.match(helper, /maximum_safe_id constant numeric := 9007199254740991/i);
-  assert.doesNotMatch(helper, /\bexecute\b|\b(?:insert|update|delete|alter|drop|truncate)\s+/i);
+  assert.ok(allocatorStart >= 0 && duplicateStart > allocatorStart && helperEnd > duplicateStart);
+  assert.equal((migration.match(/security definer/gi) ?? []).length, 2);
+  assert.match(allocator, /returns bigint[\s\S]*language plpgsql[\s\S]*volatile[\s\S]*security definer[\s\S]*set search_path = ''/i);
+  assert.match(allocator, /current_user_id uuid := auth\.uid\(\)/i);
+  assert.match(allocator, /target_entity_type not in \('visit', 'activity'\)/i);
+  assert.match(allocator, /private\.is_active_org_member\(target_organization_id, current_user_id\)/i);
+  assert.match(allocator, /private\.visit_authority_active\(target_organization_id\)/i);
+  assert.match(allocator, /pg_advisory_xact_lock[\s\S]*target_organization_id::text[\s\S]*target_entity_type/i);
+  assert.match(allocator, /max\(\(record\.payload ->> 'id'\)::numeric\)[\s\S]*record\.organization_id = target_organization_id[\s\S]*record\.entity_type = target_entity_type/i);
+  assert.match(allocator, /maximum_safe_id constant numeric := 9007199254740991/i);
+  assert.doesNotMatch(allocator, /\bexecute\b|\b(?:insert|update|delete|alter|drop|truncate)\s+/i);
+
+  assert.match(duplicate, /returns boolean[\s\S]*language plpgsql[\s\S]*volatile[\s\S]*security definer[\s\S]*set search_path = ''/i);
+  assert.match(duplicate, /current_user_id uuid := auth\.uid\(\)/i);
+  assert.match(duplicate, /target_client_id is null or target_client_id <= 0/i);
+  assert.match(duplicate, /target_property_id is null or target_property_id <= 0/i);
+  assert.match(duplicate, /not pg_catalog\.isfinite\(target_scheduled_at\)/i);
+  assert.match(duplicate, /from public\.organization_members as member[\s\S]*member\.organization_id = target_organization_id[\s\S]*member\.user_id = current_user_id[\s\S]*visit_normalized\(member\.status\) = 'active'/i);
+  assert.match(duplicate, /current_role in \('owner', 'admin'\) or record\.assigned_member_id = current_member_id/i);
+  assert.match(duplicate, /record\.entity_type = 'client'[\s\S]*record\.entity_type = 'property'/i);
+  assert.match(duplicate, /private\.visit_authority_active\(target_organization_id\)/i);
+  assert.match(duplicate, /pg_catalog\.to_char\([\s\S]*target_scheduled_at at time zone 'UTC'[\s\S]*YYYY-MM-DD"T"HH24:MI:SS\.US/i);
+  assert.match(duplicate, /pg_advisory_xact_lock[\s\S]*propcontrol:commercial:visit-duplicate:[\s\S]*target_organization_id::text[\s\S]*target_client_id::text[\s\S]*target_property_id::text[\s\S]*scheduled_key/i);
+  assert.match(duplicate, /from public\.propcontrol_records as duplicate[\s\S]*duplicate\.organization_id = target_organization_id[\s\S]*duplicate\.entity_type = 'visit'[\s\S]*clientId[\s\S]*propertyId[\s\S]*scheduledAt[\s\S]*status' = 'Coordinada'/i);
+  assert.match(duplicate, /return duplicate_exists/i);
+  assert.doesNotMatch(duplicate, /\bexecute\b|\b(?:insert|update|delete|alter|drop|truncate)\s+/i);
+
   assert.match(rpc, /security invoker/i);
   assert.doesNotMatch(rpc, /security definer/i);
   assert.ok((migration.match(/security invoker/gi) ?? []).length >= 6);
-  assert.ok((migration.match(/set search_path = ''/gi) ?? []).length >= 7);
+  assert.ok((migration.match(/set search_path = ''/gi) ?? []).length >= 8);
   assert.doesNotMatch(migration, /service_role/i);
   assert.doesNotMatch(migration, /create\s+sequence|create\s+unique\s+index|create\s+table\s+private\.[^;]*(?:counter|sequence)/i);
   assert.match(migration, /grant select on table private\.commercial_entity_authority to authenticated/i);
@@ -241,6 +262,9 @@ test('R2.2B4 limita SECURITY DEFINER al allocator tenant-safe y mantiene la RPC 
   assert.match(migration, /revoke all on function private\.next_commercial_legacy_id\(uuid, text\) from public/i);
   assert.match(migration, /revoke all on function private\.next_commercial_legacy_id\(uuid, text\) from anon/i);
   assert.match(migration, /grant execute on function private\.next_commercial_legacy_id\(uuid, text\) to authenticated/i);
+  assert.match(migration, /revoke all on function private\.commercial_visit_duplicate_exists\(uuid, bigint, bigint, timestamptz\) from public/i);
+  assert.match(migration, /revoke all on function private\.commercial_visit_duplicate_exists\(uuid, bigint, bigint, timestamptz\) from anon/i);
+  assert.match(migration, /grant execute on function private\.commercial_visit_duplicate_exists\(uuid, bigint, bigint, timestamptz\) to authenticated/i);
   assert.match(migration, /grant execute on function public\.commercial_visit_mutation[\s\S]*to authenticated/i);
   assert.match(migration, /revoke all on function public\.commercial_visit_mutation[\s\S]*from anon/i);
 });
@@ -433,7 +457,7 @@ test('R2.2B ejecuta migration, RPC, RLS, idempotencia, CAS, rollback y fences en
         ('${orgA}','${actorE}',6,'agent','active'),
         ('${orgB}','${actorA}',5,'owner','active'),
         ('${orgC}','${actorA}',7,'owner','active');
-      ${Array.from({ length: 21 }, (_, index) => {
+      ${Array.from({ length: 26 }, (_, index) => {
         const id = index + 1;
         const overrides = id === 2 ? { pipeline: 'Ganado', status: 'Operación ganada' }
           : id === 6 ? { budget: '' }
@@ -479,7 +503,7 @@ test('R2.2B ejecuta migration, RPC, RLS, idempotencia, CAS, rollback y fences en
 
     assert.equal(psql(`select count(*) from pg_proc where proname in ('commercial_visit_mutation','client_snapshot_cas') and prosecdef;`), '0');
     assert.equal(psql(`select count(*) from pg_catalog.pg_proc
-      where proname='next_commercial_legacy_id';`), '1');
+      where proname in ('next_commercial_legacy_id','commercial_visit_duplicate_exists') and prosecdef;`), '2');
     const helperCatalog = parseJson(psql(`select pg_catalog.jsonb_build_object(
         'namespace', namespace.nspname,
         'name', procedure.proname,
@@ -497,6 +521,23 @@ test('R2.2B ejecuta migration, RPC, RLS, idempotencia, CAS, rollback y fences en
     assert.equal(helperCatalog.volatility, 'v');
     assert.deepEqual(helperCatalog.config, ['search_path=""']);
     assert.match(String(helperCatalog.definition), /security definer[\s\S]*set search_path to ''/i);
+    const duplicateHelperCatalog = parseJson(psql(`select pg_catalog.jsonb_build_object(
+        'namespace', namespace.nspname,
+        'name', procedure.proname,
+        'securityDefiner', procedure.prosecdef,
+        'volatility', procedure.provolatile,
+        'config', procedure.proconfig,
+        'definition', pg_catalog.pg_get_functiondef(procedure.oid)
+      )
+      from pg_catalog.pg_proc as procedure
+      join pg_catalog.pg_namespace as namespace on namespace.oid=procedure.pronamespace
+      where procedure.oid='private.commercial_visit_duplicate_exists(uuid,bigint,bigint,timestamptz)'::pg_catalog.regprocedure;`));
+    assert.equal(duplicateHelperCatalog.namespace, 'private');
+    assert.equal(duplicateHelperCatalog.name, 'commercial_visit_duplicate_exists');
+    assert.equal(duplicateHelperCatalog.securityDefiner, true);
+    assert.equal(duplicateHelperCatalog.volatility, 'v');
+    assert.deepEqual(duplicateHelperCatalog.config, ['search_path=""']);
+    assert.match(String(duplicateHelperCatalog.definition), /security definer[\s\S]*set search_path to ''/i);
     assert.equal(psql(`select count(*) from private.commercial_entity_authority;`), '0');
     assert.match(asUserError(actorA, `insert into private.commercial_entity_authority values('${orgA}','visit',true,now(),'${actorA}');`), /permission denied/i);
     assert.match(asUserError(actorD, visitCall(randomUUID(), 'VISIT_CREATE', createRequest(1))), /NOT_FOUND|PERMISSION_DENIED/);
@@ -524,6 +565,35 @@ test('R2.2B ejecuta migration, RPC, RLS, idempotencia, CAS, rollback y fences en
     const anonAllocator = rawPsql(`set role anon; select private.next_commercial_legacy_id('${orgA}','visit');`);
     assert.notEqual(anonAllocator.status, 0);
     assert.match(`${anonAllocator.stderr}\n${anonAllocator.stdout}`, /permission denied/i);
+
+    const duplicateProbe = (organizationId: string, clientId: number, propertyId: number, instant = '2035-01-01 10:00:00+00') =>
+      `select private.commercial_visit_duplicate_exists('${organizationId}',${clientId},${propertyId},'${instant}'::timestamptz);`;
+    assert.equal(asUser(actorC, `select pg_catalog.pg_typeof(private.commercial_visit_duplicate_exists('${orgA}',3,2,'2035-01-01 10:00:00+00'::timestamptz))::text;`), 'boolean');
+    assert.equal(asUser(actorC, duplicateProbe(orgA, 3, 2)), 'f');
+    assert.equal(asUser(actorA, duplicateProbe(orgA, 3, 2)), 'f');
+    assert.equal(asUser(actorB, duplicateProbe(orgA, 3, 2)), 'f');
+    const directHelperErrors = [
+      asUserError(actorD, duplicateProbe(orgA, 3, 2)),
+      asUserError(actorF, duplicateProbe(orgA, 3, 2)),
+      asUserError(actorC, duplicateProbe(orgB, 1, 1)),
+      asUserError(actorC, duplicateProbe(orgA, 1, 2)),
+      asUserError(actorC, duplicateProbe(orgA, 3, 1)),
+    ];
+    for (const error of directHelperErrors) {
+      assert.match(error, /PERMISSION_DENIED/);
+      assert.doesNotMatch(error, /Cliente|Depto Centro|payload|transactionOwner|assignedToId/);
+    }
+    assert.match(asUserError(actorC, duplicateProbe(orgA, 0, 2)), /VALIDATION_ERROR/);
+    assert.match(asUserError(actorC, duplicateProbe(orgA, 3, 0)), /VALIDATION_ERROR/);
+    assert.match(asUserError(actorC, `select private.commercial_visit_duplicate_exists('${orgA}',3,2,'infinity'::timestamptz);`), /VALIDATION_ERROR/);
+    const noAuthHelper = rawPsql(`set role authenticated;
+      select pg_catalog.set_config('request.jwt.claim.sub','',false);
+      ${duplicateProbe(orgA, 3, 2)}`);
+    assert.notEqual(noAuthHelper.status, 0);
+    assert.match(`${noAuthHelper.stderr}\n${noAuthHelper.stdout}`, /PERMISSION_DENIED/);
+    const anonDuplicate = rawPsql(`set role anon; ${duplicateProbe(orgA, 3, 2)}`);
+    assert.notEqual(anonDuplicate.status, 0);
+    assert.match(`${anonDuplicate.stderr}\n${anonDuplicate.stdout}`, /permission denied/i);
 
     const createOperation = randomUUID();
     const createIntent = createRequest(1);
@@ -634,12 +704,46 @@ test('R2.2B ejecuta migration, RPC, RLS, idempotencia, CAS, rollback y fences en
     assert.equal(fallbackCreated.visit.assignedToId, 1);
     assert.equal(fallbackCreated.activity.actorId, 1);
     assert.match(asUserError(actorA, visitCall(randomUUID(), 'VISIT_CREATE', createRequest(14,1,1,'2035-02-10','09:30'))), /DUPLICATE_VISIT/);
+    assert.match(asUserError(actorB, visitCall(randomUUID(), 'VISIT_CREATE', createRequest(14,1,1,'2035-02-10','09:30'))), /DUPLICATE_VISIT/);
 
-    // Owner -> agent con visibilidad disjunta.
+    // Agent A crea; Client/Property pasan a Agent B; la Visit histórica queda oculta para B.
     const agentCreated = parseJson(asUser(actorC, visitCall(randomUUID(), 'VISIT_CREATE', createRequest(3,2,0,'2035-02-11','10:00'))));
     assert.equal(agentCreated.visit.assignedToId, 3);
     assert.notEqual(agentCreated.visit.id, fallbackCreated.visit.id);
     assert.notEqual(agentCreated.activity.id, fallbackCreated.activity.id);
+    assert.equal(asUser(actorE, `select count(*) from public.propcontrol_records where organization_id='${orgA}' and entity_type='visit' and uid='${agentCreated.visit.uid}';`), '0');
+    const agentClientPayload = parseJson(psql(`select payload::text from public.propcontrol_records
+      where organization_id='${orgA}' and entity_type='client' and entity_key='${scopedKey(orgA, 3)}';`));
+    const reassignedClient = parseJson(asUser(actorA, `select public.client_snapshot_cas(${jsonSql({
+      action:'update',client:{legacyId:3},expectedRevision:1,payload:{...agentClientPayload,assignedToId:6},
+    })},false);`));
+    assert.equal(reassignedClient.client.revision, 2);
+    assert.equal(reassignedClient.client.assignedToId, 6);
+    psql(`begin;
+      select pg_catalog.set_config('propcontrol.transaction_path','client_snapshot_cas',true);
+      update public.propcontrol_records set assigned_member_id=6
+      where organization_id='${orgA}' and entity_type='client' and entity_key='${scopedKey(orgA, 3)}';
+      commit;`);
+    asUser(actorA, `update public.propcontrol_records
+      set assigned_member_id=6,payload=payload||'{"assignedToId":6}'::jsonb
+      where organization_id='${orgA}' and entity_type='property' and entity_key='${scopedKey(orgA, 2)}';`);
+    assert.equal(asUser(actorE, `select count(*) from public.propcontrol_records where organization_id='${orgA}' and entity_type='client' and entity_key='${scopedKey(orgA, 3)}';`), '1');
+    assert.equal(asUser(actorE, `select count(*) from public.propcontrol_records where organization_id='${orgA}' and entity_type='property' and entity_key='${scopedKey(orgA, 2)}';`), '1');
+    assert.equal(asUser(actorE, `select count(*) from public.propcontrol_records where organization_id='${orgA}' and entity_type='visit' and uid='${agentCreated.visit.uid}';`), '0');
+    const reassignmentBefore = psql(`select payload::text||':'||revision from public.propcontrol_records
+      where organization_id='${orgA}' and entity_type='client' and entity_key='${scopedKey(orgA, 3)}';`);
+    const reassignmentOperation = randomUUID();
+    assert.match(asUserError(actorE, visitCall(reassignmentOperation, 'VISIT_CREATE', createRequest(3,2,2,'2035-02-11','10:00'))), /DUPLICATE_VISIT/);
+    assert.equal(psql(`select payload::text||':'||revision from public.propcontrol_records
+      where organization_id='${orgA}' and entity_type='client' and entity_key='${scopedKey(orgA, 3)}';`), reassignmentBefore);
+    assert.equal(psql(`select count(*) from public.propcontrol_records where organization_id='${orgA}' and entity_type='visit'
+      and (payload->>'clientId')::bigint=3 and (payload->>'propertyId')::bigint=2
+      and (payload->>'scheduledAt')::timestamptz='2035-02-11 10:00:00-03'::timestamptz and payload->>'status'='Coordinada';`), '1');
+    assert.equal(psql(`select count(*) from public.propcontrol_records where organization_id='${orgA}' and entity_type='activity' and payload->>'operationId'='${reassignmentOperation}';`), '0');
+    assert.equal(psql(`select count(*) from private.commercial_operations where organization_id='${orgA}' and operation_id='${reassignmentOperation}';`), '0');
+    asUser(actorA, `update public.propcontrol_records
+      set assigned_member_id=3,payload=payload||'{"assignedToId":3}'::jsonb
+      where organization_id='${orgA}' and entity_type='property' and entity_key='${scopedKey(orgA, 2)}';`);
 
     // Agent A -> agent B con asignaciones distintas.
     const secondAgentCreated = parseJson(asUser(actorE, visitCall(randomUUID(), 'VISIT_CREATE', createRequest(19,3,0,'2035-02-12','10:30'))));
@@ -664,6 +768,8 @@ test('R2.2B ejecuta migration, RPC, RLS, idempotencia, CAS, rollback y fences en
     assert.equal(resolved.client.revision, 2);
     assert.equal(parseJson(asUser(actorA, visitCall(resolveOperation, 'VISIT_RESOLVE', resolveIntent))).replayed, true);
     assert.match(asUserError(actorA, visitCall(randomUUID(), 'VISIT_RESOLVE', { ...resolveIntent, expectedClientRevision:2, expectedVisitRevision:1, status:'Cancelada', interest:undefined })), /TERMINAL_STATE/);
+    const recreatedAfterRealized = parseJson(asUser(actorA, visitCall(randomUUID(), 'VISIT_CREATE', createRequest(8,1,2,'2035-03-01','12:00'))));
+    assert.equal(recreatedAfterRealized.visit.status, 'Coordinada');
 
     const missingInterestCreate = parseJson(asUser(actorA, visitCall(randomUUID(), 'VISIT_CREATE', createRequest(9,1,0,'2035-04-01','12:00'))));
     assert.match(asUserError(actorA, visitCall(randomUUID(), 'VISIT_RESOLVE', {
@@ -682,6 +788,8 @@ test('R2.2B ejecuta migration, RPC, RLS, idempotencia, CAS, rollback y fences en
     assert.equal(cancelled.activity.action, 'Visita cancelada');
     assert.equal(cancelled.client.pipeline, 'Negociación');
     assert.equal(psql(`select count(*) from public.propcontrol_records where organization_id='${orgA}' and entity_type='activity' and payload->>'operationId'='${cancelledOperation}';`), '1');
+    const recreatedAfterCancelled = parseJson(asUser(actorA, visitCall(randomUUID(), 'VISIT_CREATE', createRequest(15,1,2,'2035-04-10','12:00'))));
+    assert.equal(recreatedAfterCancelled.visit.status, 'Coordinada');
 
     const noShowCreate = parseJson(asUser(actorA, visitCall(randomUUID(), 'VISIT_CREATE', createRequest(16,1,0,'2035-04-20','12:00'))));
     const noShow = parseJson(asUser(actorA, visitCall(randomUUID(), 'VISIT_RESOLVE', {
@@ -692,6 +800,8 @@ test('R2.2B ejecuta migration, RPC, RLS, idempotencia, CAS, rollback y fences en
     assert.equal(noShow.visit.interest, undefined);
     assert.equal(noShow.activity.action, 'Cliente no asistió');
     assert.equal(noShow.client.pipeline, 'Reservado');
+    const recreatedAfterNoShow = parseJson(asUser(actorA, visitCall(randomUUID(), 'VISIT_CREATE', createRequest(16,1,2,'2035-04-20','12:00'))));
+    assert.equal(recreatedAfterNoShow.visit.status, 'Coordinada');
 
     const wrongClientCreate = parseJson(asUser(actorA, visitCall(randomUUID(), 'VISIT_CREATE', createRequest(17,1,0,'2035-04-25','12:00'))));
     assert.match(asUserError(actorA, visitCall(randomUUID(), 'VISIT_RESOLVE', {
@@ -730,6 +840,27 @@ test('R2.2B ejecuta migration, RPC, RLS, idempotencia, CAS, rollback y fences en
     assert.match(actorCollision, /CONFLICT/);
     assert.doesNotMatch(actorCollision, /result_payload|transactionOwner|Depto Centro/);
 
+    // Rollback después del duplicate guard libera el advisory lock y no deja agregado parcial.
+    const rollbackGuardOperation = randomUUID();
+    assert.match(asUserError(actorA, visitCall(rollbackGuardOperation, 'VISIT_CREATE', createRequest(23,1,0,'2035-06-20','09:00'), true)), /INTERNAL_ERROR/);
+    assert.equal(psql(`select count(*) from public.propcontrol_records where organization_id='${orgA}' and entity_type='visit'
+      and (payload->>'clientId')::bigint=23 and (payload->>'propertyId')::bigint=1
+      and (payload->>'scheduledAt')::timestamptz='2035-06-20 09:00:00-03'::timestamptz;`), '0');
+    assert.equal(psql(`select count(*) from public.propcontrol_records where organization_id='${orgA}' and entity_type='activity' and payload->>'operationId'='${rollbackGuardOperation}';`), '0');
+    assert.equal(psql(`select count(*) from private.commercial_operations where organization_id='${orgA}' and operation_id='${rollbackGuardOperation}';`), '0');
+    const rollbackRecovered = parseJson(asUser(actorA, visitCall(randomUUID(), 'VISIT_CREATE', createRequest(23,1,0,'2035-06-20','09:00'))));
+    assert.equal(rollbackRecovered.visit.status, 'Coordinada');
+
+    // La clave lógica sólo bloquea coincidencia exacta: schedule/property/client distintos progresan.
+    const matrixBase = parseJson(asUser(actorA, visitCall(randomUUID(), 'VISIT_CREATE', createRequest(24,1,0,'2035-06-21','09:00'))));
+    assert.equal(matrixBase.visit.status, 'Coordinada');
+    const scheduleDifferent = parseJson(asUser(actorA, visitCall(randomUUID(), 'VISIT_CREATE', createRequest(24,1,1,'2035-06-21','09:01'))));
+    assert.equal(scheduleDifferent.visit.status, 'Coordinada');
+    const propertyDifferent = parseJson(asUser(actorA, visitCall(randomUUID(), 'VISIT_CREATE', createRequest(24,2,2,'2035-06-21','09:00'))));
+    assert.equal(propertyDifferent.visit.status, 'Coordinada');
+    const clientDifferent = parseJson(asUser(actorA, visitCall(randomUUID(), 'VISIT_CREATE', createRequest(25,1,0,'2035-06-21','09:00'))));
+    assert.equal(clientDifferent.visit.status, 'Coordinada');
+
     const ordinaryActivityUid = randomUUID();
     asUser(actorA, `insert into public.propcontrol_records(organization_id,entity_type,entity_key,assigned_member_id,payload,created_by,uid,revision)
       values('${orgA}','activity','${scopedKey(orgA, ordinaryActivityUid)}',1,'{"id":${created.activity.id},"uid":"${ordinaryActivityUid}","action":"Manual"}'::jsonb,'${actorA}','${ordinaryActivityUid}',0);`);
@@ -746,8 +877,37 @@ test('R2.2B ejecuta migration, RPC, RLS, idempotencia, CAS, rollback y fences en
     assert.equal(psql(`select count(*) from pg_catalog.pg_proc
       where proname in ('commercial_visit_mutation','client_snapshot_cas','visit_authority_active','visit_qualification_missing')
         and proconfig = array['search_path=""']::text[];`), '4');
+    assert.equal(psql(`select count(*) from pg_catalog.pg_proc
+      where proname in ('next_commercial_legacy_id','commercial_visit_duplicate_exists')
+        and prosecdef and provolatile='v' and proconfig = array['search_path=""']::text[];`), '2');
 
-    // Dos agentes con visibilidad disjunta crean en paralelo y comparten el allocator tenant-wide.
+    // Dos VISIT_CREATE equivalentes concurrentes: nunca persisten dos Coordinada.
+    const equivalentOperations = [randomUUID(), randomUUID()];
+    const equivalentCommands = equivalentOperations.map((operationId) => `set role authenticated;
+      select pg_catalog.set_config('request.jwt.claim.sub','${actorA}',false);
+      ${visitCall(operationId, 'VISIT_CREATE', createRequest(26,1,0,'2035-06-25','10:00'))}`);
+    const equivalentCreates = await Promise.all(equivalentCommands.map((sql) => new Promise<{ code: number | null; output: string }>((resolve) => {
+      const child = spawn('docker', ['exec','-i',containerName,'psql','-U','postgres','-d','postgres','-X','-A','-t','-v','ON_ERROR_STOP=1']);
+      let output = '';
+      child.stdout.on('data', (chunk) => { output += String(chunk); });
+      child.stderr.on('data', (chunk) => { output += String(chunk); });
+      child.on('close', (code) => resolve({ code, output }));
+      child.stdin.end(sql);
+    })));
+    assert.equal(equivalentCreates.filter((item) => item.code === 0).length, 1, equivalentCreates.map((item) => item.output).join('\n'));
+    assert.equal(equivalentCreates.filter((item) => item.code !== 0).length, 1, equivalentCreates.map((item) => item.output).join('\n'));
+    const equivalentLoser = equivalentCreates.find((item) => item.code !== 0)?.output ?? '';
+    assert.match(equivalentLoser, /DUPLICATE_VISIT|CONFLICT/);
+    assert.equal(psql(`select count(*) from public.propcontrol_records where organization_id='${orgA}' and entity_type='visit'
+      and (payload->>'clientId')::bigint=26 and (payload->>'propertyId')::bigint=1
+      and (payload->>'scheduledAt')::timestamptz='2035-06-25 10:00:00-03'::timestamptz
+      and payload->>'status'='Coordinada';`), '1');
+    assert.equal(psql(`select count(*) from private.commercial_operations where organization_id='${orgA}'
+      and operation_id in ('${equivalentOperations[0]}','${equivalentOperations[1]}');`), '1');
+    assert.equal(psql(`select count(*) from public.propcontrol_records where organization_id='${orgA}' and entity_type='activity'
+      and payload->>'operationId' in ('${equivalentOperations[0]}','${equivalentOperations[1]}');`), '1');
+
+    // Dos agentes con visibilidad disjunta crean claves no equivalentes y comparten sólo el allocator tenant-wide.
     const parallelOperations = [randomUUID(), randomUUID()];
     const parallelCreateCommands = [
       { actor: actorC, sql: visitCall(parallelOperations[0]!, 'VISIT_CREATE', createRequest(20,2,0,'2035-06-15','10:00')) },

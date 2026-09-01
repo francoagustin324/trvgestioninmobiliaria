@@ -156,6 +156,112 @@ begin
 end;
 $function$;
 
+create function private.commercial_visit_duplicate_exists(
+  target_organization_id uuid,
+  target_client_id bigint,
+  target_property_id bigint,
+  target_scheduled_at timestamptz
+)
+returns boolean
+language plpgsql
+volatile
+security definer
+set search_path = ''
+as $function$
+declare
+  current_user_id uuid := auth.uid();
+  current_member_id bigint;
+  current_role text;
+  can_operate_client boolean := false;
+  can_operate_property boolean := false;
+  duplicate_exists boolean := false;
+  scheduled_key text;
+begin
+  if current_user_id is null then
+    raise exception using errcode = '42501', message = 'PERMISSION_DENIED';
+  end if;
+  if target_organization_id is null
+    or target_client_id is null or target_client_id <= 0
+    or target_property_id is null or target_property_id <= 0
+    or target_scheduled_at is null or not pg_catalog.isfinite(target_scheduled_at) then
+    raise exception using errcode = '22023', message = 'VALIDATION_ERROR';
+  end if;
+
+  select member.member_id,
+    case
+      when private.visit_normalized(member.role) in ('owner', 'dueno') then 'owner'
+      when private.visit_normalized(member.role) in ('admin', 'administrator', 'administrador') then 'admin'
+      else 'agent'
+    end
+  into current_member_id, current_role
+  from public.organization_members as member
+  where member.organization_id = target_organization_id
+    and member.user_id = current_user_id
+    and private.visit_normalized(member.status) = 'active'
+  limit 1;
+  if current_member_id is null then
+    raise exception using errcode = '42501', message = 'PERMISSION_DENIED';
+  end if;
+  if not private.visit_authority_active(target_organization_id) then
+    raise exception using errcode = '22023', message = 'TERMINAL_STATE';
+  end if;
+
+  select exists (
+    select 1
+    from public.propcontrol_records as record
+    where record.organization_id = target_organization_id
+      and record.entity_type = 'client'
+      and record.payload ->> 'id' ~ '^\d+$'
+      and (record.payload ->> 'id')::bigint = target_client_id
+      and (current_role in ('owner', 'admin') or record.assigned_member_id = current_member_id)
+  )
+  into can_operate_client;
+  if not can_operate_client then
+    raise exception using errcode = '42501', message = 'PERMISSION_DENIED';
+  end if;
+
+  select exists (
+    select 1
+    from public.propcontrol_records as record
+    where record.organization_id = target_organization_id
+      and record.entity_type = 'property'
+      and record.payload ->> 'id' ~ '^\d+$'
+      and (record.payload ->> 'id')::bigint = target_property_id
+      and (current_role in ('owner', 'admin') or record.assigned_member_id = current_member_id)
+  )
+  into can_operate_property;
+  if not can_operate_property then
+    raise exception using errcode = '42501', message = 'PERMISSION_DENIED';
+  end if;
+
+  scheduled_key := pg_catalog.to_char(
+    target_scheduled_at at time zone 'UTC',
+    'YYYY-MM-DD"T"HH24:MI:SS.US'
+  );
+  perform pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended(
+    'propcontrol:commercial:visit-duplicate:'
+      || target_organization_id::text || ':'
+      || target_client_id::text || ':'
+      || target_property_id::text || ':'
+      || scheduled_key,
+    0
+  ));
+
+  select exists (
+    select 1
+    from public.propcontrol_records as duplicate
+    where duplicate.organization_id = target_organization_id
+      and duplicate.entity_type = 'visit'
+      and (duplicate.payload ->> 'clientId')::bigint = target_client_id
+      and (duplicate.payload ->> 'propertyId')::bigint = target_property_id
+      and (duplicate.payload ->> 'scheduledAt')::timestamptz = target_scheduled_at
+      and duplicate.payload ->> 'status' = 'Coordinada'
+  )
+  into duplicate_exists;
+  return duplicate_exists;
+end;
+$function$;
+
 create function private.guard_transaction_owned_records()
 returns trigger
 language plpgsql
@@ -570,13 +676,11 @@ begin
     if scheduled_at < timestamp_value then
       raise exception using errcode = '22023', message = 'PAST_SCHEDULE';
     end if;
-    if exists (
-      select 1 from public.propcontrol_records as duplicate
-      where duplicate.organization_id = target_org and duplicate.entity_type = 'visit'
-        and (duplicate.payload ->> 'clientId')::bigint = (client_record.payload ->> 'id')::bigint
-        and (duplicate.payload ->> 'propertyId')::bigint = (property_record.payload ->> 'id')::bigint
-        and (duplicate.payload ->> 'scheduledAt')::timestamptz = scheduled_at
-        and duplicate.payload ->> 'status' = 'Coordinada'
+    if private.commercial_visit_duplicate_exists(
+      target_org,
+      (client_record.payload ->> 'id')::bigint,
+      (property_record.payload ->> 'id')::bigint,
+      scheduled_at
     ) then
       raise exception using errcode = '23505', message = 'DUPLICATE_VISIT';
     end if;
@@ -730,11 +834,14 @@ revoke all on function private.visit_normalized(text) from public;
 revoke all on function private.visit_qualification_missing(jsonb) from public;
 revoke all on function private.next_commercial_legacy_id(uuid, text) from public;
 revoke all on function private.next_commercial_legacy_id(uuid, text) from anon;
+revoke all on function private.commercial_visit_duplicate_exists(uuid, bigint, bigint, timestamptz) from public;
+revoke all on function private.commercial_visit_duplicate_exists(uuid, bigint, bigint, timestamptz) from anon;
 revoke all on function private.guard_transaction_owned_records() from public;
 grant execute on function private.visit_authority_active(uuid) to authenticated;
 grant execute on function private.visit_normalized(text) to authenticated;
 grant execute on function private.visit_qualification_missing(jsonb) to authenticated;
 grant execute on function private.next_commercial_legacy_id(uuid, text) to authenticated;
+grant execute on function private.commercial_visit_duplicate_exists(uuid, bigint, bigint, timestamptz) to authenticated;
 
 revoke all on function public.client_snapshot_cas(jsonb, boolean) from public;
 revoke all on function public.client_snapshot_cas(jsonb, boolean) from anon;
