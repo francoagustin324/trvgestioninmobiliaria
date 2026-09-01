@@ -242,7 +242,8 @@ test('R2.2B7 limita SECURITY DEFINER al allocator y duplicate guard tenant-wide,
   assert.match(duplicate, /target_property_id is null or target_property_id <= 0/i);
   assert.match(duplicate, /not pg_catalog\.isfinite\(target_scheduled_at\)/i);
   assert.match(duplicate, /from public\.organization_members as member[\s\S]*member\.organization_id = target_organization_id[\s\S]*member\.user_id = current_user_id[\s\S]*visit_normalized\(member\.status\) = 'active'/i);
-  assert.match(duplicate, /current_role in \('owner', 'admin'\) or record\.assigned_member_id = current_member_id/i);
+  assert.match(duplicate, /actor_role text[\s\S]*into current_member_id, actor_role/i);
+  assert.match(duplicate, /actor_role in \('owner', 'admin'\) or record\.assigned_member_id = current_member_id/i);
   assert.match(duplicate, /record\.entity_type = 'client'[\s\S]*record\.entity_type = 'property'/i);
   assert.match(duplicate, /private\.visit_authority_active\(target_organization_id\)/i);
   assert.match(duplicate, /pg_catalog\.to_char\([\s\S]*target_scheduled_at at time zone 'UTC'[\s\S]*YYYY-MM-DD"T"HH24:MI:SS\.US/i);
@@ -252,7 +253,9 @@ test('R2.2B7 limita SECURITY DEFINER al allocator y duplicate guard tenant-wide,
   assert.doesNotMatch(duplicate, /\bexecute\b|\b(?:insert|update|delete|alter|drop|truncate)\s+/i);
 
   assert.match(rpc, /security invoker/i);
+  assert.match(rpc, /actor_role text[\s\S]*into current_member_id, actor_role[\s\S]*if actor_role = 'agent'/i);
   assert.doesNotMatch(rpc, /security definer/i);
+  assert.doesNotMatch(migration, /\bcurrent_role\b/i);
   assert.ok((migration.match(/security invoker/gi) ?? []).length >= 6);
   assert.ok((migration.match(/set search_path = ''/gi) ?? []).length >= 8);
   assert.doesNotMatch(migration, /service_role/i);

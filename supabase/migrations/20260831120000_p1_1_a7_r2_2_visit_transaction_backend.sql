@@ -171,7 +171,7 @@ as $function$
 declare
   current_user_id uuid := auth.uid();
   current_member_id bigint;
-  current_role text;
+  actor_role text;
   can_operate_client boolean := false;
   can_operate_property boolean := false;
   duplicate_exists boolean := false;
@@ -193,7 +193,7 @@ begin
       when private.visit_normalized(member.role) in ('admin', 'administrator', 'administrador') then 'admin'
       else 'agent'
     end
-  into current_member_id, current_role
+  into current_member_id, actor_role
   from public.organization_members as member
   where member.organization_id = target_organization_id
     and member.user_id = current_user_id
@@ -213,7 +213,7 @@ begin
       and record.entity_type = 'client'
       and record.payload ->> 'id' ~ '^\d+$'
       and (record.payload ->> 'id')::bigint = target_client_id
-      and (current_role in ('owner', 'admin') or record.assigned_member_id = current_member_id)
+      and (actor_role in ('owner', 'admin') or record.assigned_member_id = current_member_id)
   )
   into can_operate_client;
   if not can_operate_client then
@@ -227,7 +227,7 @@ begin
       and record.entity_type = 'property'
       and record.payload ->> 'id' ~ '^\d+$'
       and (record.payload ->> 'id')::bigint = target_property_id
-      and (current_role in ('owner', 'admin') or record.assigned_member_id = current_member_id)
+      and (actor_role in ('owner', 'admin') or record.assigned_member_id = current_member_id)
   )
   into can_operate_property;
   if not can_operate_property then
@@ -426,7 +426,7 @@ as $function$
 declare
   current_user_id uuid := auth.uid();
   current_member_id bigint;
-  current_role text;
+  actor_role text;
   target_org uuid;
   requested_client_uid uuid;
   requested_client_id bigint;
@@ -540,7 +540,7 @@ begin
       when private.visit_normalized(member.role) in ('admin', 'administrator', 'administrador') then 'admin'
       else 'agent'
     end
-  into current_member_id, current_role
+  into current_member_id, actor_role
   from public.organization_members as member
   where member.organization_id = target_org and member.user_id = current_user_id
     and private.visit_normalized(member.status) = 'active'
@@ -587,7 +587,7 @@ begin
     if visit_record.revision <> expected_visit_revision then
       raise exception using errcode = '40001', message = 'CONFLICT';
     end if;
-    if current_role = 'agent' and visit_record.assigned_member_id is distinct from current_member_id then
+    if actor_role = 'agent' and visit_record.assigned_member_id is distinct from current_member_id then
       raise exception using errcode = '42501', message = 'PERMISSION_DENIED';
     end if;
   end if;
@@ -603,7 +603,7 @@ begin
   if client_record.revision <> expected_client_revision then
     raise exception using errcode = '40001', message = 'CONFLICT';
   end if;
-  if current_role = 'agent' and client_record.assigned_member_id is distinct from current_member_id then
+  if actor_role = 'agent' and client_record.assigned_member_id is distinct from current_member_id then
     raise exception using errcode = '42501', message = 'PERMISSION_DENIED';
   end if;
 
@@ -629,7 +629,7 @@ begin
     for share;
   end if;
   if not found then raise exception using errcode = 'P0002', message = 'NOT_FOUND'; end if;
-  if current_role = 'agent' and property_record.assigned_member_id is distinct from current_member_id then
+  if actor_role = 'agent' and property_record.assigned_member_id is distinct from current_member_id then
     raise exception using errcode = '42501', message = 'PERMISSION_DENIED';
   end if;
 
