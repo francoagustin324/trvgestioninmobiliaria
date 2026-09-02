@@ -103,6 +103,7 @@ test('reproduce la pérdida física: contacto A en vuelo + seguimiento B + F5 co
         return json({ configured: true, url: 'https://supabase.test', publishableKey: 'publishable-key' });
       }
       if (url.pathname.endsWith('/rpc/activate_my_organization_memberships')) return json({});
+      if (url.pathname.endsWith('/rpc/visit_transaction_authority_active')) return json(false);
       if (url.pathname.endsWith('/organization_members')) return json([membership]);
       if (url.pathname.endsWith('/propcontrol_records') && method === 'GET') return json(structuredClone(remoteRecords));
       if (url.pathname.endsWith('/propcontrol_records') && method === 'DELETE') return json([]);

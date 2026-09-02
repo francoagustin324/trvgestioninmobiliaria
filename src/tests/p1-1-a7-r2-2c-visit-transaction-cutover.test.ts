@@ -137,7 +137,14 @@ test('R2.2C adapter fija false para carrera OFF→ON y no reconsulta esa decisi�
   assert.match(cutover, /pushCloudData\(state\.crm, accountKey, false\)/i);
   assert.match(compatible, /job\.visitAuthorityDecision \?\? await visitTransactionAuthorityActive\(\)/i);
   assert.match(compatible, /if \(authorityActive\)[\s\S]*pushCloudDataWithVisitAuthority[\s\S]*else[\s\S]*pushModernCloudData/i);
-  assert.doesNotMatch(cutover, /catch[\s\S]*invokeVisitTransaction/i);
+  const transactionalCallbacks = [...cutover.matchAll(
+    /runTransactionalCloud:\s*async\s*\(\)\s*=>\s*\{([\s\S]*?)\n\s{4}\},\n\s{2}\}\);/g,
+  )].map((match) => match[1] ?? '');
+  assert.equal(transactionalCallbacks.length, 2);
+  for (const callback of transactionalCallbacks) {
+    assert.match(callback, /invokeVisitTransaction/i);
+    assert.doesNotMatch(callback, /persistHistoricalCloud|pushCloudData|historicalCoordinate|historicalResolve|runLegacyCloud/i);
+  }
 });
 
 test('R2.2C RPC cloud envía sólo intent y conserva operationId estable para retries', () => {

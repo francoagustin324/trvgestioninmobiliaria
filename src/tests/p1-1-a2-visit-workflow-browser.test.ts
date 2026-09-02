@@ -7,7 +7,7 @@ import { initialData, type CrmData, type TeamMember } from '../models.js';
 
 const USER_ID = 'p1-a2-owner';
 const ORG_ID = 'p1-a2-org';
-const STORAGE_KEY = `trv-crm-basico:user:${USER_ID}`;
+const STORAGE_KEY = 'trv-crm-basico';
 
 function owner(): TeamMember {
   return {
@@ -132,13 +132,6 @@ async function stopServer(server: ChildProcess): Promise<void> {
 
 async function seedContext(context: BrowserContext): Promise<void> {
   await context.addInitScript(({ crm, storageKey }) => {
-    localStorage.setItem('propcontrol-cloud-session-v1', JSON.stringify({
-      accessToken: 'access',
-      refreshToken: 'refresh',
-      expiresAt: Date.now() + 3_600_000,
-      userId: 'p1-a2-owner',
-      email: 'franco@propcontrol.test',
-    }));
     localStorage.setItem(storageKey, JSON.stringify(crm));
     localStorage.setItem(`${storageKey}:sync`, JSON.stringify({
       dirty: false,

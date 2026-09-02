@@ -45,6 +45,7 @@ test('modern: no declara éxito si la relectura remota no coincide con el snapsh
       const method = String(init?.method || (input instanceof Request ? input.method : 'GET')).toUpperCase();
       if (url.pathname === '/api/cloud-config') return json({ configured: true, url: 'https://supabase.test', publishableKey: 'key' });
       if (url.pathname.endsWith('/rpc/activate_my_organization_memberships')) return json({});
+      if (url.pathname.endsWith('/rpc/visit_transaction_authority_active')) return json(false);
       if (url.pathname.endsWith('/organization_members')) return json([membership]);
       if (url.pathname.endsWith('/propcontrol_records') && method === 'GET') return json([]);
       if (url.pathname.endsWith('/propcontrol_records') && ['POST', 'DELETE'].includes(method)) return json([]);
