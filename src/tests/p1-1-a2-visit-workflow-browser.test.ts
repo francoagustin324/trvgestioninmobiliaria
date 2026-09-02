@@ -10,24 +10,6 @@ const USER_ID = 'p1-a2-owner';
 const ORG_ID = 'p1-a2-org';
 const STORAGE_KEY = `trv-crm-basico:user:${USER_ID}`;
 
-interface CloudDiagnosticTrace {
-  phase: string;
-  sequence: number;
-}
-
-function trace(step: string, detail: unknown): void {
-  console.log(`[R2.2C8] ${step} ${JSON.stringify(detail)}`);
-}
-
-function visitSummary(records: Array<{ id?: unknown; uid?: unknown }>): Array<{ id: unknown; uid: unknown }> {
-  return records.map((record) => ({ id: record.id ?? null, uid: record.uid ?? null }));
-}
-
-function remoteVisitSummary(records: CloudRecordRow[]): { count: number; keys: string[] } {
-  const visits = records.filter((record) => record.entity_type === 'visit');
-  return { count: visits.length, keys: visits.map((record) => record.entity_key) };
-}
-
 function owner(): TeamMember {
   return {
     id: 1,
@@ -182,19 +164,10 @@ function filteredRows(records: CloudRecordRow[], url: URL): CloudRecordRow[] {
   return structuredClone(rows);
 }
 
-async function installCloud(
-  context: BrowserContext,
-  initial: CrmData,
-  diagnostic: CloudDiagnosticTrace = { phase: 'bootstrap', sequence: 0 },
-): Promise<void> {
+async function installCloud(context: BrowserContext, initial: CrmData): Promise<void> {
   let remote = crmToCloudRecords(initial, cloudContext(), USER_ID)
     .map((record) => ({ ...structuredClone(record), updated_at: '2026-08-23T18:00:00.000Z' }));
   let version = 0;
-
-  function nextSequence(): number {
-    diagnostic.sequence += 1;
-    return diagnostic.sequence;
-  }
 
   function upsert(rows: CloudRecordRow[]): void {
     version += 1;
@@ -208,7 +181,6 @@ async function installCloud(
   }
 
   await context.route('**/api/cloud-config', async (route) => {
-    trace('FAKE_CONFIG', { phase: diagnostic.phase, sequence: nextSequence() });
     await route.fulfill({
       status: 200,
       contentType: 'application/json',
@@ -229,16 +201,9 @@ async function installCloud(
       body: JSON.stringify(value),
     });
 
-    if (url.pathname.endsWith('/rpc/activate_my_organization_memberships')) {
-      trace('FAKE_RPC_ACTIVATE', { phase: diagnostic.phase, sequence: nextSequence() });
-      return fulfill({});
-    }
-    if (url.pathname.endsWith('/rpc/visit_transaction_authority_active')) {
-      trace('FAKE_RPC_CAPABILITY', { phase: diagnostic.phase, sequence: nextSequence(), authority: false });
-      return fulfill(false);
-    }
+    if (url.pathname.endsWith('/rpc/activate_my_organization_memberships')) return fulfill({});
+    if (url.pathname.endsWith('/rpc/visit_transaction_authority_active')) return fulfill(false);
     if (url.pathname.endsWith('/organization_members')) {
-      trace('FAKE_MEMBERSHIP_GET', { phase: diagnostic.phase, sequence: nextSequence() });
       return fulfill([{
         organization_id: ORG_ID,
         member_id: 1,
@@ -252,181 +217,23 @@ async function installCloud(
       }]);
     }
     if (url.pathname.endsWith('/propcontrol_records') && method === 'GET') {
-      const rows = filteredRows(remote, url);
-      trace('FAKE_RECORDS_GET', {
-        phase: diagnostic.phase,
-        sequence: nextSequence(),
-        organizationId: url.searchParams.get('organization_id'),
-        entityType: url.searchParams.get('entity_type'),
-        entityKey: url.searchParams.get('entity_key'),
-        returnedRecords: rows.length,
-        returnedVisits: remoteVisitSummary(rows),
-        remoteVisits: remoteVisitSummary(remote),
-      });
-      return fulfill(rows);
+      return fulfill(filteredRows(remote, url));
     }
     if (url.pathname.endsWith('/propcontrol_records') && method === 'DELETE') {
-      const selected = filteredRows(remote, url);
-      trace('FAKE_RECORDS_DELETE_BEFORE', {
-        phase: diagnostic.phase,
-        sequence: nextSequence(),
-        entityType: url.searchParams.get('entity_type'),
-        entityKey: url.searchParams.get('entity_key'),
-        selected: selected.map(recordIdentity),
-        remoteRecords: remote.length,
-        remoteVisits: remoteVisitSummary(remote),
-      });
-      const deleting = new Set(selected.map(recordIdentity));
+      const deleting = new Set(filteredRows(remote, url).map(recordIdentity));
       remote = remote.filter((row) => !deleting.has(recordIdentity(row)));
-      trace('FAKE_RECORDS_DELETE_AFTER', {
-        phase: diagnostic.phase,
-        sequence: nextSequence(),
-        remoteRecords: remote.length,
-        remoteVisits: remoteVisitSummary(remote),
-      });
       return fulfill([]);
     }
     if (url.pathname.endsWith('/propcontrol_records') && method === 'POST') {
-      const incoming = request.postDataJSON() as CloudRecordRow[];
-      trace('FAKE_RECORDS_POST_BEFORE', {
-        phase: diagnostic.phase,
-        sequence: nextSequence(),
-        incomingRecords: incoming.length,
-        entityTypes: [...new Set(incoming.map((record) => record.entity_type))],
-        incomingVisits: remoteVisitSummary(incoming),
-        remoteRecords: remote.length,
-        remoteVisits: remoteVisitSummary(remote),
-      });
-      upsert(incoming);
-      trace('FAKE_RECORDS_POST_AFTER', {
-        phase: diagnostic.phase,
-        sequence: nextSequence(),
-        remoteRecords: remote.length,
-        remoteVisits: remoteVisitSummary(remote),
-      });
+      upsert(request.postDataJSON() as CloudRecordRow[]);
       return fulfill([]);
     }
-    trace('FAKE_UNHANDLED_ROUTE', {
-      phase: diagnostic.phase,
-      sequence: nextSequence(),
-      method,
-      pathname: url.pathname,
-    });
     return route.fulfill({ status: 404, contentType: 'application/json', body: '{}' });
   });
 }
 
 async function seedContext(context: BrowserContext): Promise<void> {
   await context.addInitScript(({ crm, storageKey }) => {
-    interface BrowserDiagnosticState {
-      authoritativeEvents: Array<{ incomingVisits: number; visits: Array<{ id: unknown; uid: unknown }> }>;
-      cloudStatus: Array<{ kind: string; message: string }>;
-      storageTransitions: Array<{ before: number; after: number; visits: Array<{ id: unknown; uid: unknown }>; stack: string[] }>;
-      syncTransitions: Array<{
-        dirty: boolean;
-        generation: number | null;
-        verifiedGeneration: number | null;
-        lastCloudVersion: string | null;
-        localFingerprintDigest: string;
-        lastCloudFingerprintDigest: string;
-      }>;
-      unhandled: string[];
-      errors: string[];
-    }
-    const diagnosticWindow = window as Window & { __r2c8?: BrowserDiagnosticState };
-    diagnosticWindow.__r2c8 = {
-      authoritativeEvents: [],
-      cloudStatus: [],
-      storageTransitions: [],
-      syncTransitions: [],
-      unhandled: [],
-      errors: [],
-    };
-    const digest = (value: unknown): string => {
-      const text = typeof value === 'string' ? value : '';
-      let hash = 2166136261;
-      for (let index = 0; index < text.length; index += 1) {
-        hash ^= text.charCodeAt(index);
-        hash = Math.imul(hash, 16777619);
-      }
-      return `${text.length}:${(hash >>> 0).toString(16)}`;
-    };
-    const parse = (value: string | null): Record<string, unknown> | null => {
-      if (!value) return null;
-      try {
-        const parsed: unknown = JSON.parse(value);
-        return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed as Record<string, unknown> : null;
-      } catch {
-        return null;
-      }
-    };
-    const summarizeVisits = (value: unknown): Array<{ id: unknown; uid: unknown }> => {
-      if (!Array.isArray(value)) return [];
-      return value.map((item) => {
-        const record = item && typeof item === 'object' ? item as Record<string, unknown> : {};
-        return { id: record.id ?? null, uid: record.uid ?? null };
-      });
-    };
-    const nativeSetItem = Storage.prototype.setItem;
-    Storage.prototype.setItem = function diagnosticSetItem(key: string, value: string): void {
-      const diagnostic = diagnosticWindow.__r2c8!;
-      if (key === storageKey) {
-        const previous = parse(this.getItem(key));
-        const next = parse(value);
-        const previousVisits = Array.isArray(previous?.visits) ? previous.visits.length : 0;
-        const nextVisits = Array.isArray(next?.visits) ? next.visits.length : 0;
-        if (previousVisits !== nextVisits) {
-          const transition = {
-            before: previousVisits,
-            after: nextVisits,
-            visits: summarizeVisits(next?.visits),
-            stack: (new Error().stack || '').split('\n').slice(1, 9).map((line) => line.trim()),
-          };
-          diagnostic.storageTransitions.push(transition);
-          console.info(`[R2.2C8] STORAGE_VISITS ${JSON.stringify(transition)}`);
-        }
-      } else if (key === `${storageKey}:sync`) {
-        const next = parse(value);
-        const transition = {
-          dirty: Boolean(next?.dirty),
-          generation: Number.isFinite(next?.localGeneration) ? Number(next?.localGeneration) : null,
-          verifiedGeneration: Number.isFinite(next?.verifiedGeneration) ? Number(next?.verifiedGeneration) : null,
-          lastCloudVersion: typeof next?.lastCloudVersion === 'string' ? next.lastCloudVersion : null,
-          localFingerprintDigest: digest(next?.localFingerprint),
-          lastCloudFingerprintDigest: digest(next?.lastCloudFingerprint),
-        };
-        diagnostic.syncTransitions.push(transition);
-        console.info(`[R2.2C8] SYNC_STATE ${JSON.stringify(transition)}`);
-      }
-      nativeSetItem.call(this, key, value);
-    };
-    document.addEventListener('propcontrol-cloud-authoritative-snapshot', (event) => {
-      const detail = (event as CustomEvent<{ crm?: { visits?: unknown[] } }>).detail;
-      const visits = summarizeVisits(detail?.crm?.visits);
-      const entry = { incomingVisits: visits.length, visits };
-      diagnosticWindow.__r2c8!.authoritativeEvents.push(entry);
-      console.info(`[R2.2C8] AUTHORITATIVE_EVENT_BEFORE_PRODUCT_LISTENER ${JSON.stringify(entry)}`);
-    }, true);
-    document.addEventListener('propcontrol-cloud-status', (event) => {
-      const detail = (event as CustomEvent<{ kind?: unknown; message?: unknown }>).detail;
-      const entry = {
-        kind: String(detail?.kind ?? ''),
-        message: String(detail?.message ?? ''),
-      };
-      diagnosticWindow.__r2c8!.cloudStatus.push(entry);
-      if (entry.kind === 'error') console.info(`[R2.2C8] CLOUD_STATUS_ERROR ${JSON.stringify(entry)}`);
-    }, true);
-    window.addEventListener('unhandledrejection', (event) => {
-      const reason = event.reason instanceof Error ? `${event.reason.name}: ${event.reason.message}` : String(event.reason ?? '');
-      diagnosticWindow.__r2c8!.unhandled.push(reason);
-      console.info(`[R2.2C8] UNHANDLED_REJECTION ${JSON.stringify({ reason })}`);
-    });
-    window.addEventListener('error', (event) => {
-      const message = event.error instanceof Error ? `${event.error.name}: ${event.error.message}` : String(event.message || '');
-      diagnosticWindow.__r2c8!.errors.push(message);
-      console.info(`[R2.2C8] WINDOW_ERROR ${JSON.stringify({ message })}`);
-    });
-
     localStorage.setItem('propcontrol-cloud-session-v1', JSON.stringify({
       accessToken: 'access',
       refreshToken: 'refresh',
@@ -490,19 +297,9 @@ test('P1.1-A2 browser desktop coordina una sola visita y registra resultado sin 
   const browser = await chromium.launch({ headless: true, executablePath: chromeExecutable() });
   const context = await browser.newContext({ viewport: { width: 1366, height: 900 } });
   try {
-    const cloudTrace: CloudDiagnosticTrace = { phase: 'bootstrap', sequence: 0 };
-    await installCloud(context, fixture(), cloudTrace);
+    await installCloud(context, fixture());
     await seedContext(context);
     const page = await context.newPage();
-    page.on('console', (message) => {
-      const text = message.text();
-      if (text.includes('[R2.2C8]') || text.includes('[R2.2C9]') || message.type() === 'error') {
-        trace('BROWSER_CONSOLE', { type: message.type(), text });
-      }
-    });
-    page.on('pageerror', (error) => {
-      trace('PAGE_ERROR', { name: error.name, message: error.message });
-    });
     await load(page, `http://127.0.0.1:${port}`);
     await openLead(page);
 
@@ -524,157 +321,14 @@ test('P1.1-A2 browser desktop coordina una sola visita y registra resultado sin 
     await form.locator('select[name="propertyId"]').selectOption('10');
     await form.locator('input[name="date"]').fill(futureLocalDate(3));
     await form.locator('input[name="time"]').fill('15:30');
-    cloudTrace.phase = 'coordinate';
-    const beforeSubmit = await page.evaluate(async () => {
-      const store = await import('/dist/store.js');
-      type BrowserStoreState = typeof store.state;
-      const diagnosticWindow = window as Window & {
-        __r2c9State?: BrowserStoreState;
-        __r2c9InitialCrm?: BrowserStoreState['crm'];
-      };
-      const summarize = (records: unknown[]): Array<{ id: unknown; uid: unknown }> => records.map((item) => {
-        const record = item && typeof item === 'object' ? item as Record<string, unknown> : {};
-        return { id: record.id ?? null, uid: record.uid ?? null };
-      });
-
-      diagnosticWindow.__r2c9State = store.state;
-      diagnosticWindow.__r2c9InitialCrm = store.state.crm;
-      let crmBacking = store.state.crm;
-      const crmDescriptor = Object.getOwnPropertyDescriptor(store.state, 'crm');
-      Object.defineProperty(store.state, 'crm', {
-        configurable: crmDescriptor?.configurable ?? true,
-        enumerable: crmDescriptor?.enumerable ?? true,
-        get: () => crmBacking,
-        set: (next: BrowserStoreState['crm']) => {
-          const transition = {
-            beforeVisits: crmBacking.visits.length,
-            afterVisits: next.visits.length,
-            stack: (new Error().stack || '').split('\n').slice(1, 10).map((line) => line.trim()),
-            timestamp: performance.now(),
-          };
-          console.info(`[R2.2C9] R2C9_CRM_ASSIGN ${JSON.stringify(transition)}`);
-          crmBacking = next;
-        },
-      });
-
-      const originalPush = Array.prototype.push;
-      const diagnosticPush = function <T>(this: T[], ...items: T[]): number {
-        const canonicalVisits = diagnosticWindow.__r2c9State?.crm.visits;
-        const isCanonicalVisits = (this as unknown) === canonicalVisits;
-        if (!isCanonicalVisits) return Reflect.apply(originalPush, this, items);
-        const before = this.length;
-        const stack = (new Error().stack || '').split('\n').slice(1, 10).map((line) => line.trim());
-        const result: number = Reflect.apply(originalPush, this, items);
-        const transition = {
-          before,
-          after: this.length,
-          insertedCount: items.length,
-          inserted: summarize(items as unknown[]),
-          visits: summarize(this as unknown[]),
-          stack,
-          timestamp: performance.now(),
-        };
-        console.info(`[R2.2C9] R2C9_VISITS_PUSH ${JSON.stringify(transition)}`);
-        return result;
-      };
-      Array.prototype.push = diagnosticPush;
-
-      const client = store.state.crm.clients[0];
-      const installed = {
-        visitsLength: store.state.crm.visits.length,
-        clientId: client?.id ?? null,
-        timestamp: performance.now(),
-      };
-      console.info(`[R2.2C9] R2C9_STATE_INSTALLED ${JSON.stringify(installed)}`);
-      return {
-        visitsLength: store.state.crm.visits.length,
-        visits: store.state.crm.visits.map((visit) => {
-          const record: { id?: unknown; uid?: unknown } = visit;
-          return { id: record.id ?? null, uid: record.uid ?? null };
-        }),
-        clientId: client?.id ?? null,
-        clientRevision: client?.revision ?? null,
-        clientPipeline: client?.pipeline ?? null,
-      };
-    });
-    trace('BEFORE_DOUBLE_SUBMIT', beforeSubmit);
     await form.evaluate((node) => {
       const event = () => new SubmitEvent('submit', { bubbles: true, cancelable: true });
       node.dispatchEvent(event());
       node.dispatchEvent(event());
     });
-    trace('AFTER_DOUBLE_SUBMIT_DISPATCH', { operationId: await form.getAttribute('data-operation-id') });
-    await page.waitForFunction(async () => {
-      const store = await import('/dist/store.js');
-      type BrowserStoreState = typeof store.state;
-      const diagnosticWindow = window as Window & { __r2c9State?: BrowserStoreState };
-      const canonicalState = diagnosticWindow.__r2c9State;
-      const observed = store.state.crm.visits.length === 1;
-      if (observed) {
-        const summarize = (records: unknown[]): Array<{ id: unknown; uid: unknown }> => records.map((item) => {
-          const record = item && typeof item === 'object' ? item as Record<string, unknown> : {};
-          return { id: record.id ?? null, uid: record.uid ?? null };
-        });
-        const identity = {
-          freshStateSame: store.state === canonicalState,
-          freshCrmSame: Boolean(canonicalState && store.state.crm === canonicalState.crm),
-          freshVisitsSame: Boolean(canonicalState && store.state.crm.visits === canonicalState.crm.visits),
-          freshVisitsLength: store.state.crm.visits.length,
-          stableVisitsLength: canonicalState?.crm.visits.length ?? null,
-          freshVisits: summarize(store.state.crm.visits),
-          stableVisits: summarize(canonicalState?.crm.visits ?? []),
-          timestamp: performance.now(),
-        };
-        console.info(`[R2.2C9] R2C9_WAIT_OBSERVED_ONE ${JSON.stringify(identity)}`);
-      }
-      return observed;
-    });
-    const stableAfterWait = await page.evaluate(() => {
-      const diagnosticWindow = window as Window & {
-        __r2c9State?: { crm: { visits: Array<{ id?: unknown; uid?: unknown }> } };
-      };
-      const canonicalState = diagnosticWindow.__r2c9State;
-      const detail = {
-        visitsLength: canonicalState?.crm.visits.length ?? null,
-        visits: (canonicalState?.crm.visits ?? []).map((record) => ({
-          id: record.id ?? null,
-          uid: record.uid ?? null,
-        })),
-        timestamp: performance.now(),
-      };
-      console.info(`[R2.2C9] R2C9_AFTER_WAIT_STABLE_STATE ${JSON.stringify(detail)}`);
-      return detail;
-    });
-    trace('R2C9_AFTER_WAIT_STABLE_STATE_NODE', stableAfterWait);
-    const afterWait = await page.evaluate(async () => {
-      const store = await import('/dist/store.js');
-      type BrowserStoreState = typeof store.state;
-      const diagnosticWindow = window as Window & { __r2c8?: unknown; __r2c9State?: BrowserStoreState };
-      const canonicalState = diagnosticWindow.__r2c9State;
-      const client = store.state.crm.clients[0];
-      const identity = {
-        freshStateSame: store.state === canonicalState,
-        freshCrmSame: Boolean(canonicalState && store.state.crm === canonicalState.crm),
-        freshVisitsSame: Boolean(canonicalState && store.state.crm.visits === canonicalState.crm.visits),
-        freshVisits: store.state.crm.visits.length,
-        stableVisits: canonicalState?.crm.visits.length ?? null,
-        timestamp: performance.now(),
-      };
-      console.info(`[R2.2C9] R2C9_AFTER_WAIT_FRESH_IMPORT ${JSON.stringify(identity)}`);
-      return {
-        visitsLength: store.state.crm.visits.length,
-        visits: store.state.crm.visits.map((visit) => {
-          const record: { id?: unknown; uid?: unknown } = visit;
-          return { id: record.id ?? null, uid: record.uid ?? null };
-        }),
-        clientId: client?.id ?? null,
-        clientRevision: client?.revision ?? null,
-        clientPipeline: client?.pipeline ?? null,
-        identity,
-        diagnostic: diagnosticWindow.__r2c8 ?? null,
-      };
-    });
-    trace('WAIT_VISIT_ONE_SATISFIED', afterWait);
+    await page
+      .locator('.pc-visit-row[data-visit-id="1"]')
+      .waitFor({ state: 'visible' });
 
     const afterCoordinate = await page.evaluate(async () => {
       const store = await import('/dist/store.js');
@@ -685,26 +339,6 @@ test('P1.1-A2 browser desktop coordina una sola visita y registra resultado sin 
         activity: store.state.crm.activityLog,
       };
     });
-    const finalDiagnostic = await page.evaluate(async ({ storageKey }) => {
-      const store = await import('/dist/store.js');
-      const diagnosticWindow = window as Window & { __r2c8?: unknown };
-      const syncRaw = localStorage.getItem(`${storageKey}:sync`);
-      let sync: unknown = null;
-      try { sync = syncRaw ? JSON.parse(syncRaw) : null; } catch { sync = { parseError: true }; }
-      const error = document.querySelector<HTMLElement>('[data-coordinate-visit] [data-visit-form-error]');
-      return {
-        visitsLength: store.state.crm.visits.length,
-        visits: store.state.crm.visits.map((visit) => {
-          const record: { id?: unknown; uid?: unknown } = visit;
-          return { id: record.id ?? null, uid: record.uid ?? null };
-        }),
-        sync,
-        formError: error?.textContent || '',
-        formErrorHidden: error?.hidden ?? null,
-        diagnostic: diagnosticWindow.__r2c8 ?? null,
-      };
-    }, { storageKey: STORAGE_KEY });
-    trace('BEFORE_EXISTING_AFTER_COORDINATE_ASSERTION', finalDiagnostic);
     assert.equal(afterCoordinate.visits.length, 1);
     assert.equal(afterCoordinate.visits[0]?.status, 'Coordinada');
     assert.equal(afterCoordinate.visits[0]?.propertyId, 10);
@@ -742,10 +376,9 @@ test('P1.1-A2 browser desktop coordina una sola visita y registra resultado sin 
     await resultForm.locator('input[name="nextFollowUp"]').fill(futureLocalDate(5));
     await resultForm.locator('button[type="submit"]').click();
 
-    await page.waitForFunction(async () => {
-      const store = await import('/dist/store.js');
-      return store.state.crm.visits[0]?.status === 'Realizada';
-    });
+    await page
+      .locator('.pc-visit-row[data-visit-id="1"] .pc-visit-status.status-realizada')
+      .waitFor({ state: 'visible' });
     const afterResult = await page.evaluate(async () => {
       const store = await import('/dist/store.js');
       return {
