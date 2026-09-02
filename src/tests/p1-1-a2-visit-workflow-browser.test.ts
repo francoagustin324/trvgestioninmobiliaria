@@ -496,7 +496,7 @@ test('P1.1-A2 browser desktop coordina una sola visita y registra resultado sin 
     const page = await context.newPage();
     page.on('console', (message) => {
       const text = message.text();
-      if (text.includes('[R2.2C8]') || message.type() === 'error') {
+      if (text.includes('[R2.2C8]') || text.includes('[R2.2C9]') || message.type() === 'error') {
         trace('BROWSER_CONSOLE', { type: message.type(), text });
       }
     });
@@ -527,7 +527,65 @@ test('P1.1-A2 browser desktop coordina una sola visita y registra resultado sin 
     cloudTrace.phase = 'coordinate';
     const beforeSubmit = await page.evaluate(async () => {
       const store = await import('/dist/store.js');
+      type BrowserStoreState = typeof store.state;
+      const diagnosticWindow = window as Window & {
+        __r2c9State?: BrowserStoreState;
+        __r2c9InitialCrm?: BrowserStoreState['crm'];
+      };
+      const summarize = (records: unknown[]): Array<{ id: unknown; uid: unknown }> => records.map((item) => {
+        const record = item && typeof item === 'object' ? item as Record<string, unknown> : {};
+        return { id: record.id ?? null, uid: record.uid ?? null };
+      });
+
+      diagnosticWindow.__r2c9State = store.state;
+      diagnosticWindow.__r2c9InitialCrm = store.state.crm;
+      let crmBacking = store.state.crm;
+      const crmDescriptor = Object.getOwnPropertyDescriptor(store.state, 'crm');
+      Object.defineProperty(store.state, 'crm', {
+        configurable: crmDescriptor?.configurable ?? true,
+        enumerable: crmDescriptor?.enumerable ?? true,
+        get: () => crmBacking,
+        set: (next: BrowserStoreState['crm']) => {
+          const transition = {
+            beforeVisits: crmBacking.visits.length,
+            afterVisits: next.visits.length,
+            stack: (new Error().stack || '').split('\n').slice(1, 10).map((line) => line.trim()),
+            timestamp: performance.now(),
+          };
+          console.info(`[R2.2C9] R2C9_CRM_ASSIGN ${JSON.stringify(transition)}`);
+          crmBacking = next;
+        },
+      });
+
+      const originalPush = Array.prototype.push;
+      const diagnosticPush = function <T>(this: T[], ...items: T[]): number {
+        const canonicalVisits = diagnosticWindow.__r2c9State?.crm.visits;
+        const isCanonicalVisits = (this as unknown) === canonicalVisits;
+        if (!isCanonicalVisits) return Reflect.apply(originalPush, this, items);
+        const before = this.length;
+        const stack = (new Error().stack || '').split('\n').slice(1, 10).map((line) => line.trim());
+        const result: number = Reflect.apply(originalPush, this, items);
+        const transition = {
+          before,
+          after: this.length,
+          insertedCount: items.length,
+          inserted: summarize(items as unknown[]),
+          visits: summarize(this as unknown[]),
+          stack,
+          timestamp: performance.now(),
+        };
+        console.info(`[R2.2C9] R2C9_VISITS_PUSH ${JSON.stringify(transition)}`);
+        return result;
+      };
+      Array.prototype.push = diagnosticPush;
+
       const client = store.state.crm.clients[0];
+      const installed = {
+        visitsLength: store.state.crm.visits.length,
+        clientId: client?.id ?? null,
+        timestamp: performance.now(),
+      };
+      console.info(`[R2.2C9] R2C9_STATE_INSTALLED ${JSON.stringify(installed)}`);
       return {
         visitsLength: store.state.crm.visits.length,
         visits: store.state.crm.visits.map((visit) => {
@@ -548,12 +606,61 @@ test('P1.1-A2 browser desktop coordina una sola visita y registra resultado sin 
     trace('AFTER_DOUBLE_SUBMIT_DISPATCH', { operationId: await form.getAttribute('data-operation-id') });
     await page.waitForFunction(async () => {
       const store = await import('/dist/store.js');
-      return store.state.crm.visits.length === 1;
+      type BrowserStoreState = typeof store.state;
+      const diagnosticWindow = window as Window & { __r2c9State?: BrowserStoreState };
+      const canonicalState = diagnosticWindow.__r2c9State;
+      const observed = store.state.crm.visits.length === 1;
+      if (observed) {
+        const summarize = (records: unknown[]): Array<{ id: unknown; uid: unknown }> => records.map((item) => {
+          const record = item && typeof item === 'object' ? item as Record<string, unknown> : {};
+          return { id: record.id ?? null, uid: record.uid ?? null };
+        });
+        const identity = {
+          freshStateSame: store.state === canonicalState,
+          freshCrmSame: Boolean(canonicalState && store.state.crm === canonicalState.crm),
+          freshVisitsSame: Boolean(canonicalState && store.state.crm.visits === canonicalState.crm.visits),
+          freshVisitsLength: store.state.crm.visits.length,
+          stableVisitsLength: canonicalState?.crm.visits.length ?? null,
+          freshVisits: summarize(store.state.crm.visits),
+          stableVisits: summarize(canonicalState?.crm.visits ?? []),
+          timestamp: performance.now(),
+        };
+        console.info(`[R2.2C9] R2C9_WAIT_OBSERVED_ONE ${JSON.stringify(identity)}`);
+      }
+      return observed;
     });
+    const stableAfterWait = await page.evaluate(() => {
+      const diagnosticWindow = window as Window & {
+        __r2c9State?: { crm: { visits: Array<{ id?: unknown; uid?: unknown }> } };
+      };
+      const canonicalState = diagnosticWindow.__r2c9State;
+      const detail = {
+        visitsLength: canonicalState?.crm.visits.length ?? null,
+        visits: (canonicalState?.crm.visits ?? []).map((record) => ({
+          id: record.id ?? null,
+          uid: record.uid ?? null,
+        })),
+        timestamp: performance.now(),
+      };
+      console.info(`[R2.2C9] R2C9_AFTER_WAIT_STABLE_STATE ${JSON.stringify(detail)}`);
+      return detail;
+    });
+    trace('R2C9_AFTER_WAIT_STABLE_STATE_NODE', stableAfterWait);
     const afterWait = await page.evaluate(async () => {
       const store = await import('/dist/store.js');
+      type BrowserStoreState = typeof store.state;
+      const diagnosticWindow = window as Window & { __r2c8?: unknown; __r2c9State?: BrowserStoreState };
+      const canonicalState = diagnosticWindow.__r2c9State;
       const client = store.state.crm.clients[0];
-      const diagnosticWindow = window as Window & { __r2c8?: unknown };
+      const identity = {
+        freshStateSame: store.state === canonicalState,
+        freshCrmSame: Boolean(canonicalState && store.state.crm === canonicalState.crm),
+        freshVisitsSame: Boolean(canonicalState && store.state.crm.visits === canonicalState.crm.visits),
+        freshVisits: store.state.crm.visits.length,
+        stableVisits: canonicalState?.crm.visits.length ?? null,
+        timestamp: performance.now(),
+      };
+      console.info(`[R2.2C9] R2C9_AFTER_WAIT_FRESH_IMPORT ${JSON.stringify(identity)}`);
       return {
         visitsLength: store.state.crm.visits.length,
         visits: store.state.crm.visits.map((visit) => {
@@ -563,6 +670,7 @@ test('P1.1-A2 browser desktop coordina una sola visita y registra resultado sin 
         clientId: client?.id ?? null,
         clientRevision: client?.revision ?? null,
         clientPipeline: client?.pipeline ?? null,
+        identity,
         diagnostic: diagnosticWindow.__r2c8 ?? null,
       };
     });
