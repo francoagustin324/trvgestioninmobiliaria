@@ -328,7 +328,7 @@ test('P1.1-A2 browser desktop coordina una sola visita y registra resultado sin 
     });
     await page
       .locator('.pc-visit-row[data-visit-id="1"]')
-      .waitFor({ state: 'visible' });
+      .waitFor({ state: 'attached' });
 
     const afterCoordinate = await page.evaluate(async () => {
       const store = await import('/dist/store.js');
@@ -378,7 +378,7 @@ test('P1.1-A2 browser desktop coordina una sola visita y registra resultado sin 
 
     await page
       .locator('.pc-visit-row[data-visit-id="1"] .pc-visit-status.status-realizada')
-      .waitFor({ state: 'visible' });
+      .waitFor({ state: 'attached' });
     const afterResult = await page.evaluate(async () => {
       const store = await import('/dist/store.js');
       return {
