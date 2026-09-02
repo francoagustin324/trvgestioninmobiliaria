@@ -2,12 +2,13 @@ import assert from 'node:assert/strict';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import test from 'node:test';
-import { chromium, type BrowserContext, type Page } from 'playwright';
+import { chromium, type BrowserContext, type Page, type Route } from 'playwright';
+import { crmToCloudRecords, type CloudMembershipContext, type CloudRecordRow } from '../cloud-records.js';
 import { initialData, type CrmData, type TeamMember } from '../models.js';
 
 const USER_ID = 'p1-a2-owner';
 const ORG_ID = 'p1-a2-org';
-const STORAGE_KEY = 'trv-crm-basico';
+const STORAGE_KEY = `trv-crm-basico:user:${USER_ID}`;
 
 function owner(): TeamMember {
   return {
@@ -74,6 +75,15 @@ function fixture(): CrmData {
   return crm;
 }
 
+function cloudContext(): CloudMembershipContext {
+  return {
+    organizationId: ORG_ID,
+    currentMemberId: 1,
+    currentRole: 'Dueño',
+    members: [owner()],
+  };
+}
+
 function chromeExecutable(): string | undefined {
   return [
     '/usr/bin/google-chrome',
@@ -130,8 +140,69 @@ async function stopServer(server: ChildProcess): Promise<void> {
   });
 }
 
+async function installCloud(context: BrowserContext, initial: CrmData): Promise<void> {
+  let remote = crmToCloudRecords(initial, cloudContext(), USER_ID)
+    .map((record) => ({ ...structuredClone(record), updated_at: '2026-08-23T18:00:00.000Z' }));
+  let version = 0;
+
+  await context.route('**/api/cloud-config', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        configured: true,
+        url: new URL(route.request().url()).origin,
+        publishableKey: 'key',
+      }),
+    });
+  });
+  await context.route('**/rest/v1/**', async (route: Route) => {
+    const request = route.request();
+    const url = new URL(request.url());
+    const method = request.method().toUpperCase();
+    const fulfill = (value: unknown) => route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify(value),
+    });
+
+    if (url.pathname.endsWith('/rpc/activate_my_organization_memberships')) return fulfill({});
+    if (url.pathname.endsWith('/rpc/visit_transaction_authority_active')) return fulfill(false);
+    if (url.pathname.endsWith('/organization_members')) {
+      return fulfill([{
+        organization_id: ORG_ID,
+        member_id: 1,
+        user_id: USER_ID,
+        role: 'owner',
+        status: 'active',
+        display_name: owner().name,
+        email: owner().email,
+        phone: owner().phone,
+        created_at: owner().createdAt,
+      }]);
+    }
+    if (url.pathname.endsWith('/propcontrol_records') && method === 'GET') return fulfill(remote);
+    if (url.pathname.endsWith('/propcontrol_records') && method === 'DELETE') return fulfill([]);
+    if (url.pathname.endsWith('/propcontrol_records') && method === 'POST') {
+      version += 1;
+      const stamp = `2026-08-23T18:00:${String(version).padStart(2, '0')}.000Z`;
+      remote = (request.postDataJSON() as CloudRecordRow[])
+        .map((record) => ({ ...structuredClone(record), updated_at: stamp }));
+      return fulfill([]);
+    }
+    return route.fulfill({ status: 404, contentType: 'application/json', body: '{}' });
+  });
+}
+
 async function seedContext(context: BrowserContext): Promise<void> {
   await context.addInitScript(({ crm, storageKey }) => {
+    localStorage.setItem('propcontrol-cloud-session-v1', JSON.stringify({
+      accessToken: 'access',
+      refreshToken: 'refresh',
+      expiresAt: Date.now() + 3_600_000,
+      userId: 'p1-a2-owner',
+      email: 'franco@propcontrol.test',
+    }));
     localStorage.setItem(storageKey, JSON.stringify(crm));
     localStorage.setItem(`${storageKey}:sync`, JSON.stringify({
       dirty: false,
@@ -188,6 +259,7 @@ test('P1.1-A2 browser desktop coordina una sola visita y registra resultado sin 
   const browser = await chromium.launch({ headless: true, executablePath: chromeExecutable() });
   const context = await browser.newContext({ viewport: { width: 1366, height: 900 } });
   try {
+    await installCloud(context, fixture());
     await seedContext(context);
     const page = await context.newPage();
     await load(page, `http://127.0.0.1:${port}`);
@@ -306,6 +378,7 @@ test('P1.1-A2 browser mobile mantiene Visitas usable, targets táctiles y sin ov
   const browser = await chromium.launch({ headless: true, executablePath: chromeExecutable() });
   const context = await browser.newContext({ viewport: { width: 390, height: 844 } });
   try {
+    await installCloud(context, fixture());
     await seedContext(context);
     const page = await context.newPage();
     await load(page, `http://127.0.0.1:${port}`);
