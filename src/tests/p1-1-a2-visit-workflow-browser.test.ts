@@ -140,10 +140,45 @@ async function stopServer(server: ChildProcess): Promise<void> {
   });
 }
 
+function recordIdentity(record: Pick<CloudRecordRow, 'organization_id' | 'entity_type' | 'entity_key'>): string {
+  return `${record.organization_id}|${record.entity_type}|${record.entity_key}`;
+}
+
+function parseInFilter(value: string): Set<string> {
+  if (!value.startsWith('in.(') || !value.endsWith(')')) return new Set();
+  return new Set(value.slice(4, -1).split(',').map((item) => item.trim().replace(/^"|"$/g, '')));
+}
+
+function filteredRows(records: CloudRecordRow[], url: URL): CloudRecordRow[] {
+  let rows = records;
+  const organization = url.searchParams.get('organization_id');
+  if (organization?.startsWith('eq.')) rows = rows.filter((row) => row.organization_id === organization.slice(3));
+  const entityType = url.searchParams.get('entity_type');
+  if (entityType?.startsWith('eq.')) rows = rows.filter((row) => row.entity_type === entityType.slice(3));
+  const entityKey = url.searchParams.get('entity_key');
+  if (entityKey?.startsWith('eq.')) rows = rows.filter((row) => row.entity_key === entityKey.slice(3));
+  else if (entityKey?.startsWith('in.(')) {
+    const keys = parseInFilter(entityKey);
+    rows = rows.filter((row) => keys.has(row.entity_key));
+  }
+  return structuredClone(rows);
+}
+
 async function installCloud(context: BrowserContext, initial: CrmData): Promise<void> {
   let remote = crmToCloudRecords(initial, cloudContext(), USER_ID)
     .map((record) => ({ ...structuredClone(record), updated_at: '2026-08-23T18:00:00.000Z' }));
   let version = 0;
+
+  function upsert(rows: CloudRecordRow[]): void {
+    version += 1;
+    const stamp = `2026-08-23T18:00:${String(version).padStart(2, '0')}.000Z`;
+    rows.forEach((incoming) => {
+      const index = remote.findIndex((existing) => recordIdentity(existing) === recordIdentity(incoming));
+      const next = { ...structuredClone(incoming), updated_at: stamp };
+      if (index >= 0) remote[index] = { ...remote[index], ...next };
+      else remote.push(next);
+    });
+  }
 
   await context.route('**/api/cloud-config', async (route) => {
     await route.fulfill({
@@ -181,13 +216,16 @@ async function installCloud(context: BrowserContext, initial: CrmData): Promise<
         created_at: owner().createdAt,
       }]);
     }
-    if (url.pathname.endsWith('/propcontrol_records') && method === 'GET') return fulfill(remote);
-    if (url.pathname.endsWith('/propcontrol_records') && method === 'DELETE') return fulfill([]);
+    if (url.pathname.endsWith('/propcontrol_records') && method === 'GET') {
+      return fulfill(filteredRows(remote, url));
+    }
+    if (url.pathname.endsWith('/propcontrol_records') && method === 'DELETE') {
+      const deleting = new Set(filteredRows(remote, url).map(recordIdentity));
+      remote = remote.filter((row) => !deleting.has(recordIdentity(row)));
+      return fulfill([]);
+    }
     if (url.pathname.endsWith('/propcontrol_records') && method === 'POST') {
-      version += 1;
-      const stamp = `2026-08-23T18:00:${String(version).padStart(2, '0')}.000Z`;
-      remote = (request.postDataJSON() as CloudRecordRow[])
-        .map((record) => ({ ...structuredClone(record), updated_at: stamp }));
+      upsert(request.postDataJSON() as CloudRecordRow[]);
       return fulfill([]);
     }
     return route.fulfill({ status: 404, contentType: 'application/json', body: '{}' });
