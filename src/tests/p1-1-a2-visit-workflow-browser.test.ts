@@ -530,7 +530,7 @@ test('P1.1-A2 browser desktop coordina una sola visita y registra resultado sin 
       const client = store.state.crm.clients[0];
       return {
         visitsLength: store.state.crm.visits.length,
-        visits: store.state.crm.visits.map((visit) => ({ id: visit.id, uid: visit.uid ?? null })),
+        visits: visitSummary(store.state.crm.visits),
         clientId: client?.id ?? null,
         clientRevision: client?.revision ?? null,
         clientPipeline: client?.pipeline ?? null,
@@ -553,7 +553,7 @@ test('P1.1-A2 browser desktop coordina una sola visita y registra resultado sin 
       const diagnosticWindow = window as Window & { __r2c8?: unknown };
       return {
         visitsLength: store.state.crm.visits.length,
-        visits: store.state.crm.visits.map((visit) => ({ id: visit.id, uid: visit.uid ?? null })),
+        visits: visitSummary(store.state.crm.visits),
         clientId: client?.id ?? null,
         clientRevision: client?.revision ?? null,
         clientPipeline: client?.pipeline ?? null,
@@ -580,7 +580,7 @@ test('P1.1-A2 browser desktop coordina una sola visita y registra resultado sin 
       const error = document.querySelector<HTMLElement>('[data-coordinate-visit] [data-visit-form-error]');
       return {
         visitsLength: store.state.crm.visits.length,
-        visits: store.state.crm.visits.map((visit) => ({ id: visit.id, uid: visit.uid ?? null })),
+        visits: visitSummary(store.state.crm.visits),
         sync,
         formError: error?.textContent || '',
         formErrorHidden: error?.hidden ?? null,
