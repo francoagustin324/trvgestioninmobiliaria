@@ -353,8 +353,13 @@ async function reconcileClientsWithCas(
       continue;
     }
     if (rowFingerprint(current) === rowFingerprint(nextRow)) continue;
+    let assignedMemberId: number | undefined;
     if (current.assigned_member_id !== nextRow.assigned_member_id) {
-      throw new Error('La reasignación de Client requiere una operación autoritativa específica antes de activar Visit authority.');
+      const targetMemberId = nextRow.assigned_member_id;
+      if (typeof targetMemberId !== 'number' || !Number.isSafeInteger(targetMemberId) || targetMemberId <= 0) {
+        throw new Error('La reasignación de Client requiere un member id positivo válido.');
+      }
+      assignedMemberId = targetMemberId;
     }
     const payload = clientPayload(nextRow);
     await clientSnapshotCas(config, accessToken, {
@@ -362,6 +367,7 @@ async function reconcileClientsWithCas(
       client: clientReference(current.payload),
       expectedRevision: clientRevision(current.payload),
       payload,
+      ...(assignedMemberId === undefined ? {} : { assignedMemberId }),
     });
   }
 

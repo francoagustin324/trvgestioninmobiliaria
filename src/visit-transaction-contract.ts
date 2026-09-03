@@ -54,12 +54,12 @@ export interface VisitMutationResult {
   activity: TransactionalVisitActivity;
 }
 
-/** Backend-only foundation used by R2.2C to replace stale Client snapshot updates/deletes. */
+/** Backend-only CAS intent for authoritative Client snapshot update/delete. */
 export type ClientSnapshotCasIntent = {
   client: CommercialRecordReference;
   expectedRevision: number;
 } & (
-  | { action: 'update'; payload: Client }
+  | { action: 'update'; payload: Client; assignedMemberId?: number }
   | { action: 'delete' }
 );
 
