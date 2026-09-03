@@ -1,3 +1,4 @@
+import { commercialCloseActivityDetail } from './commercial-close.js';
 import type { ActivityEntry, Client, CommercialStage, Temperature } from './models.js';
 
 export const COMMERCIAL_STAGES: CommercialStage[] = [
@@ -266,17 +267,22 @@ function activity(action: string, client: Client, detail: string): Omit<Activity
 export function activitiesForClientSave(previous: Client | null, next: Client): Array<Omit<ActivityEntry, 'id' | 'actorId' | 'createdAt'>> {
   const entries: Array<Omit<ActivityEntry, 'id' | 'actorId' | 'createdAt'>> = [];
   const stage = commercialStage(next);
+  const previousStage = previous ? commercialStage(previous) : null;
+
   if (!previous) {
     entries.push(activity('Lead creado', next, `${next.name} · ${stage}`));
-  } else if (commercialStage(previous) !== stage) {
-    entries.push(activity('Cambio de etapa', next, `${commercialStage(previous)} → ${stage}`));
   }
 
-  if (stage === 'Ganado' && (!previous || commercialStage(previous) !== stage)) {
-    entries.push(activity('Operación ganada', next, `${next.name} quedó registrado como ganado.`));
-  }
-  if (stage === 'Perdido' && (!previous || commercialStage(previous) !== stage)) {
-    entries.push(activity('Operación perdida', next, `${next.name} quedó registrado como perdido.`));
+  if (previousStage !== stage) {
+    if (previous && isTerminalClient(previous) && !isTerminalClient(next)) {
+      entries.push(activity('Operación reabierta', next, `${next.name} · ${previousStage} → ${stage}`));
+    } else if (stage === 'Ganado') {
+      entries.push(activity('Operación ganada', next, commercialCloseActivityDetail(next)));
+    } else if (stage === 'Perdido') {
+      entries.push(activity('Operación perdida', next, commercialCloseActivityDetail(next)));
+    } else if (previous) {
+      entries.push(activity('Cambio de etapa', next, `${previousStage} → ${stage}`));
+    }
   }
 
   if (!isTerminalClient(next) && next.nextFollowUp) {

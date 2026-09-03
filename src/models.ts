@@ -8,6 +8,20 @@ export const LOGO_PATH = PRODUCT_BRAND.logo;
 
 export type Temperature = 'Caliente' | 'Tibio' | 'Frío';
 export type CommercialStage = 'Nuevo' | 'Contactado' | 'Calificado' | 'Visita coordinada' | 'Negociación' | 'Reservado' | 'Ganado' | 'Perdido';
+export type CommercialOutcome = 'won' | 'lost';
+export type DealCurrency = 'USD' | 'ARS';
+export type CommissionMode = 'percentage' | 'fixed';
+export type LostReason =
+  | 'Precio'
+  | 'Financiación'
+  | 'No respondió'
+  | 'Postergó decisión'
+  | 'Compró/alquiló otra propiedad'
+  | 'Eligió otra inmobiliaria'
+  | 'No encontramos una propiedad adecuada'
+  | 'Propiedad no disponible'
+  | 'Requisitos no compatibles'
+  | 'Otro';
 export type ModuleId = 'inicio' | 'crm' | 'propiedades' | 'red' | 'fichas' | 'whatsapp' | 'agenda' | 'equipo' | 'reportes' | 'configuracion';
 export type FichaMode = 'manual' | 'property' | 'external';
 export type PhotoEnhancement = 'none' | 'soft';
@@ -82,6 +96,10 @@ export interface Client extends SyncRecordMetadata {
   needsFinancing?: string; creditPossible?: string; creditApprovedAmount?: string; urgency?: string;
   garage?: string; patio?: string; pool?: string; requiresCreditReady?: string; features?: string; preferences?: string;
   qualificationUpdatedAt?: string;
+  outcome?: CommercialOutcome; closedAt?: string; dealAmount?: number; dealCurrency?: DealCurrency;
+  dealPropertyId?: number; dealPropertyUid?: string; dealPropertyLabel?: string;
+  commissionMode?: CommissionMode; commissionPercentage?: number; commissionAmount?: number; commissionCurrency?: DealCurrency;
+  closeNote?: string; lostReason?: LostReason; lostReasonDetail?: string;
   assignedToId?: number; createdById?: number;
 }
 

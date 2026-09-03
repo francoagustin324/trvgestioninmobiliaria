@@ -1,3 +1,4 @@
+import './commercial-close-ui.js';
 import type { Client } from './models.js';
 import type { QualificationProgress } from './lead-pipeline-essential.js';
 
