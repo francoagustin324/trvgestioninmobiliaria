@@ -248,7 +248,8 @@ export function cloudRecordsToCrm(
   return {
     organization: organizationFromRows(rows, fallback.organization, context.organizationId),
     teamMembers: context.members,
-    activityLog: recordsOf<ActivityEntry>(rows, 'activity'),
+    activityLog: recordsOf<ActivityEntry>(rows, 'activity')
+      .sort((left, right) => Number(right.id ?? 0) - Number(left.id ?? 0)),
     clients: recordsOf<Client>(rows, 'client'),
     properties: recordsOf<Property>(rows, 'property'),
     visits: recordsOf<SyncedVisit>(rows, 'visit'),
