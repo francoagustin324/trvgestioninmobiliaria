@@ -90,6 +90,38 @@ test('legacy: tampoco declara éxito si el snapshot releído no coincide', async
   crm.clients[0]!.nextFollowUp = '2026-08-08';
   writeLocalSnapshot(crm, { reason: 'Seguimiento legacy' }, storage);
 
-  await assert.rejects(() => pushCloudData(crm), /verificación remota legacy no coincide/i);
+  await assert.rejects(() => pushCloudData(crm, undefined, false), /verificación remota legacy no coincide/i);
   assert.equal(getSyncState(storage).dirty, true);
+});
+
+test('capability: schema indeterminado falla cerrado y no entra al snapshot legacy', async () => {
+  const storage = installSession();
+  let legacyRequests = 0;
+  Object.defineProperty(globalThis, 'fetch', {
+    configurable: true,
+    value: async (input: string | URL | Request, init?: RequestInit): Promise<Response> => {
+      const url = new URL(typeof input === 'string' || input instanceof URL ? input.toString() : input.url, 'https://app.test');
+      const select = url.searchParams.get('select') || '';
+      if (url.pathname === '/api/cloud-config') return json({ configured: true, url: 'https://supabase.test', publishableKey: 'key' });
+      if (url.pathname.endsWith('/rpc/activate_my_organization_memberships')) return json({});
+      if (url.pathname.endsWith('/organization_members') && select.includes('member_id')) {
+        return json({ code: 'PGRST204', message: 'Could not find member_id in organization_members schema cache' }, 400);
+      }
+      if (url.pathname.endsWith('/fichas')) {
+        legacyRequests += 1;
+        return json([]);
+      }
+      throw new Error(`unexpected ${String(init?.method || (input instanceof Request ? input.method : 'GET')).toUpperCase()} ${url}`);
+    },
+  });
+
+  const { writeLocalSnapshot, getSyncState } = await import('../sync-safety.js');
+  const { pushCloudData } = await import('../cloud-api-compatible.js');
+  const crm = structuredClone(initialData);
+  crm.clients[0]!.nextFollowUp = '2026-08-08';
+  writeLocalSnapshot(crm, { reason: 'Seguimiento capability fail-closed' }, storage);
+
+  await assert.rejects(() => pushCloudData(crm), /Could not find member_id in organization_members schema cache/i);
+  assert.equal(getSyncState(storage).dirty, true);
+  assert.equal(legacyRequests, 0);
 });
