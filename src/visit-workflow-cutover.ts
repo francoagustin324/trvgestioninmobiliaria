@@ -55,7 +55,7 @@ function applyAuthoritativeResult(result: VisitMutationResult): void {
   });
   // Si ya existían cambios locales no relacionados, la cola los conserva. El
   // snapshot authority-aware no vuelve a escribir Visit ni su Activity.
-  queueCloudSave(state.crm);
+  queueCloudSave(state.crm, true);
 }
 
 async function persistHistoricalCloud(

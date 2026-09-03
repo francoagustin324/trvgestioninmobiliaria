@@ -133,10 +133,22 @@ test('R2.2C snapshot ownership respeta OFF/ON sin segundo writer', () => {
   assert.doesNotMatch(cloudAdapter, /serializable|service_role/i);
 });
 
-test('R2.2C adapter fija false para carrera OFF→ON y no reconsulta esa decisión', () => {
+test('R2.2C adapter fija decisiones OFF/ON y limita fallback schema legacy a OFF', () => {
   assert.match(cutover, /pushCloudData\(state\.crm, accountKey, false\)/i);
   assert.match(compatible, /job\.visitAuthorityDecision \?\? await visitTransactionAuthorityActive\(\)/i);
   assert.match(compatible, /if \(authorityActive\)[\s\S]*pushCloudDataWithVisitAuthority[\s\S]*else[\s\S]*pushModernCloudData/i);
+
+  const runCloudPushStart = compatible.indexOf('async function runCloudPush');
+  const latestPendingJobStart = compatible.indexOf('function latestPendingJob', runCloudPushStart);
+  assert.ok(runCloudPushStart >= 0 && latestPendingJobStart > runCloudPushStart);
+  const runCloudPush = compatible.slice(runCloudPushStart, latestPendingJobStart);
+  const authorityDecision = 'const authorityActive = job.visitAuthorityDecision ?? await visitTransactionAuthorityActive();';
+  const authorityIndex = runCloudPush.indexOf(authorityDecision);
+  const tryIndex = runCloudPush.indexOf('try {');
+  assert.ok(authorityIndex >= 0 && tryIndex > authorityIndex, 'capability debe resolverse fuera del fallback legacy');
+  assert.match(runCloudPush, /catch \(error\) \{\s*if \(authorityActive \|\| !isLegacySchemaError\(error\)\) throw error;\s*await pushLegacyCloudData\(job\.snapshot, job\.token\);/);
+  assert.equal((runCloudPush.match(/pushLegacyCloudData\(/g) ?? []).length, 1);
+
   const transactionalCallbacks = [...cutover.matchAll(
     /runTransactionalCloud:\s*async\s*\(\)\s*=>\s*\{([\s\S]*?)\n\s{4}\},\n\s{2}\}\);/g,
   )].map((match) => match[1] ?? '');
@@ -154,11 +166,23 @@ test('R2.2C RPC cloud envía sólo intent y conserva operationId estable para re
   assert.match(cutover, /expectedVisitRevision: normalizeRevision\(input\.visit\.revision\)/i);
 });
 
-test('R2.2C reconciliación cloud sólo reemplaza CRM cuando el job sigue siendo latest', () => {
+test('R2.2C reconciliación latest y post-RPC conserva authority=true hasta cloud push', () => {
   assert.match(compatible, /const latest = markCloudSaved\([\s\S]*if \(latest\)[\s\S]*propcontrol-cloud-authoritative-snapshot/i);
   assert.match(cutover, /propcontrol-cloud-authoritative-snapshot[\s\S]*state\.crm = structuredClone\(crm\)[\s\S]*markDirty: false[\s\S]*trv-render/i);
   assert.match(compatible, /key === 'clients'[\s\S]*delete record\.revision[\s\S]*delete record\.operationId/i);
   assert.doesNotMatch(cutover, /resetTransientState/);
+
+  const applyStart = cutover.indexOf('function applyAuthoritativeResult');
+  const historicalStart = cutover.indexOf('async function persistHistoricalCloud', applyStart);
+  assert.ok(applyStart >= 0 && historicalStart > applyStart);
+  const applyAuthoritativeResult = cutover.slice(applyStart, historicalStart);
+  assert.match(applyAuthoritativeResult, /queueCloudSave\(state\.crm, true\);/);
+
+  const queueStart = compatible.indexOf('export function queueCloudSave');
+  assert.ok(queueStart >= 0);
+  const queueCloudSave = compatible.slice(queueStart);
+  assert.match(queueCloudSave, /queueCloudSave\(crm: CrmData, visitAuthorityDecision\?: boolean\)/);
+  assert.match(queueCloudSave, /pushCloudData\(snapshot, accountKey, visitAuthorityDecision\)/);
 });
 
 test('R2.2C1 capability ejecuta auth, RLS y OFF/ON en PostgreSQL 17', { timeout: 120_000 }, async () => {

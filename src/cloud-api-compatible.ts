@@ -261,11 +261,11 @@ async function runCloudPush(job: CloudSaveJob): Promise<void> {
   if (!session || session.userId !== job.accountKey) {
     throw new Error('La cuenta activa cambió durante la sincronización. El guardado quedó pendiente para evitar mezclar inmobiliarias.');
   }
+  // Una decisión fijada por el workflow de Visit NO se vuelve a consultar: esto
+  // conserva el contrato de carrera OFF→ON. Los jobs genéricos sí consultan la
+  // capability al empezar a ejecutar.
+  const authorityActive = job.visitAuthorityDecision ?? await visitTransactionAuthorityActive();
   try {
-    // Una decisión fijada por el workflow de Visit NO se vuelve a consultar: esto
-    // conserva el contrato de carrera OFF→ON. Los jobs genéricos sí consultan la
-    // capability al empezar a ejecutar.
-    const authorityActive = job.visitAuthorityDecision ?? await visitTransactionAuthorityActive();
     let authoritativeRemoteVersion: string | null = null;
     if (authorityActive) {
       await pushCloudDataWithVisitAuthority(job.snapshot);
@@ -285,7 +285,7 @@ async function runCloudPush(job: CloudSaveJob): Promise<void> {
       }));
     }
   } catch (error) {
-    if (!isLegacySchemaError(error)) throw error;
+    if (authorityActive || !isLegacySchemaError(error)) throw error;
     await pushLegacyCloudData(job.snapshot, job.token);
   }
 }
@@ -332,7 +332,7 @@ function emitStatus(message: string, kind: 'success' | 'error' | 'working' = 'su
   document.dispatchEvent(new CustomEvent('propcontrol-cloud-status', { detail: { message, kind } }));
 }
 
-export function queueCloudSave(crm: CrmData): void {
+export function queueCloudSave(crm: CrmData, visitAuthorityDecision?: boolean): void {
   const session = getCloudSession();
   if (!session) return;
   const accountKey = session.userId;
@@ -345,7 +345,7 @@ export function queueCloudSave(crm: CrmData): void {
     if (!active || active.userId !== accountKey) return;
     if (!hasPendingLocalChanges()) return;
     emitStatus('Guardando en la nube…', 'working');
-    void pushCloudData(snapshot, accountKey)
+    void pushCloudData(snapshot, accountKey, visitAuthorityDecision)
       .then(() => {
         if (!getSyncState().dirty) emitStatus('Guardado seguro en la nube.');
       })
