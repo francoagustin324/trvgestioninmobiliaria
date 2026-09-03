@@ -176,6 +176,7 @@ async function installCloudRoutes(context: BrowserContext, initial: CrmData): Pr
     const fulfill = (value: unknown) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(value) });
 
     if (url.pathname.endsWith('/rpc/activate_my_organization_memberships')) return fulfill({});
+    if (url.pathname.endsWith('/rpc/visit_transaction_authority_active')) return fulfill(false);
     if (url.pathname.endsWith('/organization_members')) {
       return fulfill([{ organization_id: ORG_ID, member_id: 1, user_id: USER_ID, role: 'owner', status: 'active', display_name: owner().name, email: owner().email, created_at: owner().createdAt }]);
     }

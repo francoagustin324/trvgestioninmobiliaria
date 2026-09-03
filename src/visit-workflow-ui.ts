@@ -1,13 +1,16 @@
 import { missingQualificationQuestions, visitReadiness } from './lead-qualification.js';
 import { isTerminalClient, localIsoDate } from './lead-pipeline.js';
-import type { Client, Property, Visit, VisitInterest, VisitStatus } from './models.js';
-import { saveData, state } from './store.js';
-import { activeMember, addActivity, visibleProperties } from './team-access.js';
+import type { Client, Property, SyncedVisit, Visit, VisitInterest, VisitStatus } from './models.js';
+import { state } from './store.js';
+import { newOperationId } from './sync-identity.js';
+import { activeMember, visibleProperties } from './team-access.js';
 import { assignmentVisible } from './team-policy.js';
 import { escapeHtml } from './utils.js';
 import {
-  coordinateVisit,
-  registerVisitResult,
+  coordinateVisitWithCutover,
+  registerVisitResultWithCutover,
+} from './visit-workflow-cutover.js';
+import {
   visitPropertyLabel,
   visitsForClient,
 } from './visit-workflow.js';
@@ -247,13 +250,15 @@ function formBusy(form: HTMLFormElement, busy: boolean): void {
   });
 }
 
-function replaceClient(next: Client): void {
-  const index = state.crm.clients.findIndex((client) => client.id === next.id);
-  if (index < 0) throw new Error('El lead ya no está disponible.');
-  state.crm.clients[index] = next;
+function operationIdFor(form: HTMLFormElement): string {
+  const existing = form.dataset.operationId;
+  if (existing) return existing;
+  const created = newOperationId();
+  form.dataset.operationId = created;
+  return created;
 }
 
-function coordinateFromForm(form: HTMLFormElement): void {
+async function coordinateFromForm(form: HTMLFormElement): Promise<void> {
   if (form.dataset.submitting === 'true') return;
   formBusy(form, true);
   try {
@@ -264,20 +269,14 @@ function coordinateFromForm(form: HTMLFormElement): void {
     const propertyId = Number(data.get('propertyId'));
     const property = visibleProperties().find((item) => item.id === propertyId);
     if (!property) throw new Error('Seleccioná una propiedad disponible.');
-    const actor = activeMember();
-    const result = coordinateVisit({
-      visits: state.crm.visits,
+
+    await coordinateVisitWithCutover({
+      operationId: operationIdFor(form),
       client,
       property,
-      actor: { id: actor.id, role: actor.role },
       localDate: String(data.get('date') || ''),
       localTime: String(data.get('time') || ''),
     });
-
-    replaceClient(result.client);
-    state.crm.visits.push(result.visit);
-    addActivity(result.activity);
-    saveData('Visita coordinada');
     document.dispatchEvent(new CustomEvent('trv-render'));
   } catch (error) {
     formBusy(form, false);
@@ -285,7 +284,7 @@ function coordinateFromForm(form: HTMLFormElement): void {
   }
 }
 
-function registerResultFromForm(form: HTMLFormElement): void {
+async function registerResultFromForm(form: HTMLFormElement): Promise<void> {
   if (form.dataset.submitting === 'true') return;
   formBusy(form, true);
   try {
@@ -300,24 +299,18 @@ function registerResultFromForm(form: HTMLFormElement): void {
     const status = String(data.get('status') || '') as VisitStatus;
     const rawInterest = String(data.get('interest') || '');
     const interest = rawInterest ? rawInterest as VisitInterest : undefined;
-    const property = propertyForVisit(visit);
-    const actor = activeMember();
-    const result = registerVisitResult({
-      visit,
+
+    await registerVisitResultWithCutover({
+      operationId: operationIdFor(form),
+      visit: visit as SyncedVisit,
       client,
-      property,
-      actor: { id: actor.id, role: actor.role },
+      property: propertyForVisit(visit),
       status,
       interest,
       objection: String(data.get('objection') || ''),
       nextAction: String(data.get('nextAction') || ''),
       nextFollowUp: String(data.get('nextFollowUp') || ''),
     });
-
-    replaceClient(result.client);
-    state.crm.visits[visitIndex] = result.visit;
-    addActivity(result.activity);
-    saveData(`Resultado de visita: ${result.visit.status}`);
     document.dispatchEvent(new CustomEvent('trv-render'));
   } catch (error) {
     formBusy(form, false);
@@ -331,12 +324,12 @@ function bindEvents(): void {
     if (!(form instanceof HTMLFormElement)) return;
     if (form.matches('[data-coordinate-visit]')) {
       event.preventDefault();
-      coordinateFromForm(form);
+      void coordinateFromForm(form);
       return;
     }
     if (form.matches('[data-register-visit-result]')) {
       event.preventDefault();
-      registerResultFromForm(form);
+      void registerResultFromForm(form);
     }
   });
 

@@ -164,5 +164,8 @@ test('todos los caminos de escritura CRM usan el coordinador compatible y el log
   assert.ok(compatible.includes('new LatestSerialQueue<CloudSaveJob>'));
   assert.ok(compatible.includes('const verified = await pullModernCloudData(job.snapshot)'));
   assert.ok(compatible.includes('remoteComparableCrm(verified)'));
-  assert.ok(compatible.includes('markCloudSaved(null, job.token)'));
+  assert.ok(compatible.includes('const authorityActive = job.visitAuthorityDecision ?? await visitTransactionAuthorityActive()'));
+  assert.match(compatible, /if \(authorityActive\)[\s\S]*pushCloudDataWithVisitAuthority\(job\.snapshot\)[\s\S]*authoritativeRemoteVersion = await visitAuthorityRemoteVersion\(\)[\s\S]*else \{[\s\S]*pushModernCloudData\(job\.snapshot\)/);
+  assert.ok(compatible.includes('const latest = markCloudSaved(authoritativeRemoteVersion, job.token)'));
+  assert.match(compatible, /const latest = markCloudSaved\(authoritativeRemoteVersion, job\.token\);[\s\S]*if \(latest\) \{[\s\S]*propcontrol-cloud-authoritative-snapshot/);
 });

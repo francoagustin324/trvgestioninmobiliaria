@@ -10,6 +10,11 @@ import {
   signUpCloud,
   updateTeamMemberAccess,
 } from './cloud-api.js';
+import { visitAuthorityRemoteVersion } from './visit-authority-sync-version.js';
+import {
+  pushCloudDataWithVisitAuthority,
+  visitTransactionAuthorityActive,
+} from './visit-transaction-cloud.js';
 import {
   assertRemoteIsSafe,
   markCloudHydrated,
@@ -39,6 +44,7 @@ interface CloudSaveJob {
   accountKey: string;
   snapshot: CrmData;
   token: SyncSaveToken;
+  visitAuthorityDecision?: boolean;
 }
 
 const accountSaveQueues = new Map<string, LatestSerialQueue<CloudSaveJob>>();
@@ -109,6 +115,12 @@ function remoteComparableCrm(crm: CrmData): unknown {
       const record = item as Record<string, unknown>;
       delete record.assignedToId;
       delete record.createdById;
+      if (key === 'clients') {
+        // client_snapshot_cas incrementa revision y elimina operationId como metadata
+        // server-managed; el contenido comercial restante debe coincidir exactamente.
+        delete record.revision;
+        delete record.operationId;
+      }
     });
     items.sort((left, right) => Number((left as Record<string, unknown>)?.id ?? 0) - Number((right as Record<string, unknown>)?.id ?? 0));
   });
@@ -249,18 +261,31 @@ async function runCloudPush(job: CloudSaveJob): Promise<void> {
   if (!session || session.userId !== job.accountKey) {
     throw new Error('La cuenta activa cambió durante la sincronización. El guardado quedó pendiente para evitar mezclar inmobiliarias.');
   }
+  // Una decisión fijada por el workflow de Visit NO se vuelve a consultar: esto
+  // conserva el contrato de carrera OFF→ON. Los jobs genéricos sí consultan la
+  // capability al empezar a ejecutar.
+  const authorityActive = job.visitAuthorityDecision ?? await visitTransactionAuthorityActive();
   try {
-    // El writer moderno histórico no puede declarar limpio por sí solo porque no
-    // conoce la generación capturada por el coordinador. Después del write,
-    // releemos la nube y recién confirmamos la generación si el CRM es equivalente.
-    await pushModernCloudData(job.snapshot);
+    let authoritativeRemoteVersion: string | null = null;
+    if (authorityActive) {
+      await pushCloudDataWithVisitAuthority(job.snapshot);
+      authoritativeRemoteVersion = await visitAuthorityRemoteVersion();
+    } else {
+      await pushModernCloudData(job.snapshot);
+    }
+
     const verified = await pullModernCloudData(job.snapshot);
     if (!verified || stableFingerprint(remoteComparableCrm(verified)) !== stableFingerprint(remoteComparableCrm(job.snapshot))) {
       throw new Error('La verificación remota moderna no coincide con el snapshot que PropControl intentó guardar.');
     }
-    markCloudSaved(null, job.token);
+    const latest = markCloudSaved(authoritativeRemoteVersion, job.token);
+    if (latest) {
+      document.dispatchEvent(new CustomEvent('propcontrol-cloud-authoritative-snapshot', {
+        detail: { crm: verified },
+      }));
+    }
   } catch (error) {
-    if (!isLegacySchemaError(error)) throw error;
+    if (authorityActive || !isLegacySchemaError(error)) throw error;
     await pushLegacyCloudData(job.snapshot, job.token);
   }
 }
@@ -283,7 +308,11 @@ function accountQueue(accountKey: string): LatestSerialQueue<CloudSaveJob> {
   return created;
 }
 
-export async function pushCloudData(crm: CrmData, expectedAccountKey?: string): Promise<void> {
+export async function pushCloudData(
+  crm: CrmData,
+  expectedAccountKey?: string,
+  visitAuthorityDecision?: boolean,
+): Promise<void> {
   const session = getCloudSession();
   if (!session) throw new Error('Ingresá a tu cuenta para sincronizar.');
   if (expectedAccountKey && session.userId !== expectedAccountKey) {
@@ -294,6 +323,7 @@ export async function pushCloudData(crm: CrmData, expectedAccountKey?: string): 
     accountKey: session.userId,
     snapshot,
     token: syncSaveToken(snapshot),
+    ...(visitAuthorityDecision === undefined ? {} : { visitAuthorityDecision }),
   };
   await accountQueue(session.userId).enqueue(job);
 }
@@ -302,7 +332,7 @@ function emitStatus(message: string, kind: 'success' | 'error' | 'working' = 'su
   document.dispatchEvent(new CustomEvent('propcontrol-cloud-status', { detail: { message, kind } }));
 }
 
-export function queueCloudSave(crm: CrmData): void {
+export function queueCloudSave(crm: CrmData, visitAuthorityDecision?: boolean): void {
   const session = getCloudSession();
   if (!session) return;
   const accountKey = session.userId;
@@ -315,7 +345,7 @@ export function queueCloudSave(crm: CrmData): void {
     if (!active || active.userId !== accountKey) return;
     if (!hasPendingLocalChanges()) return;
     emitStatus('Guardando en la nube…', 'working');
-    void pushCloudData(snapshot, accountKey)
+    void pushCloudData(snapshot, accountKey, visitAuthorityDecision)
       .then(() => {
         if (!getSyncState().dirty) emitStatus('Guardado seguro en la nube.');
       })

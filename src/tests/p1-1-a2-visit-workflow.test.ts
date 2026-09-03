@@ -281,13 +281,17 @@ test('P1.1-A2 conserva Agenda/Reminder/B1.4.2 fuera del flujo y Visit sin campos
   const agenda = readFileSync('src/agenda.ts', 'utf8');
   const workflow = readFileSync('src/visit-workflow.ts', 'utf8');
   const ui = readFileSync('src/visit-workflow-ui.ts', 'utf8');
+  const cutover = readFileSync('src/visit-workflow-cutover.ts', 'utf8');
   const model = readFileSync('src/models.ts', 'utf8');
   const visitBlock = model.match(/export interface Visit \{([\s\S]*?)\n\}/)?.[1] ?? '';
   assert.doesNotMatch(agenda, /\bvisits\b/);
   assert.doesNotMatch(`${workflow}\n${ui}`, /state\.crm\.reminders|Reminder|lead-recommendation|supervised_recommendation/i);
   assert.doesNotMatch(visitBlock, /nextAction|nextFollowUp|offerId|reservationId|commissionId|metadata/);
-  assert.match(ui, /saveData\(/);
-  assert.match(ui, /addActivity\(/);
+  assert.match(ui, /coordinateVisitWithCutover\(/);
+  assert.match(ui, /registerVisitResultWithCutover\(/);
+  assert.doesNotMatch(ui, /\bsaveData\(|\baddActivity\(/);
+  assert.match(cutover, /runLocal:\s*\(\)\s*=>\s*\{[\s\S]*?saveData\(reason\)/);
+  assert.doesNotMatch(cutover, /state\.crm\.reminders\.push|state\.crm\.reminders\s*=/);
 });
 
 test('P1.1-A2 UI vive dentro del Lead, muestra propiedad/fecha/status y protege doble submit', () => {

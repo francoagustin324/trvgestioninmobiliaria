@@ -2,7 +2,8 @@ import assert from 'node:assert/strict';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import test from 'node:test';
-import { chromium, type BrowserContext, type Page } from 'playwright';
+import { chromium, type BrowserContext, type Page, type Route } from 'playwright';
+import { crmToCloudRecords, type CloudMembershipContext, type CloudRecordRow } from '../cloud-records.js';
 import { initialData, type CrmData, type TeamMember } from '../models.js';
 
 const USER_ID = 'p1-a2-owner';
@@ -74,6 +75,15 @@ function fixture(): CrmData {
   return crm;
 }
 
+function cloudContext(): CloudMembershipContext {
+  return {
+    organizationId: ORG_ID,
+    currentMemberId: 1,
+    currentRole: 'Dueño',
+    members: [owner()],
+  };
+}
+
 function chromeExecutable(): string | undefined {
   return [
     '/usr/bin/google-chrome',
@@ -127,6 +137,98 @@ async function stopServer(server: ChildProcess): Promise<void> {
       clearTimeout(timer);
       resolve();
     });
+  });
+}
+
+function recordIdentity(record: Pick<CloudRecordRow, 'organization_id' | 'entity_type' | 'entity_key'>): string {
+  return `${record.organization_id}|${record.entity_type}|${record.entity_key}`;
+}
+
+function parseInFilter(value: string): Set<string> {
+  if (!value.startsWith('in.(') || !value.endsWith(')')) return new Set();
+  return new Set(value.slice(4, -1).split(',').map((item) => item.trim().replace(/^"|"$/g, '')));
+}
+
+function filteredRows(records: CloudRecordRow[], url: URL): CloudRecordRow[] {
+  let rows = records;
+  const organization = url.searchParams.get('organization_id');
+  if (organization?.startsWith('eq.')) rows = rows.filter((row) => row.organization_id === organization.slice(3));
+  const entityType = url.searchParams.get('entity_type');
+  if (entityType?.startsWith('eq.')) rows = rows.filter((row) => row.entity_type === entityType.slice(3));
+  const entityKey = url.searchParams.get('entity_key');
+  if (entityKey?.startsWith('eq.')) rows = rows.filter((row) => row.entity_key === entityKey.slice(3));
+  else if (entityKey?.startsWith('in.(')) {
+    const keys = parseInFilter(entityKey);
+    rows = rows.filter((row) => keys.has(row.entity_key));
+  }
+  return structuredClone(rows);
+}
+
+async function installCloud(context: BrowserContext, initial: CrmData): Promise<void> {
+  let remote = crmToCloudRecords(initial, cloudContext(), USER_ID)
+    .map((record) => ({ ...structuredClone(record), updated_at: '2026-08-23T18:00:00.000Z' }));
+  let version = 0;
+
+  function upsert(rows: CloudRecordRow[]): void {
+    version += 1;
+    const stamp = `2026-08-23T18:00:${String(version).padStart(2, '0')}.000Z`;
+    rows.forEach((incoming) => {
+      const index = remote.findIndex((existing) => recordIdentity(existing) === recordIdentity(incoming));
+      const next = { ...structuredClone(incoming), updated_at: stamp };
+      if (index >= 0) remote[index] = { ...remote[index], ...next };
+      else remote.push(next);
+    });
+  }
+
+  await context.route('**/api/cloud-config', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        configured: true,
+        url: new URL(route.request().url()).origin,
+        publishableKey: 'key',
+      }),
+    });
+  });
+  await context.route('**/rest/v1/**', async (route: Route) => {
+    const request = route.request();
+    const url = new URL(request.url());
+    const method = request.method().toUpperCase();
+    const fulfill = (value: unknown) => route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify(value),
+    });
+
+    if (url.pathname.endsWith('/rpc/activate_my_organization_memberships')) return fulfill({});
+    if (url.pathname.endsWith('/rpc/visit_transaction_authority_active')) return fulfill(false);
+    if (url.pathname.endsWith('/organization_members')) {
+      return fulfill([{
+        organization_id: ORG_ID,
+        member_id: 1,
+        user_id: USER_ID,
+        role: 'owner',
+        status: 'active',
+        display_name: owner().name,
+        email: owner().email,
+        phone: owner().phone,
+        created_at: owner().createdAt,
+      }]);
+    }
+    if (url.pathname.endsWith('/propcontrol_records') && method === 'GET') {
+      return fulfill(filteredRows(remote, url));
+    }
+    if (url.pathname.endsWith('/propcontrol_records') && method === 'DELETE') {
+      const deleting = new Set(filteredRows(remote, url).map(recordIdentity));
+      remote = remote.filter((row) => !deleting.has(recordIdentity(row)));
+      return fulfill([]);
+    }
+    if (url.pathname.endsWith('/propcontrol_records') && method === 'POST') {
+      upsert(request.postDataJSON() as CloudRecordRow[]);
+      return fulfill([]);
+    }
+    return route.fulfill({ status: 404, contentType: 'application/json', body: '{}' });
   });
 }
 
@@ -195,6 +297,7 @@ test('P1.1-A2 browser desktop coordina una sola visita y registra resultado sin 
   const browser = await chromium.launch({ headless: true, executablePath: chromeExecutable() });
   const context = await browser.newContext({ viewport: { width: 1366, height: 900 } });
   try {
+    await installCloud(context, fixture());
     await seedContext(context);
     const page = await context.newPage();
     await load(page, `http://127.0.0.1:${port}`);
@@ -223,10 +326,9 @@ test('P1.1-A2 browser desktop coordina una sola visita y registra resultado sin 
       node.dispatchEvent(event());
       node.dispatchEvent(event());
     });
-    await page.waitForFunction(async () => {
-      const store = await import('/dist/store.js');
-      return store.state.crm.visits.length === 1;
-    });
+    await page
+      .locator('.pc-visit-row[data-visit-id="1"]')
+      .waitFor({ state: 'attached' });
 
     const afterCoordinate = await page.evaluate(async () => {
       const store = await import('/dist/store.js');
@@ -274,10 +376,9 @@ test('P1.1-A2 browser desktop coordina una sola visita y registra resultado sin 
     await resultForm.locator('input[name="nextFollowUp"]').fill(futureLocalDate(5));
     await resultForm.locator('button[type="submit"]').click();
 
-    await page.waitForFunction(async () => {
-      const store = await import('/dist/store.js');
-      return store.state.crm.visits[0]?.status === 'Realizada';
-    });
+    await page
+      .locator('.pc-visit-row[data-visit-id="1"] .pc-visit-status.status-realizada')
+      .waitFor({ state: 'attached' });
     const afterResult = await page.evaluate(async () => {
       const store = await import('/dist/store.js');
       return {
@@ -313,6 +414,7 @@ test('P1.1-A2 browser mobile mantiene Visitas usable, targets táctiles y sin ov
   const browser = await chromium.launch({ headless: true, executablePath: chromeExecutable() });
   const context = await browser.newContext({ viewport: { width: 390, height: 844 } });
   try {
+    await installCloud(context, fixture());
     await seedContext(context);
     const page = await context.newPage();
     await load(page, `http://127.0.0.1:${port}`);
