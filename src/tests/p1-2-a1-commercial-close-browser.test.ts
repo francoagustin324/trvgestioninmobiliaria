@@ -201,11 +201,20 @@ async function openApp(page: Page, baseUrl: string): Promise<void> {
 }
 
 async function openEditForm(page: Page, clientId: number): Promise<void> {
-  const card = page.locator(`.mvp-lead-card[data-client-id="${clientId}"]`);
-  const details = card.locator(`[data-lead-full-sheet="${clientId}"]`);
-  if (!(await details.getAttribute('open'))) await details.locator(':scope > summary').click();
-  await card.locator(`[data-edit-client="${clientId}"]`).click();
+  const editButton = page.locator(`.mvp-lead-card[data-client-id="${clientId}"] .mvp-lead-quick-actions[data-zero-training-actions="true"] [data-edit-client="${clientId}"]`);
+  await editButton.waitFor({ state: 'visible' });
+  await editButton.click();
   await page.waitForSelector('#mvp-lead-form:not(.collapsed)', { state: 'visible' });
+}
+
+async function openLeadDetails(page: Page, clientId: number): Promise<void> {
+  const card = page.locator(`.mvp-lead-card[data-client-id="${clientId}"]`);
+  const sheet = card.locator(`[data-lead-full-sheet="${clientId}"]`);
+  if ((await sheet.getAttribute('open')) !== null) return;
+  const menu = card.locator('.mvp-lead-actions-menu');
+  await menu.locator(':scope > summary').click();
+  await menu.locator(`[data-open-lead-details="${clientId}"]`).click();
+  await page.waitForFunction((id) => document.querySelector(`[data-lead-full-sheet="${id}"]`)?.hasAttribute('open'), clientId);
 }
 
 async function localCrm(page: Page): Promise<CrmData> {
@@ -274,8 +283,7 @@ test('P1.2-A1 browser: Won desktop, replay visual seguro y reapertura persistent
     assert.equal(crm.activityLog.filter((entry) => entry.entityId === 1 && entry.action === 'Operación ganada').length, 1);
 
     const card = page.locator('.mvp-lead-card[data-client-id="1"]');
-    const details = card.locator('[data-lead-full-sheet="1"]');
-    await details.locator(':scope > summary').click();
+    await openLeadDetails(page, 1);
     await page.waitForSelector('.mvp-lead-card[data-client-id="1"] [data-commercial-close-card].won');
     assert.match(await card.locator('[data-commercial-close-card]').textContent() || '', /USD 100\.000/);
     assert.match(await card.locator('[data-commercial-close-card]').textContent() || '', /USD 3\.000/);
@@ -344,7 +352,7 @@ test('P1.2-A1 browser: Lost mobile exige detalle Otro y no deja seguimiento viej
     assert.equal(crm.activityLog.filter((entry) => entry.entityId === 2 && entry.action === 'Operación perdida').length, 1);
 
     const card = page.locator('.mvp-lead-card[data-client-id="2"]');
-    await card.locator('[data-lead-full-sheet="2"] > summary').click();
+    await openLeadDetails(page, 2);
     await page.waitForSelector('.mvp-lead-card[data-client-id="2"] [data-commercial-close-card].lost');
     assert.match(await card.locator('[data-commercial-close-card]').textContent() || '', /El cliente cambió el alcance/);
     const width = await card.evaluate((element) => ({ card: element.getBoundingClientRect().width, viewport: window.innerWidth, document: document.documentElement.scrollWidth }));

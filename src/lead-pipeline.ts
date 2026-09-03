@@ -1,27 +1,39 @@
-import './commercial-close-ui.js';
 import type { Client } from './models.js';
 import type { QualificationProgress } from './lead-pipeline-essential.js';
 
-export * from './lead-pipeline-essential.js';
+export type PipelineStage = 'contacted' | 'in_visit' | 'reserved' | 'on_hold' | 'lost' | 'won';
 
-const legacyQualificationFields: Array<{ label: string; value: (client: Client) => unknown }> = [
-  { label: 'interés', value: (client) => client.interest },
-  { label: 'presupuesto', value: (client) => client.budget },
-  { label: 'forma de pago', value: (client) => client.paymentMethod },
-  { label: 'plazo', value: (client) => client.purchaseTimeframe },
-  { label: 'finalidad', value: (client) => client.purpose },
-  { label: 'conocimiento de zona', value: (client) => client.knowsArea },
-  { label: 'capacidad de avance', value: (client) => client.canMoveForward },
-  { label: 'condicionantes', value: (client) => client.objections },
-];
+export interface PipelineStatus {
+  stage: PipelineStage;
+  label: string;
+  className: string;
+}
 
-export function qualificationProgress(client: Client): QualificationProgress {
-  const missing = legacyQualificationFields
-    .filter(({ value }) => !String(value(client) ?? '').trim())
-    .map(({ label }) => label);
-  return {
-    completed: legacyQualificationFields.length - missing.length,
-    total: legacyQualificationFields.length,
-    missing,
-  };
+export function getPipelineStatus(client: Client, qualification: QualificationProgress): PipelineStatus {
+  if (client.pipelineStage) {
+    return mapStage(client.pipelineStage);
+  }
+
+  if (!qualification.hasPhone) return mapStage('contacted');
+
+  if (!qualification.isComplete) return mapStage('contacted');
+
+  return mapStage('contacted');
+}
+
+function mapStage(stage: PipelineStage): PipelineStatus {
+  switch (stage) {
+    case 'in_visit':
+      return { stage, label: 'En visita', className: 'lead-pipeline-status--visit' };
+    case 'reserved':
+      return { stage, label: 'Reservó', className: 'lead-pipeline-status--reserved' };
+    case 'on_hold':
+      return { stage, label: 'En pausa', className: 'lead-pipeline-status--paused' };
+    case 'lost':
+      return { stage, label: 'Perdido', className: 'lead-pipeline-status--lost' };
+    case 'won':
+      return { stage, label: 'Ganado', className: 'lead-pipeline-status--won' };
+    default:
+      return { stage: 'contacted', label: 'Contactado', className: 'lead-pipeline-status--contacted' };
+  }
 }
