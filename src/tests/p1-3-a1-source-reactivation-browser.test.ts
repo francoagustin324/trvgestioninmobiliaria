@@ -94,8 +94,6 @@ function browserCrm(): CrmData {
   crm.activityLog = [];
   crm.visits = [{
     id: 1,
-    uid: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
-    revision: 0,
     clientId: 1,
     propertyId: 7,
     scheduledAt: '2020-01-01T18:00:00.000Z',
