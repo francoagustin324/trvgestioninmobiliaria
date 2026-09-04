@@ -1,4 +1,3 @@
-import './commercial-close-ui.js';
 import { organizeAccountMenuProductActions } from './account-menu-product.js';
 import type { ModuleId } from './models.js';
 import { modules } from './models.js';

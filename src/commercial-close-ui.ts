@@ -145,10 +145,9 @@ function renderSummaryMarkup(): string {
 }
 
 function injectCommercialSummary(container: HTMLElement): void {
-  const filter = container.querySelector<HTMLElement>('.mvp-lead-filter-panel');
-  const primary = filter?.querySelector<HTMLElement>('.mvp-lead-filter-primary');
-  if (!filter || !primary || filter.querySelector('[data-commercial-close-summary]')) return;
-  primary.insertAdjacentHTML('afterend', renderSummaryMarkup());
+  const results = container.querySelector<HTMLElement>('#mvp-lead-results');
+  if (!results || container.querySelector('[data-commercial-close-summary]')) return;
+  results.insertAdjacentHTML('afterend', renderSummaryMarkup());
 }
 
 function showFormError(form: HTMLFormElement, message: string): void {
