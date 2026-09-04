@@ -8,6 +8,9 @@ const P1_3_OWNED_SELECTOR = [
   '#mvp-lead-count',
 ].join(',');
 
+let normalizationFrame = 0;
+let contactBridgeBound = false;
+
 function belongsToP13Ui(node: Node): boolean {
   const element = node instanceof Element ? node : node.parentElement;
   return Boolean(element?.closest(P1_3_OWNED_SELECTOR));
@@ -20,11 +23,74 @@ function shouldForwardMutation(record: MutationRecord): boolean {
   return changedNodes.length === 0 || !changedNodes.every(belongsToP13Ui);
 }
 
+function normalizeLeadSourceIntegration(): void {
+  const container = document.querySelector<HTMLElement>('#crm.active');
+  if (!container) return;
+
+  const form = container.querySelector<HTMLFormElement>('#mvp-lead-form:not(.collapsed)');
+  const source = form?.elements.namedItem('leadSource');
+  if (form && source instanceof HTMLSelectElement && !form.dataset.b131Editing && !source.value) {
+    // Un alta manual nace como captación propia; el usuario puede cambiar el origen antes de guardar.
+    source.value = 'Captación propia';
+  }
+
+  const results = container.querySelector<HTMLElement>('#mvp-lead-results');
+  const summary = container.querySelector<HTMLElement>('[data-lead-source-summary]');
+  const reactivation = container.querySelector<HTMLElement>('[data-reactivation-section]');
+  if (results && summary) results.insertAdjacentElement('afterend', summary);
+  if (results && reactivation) (summary ?? results).insertAdjacentElement('afterend', reactivation);
+
+  reactivation?.querySelectorAll<HTMLButtonElement>('[data-contact-whatsapp]').forEach((button) => {
+    const clientId = button.dataset.contactWhatsapp;
+    if (!clientId) return;
+    button.dataset.reactivationContactWhatsapp = clientId;
+    delete button.dataset.contactWhatsapp;
+  });
+
+  const sourceFilter = container.querySelector<HTMLSelectElement>('#pc-lead-source-filter');
+  const count = container.querySelector<HTMLElement>('#mvp-lead-count');
+  if (sourceFilter?.value === 'Todas' && count) {
+    const match = count.textContent?.trim().match(/^(\d+) de \1 leads$/);
+    if (match) count.textContent = `${match[1]} leads`;
+  }
+}
+
+function scheduleNormalization(): void {
+  if (normalizationFrame || typeof requestAnimationFrame === 'undefined') return;
+  normalizationFrame = requestAnimationFrame(() => {
+    normalizationFrame = 0;
+    normalizeLeadSourceIntegration();
+  });
+}
+
+function bindContactBridge(): void {
+  if (contactBridgeBound) return;
+  contactBridgeBound = true;
+  document.addEventListener('click', (event) => {
+    const target = event.target as HTMLElement;
+    const button = target.closest<HTMLButtonElement>('[data-reactivation-contact-whatsapp]');
+    if (!button) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const clientId = button.dataset.reactivationContactWhatsapp;
+    if (!clientId) return;
+    const canonical = document.querySelector<HTMLButtonElement>(
+      `#crm.active .mvp-lead-card[data-client-id="${clientId}"] [data-contact-whatsapp="${clientId}"]`,
+    );
+    canonical?.click();
+  });
+}
+
 async function bootstrapLeadSourceEngagement(): Promise<void> {
   if (typeof window === 'undefined' || typeof MutationObserver === 'undefined') {
     await import('./lead-source-reactivation-ui.js');
     return;
   }
+
+  bindContactBridge();
+  document.addEventListener('trv-render', scheduleNormalization);
+  document.addEventListener('DOMContentLoaded', scheduleNormalization, { once: true });
+  window.addEventListener('pageshow', scheduleNormalization);
 
   const NativeMutationObserver = window.MutationObserver;
   const FilteringMutationObserver = function (callback: MutationCallback): MutationObserver {
@@ -50,6 +116,8 @@ async function bootstrapLeadSourceEngagement(): Promise<void> {
       value: NativeMutationObserver,
     });
   }
+
+  scheduleNormalization();
 }
 
 void bootstrapLeadSourceEngagement();
