@@ -37,8 +37,13 @@ function normalizeLeadSourceIntegration(): void {
   const results = container.querySelector<HTMLElement>('#mvp-lead-results');
   const summary = container.querySelector<HTMLElement>('[data-lead-source-summary]');
   const reactivation = container.querySelector<HTMLElement>('[data-reactivation-section]');
-  if (results && summary) results.insertAdjacentElement('afterend', summary);
-  if (results && reactivation) (summary ?? results).insertAdjacentElement('afterend', reactivation);
+  if (results && summary && results.nextElementSibling !== summary) {
+    results.insertAdjacentElement('afterend', summary);
+  }
+  const reactivationAnchor = summary ?? results;
+  if (reactivationAnchor && reactivation && reactivationAnchor.nextElementSibling !== reactivation) {
+    reactivationAnchor.insertAdjacentElement('afterend', reactivation);
+  }
 
   reactivation?.querySelectorAll<HTMLButtonElement>('[data-contact-whatsapp]').forEach((button) => {
     const clientId = button.dataset.contactWhatsapp;
@@ -95,6 +100,7 @@ async function bootstrapLeadSourceEngagement(): Promise<void> {
   const NativeMutationObserver = window.MutationObserver;
   const FilteringMutationObserver = function (callback: MutationCallback): MutationObserver {
     return new NativeMutationObserver((records, observer) => {
+      normalizeLeadSourceIntegration();
       const relevant = records.filter(shouldForwardMutation);
       if (relevant.length > 0) callback(relevant, observer);
     });
@@ -117,6 +123,7 @@ async function bootstrapLeadSourceEngagement(): Promise<void> {
     });
   }
 
+  normalizeLeadSourceIntegration();
   scheduleNormalization();
 }
 
