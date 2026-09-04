@@ -128,10 +128,9 @@ function applySourceFilter(container: HTMLElement): void {
   const select = container.querySelector<HTMLSelectElement>(`#${SOURCE_FILTER_ID}`);
   if (select && select.value !== sourceFilter) select.value = sourceFilter;
   const count = container.querySelector<HTMLElement>('#mvp-lead-count');
-  if (count) {
-    count.textContent = sourceFilter === 'Todas'
-      ? `${cards.length} de ${clients.length} leads`
-      : `${shown} por origen · ${cards.length} en filtros actuales`;
+  if (count && sourceFilter !== 'Todas') {
+    const nextCount = `${shown} por origen · ${cards.length} en filtros actuales`;
+    if (count.textContent !== nextCount) count.textContent = nextCount;
   }
 }
 
