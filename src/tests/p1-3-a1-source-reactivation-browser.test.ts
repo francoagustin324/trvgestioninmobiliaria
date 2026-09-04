@@ -236,7 +236,11 @@ test('P1.3-A1 browser desktop: filtro de origen, Para reactivar y seguimiento ca
   try {
     await openApp(page, 'http://127.0.0.1:4321');
 
+    const moreFilters = page.locator('.mvp-lead-more-filters');
+    const filtersOpen = await moreFilters.evaluate((node) => (node as HTMLDetailsElement).open);
+    if (!filtersOpen) await moreFilters.locator(':scope > summary').click();
     const filter = page.locator('#pc-lead-source-filter');
+    await filter.waitFor({ state: 'visible' });
     await filter.selectOption('Meta Ads');
     await page.waitForFunction(() => document.querySelector('.mvp-lead-card[data-client-id="1"]')?.classList.contains('pc-source-filter-hidden'));
     assert.equal(await page.locator('.mvp-lead-card[data-client-id="2"]').evaluate((node) => node.classList.contains('pc-source-filter-hidden')), false);
