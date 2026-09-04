@@ -8,7 +8,7 @@ function scoreClass(match: PropertyMatch): string {
   return match.level.toLowerCase();
 }
 
-function reasonsHtml(match: PropertyMatch): string {
+export function propertyMatchReasonsHtml(match: PropertyMatch): string {
   const reasons = match.reasons.length
     ? `<div class="match-reasons">${match.reasons.map((reason) => `<span>✓ ${escapeHtml(reason)}</span>`).join('')}</div>`
     : '';
@@ -26,7 +26,7 @@ function propertyMatchRow(match: PropertyMatch): string {
       <div class="match-row-title"><strong>${escapeHtml(property.title)}</strong><span class="match-score ${scoreClass(match)}">${match.score}% · ${match.level}</span></div>
       <p>${escapeHtml(property.address)} · ${escapeHtml(property.type)}${rooms}</p>
       <b>USD ${usdFormatter.format(property.price)}</b>
-      ${reasonsHtml(match)}
+      ${propertyMatchReasonsHtml(match)}
     </div>
   </article>`;
 }
@@ -37,7 +37,7 @@ function clientMatchRow(match: PropertyMatch): string {
     <div class="match-row-main">
       <div class="match-row-title"><strong>${escapeHtml(client.name)}</strong><span class="match-score ${scoreClass(match)}">${match.score}% · ${match.level}</span></div>
       <p>${escapeHtml(client.interest)} · ${escapeHtml(client.budget || 'Presupuesto sin confirmar')}</p>
-      ${reasonsHtml(match)}
+      ${propertyMatchReasonsHtml(match)}
     </div>
     <button type="button" class="secondary" data-edit-client="${client.id}">Abrir cliente</button>
   </article>`;
