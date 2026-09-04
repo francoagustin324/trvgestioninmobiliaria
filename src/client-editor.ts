@@ -1,3 +1,4 @@
+import { applyCommercialCloseFromValues } from './commercial-close.js';
 import { applyCommercialStage, normalizeCommercialStage } from './lead-pipeline.js';
 import { Client, Temperature } from './models.js';
 import { normalizePhone } from './phone-normalizer.js';
@@ -91,7 +92,7 @@ export function clientFromFormValues(id: number, values: Record<string, string>,
     createdById: current?.createdById,
   };
   if (essentialChanged(current, client)) client.qualificationUpdatedAt = new Date().toISOString();
-  return applyCommercialStage(client, client.pipeline);
+  return applyCommercialCloseFromValues(applyCommercialStage(client, client.pipeline), values, current);
 }
 
 export function upsertClient(clients: Client[], client: Client): Client[] {
