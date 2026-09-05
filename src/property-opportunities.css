@@ -1,0 +1,103 @@
+.property-opportunities { display:grid; gap:18px; min-width:0; }
+.opportunity-page-heading { display:flex; align-items:flex-start; justify-content:space-between; gap:18px; }
+.opportunity-page-heading h1 { margin:2px 0 4px; color:#173951; }
+.opportunity-page-heading p { margin:0; color:#607681; max-width:720px; }
+.opportunity-eyebrow { color:#8a671f; font-size:.72rem; font-weight:900; letter-spacing:.12em; }
+.opportunity-page-heading button { min-height:44px; flex:0 0 auto; }
+.opportunity-property-picker,
+.opportunity-property-summary,
+.opportunity-review,
+.opportunity-empty { border:1px solid #dce6ea; border-radius:16px; background:#fff; box-shadow:0 8px 24px rgba(23,57,81,.06); }
+.opportunity-property-picker { display:grid; grid-template-columns:minmax(280px,520px) minmax(0,1fr); align-items:end; gap:18px; padding:18px; }
+.opportunity-property-picker label,
+.opportunity-filters label { display:grid; gap:6px; min-width:0; }
+.opportunity-property-picker label > span,
+.opportunity-filters label > span { color:#46616f; font-size:.72rem; font-weight:850; }
+.opportunity-property-picker select,
+.opportunity-filters input,
+.opportunity-filters select { width:100%; min-width:0; min-height:44px; border:1px solid #ccd9df; border-radius:10px; background:#fff; color:#173951; padding:9px 11px; }
+.opportunity-property-picker p { margin:0 0 7px; color:#6b7f89; font-size:.76rem; }
+.opportunity-property-summary { display:flex; align-items:center; justify-content:space-between; gap:18px; padding:16px 18px; }
+.opportunity-property-summary div { min-width:0; }
+.opportunity-property-summary span { display:block; color:#7b8e97; font-size:.68rem; font-weight:850; text-transform:uppercase; letter-spacing:.05em; }
+.opportunity-property-summary strong { display:block; margin-top:3px; color:#173951; font-size:1rem; }
+.opportunity-property-summary p { margin:3px 0 0; color:#607681; font-size:.76rem; }
+.opportunity-property-summary > b { flex:0 0 auto; color:#173951; }
+.opportunity-review { display:grid; gap:14px; padding:16px; }
+.opportunity-filters { display:grid; grid-template-columns:minmax(220px,1.4fr) repeat(3,minmax(150px,1fr)); gap:10px; }
+.opportunity-results-summary { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:4px 2px 10px; border-bottom:1px solid #e3eaee; color:#294755; }
+.opportunity-results-summary span { padding:7px 10px; border-radius:999px; background:#edf4f9; color:#173951; font-size:.75rem; font-weight:850; }
+.opportunity-results { display:grid; gap:10px; min-width:0; }
+.property-opportunity-card { display:grid; grid-template-columns:44px minmax(0,1fr); min-width:0; border:1px solid #dce5e9; border-radius:14px; background:#f9fbfc; overflow:hidden; }
+.opportunity-selector { display:flex; align-items:flex-start; justify-content:center; min-width:44px; min-height:44px; padding-top:18px; border-right:1px solid #e3eaee; cursor:pointer; }
+.opportunity-selector input { display:block; visibility:visible; opacity:1; position:static; width:20px; height:20px; margin:0; accent-color:#225a72; }
+.opportunity-main { display:grid; gap:12px; min-width:0; padding:15px 16px; }
+.opportunity-heading { display:flex; align-items:flex-start; justify-content:space-between; gap:14px; min-width:0; }
+.opportunity-heading > div:first-child { min-width:0; }
+.opportunity-client-name { display:block; color:#173951; font-size:.94rem; overflow-wrap:anywhere; }
+.opportunity-phone { display:inline-block; margin-top:3px; color:#3a6072; font-size:.76rem; text-decoration:none; overflow-wrap:anywhere; }
+.opportunity-phone.muted { color:#85959d; }
+.opportunity-badges { display:flex; flex-wrap:wrap; justify-content:flex-end; gap:7px; flex:0 0 auto; }
+.opportunity-stage { padding:5px 8px; border-radius:999px; background:#eef2f4; color:#49616d; font-size:.68rem; font-weight:850; }
+.opportunity-requirements { display:grid; gap:8px; min-width:0; }
+.opportunity-requirements-title { display:flex; align-items:center; justify-content:space-between; gap:10px; }
+.opportunity-requirements-title strong { color:#294755; font-size:.76rem; }
+.opportunity-requirements-title small { color:#71838c; font-size:.66rem; }
+.property-opportunity-card .match-reasons,
+.property-opportunity-card .match-warnings { display:flex; flex-wrap:wrap; gap:6px; }
+.property-opportunity-card .match-reasons span,
+.property-opportunity-card .match-warnings span { display:inline-flex; align-items:center; min-height:30px; padding:5px 8px; border-radius:9px; font-size:.69rem; font-weight:750; overflow-wrap:anywhere; }
+.property-opportunity-card .match-reasons span { background:#eaf7ef; color:#176044; }
+.property-opportunity-card .match-warnings span { background:#fff4df; color:#7b5819; }
+.opportunity-commercial-context { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:9px; }
+.opportunity-followup,
+.opportunity-activity { display:grid; align-content:start; gap:3px; min-width:0; padding:10px; border-radius:10px; background:#fff; border:1px solid #e3eaee; }
+.opportunity-followup > span,
+.opportunity-activity > span { color:#758892; font-size:.64rem; font-weight:850; text-transform:uppercase; }
+.opportunity-followup strong,
+.opportunity-activity strong { color:#294755; font-size:.75rem; overflow-wrap:anywhere; }
+.opportunity-followup small,
+.opportunity-activity small { color:#667c87; font-size:.7rem; overflow-wrap:anywhere; }
+.opportunity-followup.is-missing strong { color:#8a5b18; }
+.opportunity-card-actions { display:flex; justify-content:flex-end; }
+.opportunity-card-actions button { min-height:44px; }
+.opportunity-terminal { border-top:1px solid #e3eaee; padding-top:12px; }
+.opportunity-terminal summary { min-height:44px; display:flex; align-items:center; color:#5a6d76; cursor:pointer; font-size:.76rem; font-weight:850; }
+.opportunity-terminal > div { display:grid; gap:8px; }
+.opportunity-terminal-card { display:grid; grid-template-columns:minmax(0,1fr) auto minmax(220px,1.2fr); align-items:center; gap:12px; padding:10px 12px; border:1px solid #e1e6e9; border-radius:11px; background:#f6f7f8; color:#66757d; }
+.opportunity-terminal-card > div { min-width:0; }
+.opportunity-terminal-card strong,
+.opportunity-terminal-card span { display:block; overflow-wrap:anywhere; }
+.opportunity-terminal-card strong { color:#445b66; font-size:.76rem; }
+.opportunity-terminal-card div span,
+.opportunity-terminal-card small { font-size:.68rem; }
+.opportunity-terminal-stage { padding:5px 8px; border-radius:999px; background:#eceff1; font-size:.68rem; font-weight:850; }
+.opportunity-empty { padding:22px; text-align:center; }
+.opportunity-empty strong { display:block; color:#294755; }
+.opportunity-empty p { max-width:680px; margin:7px auto 0; color:#6c7f89; font-size:.78rem; }
+@media (max-width:960px) {
+  .opportunity-filters { grid-template-columns:repeat(2,minmax(0,1fr)); }
+  .opportunity-property-picker { grid-template-columns:1fr; }
+}
+@media (max-width:640px) {
+  .property-opportunities { gap:13px; width:100%; max-width:100%; overflow-x:clip; }
+  .opportunity-page-heading { flex-direction:column; }
+  .opportunity-page-heading button { width:100%; }
+  .opportunity-property-summary { align-items:flex-start; flex-direction:column; }
+  .opportunity-filters { grid-template-columns:1fr; }
+  .opportunity-results-summary { align-items:flex-start; flex-direction:column; }
+  .property-opportunity-card { grid-template-columns:44px minmax(0,1fr); }
+  .opportunity-main { padding:13px 11px; }
+  .opportunity-heading { flex-direction:column; }
+  .opportunity-badges { justify-content:flex-start; }
+  .opportunity-requirements-title { align-items:flex-start; flex-direction:column; }
+  .opportunity-commercial-context { grid-template-columns:1fr; }
+  .opportunity-card-actions button { width:100%; }
+  .opportunity-terminal-card { grid-template-columns:1fr; align-items:start; }
+  .opportunity-property-picker select,
+  .opportunity-filters input,
+  .opportunity-filters select,
+  .opportunity-page-heading button,
+  .opportunity-card-actions button,
+  .opportunity-terminal summary { min-height:44px; }
+}
