@@ -29,8 +29,8 @@
 .opportunity-results-summary span { padding:7px 10px; border-radius:999px; background:#edf4f9; color:#173951; font-size:.75rem; font-weight:850; }
 .opportunity-results { display:grid; gap:10px; min-width:0; }
 .property-opportunity-card { display:grid; grid-template-columns:44px minmax(0,1fr); min-width:0; border:1px solid #dce5e9; border-radius:14px; background:#f9fbfc; overflow:hidden; }
-.opportunity-selector { display:flex; align-items:flex-start; justify-content:center; padding-top:18px; border-right:1px solid #e3eaee; cursor:pointer; }
-.opportunity-selector input { width:20px; height:20px; margin:0; accent-color:#225a72; }
+.opportunity-selector { display:flex; align-items:flex-start; justify-content:center; min-width:44px; min-height:44px; padding-top:18px; border-right:1px solid #e3eaee; cursor:pointer; }
+.opportunity-selector input { display:block; visibility:visible; opacity:1; position:static; width:20px; height:20px; margin:0; accent-color:#225a72; }
 .opportunity-main { display:grid; gap:12px; min-width:0; padding:15px 16px; }
 .opportunity-heading { display:flex; align-items:flex-start; justify-content:space-between; gap:14px; min-width:0; }
 .opportunity-heading > div:first-child { min-width:0; }
