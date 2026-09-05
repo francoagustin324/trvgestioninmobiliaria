@@ -7,7 +7,7 @@ import { decodePublicFicha, renderPublicMode } from './public-ficha.js';
 import { loadPublicPropertyFicha } from './public-property-share.js';
 import { renderMvpLeads } from './mvp-leads-ui.js';
 import { enhanceLeadForm } from './lead-create-reliability.js';
-import { renderMvpPropertiesWorkspace } from './mvp-properties-workspace.js';
+import { renderMvpProperties } from './mvp-properties-ui.js';
 import { renderMvpUsers } from './mvp-users-ui.js';
 import { renderMvpConversations } from './mvp-conversations-ui.js';
 import { renderSettings } from './settings-ui.js';
@@ -194,7 +194,7 @@ function render(): void {
   renderMvpLeads(qs<HTMLElement>('#crm'));
   renderMvpConversations(qs<HTMLElement>('#whatsapp'));
   renderAgenda(qs<HTMLElement>('#agenda'));
-  renderMvpPropertiesWorkspace(qs<HTMLElement>('#propiedades'));
+  renderMvpProperties(qs<HTMLElement>('#propiedades'));
   renderMvpUsers(qs<HTMLElement>('#equipo'));
   renderSettings(qs<HTMLElement>('#configuracion'));
   renderAccountMenu();
