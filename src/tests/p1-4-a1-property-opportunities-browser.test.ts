@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import test from 'node:test';
+import test, { type TestContext } from 'node:test';
 import { chromium, type Browser, type BrowserContext, type Page } from 'playwright';
 import { initialData, type Client, type CrmData } from '../models.js';
 
@@ -248,7 +248,7 @@ async function selectTestProperty(page: Page): Promise<void> {
   await page.waitForSelector('#propiedades [data-opportunity-client="1"]', { state: 'visible', timeout: 10_000 });
 }
 
-async function launchP14Browser(t: Parameters<typeof test>[1] extends (...args: infer P) => unknown ? P[0] : never): Promise<string> {
+function launchP14Browser(t: TestContext): string {
   const executable = chromeExecutable();
   if (!executable) {
     if (process.env.GITHUB_ACTIONS === 'true') assert.fail('GitHub Actions no expone Chromium para P1.4-A1.');
@@ -259,7 +259,7 @@ async function launchP14Browser(t: Parameters<typeof test>[1] extends (...args: 
 }
 
 test('P1.4-A1 browser desktop: matching canónico, filtros, selección y visibilidad', { timeout: 120_000 }, async (t) => {
-  const executable = await launchP14Browser(t);
+  const executable = launchP14Browser(t);
   if (!executable) return;
   const server = await startServer(4331);
   const browser = await chromium.launch({ executablePath: executable, headless: true, args: ['--no-sandbox'] });
@@ -313,7 +313,7 @@ test('P1.4-A1 browser desktop: matching canónico, filtros, selección y visibil
 });
 
 test('P1.4-A1 browser mobile 390: sin overflow y controles táctiles', { timeout: 120_000 }, async (t) => {
-  const executable = await launchP14Browser(t);
+  const executable = launchP14Browser(t);
   if (!executable) return;
   const server = await startServer(4332);
   const browser = await chromium.launch({ executablePath: executable, headless: true, args: ['--no-sandbox'] });
