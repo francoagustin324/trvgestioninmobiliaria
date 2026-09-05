@@ -14,23 +14,12 @@ import { state } from './store.js';
 import { visibleClients, visibleProperties } from './team-access.js';
 import { escapeHtml } from './utils.js';
 
-const STYLE_ID = 'propcontrol-property-opportunities-styles';
-const STYLE_HREF = '/src/property-opportunities.css?v=20260904-1';
 const usdFormatter = new Intl.NumberFormat('es-AR');
 const dateFormatter = new Intl.DateTimeFormat('es-AR', { day: '2-digit', month: 'short', year: 'numeric' });
 
 let selectedPropertyId: number | null = null;
 let filters: OpportunityFilters = { ...DEFAULT_OPPORTUNITY_FILTERS };
 const selectedClientIds = new Set<number>();
-
-function installStyles(): void {
-  if (typeof document === 'undefined' || document.getElementById(STYLE_ID)) return;
-  const link = document.createElement('link');
-  link.id = STYLE_ID;
-  link.rel = 'stylesheet';
-  link.href = STYLE_HREF;
-  document.head.append(link);
-}
 
 function propertyOption(property: Property): string {
   const selected = property.id === selectedPropertyId ? ' selected' : '';
@@ -149,7 +138,6 @@ function selectionText(): string {
 }
 
 export function renderPropertyOpportunities(container: HTMLElement, onBack: () => void): void {
-  installStyles();
   const properties = visibleProperties();
   const clients = visibleClients();
   const visiblePropertyIds = new Set(properties.map((property) => property.id));
