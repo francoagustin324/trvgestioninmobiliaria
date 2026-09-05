@@ -291,7 +291,52 @@ test('P1.4-A1 browser desktop: matching canónico, filtros, selección y visibil
     assert.deepEqual(await page.locator('#propiedades .opportunity-client-name').allTextContents(), ['Ana Alta']);
     await page.locator('#propiedades [data-opportunity-followup]').selectOption('all');
 
-    await page.locator('#propiedades [data-opportunity-select="1"]').check();
+    const firstSelection = page.locator('#propiedades [data-opportunity-select="1"]');
+    const selectionHitTest = await firstSelection.evaluate((input) => {
+      const label = input.closest('.opportunity-selector');
+      if (!(label instanceof HTMLElement)) throw new Error('P1.4 selector label missing');
+      const inputRect = input.getBoundingClientRect();
+      const labelRect = label.getBoundingClientRect();
+      const centerX = inputRect.left + inputRect.width / 2;
+      const centerY = inputRect.top + inputRect.height / 2;
+      const hit = document.elementFromPoint(centerX, centerY);
+      return {
+        input: {
+          left: inputRect.left,
+          top: inputRect.top,
+          right: inputRect.right,
+          bottom: inputRect.bottom,
+          width: inputRect.width,
+          height: inputRect.height,
+        },
+        label: {
+          left: labelRect.left,
+          top: labelRect.top,
+          right: labelRect.right,
+          bottom: labelRect.bottom,
+          width: labelRect.width,
+          height: labelRect.height,
+        },
+        center: { x: centerX, y: centerY },
+        hit: hit ? {
+          tag: hit.tagName,
+          id: hit.id,
+          className: hit.getAttribute('class') ?? '',
+          opportunitySelect: hit.getAttribute('data-opportunity-select'),
+        } : null,
+        hitAccepted: hit === input || hit === label,
+      };
+    });
+    const hitTestEvidence = JSON.stringify(selectionHitTest);
+    assert.ok(selectionHitTest.input.width >= 19, hitTestEvidence);
+    assert.ok(selectionHitTest.input.height >= 19, hitTestEvidence);
+    assert.ok(selectionHitTest.input.left >= selectionHitTest.label.left, hitTestEvidence);
+    assert.ok(selectionHitTest.input.right <= selectionHitTest.label.right, hitTestEvidence);
+    assert.ok(selectionHitTest.input.top >= selectionHitTest.label.top, hitTestEvidence);
+    assert.ok(selectionHitTest.input.bottom <= selectionHitTest.label.bottom, hitTestEvidence);
+    assert.ok(selectionHitTest.hitAccepted, hitTestEvidence);
+
+    await firstSelection.check();
     await page.locator('#propiedades [data-opportunity-select="2"]').check();
     assert.equal((await page.locator('#propiedades [data-opportunity-selection-count]').textContent())?.trim(), '2 clientes seleccionados');
 
