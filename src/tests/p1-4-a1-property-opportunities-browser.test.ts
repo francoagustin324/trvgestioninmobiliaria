@@ -3,11 +3,30 @@ import { spawn, type ChildProcess } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import test from 'node:test';
 import { chromium, type Browser, type BrowserContext, type Page } from 'playwright';
-import { initialData, type CrmData } from '../models.js';
+import { initialData, type Client, type CrmData } from '../models.js';
 
 const repositoryRoot = process.cwd();
 const userId = 'p1-4-a1-browser-user';
 const storageKey = `trv-crm-basico:user:${userId}`;
+
+function opportunityClient(id: number, name: string, overrides: Partial<Client> = {}): Client {
+  return {
+    id,
+    name,
+    phone: `54935155501${String(id).padStart(2, '0')}`,
+    interest: 'Departamento General Paz 2 dormitorios con balcón y cochera',
+    status: 'Lead',
+    temperature: 'Tibio',
+    pipeline: 'Calificado',
+    budget: 'USD 120.000',
+    propertyType: 'Departamento',
+    zones: 'General Paz',
+    bedrooms: 2,
+    assignedToId: 1,
+    createdById: 1,
+    ...overrides,
+  };
+}
 
 function browserCrm(): CrmData {
   const crm = structuredClone(initialData);
@@ -18,6 +37,14 @@ function browserCrm(): CrmData {
     planLabel: 'Browser test',
   };
   crm.teamMembers = [{
+    id: 99,
+    userId: 'p1-4-a1-owner',
+    name: 'Dueño Test',
+    email: 'owner@example.test',
+    role: 'Dueño',
+    status: 'Activo',
+    createdAt: '2026-09-01T09:00:00.000Z',
+  }, {
     id: 1,
     userId,
     name: 'Corredor Uno',
@@ -36,82 +63,43 @@ function browserCrm(): CrmData {
     status: 'Activo',
     createdAt: '2026-09-01T10:00:00.000Z',
   }];
-  crm.clients = [{
-    id: 1,
-    name: 'Ana Alta',
-    phone: '5493515550101',
-    interest: 'Departamento General Paz 2 dormitorios con balcón y cochera',
-    status: 'Lead',
-    temperature: 'Caliente',
-    pipeline: 'Calificado',
-    budget: 'USD 120.000',
-    propertyType: 'Departamento',
-    zones: 'General Paz',
-    bedrooms: 2,
-    features: 'balcón cochera',
-    paymentMethod: 'Contado',
-    canMoveForward: 'Sí',
-    nextAction: 'Llamar por esta propiedad',
-    nextFollowUp: '2026-09-08',
-    assignedToId: 1,
-    createdById: 1,
-  }, {
-    id: 2,
-    name: 'Bruno Buena',
-    phone: '5493515550102',
-    interest: 'Departamento de 2 dormitorios',
-    status: 'Lead',
-    temperature: 'Tibio',
-    pipeline: 'Contactado',
-    budget: 'USD 120.000',
-    propertyType: 'Departamento',
-    bedrooms: 2,
-    nextAction: 'Revisar disponibilidad',
-    assignedToId: 1,
-    createdById: 1,
-  }, {
-    id: 3,
-    name: 'Carla Posible',
-    phone: '5493515550103',
-    interest: 'Departamento General Paz',
-    status: 'Lead',
-    temperature: 'Tibio',
-    pipeline: 'Nuevo',
-    propertyType: 'Departamento',
-    zones: 'General Paz',
-    assignedToId: 1,
-    createdById: 1,
-  }, {
-    id: 4,
-    name: 'Dario Ganado',
-    phone: '5493515550104',
-    interest: 'Departamento General Paz 2 dormitorios con balcón y cochera',
-    status: 'Operación ganada',
-    temperature: 'Caliente',
-    pipeline: 'Ganado',
-    budget: 'USD 120.000',
-    propertyType: 'Departamento',
-    zones: 'General Paz',
-    bedrooms: 2,
-    assignedToId: 1,
-    createdById: 1,
-  }, {
-    id: 5,
-    name: 'Cliente Oculto Otro Corredor',
-    phone: '5493515550105',
-    interest: 'Departamento General Paz 2 dormitorios con balcón y cochera',
-    status: 'Lead',
-    temperature: 'Caliente',
-    pipeline: 'Calificado',
-    budget: 'USD 200.000',
-    propertyType: 'Departamento',
-    zones: 'General Paz',
-    bedrooms: 2,
-    features: 'balcón cochera',
-    paymentMethod: 'Contado',
-    assignedToId: 2,
-    createdById: 2,
-  }];
+  crm.clients = [
+    opportunityClient(1, 'Ana Alta', {
+      temperature: 'Caliente',
+      features: 'balcón cochera',
+      paymentMethod: 'Contado',
+      canMoveForward: 'Sí',
+      nextAction: 'Llamar por esta propiedad',
+      nextFollowUp: '2026-09-08',
+    }),
+    opportunityClient(2, 'Bruno Buena', {
+      zones: '',
+      features: '',
+      paymentMethod: '',
+      pipeline: 'Contactado',
+      nextAction: 'Revisar disponibilidad',
+    }),
+    opportunityClient(3, 'Carla Posible', {
+      budget: '',
+      bedrooms: undefined,
+      features: '',
+      paymentMethod: '',
+      pipeline: 'Nuevo',
+    }),
+    opportunityClient(4, 'Dario Ganado', {
+      status: 'Operación ganada',
+      pipeline: 'Ganado',
+      temperature: 'Caliente',
+    }),
+    opportunityClient(5, 'Cliente Oculto Otro Corredor', {
+      temperature: 'Caliente',
+      budget: 'USD 200.000',
+      features: 'balcón cochera',
+      paymentMethod: 'Contado',
+      assignedToId: 2,
+      createdById: 2,
+    }),
+  ];
   crm.activityLog = [{
     id: 1,
     actorId: 1,
@@ -121,9 +109,6 @@ function browserCrm(): CrmData {
     detail: 'Conversación de calificación',
     createdAt: '2026-09-04T14:00:00.000Z',
   }];
-  crm.visits = [];
-  crm.offers = [];
-  crm.reservations = [];
   crm.properties = [{
     id: 1,
     title: 'Departamento General Paz',
@@ -150,6 +135,9 @@ function browserCrm(): CrmData {
     assignedToId: 2,
     createdById: 2,
   }];
+  crm.visits = [];
+  crm.offers = [];
+  crm.reservations = [];
   crm.contacts = [];
   crm.reminders = [];
   crm.fichas = [];
@@ -242,7 +230,11 @@ async function createContext(browser: Browser, viewport: { width: number; height
 async function openOpportunities(page: Page, baseUrl: string): Promise<void> {
   await page.goto(baseUrl, { waitUntil: 'domcontentloaded' });
   await page.waitForSelector('#crm.active .mvp-lead-card', { state: 'visible', timeout: 20_000 });
-  await page.locator('.premium-sidebar [data-module="propiedades"]').click();
+  const width = page.viewportSize()?.width ?? 1366;
+  const navigation = width <= 980
+    ? '.mobile-bottom-nav [data-module="propiedades"]'
+    : '.premium-sidebar [data-module="propiedades"]';
+  await page.locator(navigation).click();
   await page.waitForSelector('#propiedades.active [data-open-property-opportunities]', { state: 'visible', timeout: 20_000 });
   await page.locator('#propiedades [data-open-property-opportunities]').click();
   await page.waitForSelector('#propiedades.active [data-property-opportunities]', { state: 'visible', timeout: 20_000 });
@@ -256,13 +248,19 @@ async function selectTestProperty(page: Page): Promise<void> {
   await page.waitForSelector('#propiedades [data-opportunity-client="1"]', { state: 'visible', timeout: 10_000 });
 }
 
-test('P1.4-A1 browser desktop: matching canónico, filtros, selección y visibilidad', { timeout: 120_000 }, async (t) => {
+async function launchP14Browser(t: Parameters<typeof test>[1] extends (...args: infer P) => unknown ? P[0] : never): Promise<string> {
   const executable = chromeExecutable();
   if (!executable) {
-    if (process.env.GITHUB_ACTIONS === 'true') assert.fail('GitHub Actions no expone Chromium para P1.4-A1 desktop.');
+    if (process.env.GITHUB_ACTIONS === 'true') assert.fail('GitHub Actions no expone Chromium para P1.4-A1.');
     t.skip('No hay Chrome/Chromium local.');
-    return;
+    return '';
   }
+  return executable;
+}
+
+test('P1.4-A1 browser desktop: matching canónico, filtros, selección y visibilidad', { timeout: 120_000 }, async (t) => {
+  const executable = await launchP14Browser(t);
+  if (!executable) return;
   const server = await startServer(4331);
   const browser = await chromium.launch({ executablePath: executable, headless: true, args: ['--no-sandbox'] });
   const context = await createContext(browser, { width: 1366, height: 768 });
@@ -273,8 +271,7 @@ test('P1.4-A1 browser desktop: matching canónico, filtros, selección y visibil
     await openOpportunities(page, 'http://127.0.0.1:4331');
     await selectTestProperty(page);
 
-    const names = await page.locator('#propiedades .opportunity-client-name').allTextContents();
-    assert.deepEqual(names, ['Ana Alta', 'Bruno Buena', 'Carla Posible']);
+    assert.deepEqual(await page.locator('#propiedades .opportunity-client-name').allTextContents(), ['Ana Alta', 'Bruno Buena', 'Carla Posible']);
     assert.equal(await page.locator('#propiedades [data-opportunity-client="5"]').count(), 0);
     assert.equal(await page.locator('#propiedades [data-opportunity-client="4"]').count(), 0);
 
@@ -316,12 +313,8 @@ test('P1.4-A1 browser desktop: matching canónico, filtros, selección y visibil
 });
 
 test('P1.4-A1 browser mobile 390: sin overflow y controles táctiles', { timeout: 120_000 }, async (t) => {
-  const executable = chromeExecutable();
-  if (!executable) {
-    if (process.env.GITHUB_ACTIONS === 'true') assert.fail('GitHub Actions no expone Chromium para P1.4-A1 mobile.');
-    t.skip('No hay Chrome/Chromium local.');
-    return;
-  }
+  const executable = await launchP14Browser(t);
+  if (!executable) return;
   const server = await startServer(4332);
   const browser = await chromium.launch({ executablePath: executable, headless: true, args: ['--no-sandbox'] });
   const context = await createContext(browser, { width: 390, height: 844 });
