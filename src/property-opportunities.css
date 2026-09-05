@@ -86,7 +86,7 @@
   .opportunity-property-summary { align-items:flex-start; flex-direction:column; }
   .opportunity-filters { grid-template-columns:1fr; }
   .opportunity-results-summary { align-items:flex-start; flex-direction:column; }
-  .property-opportunity-card { grid-template-columns:40px minmax(0,1fr); }
+  .property-opportunity-card { grid-template-columns:44px minmax(0,1fr); }
   .opportunity-main { padding:13px 11px; }
   .opportunity-heading { flex-direction:column; }
   .opportunity-badges { justify-content:flex-start; }
