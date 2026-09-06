@@ -90,7 +90,7 @@ function opportunityCard(
         ${activityHtml(latestActivities.get(client.id))}
       </div>
       <div class="opportunity-card-actions">
-        <button type="button" class="secondary" data-edit-client="${client.id}">Abrir cliente</button>
+        <button type="button" class="secondary opportunity-open-client" data-edit-client="${client.id}">Abrir ficha</button>
       </div>
     </div>
   </article>`;
@@ -148,12 +148,12 @@ export function renderPropertyOpportunities(container: HTMLElement, onBack: () =
 
   container.innerHTML = `<div class="property-opportunities" data-property-opportunities>
     <div class="opportunity-page-heading">
-      <div><span class="opportunity-eyebrow">OPORTUNIDADES</span><h1>Propiedad → clientes</h1><p>Elegí una propiedad y revisá los clientes que el matching actual considera compatibles.</p></div>
-      <button type="button" class="secondary" data-opportunities-back>Volver a propiedades</button>
+      <div><span class="opportunity-eyebrow">OPORTUNIDADES</span><h1>Buscar clientes para una propiedad</h1><p>Elegí una propiedad y PropControl te muestra los clientes compatibles según el matching actual.</p></div>
+      <button type="button" class="secondary opportunity-back" data-opportunities-back>Volver a propiedades</button>
     </div>
     ${properties.length ? `<section class="opportunity-property-picker">
-      <label><span>Propiedad</span><select data-opportunity-property><option value="">Seleccionar propiedad</option>${properties.map(propertyOption).join('')}</select></label>
-      <p>PropControl reutiliza el matching existente. Esta selección no envía mensajes ni modifica clientes.</p>
+      <label><span>1. Elegí la propiedad que querés trabajar</span><select data-opportunity-property><option value="">Seleccioná una propiedad…</option>${properties.map(propertyOption).join('')}</select></label>
+      <p>PropControl reutiliza el matching existente. Elegir una propiedad o seleccionar clientes no envía mensajes ni modifica el CRM.</p>
     </section>` : `<section class="opportunity-empty" data-opportunity-empty="no-properties"><strong>No hay propiedades disponibles</strong><p>Cargá o habilitá una propiedad visible antes de buscar oportunidades.</p></section>`}
     <div data-opportunity-workspace></div>
   </div>`;
@@ -224,7 +224,7 @@ export function renderPropertyOpportunities(container: HTMLElement, onBack: () =
   const renderSelectedProperty = (): void => {
     const property = properties.find((item) => item.id === selectedPropertyId);
     if (!property) {
-      workspace.innerHTML = '<section class="opportunity-empty" data-opportunity-empty="select-property"><strong>Seleccioná una propiedad</strong><p>El matching se ejecutará recién cuando elijas cuál querés trabajar.</p></section>';
+      workspace.innerHTML = '<section class="opportunity-empty" data-opportunity-empty="select-property"><strong>Seleccioná una propiedad para empezar</strong><p>El matching se ejecutará recién cuando elijas cuál querés trabajar.</p></section>';
       return;
     }
     const issues = propertyMatchingDataIssues(property);
@@ -242,6 +242,7 @@ export function renderPropertyOpportunities(container: HTMLElement, onBack: () =
     });
     workspace.innerHTML = `${propertySummary(property)}
       <section class="opportunity-review">
+        <div class="opportunity-section-heading"><span>2</span><div><strong>Revisá los clientes compatibles</strong><small>Filtrá la lista, entendé por qué coinciden y abrí la ficha del cliente cuando necesites más contexto.</small></div></div>
         ${filtersHtml()}
         <div class="opportunity-results-summary"><strong>${allOpportunities.length} ${allOpportunities.length === 1 ? 'cliente compatible' : 'clientes compatibles'}</strong><span data-opportunity-selection-count>${selectionText()}</span></div>
         <div class="opportunity-results" data-opportunity-results></div>
