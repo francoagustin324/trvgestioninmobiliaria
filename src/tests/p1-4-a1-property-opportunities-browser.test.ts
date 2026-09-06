@@ -292,6 +292,7 @@ test('P1.4-A1 browser desktop: matching canónico, filtros, selección y visibil
     await page.locator('#propiedades [data-opportunity-followup]').selectOption('all');
 
     const firstSelection = page.locator('#propiedades [data-opportunity-select="1"]');
+    await firstSelection.scrollIntoViewIfNeeded();
     const selectionHitTest = await firstSelection.evaluate((input) => {
       const label = input.closest('.opportunity-selector');
       if (!(label instanceof HTMLElement)) throw new Error('P1.4 selector label missing');
