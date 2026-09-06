@@ -107,9 +107,13 @@ function terminalCard(client: Client): string {
 
 function propertySummary(property: Property): string {
   const bedrooms = property.bedrooms ? ` · ${property.bedrooms} dorm.` : '';
-  return `<article class="opportunity-property-summary">
-    <div><span>Propiedad seleccionada</span><strong>${escapeHtml(property.title)}</strong><p>${escapeHtml(property.address)} · ${escapeHtml(property.type)}${bedrooms}</p></div>
-    <b>USD ${usdFormatter.format(property.price)}</b>
+  return `<article class="opportunity-property-summary" aria-label="Propiedad seleccionada">
+    <div class="opportunity-property-summary-copy">
+      <span>Propiedad seleccionada</span>
+      <strong>${escapeHtml(property.title)}</strong>
+      <p>${escapeHtml(property.address)} · ${escapeHtml(property.type)}${bedrooms}</p>
+    </div>
+    <div class="opportunity-property-price"><span>Precio</span><b>USD ${usdFormatter.format(property.price)}</b></div>
   </article>`;
 }
 
@@ -151,11 +155,18 @@ export function renderPropertyOpportunities(container: HTMLElement, onBack: () =
       <div><span class="opportunity-eyebrow">OPORTUNIDADES</span><h1>Buscar clientes para una propiedad</h1><p>Elegí una propiedad y PropControl te muestra los clientes compatibles según el matching actual.</p></div>
       <button type="button" class="secondary opportunity-back" data-opportunities-back>Volver a propiedades</button>
     </div>
-    ${properties.length ? `<section class="opportunity-property-picker">
-      <label><span>1. Elegí la propiedad que querés trabajar</span><select data-opportunity-property><option value="">Seleccioná una propiedad…</option>${properties.map(propertyOption).join('')}</select></label>
-      <p>PropControl reutiliza el matching existente. Elegir una propiedad o seleccionar clientes no envía mensajes ni modifica el CRM.</p>
+    ${properties.length ? `<section class="opportunity-property-picker" aria-labelledby="opportunity-property-step-title">
+      <div class="opportunity-property-step">
+        <span class="opportunity-step-kicker">PASO 1</span>
+        <h2 id="opportunity-property-step-title">Elegí la propiedad que querés trabajar</h2>
+      </div>
+      <div class="opportunity-property-field">
+        <label class="sr-only" for="opportunity-property-select">Seleccionar propiedad</label>
+        <select id="opportunity-property-select" data-opportunity-property aria-describedby="opportunity-property-note"><option value="">Seleccioná una propiedad…</option>${properties.map(propertyOption).join('')}</select>
+      </div>
+      <p id="opportunity-property-note" class="opportunity-property-note">PropControl reutiliza el matching existente. Elegir una propiedad o seleccionar clientes no envía mensajes ni modifica el CRM.</p>
     </section>` : `<section class="opportunity-empty" data-opportunity-empty="no-properties"><strong>No hay propiedades disponibles</strong><p>Cargá o habilitá una propiedad visible antes de buscar oportunidades.</p></section>`}
-    <div data-opportunity-workspace></div>
+    <div class="opportunity-workspace" data-opportunity-workspace></div>
   </div>`;
 
   container.querySelector<HTMLElement>('[data-opportunities-back]')?.addEventListener('click', onBack);
