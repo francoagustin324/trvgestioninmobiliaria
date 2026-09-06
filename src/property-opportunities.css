@@ -8,6 +8,17 @@
 .property-opportunities-entry:hover { background:rgba(198,171,120,.15); border-color:rgba(222,197,147,.62); }
 
 .property-opportunities { display:grid; gap:26px; min-width:0; color:var(--ink); }
+.property-opportunities .sr-only {
+  position:absolute !important;
+  width:1px !important;
+  height:1px !important;
+  padding:0 !important;
+  margin:-1px !important;
+  overflow:hidden !important;
+  clip:rect(0,0,0,0) !important;
+  white-space:nowrap !important;
+  border:0 !important;
+}
 .opportunity-page-heading { display:flex; align-items:flex-start; justify-content:space-between; gap:22px; padding:4px 2px 2px; }
 .opportunity-page-heading > div { min-width:0; }
 .opportunity-page-heading h1 { margin:4px 0 7px; color:var(--ink); font-size:clamp(1.45rem,2.4vw,2rem); line-height:1.12; letter-spacing:-.025em; }
