@@ -51,6 +51,14 @@ test('P1.4-A2.1 protege geometría, legibilidad y aire del selector en desktop/m
   assert.match(cssSource, /min-height:44px/);
 });
 
+test('P1.4-A2.1 mantiene textos accesibles de selección fuera del plano visual', () => {
+  assert.match(cssSource, /\.property-opportunities \.sr-only \{/);
+  assert.match(cssSource, /width:1px !important/);
+  assert.match(cssSource, /height:1px !important/);
+  assert.match(cssSource, /overflow:hidden !important/);
+  assert.match(cssSource, /clip:rect\(0,0,0,0\) !important/);
+});
+
 test('P1.4-A2 integra Oportunidades con los tokens visuales oficiales sin volver a superficies blancas dominantes', () => {
   for (const token of ['--ink', '--ink-soft', '--brand', '--brand-bright', '--glass-bg', '--glass-stroke', '--glass-brand']) {
     assert.match(cssSource, new RegExp(`var\\(${token}\\)`), `Falta reutilizar token oficial ${token}`);
