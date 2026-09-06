@@ -19,9 +19,9 @@ export function renderMvpPropertiesWorkspace(container: HTMLElement): void {
 
   const opportunitiesButton = document.createElement('button');
   opportunitiesButton.type = 'button';
-  opportunitiesButton.className = 'secondary';
+  opportunitiesButton.className = 'secondary property-opportunities-entry';
   opportunitiesButton.dataset.openPropertyOpportunities = '';
-  opportunitiesButton.textContent = 'Oportunidades';
+  opportunitiesButton.textContent = 'Buscar clientes compatibles';
   opportunitiesButton.addEventListener('click', () => {
     activeView = 'opportunities';
     renderMvpPropertiesWorkspace(container);
