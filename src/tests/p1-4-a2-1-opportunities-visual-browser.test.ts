@@ -216,6 +216,25 @@ async function createContext(browser: Browser, viewport: { width: number; height
   return context;
 }
 
+async function removeEnvironmentNotice(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    const message = 'La conexión con Supabase todavía no está configurada.';
+    const candidates = [...document.querySelectorAll<HTMLElement>('body *')]
+      .filter((element) => element.textContent?.trim() === message);
+    candidates.forEach((candidate) => {
+      let target = candidate;
+      while (
+        target.parentElement
+        && target.parentElement !== document.body
+        && target.parentElement.textContent?.trim() === message
+      ) {
+        target = target.parentElement;
+      }
+      target.remove();
+    });
+  });
+}
+
 async function openSelectedOpportunity(page: Page, baseUrl: string): Promise<void> {
   await page.goto(baseUrl, { waitUntil: 'domcontentloaded' });
   await page.waitForSelector('#crm.active .mvp-lead-card', { state: 'visible', timeout: 20_000 });
@@ -233,6 +252,7 @@ async function openSelectedOpportunity(page: Page, baseUrl: string): Promise<voi
   await page.evaluate(async () => {
     await document.fonts.ready;
   });
+  await removeEnvironmentNotice(page);
 }
 
 function launchVisualBrowser(t: TestContext): string {
@@ -279,6 +299,10 @@ async function assertVisualGeometry(page: Page, viewport: ViewportCase): Promise
     const firstCard = rect('[data-opportunity-client="31"]');
     const badges = rect('[data-opportunity-client="31"] .opportunity-badges');
     const openButton = rect('[data-opportunity-client="31"] .opportunity-open-client');
+    const srOnlyElement = node.querySelector<HTMLElement>('[data-opportunity-client="31"] .opportunity-selector .sr-only');
+    if (!srOnlyElement) throw new Error('Texto accesible del selector faltante.');
+    const srOnly = plainRect(srOnlyElement);
+    const srOnlyStyle = getComputedStyle(srOnlyElement);
     const filterControls = [...node.querySelectorAll<HTMLElement>('.opportunity-filters input, .opportunity-filters select')]
       .filter((control) => control.offsetParent !== null)
       .map(plainRect);
@@ -297,6 +321,12 @@ async function assertVisualGeometry(page: Page, viewport: ViewportCase): Promise
       firstCard,
       badges,
       openButton,
+      srOnly,
+      srOnlyStyle: {
+        position: srOnlyStyle.position,
+        overflow: srOnlyStyle.overflow,
+        whiteSpace: srOnlyStyle.whiteSpace,
+      },
       filterControls,
       selectedText,
       selectStyle: {
@@ -329,6 +359,10 @@ async function assertVisualGeometry(page: Page, viewport: ViewportCase): Promise
   assert.ok(metrics.badges.right <= metrics.firstCard.right + 1, evidence);
   assert.ok(metrics.openButton.height >= 43.5, evidence);
   assert.ok(metrics.filterControls.every((control) => control.height >= 43.5), evidence);
+  assert.ok(metrics.srOnly.width <= 1.5 && metrics.srOnly.height <= 1.5, evidence);
+  assert.equal(metrics.srOnlyStyle.position, 'absolute', evidence);
+  assert.equal(metrics.srOnlyStyle.overflow, 'hidden', evidence);
+  assert.equal(metrics.srOnlyStyle.whiteSpace, 'nowrap', evidence);
 
   if (viewport.width <= 640) {
     assert.ok(metrics.price.top - metrics.summaryCopy.bottom >= 10, evidence);
