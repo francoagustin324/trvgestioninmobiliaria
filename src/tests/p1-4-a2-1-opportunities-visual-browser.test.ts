@@ -18,6 +18,15 @@ type ViewportCase = {
   primary?: boolean;
 };
 
+type RectMetrics = {
+  left: number;
+  top: number;
+  right: number;
+  bottom: number;
+  width: number;
+  height: number;
+};
+
 const viewports: ViewportCase[] = [
   { width: 1366, height: 768, name: 'desktop-1366x768', primary: true },
   { width: 1440, height: 900, name: 'desktop-1440x900' },
@@ -236,18 +245,29 @@ function launchVisualBrowser(t: TestContext): string {
   return executable;
 }
 
-function overlap(a: DOMRect, b: DOMRect): boolean {
+function overlap(a: RectMetrics, b: RectMetrics): boolean {
   return a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top;
 }
 
 async function assertVisualGeometry(page: Page, viewport: ViewportCase): Promise<void> {
   const metrics = await page.locator('#propiedades [data-property-opportunities]').evaluate((node) => {
-    const rect = (selector: string): DOMRect => {
+    const plainRect = (element: Element) => {
+      const rect = element.getBoundingClientRect();
+      return {
+        left: rect.left,
+        top: rect.top,
+        right: rect.right,
+        bottom: rect.bottom,
+        width: rect.width,
+        height: rect.height,
+      };
+    };
+    const rect = (selector: string) => {
       const element = node.querySelector<HTMLElement>(selector);
       if (!element) throw new Error(`Elemento visual faltante: ${selector}`);
-      return element.getBoundingClientRect();
+      return plainRect(element);
     };
-    const root = node.getBoundingClientRect();
+    const root = plainRect(node);
     const picker = rect('.opportunity-property-picker');
     const stepTitle = rect('#opportunity-property-step-title');
     const select = rect('[data-opportunity-property]');
@@ -261,7 +281,7 @@ async function assertVisualGeometry(page: Page, viewport: ViewportCase): Promise
     const openButton = rect('[data-opportunity-client="31"] .opportunity-open-client');
     const filterControls = [...node.querySelectorAll<HTMLElement>('.opportunity-filters input, .opportunity-filters select')]
       .filter((control) => control.offsetParent !== null)
-      .map((control) => control.getBoundingClientRect());
+      .map(plainRect);
     const selectedText = (node.querySelector<HTMLSelectElement>('[data-opportunity-property]')?.selectedOptions[0]?.textContent ?? '').trim();
     const selectStyle = getComputedStyle(node.querySelector<HTMLSelectElement>('[data-opportunity-property]')!);
     return {
