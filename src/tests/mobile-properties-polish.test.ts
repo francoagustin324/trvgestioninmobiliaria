@@ -10,21 +10,22 @@ const main = readFileSync('src/mvp-main.ts', 'utf8');
 const packageJson = readFileSync('package.json', 'utf8').toLowerCase();
 
 test('carga el pulido móvil de Propiedades después de las capas existentes', () => {
-  assert.ok(html.includes('/src/mobile-properties-polish.css?v=20260723-1'));
+  assert.ok(html.includes('/src/mobile-properties-polish.css?v=20260906-p1-4-a2-2-1'));
   assert.ok(html.indexOf('mobile-properties-polish.css') > html.indexOf('mvp-properties.css'));
   assert.ok(html.indexOf('mobile-properties-polish.css') > html.indexOf('mobile-bottom-nav.css'));
 });
 
-test('la guía conserva los tres pasos y usa una grilla móvil sin scroll horizontal', () => {
-  for (const step of ['1. Cargá la propiedad', '2. Agregá y ordená las fotos', '3. Compartí la ficha']) {
-    assert.ok(ui.includes(step), step);
+test('la cabecera móvil elimina la guía permanente y prioriza las dos acciones reales', () => {
+  for (const removedStep of ['1. Cargá la propiedad', '2. Agregá y ordená las fotos', '3. Compartí la ficha']) {
+    assert.equal(ui.includes(removedStep), false, removedStep);
   }
-  for (const shortStep of ["content: '1. Propiedad'", "content: '2. Fotos'", "content: '3. Publicar'"]) {
-    assert.ok(css.includes(shortStep), shortStep);
-  }
-  assert.ok(css.includes('grid-template-columns: repeat(3, minmax(0, 1fr))'));
-  assert.ok(css.includes('white-space: normal'));
-  assert.equal(css.includes('overflow-x: auto'), false);
+  assert.equal(ui.includes('mvp-property-flow'), false);
+  assert.equal(css.includes('mvp-property-flow'), false);
+  assert.ok(css.includes('#propiedades .mvp-properties-heading-actions'));
+  assert.ok(css.includes('[data-toggle="property-form"]'));
+  assert.ok(css.includes('[data-open-property-opportunities]'));
+  assert.ok(css.includes('grid-template-columns: minmax(0, 1fr)'));
+  assert.ok(css.includes('min-height: 46px'));
 });
 
 test('foto y placeholder comparten una estructura y proporción inmobiliaria uniforme', () => {
