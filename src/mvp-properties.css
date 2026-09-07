@@ -40,13 +40,13 @@
   filter:brightness(1.05);
   transform:translateY(-1px);
 }
-#propiedades .mvp-properties-heading-actions .mvp-properties-secondary-action {
+#propiedades .mvp-properties-heading-actions .property-opportunities-entry {
   border:1px solid rgba(198,171,120,.42);
   color:var(--brand-bright);
   background:var(--glass-brand);
   box-shadow:none;
 }
-#propiedades .mvp-properties-heading-actions .mvp-properties-secondary-action:hover {
+#propiedades .mvp-properties-heading-actions .property-opportunities-entry:hover {
   border-color:rgba(222,197,147,.68);
   color:var(--ink);
   background:rgba(198,171,120,.16);
