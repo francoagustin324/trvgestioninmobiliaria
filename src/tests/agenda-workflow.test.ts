@@ -30,13 +30,13 @@ test('el diseño contempla computadora y celular', () => {
   assert.ok(agendaCss.includes('@media (max-width: 720px)'));
 });
 
-test('la publicación renueva agenda y los módulos JavaScript coordinados', () => {
+test('la publicación conserva agenda y módulos históricos con entrada principal A2.2', () => {
   const agendaVersion = html.match(/agenda\.css\?v=([^"']+)/)?.[1];
   const compatibilityVersion = html.match(/cloud-compat-bootstrap\.js\?v=([^"']+)/)?.[1];
   const mainVersion = html.match(/mvp-main\.js\?v=([^"']+)/)?.[1];
   const recoveryVersion = html.match(/sync-recovery-bootstrap\.js\?v=([^"']+)/)?.[1];
-  assert.ok(agendaVersion);
-  assert.equal(mainVersion, compatibilityVersion);
-  assert.equal(recoveryVersion, compatibilityVersion);
-  assert.equal(agendaVersion, mainVersion);
+  assert.equal(agendaVersion, '20260802-1');
+  assert.equal(compatibilityVersion, '20260802-1');
+  assert.equal(mainVersion, '20260906-p1-4-a2-2-1');
+  assert.equal(recoveryVersion, '20260802-1');
 });

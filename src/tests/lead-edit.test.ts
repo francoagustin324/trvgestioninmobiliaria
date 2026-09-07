@@ -22,11 +22,11 @@ test('la edición lleva la pantalla al formulario y enfoca el nombre', () => {
   assert.ok(source.includes('focus({ preventScroll: true })'));
 });
 
-test('la entrada principal dejó atrás la caché anterior del módulo', () => {
+test('la entrada principal usa A2.2 y compatibilidad conserva su versión histórica', () => {
   const html = readFileSync('index.html', 'utf8');
   const mainVersion = html.match(/\/dist\/mvp-main\.js\?v=([^"']+)/)?.[1];
   const compatibilityVersion = html.match(/\/dist\/cloud-compat-bootstrap\.js\?v=([^"']+)/)?.[1];
-  assert.ok(mainVersion);
+  assert.equal(mainVersion, '20260906-p1-4-a2-2-1');
   assert.notEqual(mainVersion, '20260714-22');
-  assert.equal(compatibilityVersion, mainVersion);
+  assert.equal(compatibilityVersion, '20260802-1');
 });

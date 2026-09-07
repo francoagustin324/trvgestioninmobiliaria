@@ -99,7 +99,7 @@ test('HOTFIX UX H: target mobile real >=44 y cache-bust sólo de CSS modificados
   assert.doesNotMatch(mobile, /\.pc-supervised-attention-item\s*\{[\s\S]*?min-height:\s*16px/);
   assert.match(html, /lead-attention-queue\.css\?v=20260820-3/);
   assert.match(html, /hotfix-leads-attention-ux\.css\?v=20260820-3/);
-  assert.match(html, /mvp-main\.js\?v=20260802-1/);
+  assert.match(html, /mvp-main\.js\?v=20260906-p1-4-a2-2-1/);
   assert.match(queue, /sortLeads\(active, 'priority', today\)/);
   assert.match(queue, /Math\.min\(3/);
 });

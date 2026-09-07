@@ -22,10 +22,10 @@ test('el menú de cuenta no repite el correo cuando existe una identidad humana 
   assert.equal(auth.includes('${escapeHtml(session.email)}'), false);
 });
 
-test('los módulos principales usan una misma versión de caché explícita', () => {
+test('la entrada principal usa A2.2 y la compatibilidad conserva su versión histórica', () => {
   const html = readFileSync('index.html', 'utf8');
   const mainVersion = html.match(/\/dist\/mvp-main\.js\?v=([^"']+)/)?.[1];
   const compatibilityVersion = html.match(/\/dist\/cloud-compat-bootstrap\.js\?v=([^"']+)/)?.[1];
-  assert.ok(mainVersion);
-  assert.equal(compatibilityVersion, mainVersion);
+  assert.equal(mainVersion, '20260906-p1-4-a2-2-1');
+  assert.equal(compatibilityVersion, '20260802-1');
 });

@@ -1,0 +1,57 @@
+name: P1.4-A2.2 Properties Visual QA
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - index.html
+      - src/mvp-main.ts
+      - src/mvp-properties-ui.ts
+      - src/mvp-properties-workspace.ts
+      - src/mvp-properties.css
+      - src/mobile-properties-polish.css
+      - src/tests/p1-4-a2-2-properties-actions-browser.test.ts
+      - .github/workflows/p1-4-a2-2-properties-visual-qa.yml
+  workflow_dispatch:
+
+concurrency:
+  group: p1-4-a2-2-properties-visual-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  properties-visual-qa:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - name: Instalar dependencias
+        run: npm ci --silent
+      - name: Compilar TypeScript
+        run: npm run build --silent
+      - name: Ejecutar QA visual P1.4-A2.2
+        run: node --test --test-concurrency=1 dist/tests/p1-4-a2-2-properties-actions-browser.test.js
+      - name: Verificar capturas P1.4-A2.2
+        run: |
+          set -euo pipefail
+          directory="artifacts/p1-4-a2-2-properties"
+          expected=(
+            desktop-1440x900.png
+            desktop-1366x768.png
+            mobile-390x844.png
+            mobile-360x800.png
+          )
+          test -d "$directory"
+          test "$(find "$directory" -maxdepth 1 -type f -name '*.png' | wc -l)" -eq "${#expected[@]}"
+          for file in "${expected[@]}"; do
+            test -s "$directory/$file"
+          done
+      - name: Adjuntar capturas P1.4-A2.2
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: p1-4-a2-2-properties-visual
+          path: artifacts/p1-4-a2-2-properties
+          if-no-files-found: error
+          retention-days: 14

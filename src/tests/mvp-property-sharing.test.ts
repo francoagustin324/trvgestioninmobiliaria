@@ -40,12 +40,20 @@ test('las fotos se cargan secuencialmente, se ordenan y se eliminan de la ficha'
   assert.ok(ui.includes('data-photo-remove'));
 });
 
-test('el diseño presenta un flujo profesional y responsive', () => {
-  assert.ok(css.includes('.mvp-property-flow'));
+test('Propiedades conserva el contrato A2.2 sin tutorial permanente y mantiene el diseño responsive', () => {
+  assert.ok(ui.includes('<h1>Propiedades</h1>'));
+  assert.ok(ui.includes('Gestioná tu inventario y encontrá clientes compatibles.'));
+  assert.ok(ui.includes('data-toggle="property-form">Nueva propiedad</button>'));
+  assert.ok(ui.includes('data-open-property-opportunities>Buscar clientes compatibles</button>'));
+  assert.equal(ui.includes('1. Cargá la propiedad'), false);
+  assert.equal(ui.includes('2. Agregá y ordená las fotos'), false);
+  assert.equal(ui.includes('3. Compartí la ficha'), false);
+  assert.equal(css.includes('.mvp-property-flow'), false);
   assert.ok(css.includes('.mvp-property-photo-grid'));
   assert.ok(css.includes('.mvp-property-card-actions'));
   assert.ok(css.includes('.mvp-property-form-section-internal'));
   assert.ok(css.includes('@media (max-width:640px)'));
-  assert.ok(html.includes('/src/mvp-properties.css?v=20260717-41'));
-  assert.ok(html.includes('/dist/mvp-main.js?v=20260802-1'));
+  assert.ok(html.includes('/src/mvp-properties.css?v=20260906-p1-4-a2-2-1'));
+  assert.ok(html.includes('/src/mobile-properties-polish.css?v=20260906-p1-4-a2-2-1'));
+  assert.ok(html.includes('/dist/mvp-main.js?v=20260906-p1-4-a2-2-1'));
 });

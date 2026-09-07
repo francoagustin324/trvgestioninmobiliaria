@@ -28,11 +28,11 @@ test('revisa nuevamente la nube y verifica el resultado final', () => {
   assert.ok(recovery.includes('verification.localOnlyCount || verification.cloudOnlyCount || verification.conflictCount'));
 });
 
-test('publica los tres módulos JavaScript con la misma versión de caché', () => {
+test('publica compatibilidad y recuperación históricas con mvp-main A2.2', () => {
   const compatibilityVersion = html.match(/cloud-compat-bootstrap\.js\?v=([^"']+)/)?.[1];
   const mainVersion = html.match(/mvp-main\.js\?v=([^"']+)/)?.[1];
   const recoveryVersion = html.match(/sync-recovery-bootstrap\.js\?v=([^"']+)/)?.[1];
-  assert.ok(compatibilityVersion);
-  assert.equal(mainVersion, compatibilityVersion);
-  assert.equal(recoveryVersion, compatibilityVersion);
+  assert.equal(compatibilityVersion, '20260802-1');
+  assert.equal(mainVersion, '20260906-p1-4-a2-2-1');
+  assert.equal(recoveryVersion, '20260802-1');
 });

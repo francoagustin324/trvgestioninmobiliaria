@@ -10,6 +10,10 @@ let searchText = '';
 let photoUploadInProgress = false;
 const priceFormatter = new Intl.NumberFormat('es-AR');
 
+export interface MvpPropertiesRenderOptions {
+  onOpenOpportunities?: () => void;
+}
+
 function normalized(value: unknown): string {
   return String(value ?? '')
     .normalize('NFD')
@@ -185,7 +189,7 @@ async function openPropertyFicha(property: PropertyWithFicha, button: HTMLButton
   }
 }
 
-function bindPropertyCardActions(container: HTMLElement): void {
+function bindPropertyCardActions(container: HTMLElement, options: MvpPropertiesRenderOptions): void {
   container.querySelectorAll<HTMLButtonElement>('[data-edit-property]').forEach((button) => {
     button.addEventListener('click', (event) => {
       event.stopPropagation();
@@ -193,7 +197,7 @@ function bindPropertyCardActions(container: HTMLElement): void {
       if (!propertyId || !findProperty(propertyId)) return;
       state.editingPropertyId = propertyId;
       state.openForms.property = true;
-      renderMvpProperties(container);
+      renderMvpProperties(container, options);
       focusPropertyForm(container);
     });
   });
@@ -215,13 +219,13 @@ function bindPropertyCardActions(container: HTMLElement): void {
   });
 }
 
-function updatePropertyResults(container: HTMLElement): void {
+function updatePropertyResults(container: HTMLElement, options: MvpPropertiesRenderOptions): void {
   const properties = propertyRows();
   const results = container.querySelector<HTMLElement>('#mvp-property-results');
   const count = container.querySelector<HTMLElement>('#mvp-property-count');
   if (results) results.innerHTML = properties.map(card).join('') || '<p class="empty-state">No hay propiedades para mostrar.</p>';
   if (count) count.textContent = `${properties.length} propiedades`;
-  bindPropertyCardActions(container);
+  bindPropertyCardActions(container, options);
 }
 
 function optionalNumber(value: string): number | undefined {
@@ -343,7 +347,7 @@ function bindPhotoManager(form: HTMLFormElement, propertyId: number): void {
   });
 }
 
-export function renderMvpProperties(container: HTMLElement): void {
+export function renderMvpProperties(container: HTMLElement, options: MvpPropertiesRenderOptions = {}): void {
   const editing = findProperty(state.editingPropertyId ?? 0);
   const properties = propertyRows();
   const formPropertyId = editing?.id ?? nextId(state.crm.properties);
@@ -351,13 +355,16 @@ export function renderMvpProperties(container: HTMLElement): void {
   const types = ['Departamento', 'Casa', 'Dúplex', 'Terreno', 'Comercial'];
   const operations = ['Venta', 'Alquiler', 'Captación'];
   const statuses = ['Activa', 'Captación', 'Reservada', 'Cerrada'];
+  const opportunitiesAction = options.onOpenOpportunities
+    ? '<button type="button" class="secondary property-opportunities-entry" data-open-property-opportunities>Buscar clientes compatibles</button>'
+    : '';
 
-  container.innerHTML = `<div class="mvp-page-heading">
-    <div><h1>Propiedades</h1><p>Inventario interno y fichas profesionales listas para compartir.</p></div>
-    <button type="button" data-toggle="property-form">Nueva propiedad</button>
-  </div>
-  <div class="mvp-property-flow" aria-label="Flujo comercial">
-    <strong>1. Cargá la propiedad</strong><span>→</span><strong>2. Agregá y ordená las fotos</strong><span>→</span><strong>3. Compartí la ficha</strong>
+  container.innerHTML = `<div class="mvp-page-heading mvp-properties-heading">
+    <div class="mvp-properties-heading-copy"><h1>Propiedades</h1><p>Gestioná tu inventario y encontrá clientes compatibles.</p></div>
+    <div class="mvp-properties-heading-actions" aria-label="Acciones de propiedades">
+      ${opportunitiesAction}
+      <button type="button" class="mvp-properties-primary-action" data-toggle="property-form">Nueva propiedad</button>
+    </div>
   </div>
   <form id="mvp-property-form" class="mvp-lead-form mvp-property-form ${state.openForms.property ? '' : 'collapsed'}">
     <div class="mvp-form-heading">
@@ -410,10 +417,14 @@ export function renderMvpProperties(container: HTMLElement): void {
 
   container.querySelector<HTMLInputElement>('#mvp-property-search')?.addEventListener('input', (event) => {
     searchText = (event.currentTarget as HTMLInputElement).value;
-    updatePropertyResults(container);
+    updatePropertyResults(container, options);
   });
 
-  bindPropertyCardActions(container);
+  container.querySelector<HTMLButtonElement>('[data-open-property-opportunities]')?.addEventListener('click', () => {
+    options.onOpenOpportunities?.();
+  });
+
+  bindPropertyCardActions(container, options);
 
   const form = container.querySelector<HTMLFormElement>('#mvp-property-form');
   if (form) bindPhotoManager(form, formPropertyId);
@@ -422,7 +433,7 @@ export function renderMvpProperties(container: HTMLElement): void {
     if (photoUploadInProgress) return;
     state.editingPropertyId = null;
     state.openForms.property = false;
-    renderMvpProperties(container);
+    renderMvpProperties(container, options);
   });
 
   form?.addEventListener('submit', async (event) => {
