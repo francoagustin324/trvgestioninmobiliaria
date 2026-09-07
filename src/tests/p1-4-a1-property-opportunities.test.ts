@@ -136,10 +136,11 @@ test('P1.4-A1 detecta propiedad con información básica insuficiente sin invent
   assert.deepEqual(propertyMatchingDataIssues(property), []);
 });
 
-test('P1.4-A1 no implementa un segundo motor y reutiliza visibilidad y explicación existentes', () => {
+test('P1.4-A1 no implementa un segundo motor y conserva un único owner estructural del workspace', () => {
   const coreSource = readFileSync('src/property-opportunities.ts', 'utf8');
   const uiSource = readFileSync('src/property-opportunities-ui.ts', 'utf8');
   const workspaceSource = readFileSync('src/mvp-properties-workspace.ts', 'utf8');
+  const indexSource = readFileSync('index.html', 'utf8');
 
   assert.match(coreSource, /matchClientsForProperty/);
   assert.equal((coreSource.match(/matchClientsForProperty\(/g) ?? []).length, 1);
@@ -152,5 +153,10 @@ test('P1.4-A1 no implementa un segundo motor y reutiliza visibilidad y explicaci
   assert.doesNotMatch(uiSource, /MutationObserver/);
   assert.match(uiSource, /clientes seleccionados/);
   assert.match(uiSource, /no envía mensajes/);
-  assert.match(workspaceSource, /renderMvpProperties\(container\)/);
+  assert.match(workspaceSource, /renderPropertyOpportunities\(container, \(\) => \{/);
+  assert.match(workspaceSource, /renderMvpProperties\(container,\s*\{\s*onOpenOpportunities:/);
+  assert.equal((workspaceSource.match(/renderMvpProperties\(/g) ?? []).length, 1);
+  assert.doesNotMatch(workspaceSource, /matchClientsForProperty/);
+  assert.doesNotMatch(workspaceSource, /MutationObserver|requestAnimationFrame|setTimeout|setInterval/);
+  assert.doesNotMatch(indexSource, /property-opportunities-bootstrap\.js/);
 });

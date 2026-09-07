@@ -11,12 +11,15 @@ function inputHandler(source: string, inputId: string): string {
   return source.slice(start, source.indexOf('\n  });', start) + 6);
 }
 
-test('el buscador de propiedades actualiza resultados sin reconstruir el campo', () => {
+test('el buscador de propiedades actualiza resultados sin reconstruir el campo y preserva options', () => {
   const handler = inputHandler(propertiesUi, 'mvp-property-search');
-  assert.ok(handler.includes('updatePropertyResults(container)'));
-  assert.ok(!handler.includes('renderMvpProperties(container)'));
+  assert.ok(handler.includes('updatePropertyResults(container, options)'));
+  assert.ok(!handler.includes('renderMvpProperties(container'));
+  assert.ok(propertiesUi.includes('function updatePropertyResults(container: HTMLElement, options: MvpPropertiesRenderOptions): void'));
+  assert.ok(propertiesUi.includes('bindPropertyCardActions(container, options);'));
   assert.ok(propertiesUi.includes('id="mvp-property-results"'));
   assert.ok(propertiesUi.includes('id="mvp-property-count"'));
+  assert.ok(propertiesUi.includes('options.onOpenOpportunities?.();'));
 });
 
 test('el buscador de leads actualiza resultados sin reconstruir el campo', () => {

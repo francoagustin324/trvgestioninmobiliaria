@@ -203,7 +203,7 @@ test('B1.2.8 invalida assets y define la jerarquía contextual sin alterar handl
 
   assert.match(index, /\/src\/mvp\.css\?v=20260802-1/);
   assert.doesNotMatch(index, /\/src\/mvp\.css\?v=20260717-41/);
-  assert.match(index, /\/dist\/mvp-main\.js\?v=20260802-1/);
+  assert.match(index, /\/dist\/mvp-main\.js\?v=20260906-p1-4-a2-2-1/);
   assert.doesNotMatch(index, /\/dist\/mvp-main\.js\?v=20260723-104/);
   assert.match(cacheHelper, /max-age=31536000, immutable/);
 

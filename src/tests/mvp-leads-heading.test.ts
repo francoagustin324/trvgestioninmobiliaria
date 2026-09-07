@@ -28,7 +28,7 @@ test('Leads mantiene búsqueda comercial con placeholder móvil legible', () => 
 });
 
 test('las descripciones de los demás módulos permanecen disponibles', () => {
-  assert.ok(properties.includes('Inventario interno y fichas profesionales listas para compartir.'));
+  assert.ok(properties.includes('Gestioná tu inventario y encontrá clientes compatibles.'));
   assert.ok(conversations.includes('Atendé consultas y revisá las plantillas aprobadas para iniciar contactos.'));
   assert.ok(agenda.includes('Resolvé primero los vencidos, completá cada gestión y reprogramá el próximo contacto sin perder información.'));
   assert.ok(users.includes('Administrá accesos y roles de la inmobiliaria.'));

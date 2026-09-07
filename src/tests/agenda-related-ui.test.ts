@@ -24,13 +24,13 @@ test('las tarjetas quedan en una sola secuencia vertical y con acciones secundar
   assert.ok(ui.includes('Ordenados por fecha y prioridad.'));
 });
 
-test('renueva juntos el módulo principal, recuperación y estilos de agenda', () => {
+test('conserva versiones históricas y publica la entrada principal A2.2', () => {
   const compatibilityVersion = html.match(/cloud-compat-bootstrap\.js\?v=([^"']+)/)?.[1];
   const mainVersion = html.match(/mvp-main\.js\?v=([^"']+)/)?.[1];
   const recoveryVersion = html.match(/sync-recovery-bootstrap\.js\?v=([^"']+)/)?.[1];
   const agendaVersion = html.match(/agenda\.css\?v=([^"']+)/)?.[1];
-  assert.ok(compatibilityVersion);
-  assert.equal(mainVersion, compatibilityVersion);
-  assert.equal(recoveryVersion, compatibilityVersion);
-  assert.equal(agendaVersion, compatibilityVersion);
+  assert.equal(compatibilityVersion, '20260802-1');
+  assert.equal(mainVersion, '20260906-p1-4-a2-2-1');
+  assert.equal(recoveryVersion, '20260802-1');
+  assert.equal(agendaVersion, '20260802-1');
 });
