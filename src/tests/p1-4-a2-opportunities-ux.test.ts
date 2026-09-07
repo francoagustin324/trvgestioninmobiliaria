@@ -16,11 +16,18 @@ test('P1.4-A2 hace descubrible el acceso comercial desde Propiedades', () => {
   assert.match(workspaceSource, /insertBefore\(opportunitiesButton, newPropertyButton\)/);
 });
 
-test('P1.4-A2 ordena la pantalla como propiedad → revisión → acción', () => {
+test('P1.4-A2.1 separa Paso 1, selector y propiedad seleccionada con semántica clara', () => {
   assert.match(uiSource, /Buscar clientes para una propiedad/);
   assert.match(uiSource, /Elegí una propiedad y PropControl te muestra los clientes compatibles según el matching actual\./);
-  assert.match(uiSource, /1\. Elegí la propiedad que querés trabajar/);
+  assert.match(uiSource, /opportunity-step-kicker">PASO 1/);
+  assert.match(uiSource, /opportunity-property-step-title">Elegí la propiedad que querés trabajar/);
+  assert.match(uiSource, /class="opportunity-property-field"/);
+  assert.match(uiSource, /for="opportunity-property-select">Seleccionar propiedad/);
+  assert.match(uiSource, /id="opportunity-property-select" data-opportunity-property/);
   assert.match(uiSource, /Seleccioná una propiedad…/);
+  assert.match(uiSource, /class="opportunity-workspace" data-opportunity-workspace/);
+  assert.match(uiSource, /class="opportunity-property-summary-copy"/);
+  assert.match(uiSource, /class="opportunity-property-price"/);
   assert.match(uiSource, /2<\/span><div><strong>Revisá los clientes compatibles/);
   assert.match(uiSource, /Buscar cliente/);
   assert.match(uiSource, /Compatibilidad/);
@@ -30,15 +37,36 @@ test('P1.4-A2 ordena la pantalla como propiedad → revisión → acción', () =
   assert.match(uiSource, /Volver a propiedades/);
 });
 
+test('P1.4-A2.1 protege geometría, legibilidad y aire del selector en desktop/mobile', () => {
+  assert.match(cssSource, /\.property-opportunities \{ display:grid; gap:26px;/);
+  assert.match(cssSource, /\.opportunity-property-picker \{ display:grid; gap:16px; padding:22px; min-width:0; \}/);
+  assert.match(cssSource, /\.opportunity-property-field \{ width:min\(100%,760px\); min-width:0; \}/);
+  assert.match(cssSource, /padding-right:46px/);
+  assert.match(cssSource, /white-space:nowrap/);
+  assert.match(cssSource, /text-overflow:ellipsis/);
+  assert.match(cssSource, /line-height:1\.35/);
+  assert.match(cssSource, /\.opportunity-workspace \{ display:grid; gap:24px; min-width:0; \}/);
+  assert.match(cssSource, /grid-template-columns:minmax\(0,1fr\) auto/);
+  assert.match(cssSource, /@media \(max-width:400px\)/);
+  assert.match(cssSource, /min-height:44px/);
+});
+
+test('P1.4-A2.1 mantiene textos accesibles de selección fuera del plano visual', () => {
+  assert.match(cssSource, /\.property-opportunities \.sr-only \{/);
+  assert.match(cssSource, /width:1px !important/);
+  assert.match(cssSource, /height:1px !important/);
+  assert.match(cssSource, /overflow:hidden !important/);
+  assert.match(cssSource, /clip:rect\(0,0,0,0\) !important/);
+});
+
 test('P1.4-A2 integra Oportunidades con los tokens visuales oficiales sin volver a superficies blancas dominantes', () => {
   for (const token of ['--ink', '--ink-soft', '--brand', '--brand-bright', '--glass-bg', '--glass-stroke', '--glass-brand']) {
     assert.match(cssSource, new RegExp(`var\\(${token}\\)`), `Falta reutilizar token oficial ${token}`);
   }
   assert.doesNotMatch(cssSource, /background\s*:\s*#fff\b/i);
   assert.doesNotMatch(cssSource, /color\s*:\s*#173951\b/i);
-  assert.match(cssSource, /min-height:44px/);
   assert.match(cssSource, /opportunity-open-client/);
-  assert.match(cssSource, /opportunity-property-picker select:focus-visible/);
+  assert.match(cssSource, /opportunity-property-field select:focus-visible/);
   assert.match(cssSource, /opportunity-filters input::placeholder/);
 });
 
@@ -63,7 +91,7 @@ test('P1.4-A2 mantiene las regresiones browser que cubren filtros, selección, d
   assert.match(browserRegressionSource, /scrollWidth/);
 });
 
-test('P1.4-A2 actualiza cache-busting de UI y CSS de Oportunidades', () => {
-  assert.match(indexSource, /property-opportunities\.css\?v=20260906-p1-4-a2-1/);
-  assert.match(indexSource, /property-opportunities-bootstrap\.js\?v=20260906-p1-4-a2-1/);
+test('P1.4-A2.1 actualiza cache-busting de UI y CSS de Oportunidades', () => {
+  assert.match(indexSource, /property-opportunities\.css\?v=20260906-p1-4-a2-1-1/);
+  assert.match(indexSource, /property-opportunities-bootstrap\.js\?v=20260906-p1-4-a2-1-1/);
 });
