@@ -5,15 +5,22 @@ import test from 'node:test';
 
 const root = process.cwd();
 const workspaceSource = readFileSync(resolve(root, 'src/mvp-properties-workspace.ts'), 'utf8');
+const propertiesUiSource = readFileSync(resolve(root, 'src/mvp-properties-ui.ts'), 'utf8');
+const mainSource = readFileSync(resolve(root, 'src/mvp-main.ts'), 'utf8');
 const uiSource = readFileSync(resolve(root, 'src/property-opportunities-ui.ts'), 'utf8');
 const cssSource = readFileSync(resolve(root, 'src/property-opportunities.css'), 'utf8');
 const indexSource = readFileSync(resolve(root, 'index.html'), 'utf8');
 const browserRegressionSource = readFileSync(resolve(root, 'src/tests/p1-4-a1-property-opportunities-browser.test.ts'), 'utf8');
 
-test('P1.4-A2 hace descubrible el acceso comercial desde Propiedades', () => {
-  assert.match(workspaceSource, /Buscar clientes compatibles/);
-  assert.match(workspaceSource, /property-opportunities-entry/);
-  assert.match(workspaceSource, /insertBefore\(opportunitiesButton, newPropertyButton\)/);
+test('P1.4-A2/A2.2 mantiene descubrible el acceso comercial desde Propiedades con owner estructural', () => {
+  assert.match(propertiesUiSource, /Buscar clientes compatibles/);
+  assert.match(propertiesUiSource, /property-opportunities-entry/);
+  assert.match(propertiesUiSource, /data-open-property-opportunities/);
+  assert.match(workspaceSource, /onOpenOpportunities/);
+  assert.match(workspaceSource, /renderMvpProperties\(container, \{/);
+  assert.doesNotMatch(workspaceSource, /createElement/);
+  assert.doesNotMatch(workspaceSource, /insertBefore/);
+  assert.match(mainSource, /renderMvpPropertiesWorkspace/);
 });
 
 test('P1.4-A2.1 separa Paso 1, selector y propiedad seleccionada con semántica clara', () => {
@@ -91,7 +98,8 @@ test('P1.4-A2 mantiene las regresiones browser que cubren filtros, selección, d
   assert.match(browserRegressionSource, /scrollWidth/);
 });
 
-test('P1.4-A2.1 actualiza cache-busting de UI y CSS de Oportunidades', () => {
+test('P1.4-A2.2 mantiene cache-busting vigente y retira el bootstrap de reinyección', () => {
   assert.match(indexSource, /property-opportunities\.css\?v=20260906-p1-4-a2-1-1/);
-  assert.match(indexSource, /property-opportunities-bootstrap\.js\?v=20260906-p1-4-a2-1-1/);
+  assert.match(indexSource, /mvp-main\.js\?v=20260906-p1-4-a2-2-1/);
+  assert.doesNotMatch(indexSource, /property-opportunities-bootstrap\.js/);
 });
