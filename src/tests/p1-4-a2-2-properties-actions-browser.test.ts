@@ -332,7 +332,7 @@ async function assertEntrypointPersists(page: Page): Promise<void> {
   assert.equal(await page.locator('#propiedades [data-open-property-opportunities]').count(), 1);
 
   await page.locator('#propiedades [data-cancel-property-edit]').click();
-  await page.waitForSelector('#propiedades #mvp-property-form.collapsed');
+  await page.waitForSelector('#propiedades #mvp-property-form.collapsed', { state: 'attached' });
   assert.equal(await page.locator('#propiedades [data-open-property-opportunities]').count(), 1);
 
   await page.locator('#propiedades [data-edit-property="41"]').click();
@@ -340,7 +340,7 @@ async function assertEntrypointPersists(page: Page): Promise<void> {
   const updatedTitle = 'Departamento premium General Paz actualizado';
   await page.locator('#propiedades #mvp-property-form input[name="title"]').fill(updatedTitle);
   await page.locator('#propiedades #mvp-property-form button[type="submit"]').click();
-  await page.waitForSelector('#propiedades #mvp-property-form.collapsed');
+  await page.waitForSelector('#propiedades #mvp-property-form.collapsed', { state: 'attached' });
   await page.waitForFunction((title) => [...document.querySelectorAll('#propiedades .mvp-property-title h3')]
     .some((element) => element.textContent?.trim() === title), updatedTitle);
   assert.equal(await page.locator('#propiedades [data-open-property-opportunities]').count(), 1);
@@ -349,7 +349,7 @@ async function assertEntrypointPersists(page: Page): Promise<void> {
   await page.waitForSelector('#propiedades #mvp-property-form:not(.collapsed)', { state: 'visible' });
   assert.equal(await page.locator('#propiedades [data-open-property-opportunities]').count(), 1);
   await page.locator('#propiedades [data-cancel-property-edit]').click();
-  await page.waitForSelector('#propiedades #mvp-property-form.collapsed');
+  await page.waitForSelector('#propiedades #mvp-property-form.collapsed', { state: 'attached' });
   assert.equal(await page.locator('#propiedades [data-open-property-opportunities]').count(), 1);
 }
 
