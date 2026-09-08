@@ -1,0 +1,36 @@
+name: SEC-FIX-A1.2-E Align B0.3
+
+on:
+  push:
+    branches:
+      - validation/sec-fix-a1-2-e-test-contract
+
+permissions:
+  contents: write
+
+jobs:
+  align-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: agent/sec-fix-a1-2-e-team-tenant-authority
+          fetch-depth: 0
+      - name: Fetch alignment script
+        shell: bash
+        run: |
+          git show origin/validation/sec-fix-a1-2-e-test-contract:.github/scripts/sec_fix_a1_2_e_align_b03.py > /tmp/sec_fix_a1_2_e_align_b03.py
+      - name: Align inherited B0.3 assertions
+        shell: bash
+        run: |
+          python /tmp/sec_fix_a1_2_e_align_b03.py
+          git diff --check
+          test "$(git diff --name-only)" = 'src/tests/b0-3-user-onboarding.test.ts'
+      - name: Commit test-only alignment
+        shell: bash
+        run: |
+          git config user.name 'francoagustin324'
+          git config user.email 'francoagustinsolis@gmail.com'
+          git add src/tests/b0-3-user-onboarding.test.ts
+          git commit -m 'SEC-FIX A1.2-E — Align B0.3 Team tenant contract'
+          git push origin HEAD:agent/sec-fix-a1-2-e-team-tenant-authority
