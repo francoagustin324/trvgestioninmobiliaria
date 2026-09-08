@@ -15,9 +15,8 @@ import {
 import { appIcons } from './icons.js';
 import type { CrmData } from './models.js';
 import {
-  hasLocalBackup,
   replaceDataForTenant,
-  restoreLatestLocalBackup,
+  restoreLatestLocalBackupForTenant,
   setActiveMemberId,
   state,
 } from './store.js';
@@ -38,6 +37,7 @@ import {
   type TenantRuntimeLease,
 } from './tenant-runtime.js';
 import {
+  hasTenantLocalBackup,
   markTenantSyncError,
   readTenantSyncState,
   tenantHasPendingLocalChanges,
@@ -64,10 +64,6 @@ function activateMember(scope: TenantScope, runtimeLease: TenantRuntimeLease): v
   if (member) setActiveMemberId(member.id);
 }
 
-function dispatchCloudStatus(message: string, kind: 'success' | 'error' | 'working' = 'success'): void {
-  document.dispatchEvent(new CustomEvent('propcontrol-cloud-status', { detail: { message, kind } }));
-}
-
 function dispatchTenantCloudStatus(
   runtimeLease: TenantRuntimeLease,
   message: string,
@@ -87,6 +83,14 @@ function dispatchTenantCloudStatus(
 function dispatchTenantRender(runtimeLease: TenantRuntimeLease): void {
   if (!tenantRuntimeLeaseIsCurrent(runtimeLease)) return;
   document.dispatchEvent(new CustomEvent('trv-render'));
+}
+
+function tenantBackupAvailable(scope: TenantScope): boolean {
+  try {
+    return hasTenantLocalBackup(scope);
+  } catch {
+    return false;
+  }
 }
 
 function accountMenuRoot(): HTMLElement | null {
@@ -212,6 +216,29 @@ async function inspectCloudWithoutChangingLocalState(
 function isDifferenceError(message: string | undefined): boolean {
   const text = String(message || '').toLowerCase();
   return text.includes('datos distintos') || text.includes('cambios más nuevos en la nube');
+}
+
+
+export function restoreLatestLocalBackupRecovery(
+  confirmRestore: () => boolean = () => window.confirm('Se recuperará la copia local anterior y quedará pendiente de sincronización. ¿Continuar?'),
+): boolean {
+  const scope = requireCurrentTenantScope();
+  const runtimeLease = captureTenantRuntimeLease(scope);
+
+  if (!confirmRestore()) return false;
+  assertTenantRuntimeLeaseCurrent(runtimeLease);
+
+  const restored = restoreLatestLocalBackupForTenant(scope, runtimeLease);
+  assertTenantRuntimeLeaseCurrent(runtimeLease);
+  if (!restored) return false;
+
+  dispatchTenantCloudStatus(
+    runtimeLease,
+    'Copia anterior recuperada. PropControl la guardará sin sobrescribir cambios más nuevos.',
+    'success',
+  );
+  dispatchTenantRender(runtimeLease);
+  return true;
 }
 
 export async function resolveSyncDifferences(): Promise<void> {
@@ -400,7 +427,7 @@ export function renderAccountMenu(): void {
   const syncState = readTenantSyncState(scope);
   const sync = accountSyncPresentation(syncState);
   const differencePending = isDifferenceError(syncState.lastError);
-  const backupAvailable = hasLocalBackup();
+  const backupAvailable = tenantBackupAvailable(scope);
   const avatarGlyph = settings.avatar
     ? `<img src="${escapeHtml(settings.avatar)}" alt="">`
     : '<svg viewBox="0 0 24 24" role="img"><path d="M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8Zm-7 8a7 7 0 0 1 14 0" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>';
@@ -476,10 +503,7 @@ export function renderAccountMenu(): void {
   });
   recoveryTarget?.querySelector<HTMLElement>('[data-account-restore]')?.addEventListener('click', () => {
     closeAccountMenuPanel({ restoreFocus: false });
-    if (!window.confirm('Se recuperará la copia local anterior y quedará pendiente de sincronización. ¿Continuar?')) return;
-    if (!restoreLatestLocalBackup()) return;
-    dispatchCloudStatus('Copia anterior recuperada. PropControl la guardará sin sobrescribir cambios más nuevos.', 'success');
-    document.dispatchEvent(new CustomEvent('trv-render'));
+    restoreLatestLocalBackupRecovery();
   });
   container.querySelector<HTMLElement>('[data-account-logout]')?.addEventListener('click', () => {
     closeAccountMenuPanel({ restoreFocus: false });

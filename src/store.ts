@@ -19,9 +19,13 @@ import {
   writeTenantSnapshot,
 } from './tenant-storage.js';
 import {
+  assertTenantRuntimeLeaseCurrent,
+  captureTenantRuntimeLease,
   currentTenantScope,
   requireCurrentTenantScope,
+  TENANT_RUNTIME_STALE,
   tenantScopesEqual,
+  type TenantRuntimeLease,
 } from './tenant-runtime.js';
 import {
   canonicalUuid,
@@ -299,16 +303,42 @@ export function canRestoreLatestLocalBackup(): boolean {
   return Boolean(member && roleCanManageTeam(member.role));
 }
 
-export function restoreLatestLocalBackup(): boolean {
+export function restoreLatestLocalBackupForTenant(
+  scope: TenantScope,
+  runtimeLease: TenantRuntimeLease,
+): boolean {
+  if (!tenantScopesEqual(scope, runtimeLease.scope)) throw new Error(TENANT_RUNTIME_STALE);
+  assertTenantRuntimeLeaseCurrent(runtimeLease);
   if (!canRestoreLatestLocalBackup()) return false;
-  const scope = requireCurrentTenantScope();
+
+  // restoreLatestTenantBackup consumes the exact tenant backup and writes only
+  // inside that tenant namespace. The lease is therefore revalidated directly
+  // before entering that synchronous material section.
+  assertTenantRuntimeLeaseCurrent(runtimeLease);
   const restored = restoreLatestTenantBackup(scope);
   if (!restored) return false;
-  const normalized = normalizedData(restored);
-  assertTenantCrmScope(scope, normalized);
-  state.crm = normalized;
+  assertTenantCrmScope(scope, restored);
+  const restoredSnapshot = normalizedData(restored);
+  assertTenantCrmScope(scope, restoredSnapshot);
+
+  assertTenantRuntimeLeaseCurrent(runtimeLease);
+  state.crm = structuredClone(restoredSnapshot);
   resetTransientState();
-  writeTenantSnapshot(scope, state.crm, { markDirty: true, reason: 'Restauración confirmada', backup: false });
-  queueCloudSave(scope, state.crm);
+
+  assertTenantRuntimeLeaseCurrent(runtimeLease);
+  writeTenantSnapshot(scope, restoredSnapshot, {
+    markDirty: true,
+    reason: 'Restauración confirmada',
+    backup: false,
+  });
+
+  assertTenantRuntimeLeaseCurrent(runtimeLease);
+  queueCloudSave(scope, restoredSnapshot);
   return true;
+}
+
+export function restoreLatestLocalBackup(): boolean {
+  const scope = requireCurrentTenantScope();
+  const runtimeLease = captureTenantRuntimeLease(scope);
+  return restoreLatestLocalBackupForTenant(scope, runtimeLease);
 }

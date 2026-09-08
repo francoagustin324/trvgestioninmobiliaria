@@ -1,29 +1,11 @@
-export const TENANT_RECOVERY_CUTOVER_REQUIRED = 'TENANT_RECOVERY_CUTOVER_REQUIRED';
-
-function dispatchRecoveryCutoverRequired(): void {
-  document.dispatchEvent(new CustomEvent('propcontrol-cloud-status', {
-    detail: {
-      message: `${TENANT_RECOVERY_CUTOVER_REQUIRED}: la resolución de diferencias queda bloqueada hasta completar el cutover tenant de recovery. No se modificó ningún dato.`,
-      kind: 'error',
-    },
-  }));
-}
+export const TENANT_RECOVERY_CUTOVER_COMPLETE = 'TENANT_RECOVERY_CUTOVER_COMPLETE';
 
 /**
- * C1 fail-closed boundary.
+ * A1.2-F recovery cutover complete.
  *
- * The historical recovery algorithm mixes CRM state with user-only sync
- * metadata. A1.2-F owns the complete tenant-aware recovery cutover. Until then
- * this capture listener blocks the older handler before it can read, write,
- * pull or push CRM data.
+ * Recovery authority now lives exclusively in mvp-auth.ts, where both local
+ * restore and cloud reconciliation capture one TenantScope + TenantRuntimeLease.
+ * This bootstrap intentionally installs no click handler: in particular it no
+ * longer intercepts [data-account-resolve], so the canonical tenant-aware
+ * resolveSyncDifferences() handler is the only effective recovery path.
  */
-document.addEventListener('click', (event) => {
-  const target = event.target instanceof Element
-    ? event.target.closest<HTMLElement>('[data-account-resolve]')
-    : null;
-  if (!target) return;
-  event.preventDefault();
-  event.stopPropagation();
-  event.stopImmediatePropagation();
-  dispatchRecoveryCutoverRequired();
-}, true);

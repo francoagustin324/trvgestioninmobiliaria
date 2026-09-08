@@ -390,7 +390,7 @@ export function assertTenantRemoteIsSafe(
 }
 
 export function hasTenantLocalBackup(scope: TenantScope, storage?: Storage): boolean {
-  return hasLocalBackup(tenantView(scope, storage));
+  return readTenantBackups(scope, storage).length > 0;
 }
 
 export function readTenantBackups(scope: TenantScope, storage?: Storage): readonly LocalBackup[] {
