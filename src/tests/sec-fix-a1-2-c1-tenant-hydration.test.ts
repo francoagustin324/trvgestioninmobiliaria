@@ -54,14 +54,18 @@ test('A1.2-C1 static: hydration resuelve tenant antes de inspeccionar o leer sto
   const inspect = body.indexOf('prepareTenantLegacyStorage(scope)');
   const activate = body.indexOf('activateStorageForTenant(scope)');
   const install = body.indexOf('installTenantRuntimeScope(scope, scope.userId)');
+  const lease = body.indexOf('captureTenantRuntimeLease(scope)');
+  const snapshot = body.indexOf('localSnapshot = structuredClone(state.crm)');
   const dirty = body.indexOf('tenantHasPendingLocalChanges(scope)');
-  const pull = body.indexOf('pullCloudData(scope, state.crm)');
+  const pull = body.indexOf('pullCloudData(scope, localSnapshot)');
 
   assert.ok(resolve >= 0);
   assert.ok(resolve < inspect);
   assert.ok(inspect < activate);
   assert.ok(activate < install);
-  assert.ok(install < dirty);
+  assert.ok(install < lease);
+  assert.ok(lease < snapshot);
+  assert.ok(snapshot < dirty);
   assert.ok(dirty < pull);
 });
 
@@ -128,7 +132,7 @@ test('A1.2-C1 static: cloud rows y CRM remoto exigen organization exacta', () =>
 test('A1.2-C1 static: capability no puede degradar 2+ memberships a writer legacy', () => {
   const source = readFileSync('src/cloud-api-compatible.ts', 'utf8');
   const start = source.indexOf('export async function resolveTenantVisitAuthority');
-  const end = source.indexOf('export async function pullCloudData');
+  const end = source.indexOf('export function pullCloudData');
   const body = source.slice(start, end);
 
   assert.match(body, /active\.length !== 1/);

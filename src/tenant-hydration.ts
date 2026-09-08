@@ -26,9 +26,12 @@ import {
   tenantHasPendingLocalChanges,
 } from './tenant-storage.js';
 import {
-  currentTenantScope,
+  assertTenantRuntimeLeaseCurrent,
+  captureTenantRuntimeLease,
   installTenantRuntimeScope,
+  tenantRuntimeLeaseIsCurrent,
   tenantScopesEqual,
+  type TenantRuntimeLease,
 } from './tenant-runtime.js';
 
 export const TENANT_HYDRATION_SESSION_CHANGED = 'TENANT_HYDRATION_SESSION_CHANGED';
@@ -66,8 +69,8 @@ export function prepareTenantLegacyStorage(scope: TenantScope): void {
   throw new Error(`${TENANT_LEGACY_STORAGE_RECOVERY_REQUIRED}:${inspection.classification}`);
 }
 
-function activateAuthenticatedMember(scope: TenantScope): void {
-  if (!tenantScopesEqual(currentTenantScope(), scope)) return;
+function activateAuthenticatedMember(scope: TenantScope, runtimeLease: TenantRuntimeLease): void {
+  if (!tenantRuntimeLeaseIsCurrent(runtimeLease) || !tenantScopesEqual(runtimeLease.scope, scope)) return;
   const member = state.crm.teamMembers.find(
     (item) => item.userId === scope.userId && item.status !== 'Suspendido',
   );
@@ -109,30 +112,44 @@ export async function hydrateTenantAfterAuth(): Promise<TenantScope> {
 
   activateStorageForTenant(scope);
   installTenantRuntimeScope(scope, scope.userId);
+  const runtimeLease = captureTenantRuntimeLease(scope);
+  let localSnapshot = structuredClone(state.crm);
 
   if (tenantHasPendingLocalChanges(scope)) {
     try {
-      await pushCloudData(scope, state.crm);
+      await pushCloudData(scope, localSnapshot);
+      assertTenantRuntimeLeaseCurrent(runtimeLease);
     } catch (error) {
+      if (!tenantRuntimeLeaseIsCurrent(runtimeLease)) {
+        assertTenantRuntimeLeaseCurrent(runtimeLease);
+      }
       const message = error instanceof Error ? error.message : 'No se pudieron sincronizar los cambios locales.';
       markTenantSyncError(scope, message);
-      activateAuthenticatedMember(scope);
+      activateAuthenticatedMember(scope, runtimeLease);
       return scope;
     }
   }
 
-  const cloud = await pullCloudData(scope, state.crm);
+  const cloud = await pullCloudData(scope, localSnapshot);
+  assertTenantRuntimeLeaseCurrent(runtimeLease);
   if (cloud) {
-    replaceDataForTenant(scope, cloud);
+    if (!replaceDataForTenant(scope, cloud)) assertTenantRuntimeLeaseCurrent(runtimeLease);
   } else {
-    const firstData = isUntouchedTenantDemoData(scope, state.crm)
-      ? emptyOperationalData(state.crm)
-      : state.crm;
-    if (firstData !== state.crm) replaceDataForTenant(scope, firstData);
-    await pushCloudData(scope, state.crm);
-    const refreshed = await pullCloudData(scope, state.crm);
-    if (refreshed) replaceDataForTenant(scope, refreshed);
+    const firstData = isUntouchedTenantDemoData(scope, localSnapshot)
+      ? emptyOperationalData(localSnapshot)
+      : localSnapshot;
+    if (firstData !== localSnapshot) {
+      assertTenantRuntimeLeaseCurrent(runtimeLease);
+      if (!replaceDataForTenant(scope, firstData)) assertTenantRuntimeLeaseCurrent(runtimeLease);
+      localSnapshot = structuredClone(firstData);
+    }
+    await pushCloudData(scope, localSnapshot);
+    assertTenantRuntimeLeaseCurrent(runtimeLease);
+    const refreshed = await pullCloudData(scope, localSnapshot);
+    assertTenantRuntimeLeaseCurrent(runtimeLease);
+    if (refreshed && !replaceDataForTenant(scope, refreshed)) assertTenantRuntimeLeaseCurrent(runtimeLease);
   }
-  activateAuthenticatedMember(scope);
+  assertTenantRuntimeLeaseCurrent(runtimeLease);
+  activateAuthenticatedMember(scope, runtimeLease);
   return scope;
 }

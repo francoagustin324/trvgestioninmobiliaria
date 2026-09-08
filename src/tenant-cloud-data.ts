@@ -23,6 +23,11 @@ import {
   tenantCloudTransport,
   type TenantCloudTransport,
 } from './tenant-cloud-context.js';
+import {
+  assertTenantRuntimeLeaseCurrent,
+  captureTenantRuntimeLease,
+  type TenantRuntimeLease,
+} from './tenant-runtime.js';
 
 const SNAPSHOT_SOURCE = 'propcontrol_system_snapshot';
 
@@ -180,38 +185,53 @@ async function tenantLegacySnapshotRow(transport: TenantCloudTransport): Promise
   return row;
 }
 
-export async function pullTenantLegacyCloudData(scope: TenantScope): Promise<CrmData | null> {
+export async function pullTenantLegacyCloudData(
+  scope: TenantScope,
+  runtimeLease: TenantRuntimeLease = captureTenantRuntimeLease(scope),
+): Promise<CrmData | null> {
   const transport = await tenantCloudTransport(scope);
+  assertTenantRuntimeLeaseCurrent(runtimeLease);
   const row = await tenantLegacySnapshotRow(transport);
+  assertTenantRuntimeLeaseCurrent(runtimeLease);
   const crm = row?.internal_data?.crm;
   if (!isCrmData(crm)) {
     markTenantCloudHydrated(scope, row?.updated_at || null);
     return null;
   }
   assertTenantCrmScope(scope, crm);
+  assertTenantRuntimeLeaseCurrent(runtimeLease);
   markTenantCloudHydrated(scope, row?.updated_at || null, tenantFingerprint(crm));
   return structuredClone(crm);
 }
 
-export async function pullTenantCloudData(scope: TenantScope, fallback: CrmData): Promise<CrmData | null> {
+export async function pullTenantCloudData(
+  scope: TenantScope,
+  fallback: CrmData,
+  runtimeLease: TenantRuntimeLease = captureTenantRuntimeLease(scope),
+): Promise<CrmData | null> {
   const transport = await tenantCloudTransport(scope);
+  assertTenantRuntimeLeaseCurrent(runtimeLease);
   try {
     const records = await fetchCloudRecords(transport);
+    assertTenantRuntimeLeaseCurrent(runtimeLease);
     const crmRecords = crmSyncRecords(records);
     if (crmRecords.length) {
       const crm = cloudRecordsToCrm(crmRecords, transport.context, fallback);
       assertTenantCrmScope(scope, crm);
+      assertTenantRuntimeLeaseCurrent(runtimeLease);
       markTenantCloudHydrated(scope, latestRemoteVersion(crmRecords));
       return crm;
     }
 
     if (transport.context.currentRole !== 'Corredor') {
       const legacy = await tenantLegacySnapshotRow(transport);
+      assertTenantRuntimeLeaseCurrent(runtimeLease);
       const legacyCrm = legacy?.internal_data?.crm;
       if (isCrmData(legacyCrm)) {
         assertTenantCrmScope(scope, legacyCrm);
         const crm = { ...structuredClone(legacyCrm), teamMembers: transport.context.members };
         assertTenantCrmScope(scope, crm);
+        assertTenantRuntimeLeaseCurrent(runtimeLease);
         markTenantCloudHydrated(scope, legacy?.updated_at || null, tenantFingerprint(crm));
         return crm;
       }
@@ -221,20 +241,24 @@ export async function pullTenantCloudData(scope: TenantScope, fallback: CrmData)
 
     const crm = cloudRecordsToCrm([], transport.context, fallback);
     assertTenantCrmScope(scope, crm);
+    assertTenantRuntimeLeaseCurrent(runtimeLease);
     markTenantCloudHydrated(scope, null);
     return crm;
   } catch (error) {
     if (!isTenantModernSchemaUnavailable(error)) throw error;
+    assertTenantRuntimeLeaseCurrent(runtimeLease);
     if (transport.context.currentRole === 'Corredor') {
       throw new Error('La seguridad multiusuario todavía no fue activada en Supabase.');
     }
     const legacy = await tenantLegacySnapshotRow(transport);
+    assertTenantRuntimeLeaseCurrent(runtimeLease);
     const crm = legacy?.internal_data?.crm;
     if (!isCrmData(crm)) {
       markTenantCloudHydrated(scope, legacy?.updated_at || null);
       return null;
     }
     assertTenantCrmScope(scope, crm);
+    assertTenantRuntimeLeaseCurrent(runtimeLease);
     markTenantCloudHydrated(scope, legacy?.updated_at || null, tenantFingerprint(crm));
     return structuredClone(crm);
   }

@@ -1,3 +1,4 @@
+import type { TenantScope } from './active-organization.js';
 import {
   accountIdentityPresentation,
   accountSyncPresentation,
@@ -15,7 +16,7 @@ import { appIcons } from './icons.js';
 import type { CrmData } from './models.js';
 import {
   hasLocalBackup,
-  replaceData,
+  replaceDataForTenant,
   restoreLatestLocalBackup,
   setActiveMemberId,
   state,
@@ -29,7 +30,13 @@ import {
 import { stableFingerprint } from './sync-safety.js';
 import { canManageTeam } from './team-access.js';
 import { hydrateTenantAfterAuth } from './tenant-hydration.js';
-import { requireCurrentTenantScope } from './tenant-runtime.js';
+import {
+  assertTenantRuntimeLeaseCurrent,
+  captureTenantRuntimeLease,
+  requireCurrentTenantScope,
+  tenantRuntimeLeaseIsCurrent,
+  type TenantRuntimeLease,
+} from './tenant-runtime.js';
 import {
   markTenantSyncError,
   readTenantSyncState,
@@ -49,15 +56,37 @@ function formValue(form: HTMLFormElement, name: string): string {
   return String(new FormData(form).get(name) || '').trim();
 }
 
-function activateMember(): void {
+function activateMember(scope: TenantScope, runtimeLease: TenantRuntimeLease): void {
+  if (!tenantRuntimeLeaseIsCurrent(runtimeLease)) return;
   const session = getCloudSession();
-  if (!session) return;
-  const member = state.crm.teamMembers.find((item) => item.userId === session.userId && item.status !== 'Suspendido');
+  if (!session || session.userId !== scope.userId) return;
+  const member = state.crm.teamMembers.find((item) => item.userId === scope.userId && item.status !== 'Suspendido');
   if (member) setActiveMemberId(member.id);
 }
 
 function dispatchCloudStatus(message: string, kind: 'success' | 'error' | 'working' = 'success'): void {
   document.dispatchEvent(new CustomEvent('propcontrol-cloud-status', { detail: { message, kind } }));
+}
+
+function dispatchTenantCloudStatus(
+  runtimeLease: TenantRuntimeLease,
+  message: string,
+  kind: 'success' | 'error' | 'working' = 'success',
+): void {
+  if (!tenantRuntimeLeaseIsCurrent(runtimeLease)) return;
+  document.dispatchEvent(new CustomEvent('propcontrol-cloud-status', {
+    detail: {
+      scope: runtimeLease.scope,
+      runtimeLease,
+      message,
+      kind,
+    },
+  }));
+}
+
+function dispatchTenantRender(runtimeLease: TenantRuntimeLease): void {
+  if (!tenantRuntimeLeaseIsCurrent(runtimeLease)) return;
+  document.dispatchEvent(new CustomEvent('trv-render'));
 }
 
 function accountMenuRoot(): HTMLElement | null {
@@ -140,31 +169,43 @@ async function hydrateAfterAuth(): Promise<void> {
   await hydrateTenantAfterAuth();
 }
 
-async function synchronizeNow(): Promise<void> {
+export async function synchronizeNow(): Promise<void> {
   const scope = requireCurrentTenantScope();
+  const runtimeLease = captureTenantRuntimeLease(scope);
+  const localSnapshot = structuredClone(state.crm);
   try {
-    dispatchCloudStatus('Comprobando datos locales y de la nube…', 'working');
-    if (tenantHasPendingLocalChanges(scope)) await pushCloudData(scope, state.crm);
-    const cloud = await pullCloudData(scope, state.crm);
-    if (cloud) replaceData(cloud);
-    dispatchCloudStatus('Sincronización completada sin sobrescrituras.', 'success');
-    document.dispatchEvent(new CustomEvent('trv-render'));
+    dispatchTenantCloudStatus(runtimeLease, 'Comprobando datos locales y de la nube…', 'working');
+    if (tenantHasPendingLocalChanges(scope)) {
+      await pushCloudData(scope, localSnapshot);
+      assertTenantRuntimeLeaseCurrent(runtimeLease);
+    }
+    const cloud = await pullCloudData(scope, localSnapshot);
+    assertTenantRuntimeLeaseCurrent(runtimeLease);
+    if (cloud && !replaceDataForTenant(scope, cloud)) assertTenantRuntimeLeaseCurrent(runtimeLease);
+    dispatchTenantCloudStatus(runtimeLease, 'Sincronización completada sin sobrescrituras.', 'success');
+    dispatchTenantRender(runtimeLease);
   } catch (error) {
+    if (!tenantRuntimeLeaseIsCurrent(runtimeLease)) return;
     const message = error instanceof Error ? error.message : 'No se pudo sincronizar.';
     markTenantSyncError(scope, message);
-    dispatchCloudStatus(message, 'error');
+    dispatchTenantCloudStatus(runtimeLease, message, 'error');
   }
 }
 
-async function inspectCloudWithoutChangingLocalState(local: CrmData): Promise<{ cloud: CrmData | null; remoteVersion: string }> {
-  const scope = requireCurrentTenantScope();
+async function inspectCloudWithoutChangingLocalState(
+  scope: TenantScope,
+  runtimeLease: TenantRuntimeLease,
+  local: CrmData,
+): Promise<{ cloud: CrmData | null; remoteVersion: string }> {
+  assertTenantRuntimeLeaseCurrent(runtimeLease);
   const previousSyncState = readTenantSyncState(scope);
   try {
-    const cloud = await pullCloudData(scope, local);
+    const cloud = await pullCloudData(scope, structuredClone(local));
+    assertTenantRuntimeLeaseCurrent(runtimeLease);
     const inspectedState = readTenantSyncState(scope);
     return { cloud, remoteVersion: inspectedState.lastCloudVersion || '' };
   } finally {
-    restoreSyncStateSnapshot(scope, previousSyncState);
+    if (tenantRuntimeLeaseIsCurrent(runtimeLease)) restoreSyncStateSnapshot(scope, previousSyncState);
   }
 }
 
@@ -173,12 +214,14 @@ function isDifferenceError(message: string | undefined): boolean {
   return text.includes('datos distintos') || text.includes('cambios más nuevos en la nube');
 }
 
-async function resolveSyncDifferences(): Promise<void> {
+export async function resolveSyncDifferences(): Promise<void> {
   const scope = requireCurrentTenantScope();
+  const runtimeLease = captureTenantRuntimeLease(scope);
   const originalLocal = structuredClone(state.crm);
   try {
-    dispatchCloudStatus('Revisando diferencias sin modificar tus datos…', 'working');
-    const inspected = await inspectCloudWithoutChangingLocalState(originalLocal);
+    dispatchTenantCloudStatus(runtimeLease, 'Revisando diferencias sin modificar tus datos…', 'working');
+    const inspected = await inspectCloudWithoutChangingLocalState(scope, runtimeLease, originalLocal);
+    assertTenantRuntimeLeaseCurrent(runtimeLease);
     if (!inspected.cloud || !inspected.remoteVersion) {
       throw new Error('No se encontró una copia válida en la nube. No se modificó ningún dato.');
     }
@@ -191,11 +234,12 @@ async function resolveSyncDifferences(): Promise<void> {
 
     const hasDifferences = result.localOnlyCount > 0 || result.cloudOnlyCount > 0;
     if (hasDifferences && !window.confirm(`${reconciliationMessage(result)}\n\n¿Unir ambas copias y continuar?`)) {
-      dispatchCloudStatus('No se realizó ningún cambio.', 'success');
+      dispatchTenantCloudStatus(runtimeLease, 'No se realizó ningún cambio.', 'success');
       return;
     }
 
-    const latestInspection = await inspectCloudWithoutChangingLocalState(originalLocal);
+    const latestInspection = await inspectCloudWithoutChangingLocalState(scope, runtimeLease, originalLocal);
+    assertTenantRuntimeLeaseCurrent(runtimeLease);
     if (!latestInspection.cloud || !latestInspection.remoteVersion) {
       throw new Error('No se pudo volver a comprobar la nube. No se modificó ningún dato.');
     }
@@ -208,30 +252,35 @@ async function resolveSyncDifferences(): Promise<void> {
       throw new Error('Aparecieron cambios incompatibles durante la revisión. No se modificó ningún dato.');
     }
 
-    replaceData(latestResult.merged);
-    writeTenantSnapshot(scope, state.crm, {
+    const mergedSnapshot = structuredClone(latestResult.merged);
+    assertTenantRuntimeLeaseCurrent(runtimeLease);
+    if (!replaceDataForTenant(scope, mergedSnapshot)) assertTenantRuntimeLeaseCurrent(runtimeLease);
+    writeTenantSnapshot(scope, mergedSnapshot, {
       markDirty: true,
       reason: 'Unión segura antes de sincronizar',
       backup: false,
     });
     authorizeConfirmedCloudResolution(scope, latestInspection.remoteVersion);
-    await pushCloudData(scope, state.crm);
+    await pushCloudData(scope, mergedSnapshot);
+    assertTenantRuntimeLeaseCurrent(runtimeLease);
 
-    const verified = await pullCloudData(scope, state.crm);
+    const verified = await pullCloudData(scope, mergedSnapshot);
+    assertTenantRuntimeLeaseCurrent(runtimeLease);
     if (!verified) throw new Error('La nube no devolvió la copia verificada después de guardar.');
-    const verification = reconcileCrmSnapshots(state.crm, verified);
+    const verification = reconcileCrmSnapshots(mergedSnapshot, verified);
     if (verification.localOnlyCount || verification.conflictCount) {
       throw new Error('La verificación final no coincidió. La copia local unida sigue protegida.');
     }
-    replaceData(verified);
-    activateMember();
-    dispatchCloudStatus('Datos unidos y verificados. La computadora y la nube ya tienen la misma información.', 'success');
-    document.dispatchEvent(new CustomEvent('trv-render'));
+    if (!replaceDataForTenant(scope, verified)) assertTenantRuntimeLeaseCurrent(runtimeLease);
+    activateMember(scope, runtimeLease);
+    dispatchTenantCloudStatus(runtimeLease, 'Datos unidos y verificados. La computadora y la nube ya tienen la misma información.', 'success');
+    dispatchTenantRender(runtimeLease);
   } catch (error) {
+    if (!tenantRuntimeLeaseIsCurrent(runtimeLease)) return;
     const message = error instanceof Error ? error.message : 'No se pudieron resolver las diferencias.';
     markTenantSyncError(scope, message);
-    dispatchCloudStatus(message, 'error');
-    document.dispatchEvent(new CustomEvent('trv-render'));
+    dispatchTenantCloudStatus(runtimeLease, message, 'error');
+    dispatchTenantRender(runtimeLease);
   }
 }
 

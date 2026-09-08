@@ -5,9 +5,9 @@ import type { CrmData } from './models.js';
 import {
   getCloudSession,
   inviteTeamMember,
-  signInCloud,
-  signOutCloud,
-  signUpCloud,
+  signInCloud as signInCloudRaw,
+  signOutCloud as signOutCloudRaw,
+  signUpCloud as signUpCloudRaw,
   updateTeamMemberAccess,
 } from './cloud-api.js';
 import { fetchMembershipCatalog } from './membership-catalog.js';
@@ -30,7 +30,9 @@ import {
   tenantCloudTransport,
 } from './tenant-cloud-context.js';
 import {
+  assertTenantRuntimeLeaseCurrent,
   captureTenantRuntimeLease,
+  invalidateTenantRuntimeScope,
   requireCurrentTenantScope,
   tenantRuntimeKey,
   type TenantRuntimeLease,
@@ -39,11 +41,25 @@ import {
 export {
   getCloudSession,
   inviteTeamMember,
-  signInCloud,
-  signOutCloud,
-  signUpCloud,
   updateTeamMemberAccess,
 };
+
+export async function signInCloud(email: string, password: string) {
+  const session = await signInCloudRaw(email, password);
+  invalidateTenantRuntimeScope();
+  return session;
+}
+
+export async function signUpCloud(email: string, password: string, companyName: string) {
+  const result = await signUpCloudRaw(email, password, companyName);
+  if (result.session) invalidateTenantRuntimeScope();
+  return result;
+}
+
+export function signOutCloud(): void {
+  invalidateTenantRuntimeScope();
+  signOutCloudRaw();
+}
 
 export const TENANT_VISIT_CAPABILITY_INDETERMINATE = 'TENANT_VISIT_CAPABILITY_INDETERMINATE';
 export const TENANT_VISIT_TRANSACTION_SCOPE_REQUIRED = 'TENANT_VISIT_TRANSACTION_SCOPE_REQUIRED';
@@ -208,7 +224,10 @@ export async function pullCloudData(
   const fallback = isTenantScope(scopeOrFallback) ? fallbackMaybe : scopeOrFallback;
   if (!fallback) throw new Error('TENANT_CLOUD_FALLBACK_REQUIRED');
   assertTenantCrmScope(scope, fallback);
-  const cloud = await pullTenantCloudData(scope, fallback);
+  const runtimeLease = captureTenantRuntimeLease(scope);
+  const frozenFallback = structuredClone(fallback);
+  const cloud = await pullTenantCloudData(scope, frozenFallback, runtimeLease);
+  assertTenantRuntimeLeaseCurrent(runtimeLease);
   if (cloud) assertTenantCrmScope(scope, cloud);
   return cloud;
 }
