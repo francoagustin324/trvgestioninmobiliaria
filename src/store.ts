@@ -1,4 +1,5 @@
 import { queueCloudSave } from './cloud-api-compatible.js';
+import type { TenantScope } from './active-organization.js';
 import type {
   ActivityEntry,
   ConversationMessage,
@@ -11,12 +12,17 @@ import type {
 } from './models.js';
 import { defaultSettings, initialData } from './models.js';
 import {
-  activateAccountStorage,
-  hasLocalBackup as hasStoredLocalBackup,
-  readLocalSnapshot,
-  restoreLatestBackup,
-  writeLocalSnapshot,
-} from './sync-safety.js';
+  assertTenantCrmScope,
+  hasTenantLocalBackup,
+  readTenantSnapshot,
+  restoreLatestTenantBackup,
+  writeTenantSnapshot,
+} from './tenant-storage.js';
+import {
+  currentTenantScope,
+  requireCurrentTenantScope,
+  tenantScopesEqual,
+} from './tenant-runtime.js';
 import {
   canonicalUuid,
   normalizedSyncMetadata,
@@ -179,9 +185,15 @@ function normalizedData(value: Partial<CrmData>): CrmData {
   };
 }
 
-function loadData(): CrmData {
-  const local = readLocalSnapshot();
-  return local ? normalizedData(local) : normalizedData(structuredClone(initialData));
+function scopedInitialData(scope: TenantScope): CrmData {
+  const initial = structuredClone(initialData);
+  initial.organization.id = scope.organizationId;
+  return normalizedData(initial);
+}
+
+function loadData(scope: TenantScope): CrmData {
+  const local = readTenantSnapshot(scope);
+  return local ? normalizedData(local) : scopedInitialData(scope);
 }
 
 function loadActiveMemberId(crm: CrmData): number {
@@ -193,7 +205,7 @@ function loadActiveMemberId(crm: CrmData): number {
     ?? 1;
 }
 
-const loadedCrm = loadData();
+const loadedCrm = normalizedData(structuredClone(initialData));
 
 export const state = {
   crm: loadedCrm,
@@ -219,9 +231,9 @@ function resetTransientState(): void {
   state.editingContactId = null;
 }
 
-export function activateStorageForCurrentSession(): void {
-  activateAccountStorage();
-  state.crm = loadData();
+export function activateStorageForTenant(scope: TenantScope): void {
+  state.crm = loadData(scope);
+  assertTenantCrmScope(scope, state.crm);
   resetTransientState();
 }
 
@@ -237,23 +249,38 @@ export function setActiveMemberId(memberId: number): void {
     : null;
 }
 
-export function replaceData(data: CrmData, syncCloud = false): void {
-  state.crm = normalizedData(data);
-  resetTransientState();
-  writeLocalSnapshot(state.crm, {
+export function replaceDataForTenant(scope: TenantScope, data: CrmData, syncCloud = false): boolean {
+  if (!tenantScopesEqual(currentTenantScope(), scope)) return false;
+  assertTenantCrmScope(scope, data);
+  const normalized = normalizedData(data);
+  assertTenantCrmScope(scope, normalized);
+  writeTenantSnapshot(scope, normalized, {
     markDirty: syncCloud,
     reason: syncCloud ? 'Restauración local' : 'Carga desde la nube',
   });
-  if (syncCloud) queueCloudSave(state.crm);
+  state.crm = normalized;
+  resetTransientState();
+  if (syncCloud) queueCloudSave(scope, state.crm);
+  return true;
+}
+
+export function replaceData(data: CrmData, syncCloud = false): void {
+  const scope = requireCurrentTenantScope();
+  if (!replaceDataForTenant(scope, data, syncCloud)) {
+    throw new Error('TENANT_RUNTIME_STALE');
+  }
 }
 
 export function saveData(reason = 'Cambio local'): void {
-  writeLocalSnapshot(state.crm, { markDirty: true, reason });
-  queueCloudSave(state.crm);
+  const scope = requireCurrentTenantScope();
+  assertTenantCrmScope(scope, state.crm);
+  writeTenantSnapshot(scope, state.crm, { markDirty: true, reason });
+  queueCloudSave(scope, state.crm);
 }
 
 export function hasLocalBackup(): boolean {
-  return hasStoredLocalBackup();
+  const scope = currentTenantScope();
+  return scope ? hasTenantLocalBackup(scope) : false;
 }
 
 export function canRestoreLatestLocalBackup(): boolean {
@@ -265,11 +292,14 @@ export function canRestoreLatestLocalBackup(): boolean {
 
 export function restoreLatestLocalBackup(): boolean {
   if (!canRestoreLatestLocalBackup()) return false;
-  const restored = restoreLatestBackup();
+  const scope = requireCurrentTenantScope();
+  const restored = restoreLatestTenantBackup(scope);
   if (!restored) return false;
-  state.crm = normalizedData(restored);
+  const normalized = normalizedData(restored);
+  assertTenantCrmScope(scope, normalized);
+  state.crm = normalized;
   resetTransientState();
-  writeLocalSnapshot(state.crm, { markDirty: true, reason: 'Restauración confirmada', backup: false });
-  queueCloudSave(state.crm);
+  writeTenantSnapshot(scope, state.crm, { markDirty: true, reason: 'Restauración confirmada', backup: false });
+  queueCloudSave(scope, state.crm);
   return true;
 }
