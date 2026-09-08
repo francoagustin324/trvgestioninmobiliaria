@@ -25,6 +25,7 @@ jobs:
         run: |
           node --test --test-concurrency=1 \
             dist/tests/sec-fix-a1-2-c2-tenant-async.test.js \
+            dist/tests/sec-fix-a1-2-c2-job-freeze.test.js \
             dist/tests/sec-fix-a1-2-c1-gate-closure.test.js \
             dist/tests/sec-fix-a1-2-c1-tenant-hydration.test.js \
             dist/tests/sec-fix-a1-2-a-active-organization.test.js \
