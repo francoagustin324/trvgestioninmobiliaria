@@ -10,6 +10,7 @@ import {
   markCloudSaved,
   markSyncError,
   readLocalSnapshot,
+  restoreLatestBackup,
   scopedStorageKey,
   stableFingerprint,
   syncSaveToken,
@@ -369,6 +370,13 @@ export function readTenantBackups(scope: TenantScope, storage?: Storage): readon
   const raw = target.getItem(namespace.backupsKey);
   if (raw === null) return Object.freeze([]);
   return parseTenantBackupSet(raw, namespace.scope.organizationId);
+}
+
+export function restoreLatestTenantBackup(scope: TenantScope, storage?: Storage): CrmData | null {
+  readTenantBackups(scope, storage);
+  const restored = restoreLatestBackup(tenantView(scope, storage));
+  if (restored) assertTenantCrmScope(scope, restored);
+  return restored;
 }
 
 export function tenantFingerprint(value: unknown): string {
