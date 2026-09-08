@@ -1,0 +1,43 @@
+name: SEC-FIX-A1.2-C2 Targeted Validation
+
+on:
+  push:
+    branches:
+      - validation/sec-fix-a1-2-c2
+  workflow_dispatch:
+
+env:
+  PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
+
+jobs:
+  targeted:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - name: Instalar dependencias
+        run: npm ci --silent
+      - name: Compilar TypeScript
+        run: npm run build --silent
+      - name: Ejecutar tests targeted C2
+        run: |
+          node --test --test-concurrency=1 \
+            dist/tests/sec-fix-a1-2-c2-tenant-async.test.js \
+            dist/tests/sec-fix-a1-2-c1-gate-closure.test.js \
+            dist/tests/sec-fix-a1-2-c1-tenant-hydration.test.js \
+            dist/tests/sec-fix-a1-2-a-active-organization.test.js \
+            dist/tests/sec-fix-a1-2-b-tenant-storage.test.js \
+            dist/tests/sec-fix-a1-2-b-2-tenant-storage-boundary.test.js \
+            dist/tests/cloud-save-serial.test.js \
+            dist/tests/automatic-save.test.js \
+            dist/tests/sync-safety.test.js \
+            dist/tests/sync-reconciliation.test.js \
+            dist/tests/cloud-api-compatible.test.js \
+            dist/tests/cloud-records.test.js \
+            dist/tests/sync-recovery-bootstrap.test.js \
+            dist/tests/mvp-scope.test.js \
+            dist/tests/invitation-auth-flow.test.js \
+            dist/tests/b0-1-membership-security.test.js \
+            dist/tests/b0-3-user-onboarding.test.js
