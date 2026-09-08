@@ -1,0 +1,76 @@
+name: SEC-FIX-A1.2-E Validation
+
+on:
+  push:
+    branches:
+      - validation/sec-fix-a1-2-e
+  workflow_dispatch:
+
+jobs:
+  e-validation:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - name: Instalar dependencias
+        run: npm ci --silent
+      - name: Compilar TypeScript
+        run: npm run build --silent
+      - name: Ejecutar tests E
+        run: |
+          set +e
+          node --test --test-concurrency=1 \
+            dist/tests/sec-fix-a1-2-e-team-tenant-authority.test.js \
+            dist/tests/team-management.test.js > e-tests.log 2>&1
+          code=$?
+          cat e-tests.log
+          exit $code
+      - name: Ejecutar A1.1 PostgreSQL
+        run: |
+          set +e
+          node --test --test-concurrency=1 dist/tests/sec-fix-a1-1-org-aware-db-compat.test.js > a11-postgres.log 2>&1
+          code=$?
+          cat a11-postgres.log
+          exit $code
+      - name: Ejecutar targeted E + D + A1.1 + A+B+C1+C2+C3
+        run: |
+          set +e
+          node --test --test-concurrency=1 \
+            dist/tests/sec-fix-a1-2-e-team-tenant-authority.test.js \
+            dist/tests/team-management.test.js \
+            dist/tests/sec-fix-a1-2-d-org-aware-visit-cutover.test.js \
+            dist/tests/sec-fix-a1-1-org-aware-db-compat.test.js \
+            dist/tests/sec-fix-a1-2-c3-stale-async.test.js \
+            dist/tests/sec-fix-a1-2-c2-tenant-async.test.js \
+            dist/tests/sec-fix-a1-2-c1-gate-closure.test.js \
+            dist/tests/sec-fix-a1-2-c1-tenant-hydration.test.js \
+            dist/tests/sec-fix-a1-2-a-active-organization.test.js \
+            dist/tests/sec-fix-a1-2-b-tenant-storage.test.js \
+            dist/tests/sec-fix-a1-2-b-2-tenant-storage-boundary.test.js \
+            dist/tests/cloud-save-serial.test.js \
+            dist/tests/automatic-save.test.js \
+            dist/tests/sync-safety.test.js \
+            dist/tests/sync-reconciliation.test.js \
+            dist/tests/cloud-api-compatible.test.js \
+            dist/tests/cloud-records.test.js \
+            dist/tests/sync-recovery-bootstrap.test.js \
+            dist/tests/mvp-scope.test.js \
+            dist/tests/invitation-auth-flow.test.js \
+            dist/tests/b0-1-membership-security.test.js \
+            dist/tests/b0-3-user-onboarding.test.js > e-targeted.log 2>&1
+          code=$?
+          cat e-targeted.log
+          exit $code
+      - name: Guardar diagnósticos E
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: sec-fix-a1-2-e-diagnostics
+          path: |
+            e-tests.log
+            a11-postgres.log
+            e-targeted.log
+          if-no-files-found: warn
+          retention-days: 3
