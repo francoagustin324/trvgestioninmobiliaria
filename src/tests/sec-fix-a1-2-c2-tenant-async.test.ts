@@ -370,7 +370,7 @@ test('C2 static: save completion, status y authoritative event cargan scope+leas
   assert.match(compatible, /timerKey = cloudSaveQueueKey\(job\.scope\)/);
   assert.doesNotMatch(compatible, /timerKey\s*=\s*(?:scope|job\.scope)\.userId\b/);
   assert.match(compatible, /runCloudPush\(job: CloudSaveJob\)[\s\S]*session\.userId !== job\.scope\.userId/);
-  assert.match(compatible, /resolveTenantVisitAuthority\(job\.scope\)/);
+  assert.match(compatible, /resolveTenantVisitAuthority\(job\.scope, job\.runtimeLease\)/);
   assert.match(compatible, /pushTenantModernCloudData\(job\.scope, job\.snapshot, job\.token\)/);
   assert.match(compatible, /pushTenantLegacyCloudData\(job\.scope, job\.snapshot, job\.token\)/);
 
@@ -380,7 +380,8 @@ test('C2 static: save completion, status y authoritative event cargan scope+leas
   const authoritative = compatible.slice(eventStart, eventEnd);
   assert.match(authoritative, /scope: job\.scope/);
   assert.match(authoritative, /runtimeLease: job\.runtimeLease/);
-  assert.match(authoritative, /crm: structuredClone\(job\.snapshot\)/);
+  assert.match(authoritative, /function emitAuthoritativeSnapshot\(job: CloudSaveJob, crm: CrmData = job\.snapshot\)/);
+  assert.match(authoritative, /crm: structuredClone\(crm\)/);
   assert.match(authoritative, /propcontrol-cloud-authoritative-snapshot/);
 
   assert.match(compatible, /TenantCloudStatusDetail[\s\S]*scope:[\s\S]*runtimeLease:[\s\S]*message:[\s\S]*kind:/);

@@ -181,6 +181,7 @@ test('C2: el coordinador compatible reutiliza LatestSerialQueue con job y claves
   const authoritative = compatible.slice(eventStart, eventEnd);
   assert.match(authoritative, /scope: job\.scope/);
   assert.match(authoritative, /runtimeLease: job\.runtimeLease/);
-  assert.match(authoritative, /crm: structuredClone\(job\.snapshot\)/);
+  assert.match(authoritative, /function emitAuthoritativeSnapshot\(job: CloudSaveJob, crm: CrmData = job\.snapshot\)/);
+  assert.match(authoritative, /crm: structuredClone\(crm\)/);
   assert.match(authoritative, /propcontrol-cloud-authoritative-snapshot/);
 });

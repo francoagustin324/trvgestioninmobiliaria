@@ -12,6 +12,7 @@ import {
   tenantStorageNamespace,
   writeTenantSnapshot,
 } from '../tenant-storage.js';
+import { installTenantRuntimeScope, invalidateTenantRuntimeScope } from '../tenant-runtime.js';
 
 class MemoryStorage implements Storage {
   private readonly data = new Map<string, string>();
@@ -144,7 +145,7 @@ test('A1.2-C1.1 reconciliation: restore y authorize modifican sólo sync del ten
   assert.doesNotMatch(source, /scopedStorageKey|getSyncState\(|localStorage\./);
 });
 
-test('A1.2-C1.1 Visit capability: 2 active falla indeterminado antes de cualquier writer', async () => {
+test('A1.2-D Visit capability: multi-org usa scope exacto y no degrada a writer legacy', async () => {
   const storage = new MemoryStorage();
   storage.setItem('propcontrol-cloud-session-v1', JSON.stringify({
     accessToken: 'token',
@@ -154,6 +155,8 @@ test('A1.2-C1.1 Visit capability: 2 active falla indeterminado antes de cualquie
     email: 'user@example.com',
   }));
   Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: storage });
+  invalidateTenantRuntimeScope();
+  installTenantRuntimeScope(scopeA, userId);
 
   const requests: Array<{ method: string; pathname: string }> = [];
   Object.defineProperty(globalThis, 'fetch', {
@@ -166,19 +169,22 @@ test('A1.2-C1.1 Visit capability: 2 active falla indeterminado antes de cualquie
         return json({ configured: true, url: 'https://supabase.test', publishableKey: 'key' });
       }
       if (url.pathname === '/rest/v1/organization_members') {
+        assert.equal(url.searchParams.get('organization_id'), 'eq.org-a');
         return json([
           { organization_id: 'org-a', member_id: 1, user_id: userId, role: 'owner', status: 'active' },
-          { organization_id: 'org-b', member_id: 2, user_id: userId, role: 'owner', status: 'active' },
         ]);
+      }
+      if (url.pathname === '/rest/v1/rpc/visit_transaction_authority_active_v2') {
+        assert.equal(method, 'POST');
+        assert.deepEqual(JSON.parse(String(init?.body ?? '{}')), { p_organization_id: 'org-a' });
+        return json(true);
       }
       throw new Error(`unexpected ${method} ${url.pathname}`);
     },
   });
 
-  await assert.rejects(
-    () => resolveTenantVisitAuthority(scopeA),
-    /TENANT_VISIT_CAPABILITY_INDETERMINATE/,
-  );
-  assert.equal(requests.some((request) => request.method !== 'GET'), false);
-  assert.equal(requests.some((request) => request.pathname.includes('visit_transaction_authority_active')), false);
+  assert.equal(await resolveTenantVisitAuthority(scopeA), true);
+  assert.equal(requests.some((request) => request.pathname === '/rest/v1/rpc/visit_transaction_authority_active'), false);
+  assert.equal(requests.some((request) => request.pathname.includes('client_snapshot_cas')), false);
+  assert.equal(requests.some((request) => request.pathname.includes('commercial_visit_mutation')), false);
 });

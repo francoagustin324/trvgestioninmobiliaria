@@ -135,8 +135,9 @@ test('A1.2-C1 static: capability no puede degradar 2+ memberships a writer legac
   const end = source.indexOf('export function pullCloudData');
   const body = source.slice(start, end);
 
-  assert.match(body, /active\.length !== 1/);
-  assert.match(body, /TENANT_VISIT_CAPABILITY_INDETERMINATE/);
+  assert.match(body, /captureTenantRuntimeLease\(scope\)/);
+  assert.match(body, /visitTransactionAuthorityActiveV2\(scope, runtimeLease\)/);
+  assert.doesNotMatch(body, /active\.length|active\[0\]/);
   assert.equal(body.includes('activate_my_organization_memberships'), false);
   assert.equal(body.includes("searchParams.set('limit'"), false);
 });
