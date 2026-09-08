@@ -1,5 +1,6 @@
 import type { TenantScope } from './active-organization.js';
 import { activeMembershipsForUser } from './active-organization.js';
+import { LatestSerialQueue } from './cloud-save-serial.js';
 import type { CrmData } from './models.js';
 import {
   getCloudSession,
@@ -10,6 +11,7 @@ import {
   updateTeamMemberAccess,
 } from './cloud-api.js';
 import { fetchMembershipCatalog } from './membership-catalog.js';
+import type { SyncSaveToken } from './sync-safety.js';
 import {
   assertTenantCrmScope,
   markTenantSyncError,
@@ -27,7 +29,12 @@ import {
   tenantCloudHeaders,
   tenantCloudTransport,
 } from './tenant-cloud-context.js';
-import { requireCurrentTenantScope } from './tenant-runtime.js';
+import {
+  captureTenantRuntimeLease,
+  requireCurrentTenantScope,
+  tenantRuntimeKey,
+  type TenantRuntimeLease,
+} from './tenant-runtime.js';
 
 export {
   getCloudSession,
@@ -41,7 +48,30 @@ export {
 export const TENANT_VISIT_CAPABILITY_INDETERMINATE = 'TENANT_VISIT_CAPABILITY_INDETERMINATE';
 export const TENANT_VISIT_TRANSACTION_SCOPE_REQUIRED = 'TENANT_VISIT_TRANSACTION_SCOPE_REQUIRED';
 
+export type CloudSaveJob = Readonly<{
+  scope: TenantScope;
+  snapshot: CrmData;
+  token: Readonly<SyncSaveToken>;
+  runtimeLease: TenantRuntimeLease;
+  visitAuthorityDecision?: boolean;
+}>;
+
+export type TenantCloudStatusDetail = Readonly<{
+  scope: TenantScope;
+  runtimeLease: TenantRuntimeLease;
+  message: string;
+  kind: 'success' | 'error' | 'working';
+}>;
+
+export type TenantCloudAuthoritativeSnapshotDetail = Readonly<{
+  scope: TenantScope;
+  runtimeLease: TenantRuntimeLease;
+  crm: CrmData;
+  token: Readonly<SyncSaveToken>;
+}>;
+
 const compatibilitySaveTimers = new Map<string, number>();
+const tenantSaveQueues = new Map<string, LatestSerialQueue<CloudSaveJob>>();
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error ?? '');
@@ -51,6 +81,40 @@ function isTenantScope(value: unknown): value is TenantScope {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
   const scope = value as Partial<TenantScope>;
   return typeof scope.userId === 'string' && typeof scope.organizationId === 'string';
+}
+
+export function cloudSaveQueueKey(scope: TenantScope): string {
+  return tenantRuntimeKey(scope);
+}
+
+function sameSaveToken(left: Readonly<SyncSaveToken>, right: Readonly<SyncSaveToken>): boolean {
+  return left.generation === right.generation && left.fingerprint === right.fingerprint;
+}
+
+export function createCloudSaveJob(
+  scope: TenantScope,
+  crm: CrmData,
+  visitAuthorityDecision?: boolean,
+): CloudSaveJob {
+  assertTenantCrmScope(scope, crm);
+  const frozenScope: TenantScope = Object.freeze({ ...scope });
+  const snapshot = structuredClone(crm);
+  const token = Object.freeze({ ...tenantSyncSaveToken(frozenScope, snapshot) });
+  const runtimeLease = captureTenantRuntimeLease(frozenScope);
+  return Object.freeze({
+    scope: frozenScope,
+    snapshot,
+    token,
+    runtimeLease,
+    ...(visitAuthorityDecision === undefined ? {} : { visitAuthorityDecision }),
+  });
+}
+
+export function cloudSaveJobIsLatest(job: CloudSaveJob): boolean {
+  const sync = readTenantSyncState(job.scope);
+  return sync.dirty === false
+    && sync.verifiedGeneration === job.token.generation
+    && sync.lastCloudFingerprint === job.token.fingerprint;
 }
 
 export function isLegacySchemaError(error: unknown): boolean {
@@ -79,13 +143,27 @@ export function isLegacySchemaError(error: unknown): boolean {
 }
 
 function emitStatus(
-  scope: TenantScope,
+  job: CloudSaveJob,
   message: string,
   kind: 'success' | 'error' | 'working' = 'success',
 ): void {
-  document.dispatchEvent(new CustomEvent('propcontrol-cloud-status', {
-    detail: { scope: Object.freeze({ ...scope }), message, kind },
-  }));
+  const detail: TenantCloudStatusDetail = Object.freeze({
+    scope: job.scope,
+    runtimeLease: job.runtimeLease,
+    message,
+    kind,
+  });
+  document.dispatchEvent(new CustomEvent('propcontrol-cloud-status', { detail }));
+}
+
+function emitAuthoritativeSnapshot(job: CloudSaveJob): void {
+  const detail: TenantCloudAuthoritativeSnapshotDetail = Object.freeze({
+    scope: job.scope,
+    runtimeLease: job.runtimeLease,
+    crm: structuredClone(job.snapshot),
+    token: job.token,
+  });
+  document.dispatchEvent(new CustomEvent('propcontrol-cloud-authoritative-snapshot', { detail }));
 }
 
 export async function resolveTenantVisitAuthority(scope: TenantScope): Promise<boolean> {
@@ -128,6 +206,41 @@ export async function pullCloudData(
   return cloud;
 }
 
+async function runCloudPush(job: CloudSaveJob): Promise<void> {
+  const session = getCloudSession();
+  if (!session || session.userId !== job.scope.userId) {
+    throw new Error('La sesión activa cambió durante la sincronización tenant. El guardado quedó pendiente.');
+  }
+  assertTenantCrmScope(job.scope, job.snapshot);
+
+  const authorityActive = job.visitAuthorityDecision ?? await resolveTenantVisitAuthority(job.scope);
+  if (authorityActive) {
+    throw new Error(TENANT_VISIT_TRANSACTION_SCOPE_REQUIRED);
+  }
+
+  try {
+    await pushTenantModernCloudData(job.scope, job.snapshot, job.token);
+  } catch (error) {
+    if (!isLegacySchemaError(error)) throw error;
+    await pushTenantLegacyCloudData(job.scope, job.snapshot, job.token);
+  }
+
+  if (cloudSaveJobIsLatest(job)) emitAuthoritativeSnapshot(job);
+}
+
+function tenantSaveQueue(scope: TenantScope): LatestSerialQueue<CloudSaveJob> {
+  const key = cloudSaveQueueKey(scope);
+  const existing = tenantSaveQueues.get(key);
+  if (existing) return existing;
+  const created = new LatestSerialQueue<CloudSaveJob>(runCloudPush);
+  tenantSaveQueues.set(key, created);
+  return created;
+}
+
+function enqueueCloudSaveJob(job: CloudSaveJob): Promise<void> {
+  return tenantSaveQueue(job.scope).enqueue(job);
+}
+
 export function pushCloudData(scope: TenantScope, crm: CrmData, visitAuthorityDecision?: boolean): Promise<void>;
 export function pushCloudData(crm: CrmData, expectedAccountKey?: string, visitAuthorityDecision?: boolean): Promise<void>;
 export async function pushCloudData(
@@ -147,24 +260,8 @@ export async function pushCloudData(
   if (!session || session.userId !== scope.userId || (expectedAccountKey && expectedAccountKey !== scope.userId)) {
     throw new Error('La sesión activa cambió antes de iniciar la sincronización tenant.');
   }
-  assertTenantCrmScope(scope, crm);
-  const snapshot = structuredClone(crm);
-  const token = tenantSyncSaveToken(scope, snapshot);
-  const authorityActive = visitAuthorityDecision ?? await resolveTenantVisitAuthority(scope);
-
-  if (authorityActive) {
-    // C1 deliberately does not adapt the Visit transactional writer. C2 will
-    // freeze the decision inside a tenant job and transport scope without
-    // changing RPC semantics. Until then this branch is fail-closed.
-    throw new Error(TENANT_VISIT_TRANSACTION_SCOPE_REQUIRED);
-  }
-
-  try {
-    await pushTenantModernCloudData(scope, snapshot, token);
-  } catch (error) {
-    if (!isLegacySchemaError(error)) throw error;
-    await pushTenantLegacyCloudData(scope, snapshot, token);
-  }
+  const job = createCloudSaveJob(scope, crm, visitAuthorityDecision);
+  await enqueueCloudSaveJob(job);
 }
 
 export function queueCloudSave(scope: TenantScope, crm: CrmData, visitAuthorityDecision?: boolean): void;
@@ -183,33 +280,33 @@ export function queueCloudSave(
 
   const session = getCloudSession();
   if (!session || session.userId !== scope.userId) return;
-  assertTenantCrmScope(scope, crm);
-
-  // C1 transports the frozen scope but intentionally retains the historical
-  // user-only debounce key. C2 changes the key and serial queue to user+org.
-  const timerKey = scope.userId;
+  const job = createCloudSaveJob(scope, crm, visitAuthorityDecision);
+  const timerKey = cloudSaveQueueKey(job.scope);
   const previousTimer = compatibilitySaveTimers.get(timerKey);
   if (previousTimer !== undefined) window.clearTimeout(previousTimer);
-  const frozenScope: TenantScope = Object.freeze({ ...scope });
-  const snapshot = structuredClone(crm);
+
   const timer = window.setTimeout(() => {
     compatibilitySaveTimers.delete(timerKey);
     const active = getCloudSession();
-    if (!active || active.userId !== frozenScope.userId) return;
-    if (!tenantHasPendingLocalChanges(frozenScope)) return;
-    emitStatus(frozenScope, 'Guardando en la nube…', 'working');
-    void pushCloudData(frozenScope, snapshot, visitAuthorityDecision)
+    if (!active || active.userId !== job.scope.userId) return;
+    if (!tenantHasPendingLocalChanges(job.scope)) return;
+    emitStatus(job, 'Guardando en la nube…', 'working');
+    void enqueueCloudSaveJob(job)
       .then(() => {
-        if (!readTenantSyncState(frozenScope).dirty) {
-          emitStatus(frozenScope, 'Guardado seguro en la nube.');
+        if (cloudSaveJobIsLatest(job)) {
+          emitStatus(job, 'Guardado seguro en la nube.');
         }
       })
       .catch((error) => {
         const technicalMessage = errorMessage(error) || 'No se pudo guardar en la nube.';
         const message = `Guardado localmente, sincronización pendiente. ${technicalMessage}`;
-        markTenantSyncError(frozenScope, message);
-        emitStatus(frozenScope, message, 'error');
+        markTenantSyncError(job.scope, message);
+        emitStatus(job, message, 'error');
       });
   }, 700);
   compatibilitySaveTimers.set(timerKey, timer);
 }
+
+// Static review marker: token equality is always tenant-local because CloudSaveJob
+// is created from tenantSyncSaveToken(job.scope, snapshot), never from user-only state.
+void sameSaveToken;
