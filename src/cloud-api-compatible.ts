@@ -1,5 +1,4 @@
 import type { TenantScope } from './active-organization.js';
-import { activeMembershipsForUser } from './active-organization.js';
 import { LatestSerialQueue } from './cloud-save-serial.js';
 import type { CrmData } from './models.js';
 import {
@@ -10,7 +9,6 @@ import {
   signUpCloud as signUpCloudRaw,
   updateTeamMemberAccess,
 } from './cloud-api.js';
-import { fetchMembershipCatalog } from './membership-catalog.js';
 import type { SyncSaveToken } from './sync-safety.js';
 import {
   assertTenantCrmScope,
@@ -25,10 +23,9 @@ import {
   pushTenantModernCloudData,
 } from './tenant-cloud-data.js';
 import {
-  parseTenantCloudJson,
-  tenantCloudHeaders,
-  tenantCloudTransport,
-} from './tenant-cloud-context.js';
+  pushCloudDataWithVisitAuthorityV2,
+  visitTransactionAuthorityActiveV2,
+} from './tenant-visit-v2.js';
 import {
   assertTenantRuntimeLeaseCurrent,
   captureTenantRuntimeLease,
@@ -179,39 +176,21 @@ function emitStatus(
   document.dispatchEvent(new CustomEvent('propcontrol-cloud-status', { detail }));
 }
 
-function emitAuthoritativeSnapshot(job: CloudSaveJob): void {
+function emitAuthoritativeSnapshot(job: CloudSaveJob, crm: CrmData = job.snapshot): void {
   const detail: TenantCloudAuthoritativeSnapshotDetail = Object.freeze({
     scope: job.scope,
     runtimeLease: job.runtimeLease,
-    crm: structuredClone(job.snapshot),
+    crm: structuredClone(crm),
     token: job.token,
   });
   document.dispatchEvent(new CustomEvent('propcontrol-cloud-authoritative-snapshot', { detail }));
 }
 
-export async function resolveTenantVisitAuthority(scope: TenantScope): Promise<boolean> {
-  const memberships = await fetchMembershipCatalog();
-  const active = activeMembershipsForUser(scope.userId, memberships);
-  if (
-    active.length !== 1
-    || active[0]?.organizationId !== scope.organizationId
-  ) {
-    throw new Error(TENANT_VISIT_CAPABILITY_INDETERMINATE);
-  }
-
-  const transport = await tenantCloudTransport(scope);
-  const payload = await parseTenantCloudJson(await fetch(
-    `${transport.config.url}/rest/v1/rpc/visit_transaction_authority_active`,
-    {
-      method: 'POST',
-      headers: tenantCloudHeaders(transport.config.publishableKey, transport.accessToken),
-      body: '{}',
-    },
-  ));
-  if (typeof payload !== 'boolean') {
-    throw new Error(TENANT_VISIT_CAPABILITY_INDETERMINATE);
-  }
-  return payload;
+export async function resolveTenantVisitAuthority(
+  scope: TenantScope,
+  runtimeLease: TenantRuntimeLease = captureTenantRuntimeLease(scope),
+): Promise<boolean> {
+  return visitTransactionAuthorityActiveV2(scope, runtimeLease);
 }
 
 export function pullCloudData(scope: TenantScope, fallback: CrmData): Promise<CrmData | null>;
@@ -238,10 +217,22 @@ async function runCloudPush(job: CloudSaveJob): Promise<void> {
     throw new Error('La sesión activa cambió durante la sincronización tenant. El guardado quedó pendiente.');
   }
   assertTenantCrmScope(job.scope, job.snapshot);
+  assertTenantRuntimeLeaseCurrent(job.runtimeLease);
 
-  const authorityActive = job.visitAuthorityDecision ?? await resolveTenantVisitAuthority(job.scope);
+  const authorityActive = job.visitAuthorityDecision
+    ?? await resolveTenantVisitAuthority(job.scope, job.runtimeLease);
+  assertTenantRuntimeLeaseCurrent(job.runtimeLease);
+
   if (authorityActive) {
-    throw new Error(TENANT_VISIT_TRANSACTION_SCOPE_REQUIRED);
+    const verified = await pushCloudDataWithVisitAuthorityV2(
+      job.scope,
+      job.snapshot,
+      job.token,
+      job.runtimeLease,
+    );
+    assertTenantRuntimeLeaseCurrent(job.runtimeLease);
+    if (cloudSaveJobIsLatest(job)) emitAuthoritativeSnapshot(job, verified);
+    return;
   }
 
   try {
