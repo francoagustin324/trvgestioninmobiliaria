@@ -21,6 +21,9 @@ import {
 
 const SESSION_KEY = 'propcontrol-cloud-session-v1';
 
+export const TENANT_SNAPSHOT_ORGANIZATION_MISMATCH = 'TENANT_SNAPSHOT_ORGANIZATION_MISMATCH';
+export const TENANT_MIGRATION_ROLLBACK_FAILED = 'TENANT_MIGRATION_ROLLBACK_FAILED';
+
 export type TenantStorageNamespace = Readonly<{
   scope: TenantScope;
   crmKey: string;
@@ -33,7 +36,12 @@ export type TenantLegacyMigrationClassification =
   | 'EXACT_ORG_MATCH'
   | 'ORG_MISMATCH'
   | 'TARGET_ALREADY_EXISTS'
+  | 'TARGET_PARTIAL_EXISTS'
   | 'AMBIGUOUS_LEGACY'
+  | 'UNSAFE_LEGACY_SYNC'
+  | 'UNSAFE_LEGACY_BACKUP'
+  | 'MIGRATION_WRITE_FAILED'
+  | 'MIGRATION_VERIFICATION_FAILED'
   | 'RECOVERY_REQUIRED';
 
 export type TenantLegacyMigrationOutcome =
@@ -68,6 +76,16 @@ type LegacyCandidate = Readonly<{
   backupsRaw: string | null;
 }>;
 
+type TenantLegacyCandidateSelection =
+  | Readonly<{ kind: 'none' }>
+  | Readonly<{ kind: 'ambiguous' }>
+  | Readonly<{ kind: 'candidate'; candidate: LegacyCandidate }>;
+
+type TargetWrite = Readonly<{
+  key: string;
+  value: string;
+}>;
+
 function activeStorage(storage?: Storage): Storage {
   return storage ?? localStorage;
 }
@@ -94,6 +112,18 @@ export function tenantStorageNamespace(scope: TenantScope): TenantStorageNamespa
     syncKey: `${crmKey}:sync`,
     backupsKey: `${crmKey}:backups`,
   });
+}
+
+/**
+ * Canonical tenant identity boundary for CRM snapshots.
+ *
+ * The comparison is deliberately exact. This guard never trims, normalizes,
+ * rewrites or repairs crm.organization.id.
+ */
+export function assertTenantCrmScope(scope: TenantScope, crm: CrmData): void {
+  if (crm.organization.id !== scope.organizationId) {
+    throw new Error(TENANT_SNAPSHOT_ORGANIZATION_MISMATCH);
+  }
 }
 
 /**
@@ -149,7 +179,9 @@ function tenantView(scope: TenantScope, storage?: Storage): TenantStorageView {
 }
 
 export function readTenantSnapshot(scope: TenantScope, storage?: Storage): CrmData | null {
-  return readLocalSnapshot(tenantView(scope, storage));
+  const crm = readLocalSnapshot(tenantView(scope, storage));
+  if (crm) assertTenantCrmScope(scope, crm);
+  return crm;
 }
 
 export function writeTenantSnapshot(
@@ -158,6 +190,7 @@ export function writeTenantSnapshot(
   options: { markDirty?: boolean; reason?: string; backup?: boolean } = {},
   storage?: Storage,
 ): void {
+  assertTenantCrmScope(scope, crm);
   writeLocalSnapshot(crm, options, tenantView(scope, storage));
 }
 
@@ -174,6 +207,7 @@ export function tenantSyncSaveToken(
   crm: CrmData,
   storage?: Storage,
 ): SyncSaveToken {
+  assertTenantCrmScope(scope, crm);
   return syncSaveToken(crm, tenantView(scope, storage));
 }
 
@@ -183,6 +217,7 @@ export function markTenantDirty(
   reason = 'Cambio local',
   storage?: Storage,
 ): void {
+  assertTenantCrmScope(scope, crm);
   writeLocalSnapshot(crm, { reason, backup: false }, tenantView(scope, storage));
 }
 
@@ -299,16 +334,46 @@ function equivalentLegacyCandidates(left: LegacyCandidate, right: LegacyCandidat
     && left.backupsRaw === right.backupsRaw;
 }
 
+function rawOrganizationIdFromValue(value: unknown): string | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const organization = (value as { organization?: unknown }).organization;
+  if (!organization || typeof organization !== 'object' || Array.isArray(organization)) return null;
+  const id = (organization as { id?: unknown }).id;
+  return typeof id === 'string' && id.length > 0 ? id : null;
+}
+
 function rawOrganizationId(snapshotRaw: string): string | null {
   try {
-    const parsed: unknown = JSON.parse(snapshotRaw);
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
-    const organization = (parsed as { organization?: unknown }).organization;
-    if (!organization || typeof organization !== 'object' || Array.isArray(organization)) return null;
-    const id = (organization as { id?: unknown }).id;
-    return typeof id === 'string' && id.length > 0 ? id : null;
+    return rawOrganizationIdFromValue(JSON.parse(snapshotRaw));
   } catch {
     return null;
+  }
+}
+
+function validLegacySync(syncRaw: string | null): boolean {
+  if (syncRaw === null) return true;
+  try {
+    const parsed: unknown = JSON.parse(syncRaw);
+    return Boolean(parsed && typeof parsed === 'object' && !Array.isArray(parsed));
+  } catch {
+    return false;
+  }
+}
+
+function validLegacyBackups(backupsRaw: string | null, organizationId: string): boolean {
+  if (backupsRaw === null) return true;
+  try {
+    const parsed: unknown = JSON.parse(backupsRaw);
+    if (!Array.isArray(parsed)) return false;
+    return parsed.every((entry) => {
+      if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return false;
+      const backup = entry as { createdAt?: unknown; reason?: unknown; crm?: unknown };
+      if (typeof backup.createdAt !== 'string' || typeof backup.reason !== 'string') return false;
+      if (!backup.crm || typeof backup.crm !== 'object' || Array.isArray(backup.crm)) return false;
+      return rawOrganizationIdFromValue(backup.crm) === organizationId;
+    });
+  } catch {
+    return false;
   }
 }
 
@@ -329,6 +394,45 @@ function result(
   });
 }
 
+function inspectTargetNamespace(
+  namespace: TenantStorageNamespace,
+  storage: Storage,
+): TenantLegacyMigrationResult | null {
+  const crmExists = storage.getItem(namespace.crmKey) !== null;
+  const syncExists = storage.getItem(namespace.syncKey) !== null;
+  const backupsExist = storage.getItem(namespace.backupsKey) !== null;
+
+  if (crmExists) {
+    return result(namespace.crmKey, 'TARGET_ALREADY_EXISTS', 'TARGET_ALREADY_EXISTS');
+  }
+  if (syncExists || backupsExist) {
+    return result(namespace.crmKey, 'TARGET_PARTIAL_EXISTS', 'RECOVERY_REQUIRED');
+  }
+  return null;
+}
+
+function selectedLegacyCandidate(
+  scope: TenantScope,
+  storage: Storage,
+): TenantLegacyCandidateSelection {
+  const candidates = [
+    legacyCandidate('base', baseLegacyKeys(), storage),
+    legacyCandidate('user', userLegacyKeys(scope), storage),
+  ].filter((candidate): candidate is LegacyCandidate => Boolean(candidate));
+
+  if (candidates.length === 0) return Object.freeze({ kind: 'none' });
+
+  let candidate = candidates[0]!;
+  if (candidates.length > 1) {
+    const [first, second] = candidates;
+    if (!first || !second || !equivalentLegacyCandidates(first, second)) {
+      return Object.freeze({ kind: 'ambiguous' });
+    }
+    candidate = candidates.find((item) => item.kind === 'user') ?? candidate;
+  }
+  return Object.freeze({ kind: 'candidate', candidate });
+}
+
 /**
  * Read-only inspection. It never normalizes the CRM snapshot and never rewrites
  * organization.id. The raw organization id is compared before any migration.
@@ -340,30 +444,18 @@ export function inspectTenantLegacyMigration(
   const target = activeStorage(storage);
   const namespace = tenantStorageNamespace(scope);
 
-  if (target.getItem(namespace.crmKey) !== null) {
-    return result(namespace.crmKey, 'TARGET_ALREADY_EXISTS', 'TARGET_ALREADY_EXISTS');
-  }
+  const targetState = inspectTargetNamespace(namespace, target);
+  if (targetState) return targetState;
 
-  const candidates = [
-    legacyCandidate('base', baseLegacyKeys(), target),
-    legacyCandidate('user', userLegacyKeys(namespace.scope), target),
-  ].filter((candidate): candidate is LegacyCandidate => Boolean(candidate));
-
-  if (candidates.length === 0) {
+  const selection = selectedLegacyCandidate(namespace.scope, target);
+  if (selection.kind === 'none') {
     return result(namespace.crmKey, 'NO_LEGACY', 'NO_LEGACY');
   }
-
-  let candidate = candidates[0]!;
-  if (candidates.length > 1) {
-    const [first, second] = candidates;
-    if (!first || !second || !equivalentLegacyCandidates(first, second)) {
-      return result(namespace.crmKey, 'AMBIGUOUS_LEGACY', 'RECOVERY_REQUIRED');
-    }
-    // Both sources are byte-for-byte equivalent, including sync metadata and backups.
-    // Prefer the user-scoped source only after proving equivalence.
-    candidate = candidates.find((item) => item.kind === 'user') ?? candidate;
+  if (selection.kind === 'ambiguous') {
+    return result(namespace.crmKey, 'AMBIGUOUS_LEGACY', 'RECOVERY_REQUIRED');
   }
 
+  const { candidate } = selection;
   const organizationId = rawOrganizationId(candidate.snapshotRaw);
   if (organizationId === null) {
     return result(namespace.crmKey, 'RECOVERY_REQUIRED', 'RECOVERY_REQUIRED', {
@@ -381,6 +473,22 @@ export function inspectTenantLegacyMigration(
     });
   }
 
+  if (!validLegacySync(candidate.syncRaw)) {
+    return result(namespace.crmKey, 'UNSAFE_LEGACY_SYNC', 'RECOVERY_REQUIRED', {
+      source: candidate.kind,
+      sourceKey: candidate.keys.snapshot,
+      rawOrganizationId: organizationId,
+    });
+  }
+
+  if (!validLegacyBackups(candidate.backupsRaw, namespace.scope.organizationId)) {
+    return result(namespace.crmKey, 'UNSAFE_LEGACY_BACKUP', 'RECOVERY_REQUIRED', {
+      source: candidate.kind,
+      sourceKey: candidate.keys.snapshot,
+      rawOrganizationId: organizationId,
+    });
+  }
+
   return result(namespace.crmKey, 'EXACT_ORG_MATCH', 'EXACT_ORG_MATCH', {
     source: candidate.kind,
     sourceKey: candidate.keys.snapshot,
@@ -388,9 +496,56 @@ export function inspectTenantLegacyMigration(
   });
 }
 
+function rollbackTargetWrites(storage: Storage, keys: readonly string[]): void {
+  let rollbackError: unknown = null;
+
+  for (const key of [...keys].reverse()) {
+    let exists = false;
+    try {
+      exists = storage.getItem(key) !== null;
+    } catch (error) {
+      rollbackError ??= error;
+      continue;
+    }
+    if (!exists) continue;
+    try {
+      storage.removeItem(key);
+    } catch (error) {
+      rollbackError ??= error;
+    }
+  }
+
+  for (const key of keys) {
+    try {
+      if (storage.getItem(key) !== null) {
+        rollbackError ??= new Error(`No se pudo retirar ${key}.`);
+      }
+    } catch (error) {
+      rollbackError ??= error;
+    }
+  }
+
+  if (rollbackError) {
+    const detail = rollbackError instanceof Error ? rollbackError.message : String(rollbackError);
+    throw new Error(`${TENANT_MIGRATION_ROLLBACK_FAILED}: ${detail}`);
+  }
+}
+
+function copyFailureResult(
+  namespace: TenantStorageNamespace,
+  inspection: TenantLegacyMigrationResult,
+  classification: Extract<TenantLegacyMigrationClassification, 'MIGRATION_WRITE_FAILED' | 'MIGRATION_VERIFICATION_FAILED'>,
+): TenantLegacyMigrationResult {
+  return result(namespace.crmKey, classification, 'RECOVERY_REQUIRED', {
+    source: inspection.source,
+    sourceKey: inspection.sourceKey,
+    rawOrganizationId: inspection.rawOrganizationId,
+  });
+}
+
 /**
  * Explicit, idempotent legacy copy foundation. Never runs automatically.
- * It preserves every legacy source and copies only after exact raw org match.
+ * It preserves every legacy source and copies only after complete validation.
  */
 export function migrateLegacyStorageToTenant(
   scope: TenantScope,
@@ -401,15 +556,14 @@ export function migrateLegacyStorageToTenant(
   const inspection = inspectTenantLegacyMigration(namespace.scope, target);
   if (inspection.outcome !== 'EXACT_ORG_MATCH' || !inspection.source) return inspection;
 
-  if (target.getItem(namespace.crmKey) !== null) {
-    return result(namespace.crmKey, 'TARGET_ALREADY_EXISTS', 'TARGET_ALREADY_EXISTS');
-  }
+  const targetState = inspectTargetNamespace(namespace, target);
+  if (targetState) return targetState;
 
   const keys = inspection.source === 'base'
     ? baseLegacyKeys()
     : userLegacyKeys(namespace.scope);
-  const snapshotRaw = target.getItem(keys.snapshot);
-  if (!snapshotRaw) {
+  const candidate = legacyCandidate(inspection.source, keys, target);
+  if (!candidate) {
     return result(namespace.crmKey, 'RECOVERY_REQUIRED', 'RECOVERY_REQUIRED', {
       source: inspection.source,
       sourceKey: keys.snapshot,
@@ -417,8 +571,8 @@ export function migrateLegacyStorageToTenant(
     });
   }
 
-  // Revalidate the raw id immediately before copy. No normalization or rewriting.
-  const organizationId = rawOrganizationId(snapshotRaw);
+  // Revalidate the complete source immediately before the first target write.
+  const organizationId = rawOrganizationId(candidate.snapshotRaw);
   if (organizationId !== namespace.scope.organizationId) {
     return result(namespace.crmKey, 'ORG_MISMATCH', 'RECOVERY_REQUIRED', {
       source: inspection.source,
@@ -426,12 +580,68 @@ export function migrateLegacyStorageToTenant(
       rawOrganizationId: organizationId,
     });
   }
+  if (!validLegacySync(candidate.syncRaw)) {
+    return result(namespace.crmKey, 'UNSAFE_LEGACY_SYNC', 'RECOVERY_REQUIRED', {
+      source: inspection.source,
+      sourceKey: keys.snapshot,
+      rawOrganizationId: organizationId,
+    });
+  }
+  if (!validLegacyBackups(candidate.backupsRaw, namespace.scope.organizationId)) {
+    return result(namespace.crmKey, 'UNSAFE_LEGACY_BACKUP', 'RECOVERY_REQUIRED', {
+      source: inspection.source,
+      sourceKey: keys.snapshot,
+      rawOrganizationId: organizationId,
+    });
+  }
 
-  target.setItem(namespace.crmKey, snapshotRaw);
-  const syncRaw = target.getItem(keys.sync);
-  if (syncRaw !== null) target.setItem(namespace.syncKey, syncRaw);
-  const backupsRaw = target.getItem(keys.backups);
-  if (backupsRaw !== null) target.setItem(namespace.backupsKey, backupsRaw);
+  const writes: TargetWrite[] = [
+    Object.freeze({ key: namespace.crmKey, value: candidate.snapshotRaw }),
+  ];
+  if (candidate.syncRaw !== null) {
+    writes.push(Object.freeze({ key: namespace.syncKey, value: candidate.syncRaw }));
+  }
+  if (candidate.backupsRaw !== null) {
+    writes.push(Object.freeze({ key: namespace.backupsKey, value: candidate.backupsRaw }));
+  }
+
+  const touchedKeys: string[] = [];
+
+  for (const write of writes) {
+    touchedKeys.push(write.key);
+    try {
+      target.setItem(write.key, write.value);
+    } catch {
+      rollbackTargetWrites(target, touchedKeys);
+      return copyFailureResult(namespace, inspection, 'MIGRATION_WRITE_FAILED');
+    }
+
+    let exact = false;
+    try {
+      exact = target.getItem(write.key) === write.value;
+    } catch {
+      rollbackTargetWrites(target, touchedKeys);
+      return copyFailureResult(namespace, inspection, 'MIGRATION_VERIFICATION_FAILED');
+    }
+    if (!exact) {
+      rollbackTargetWrites(target, touchedKeys);
+      return copyFailureResult(namespace, inspection, 'MIGRATION_VERIFICATION_FAILED');
+    }
+  }
+
+  for (const write of writes) {
+    let exact = false;
+    try {
+      exact = target.getItem(write.key) === write.value;
+    } catch {
+      rollbackTargetWrites(target, touchedKeys);
+      return copyFailureResult(namespace, inspection, 'MIGRATION_VERIFICATION_FAILED');
+    }
+    if (!exact) {
+      rollbackTargetWrites(target, touchedKeys);
+      return copyFailureResult(namespace, inspection, 'MIGRATION_VERIFICATION_FAILED');
+    }
+  }
 
   return result(namespace.crmKey, 'EXACT_ORG_MATCH', 'EXACT_ORG_MATCH', {
     copied: true,

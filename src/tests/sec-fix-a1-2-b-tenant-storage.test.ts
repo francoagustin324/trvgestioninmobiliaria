@@ -3,9 +3,11 @@ import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import { initialData, STORAGE_KEY } from '../models.js';
 import {
+  assertTenantCrmScope,
   hasTenantLocalBackup,
   inspectTenantLegacyMigration,
   markTenantCloudSaved,
+  markTenantDirty,
   migrateLegacyStorageToTenant,
   readTenantBackups,
   readTenantSnapshot,
@@ -33,6 +35,56 @@ class MemoryStorage implements Storage {
   setItem(key: string, value: string): void { this.values.set(key, value); }
 }
 
+class FaultInjectingStorage extends MemoryStorage {
+  private setMode: 'throw-before' | 'throw-after' | 'corrupt' | null = null;
+  private failAt = 0;
+  private setCount = 0;
+  private failRemove = false;
+
+  armSet(mode: 'throw-before' | 'throw-after' | 'corrupt', failAt: number): void {
+    this.setMode = mode;
+    this.failAt = failAt;
+    this.setCount = 0;
+  }
+
+  disarmSet(): void {
+    this.setMode = null;
+    this.failAt = 0;
+    this.setCount = 0;
+  }
+
+  armRollbackFailure(): void {
+    this.failRemove = true;
+  }
+
+  setItem(key: string, value: string): void {
+    if (!this.setMode) {
+      super.setItem(key, value);
+      return;
+    }
+
+    this.setCount += 1;
+    const shouldFault = this.setCount === this.failAt;
+    if (shouldFault && this.setMode === 'throw-before') {
+      throw new Error(`SETITEM_FAIL_${this.failAt}`);
+    }
+    if (shouldFault && this.setMode === 'corrupt') {
+      super.setItem(key, `${value}#corrupt`);
+      return;
+    }
+
+    super.setItem(key, value);
+    if (shouldFault && this.setMode === 'throw-after') {
+      throw new Error(`SETITEM_FAIL_AFTER_${this.failAt}`);
+    }
+  }
+
+  removeItem(key: string): void {
+    if (this.failRemove) throw new Error('ROLLBACK_REMOVE_FAILED');
+    super.removeItem(key);
+  }
+}
+
 const scopeA: TenantScope = Object.freeze({ userId: 'user-1', organizationId: 'org-a' });
 const scopeB: TenantScope = Object.freeze({ userId: 'user-1', organizationId: 'org-b' });
 
@@ -47,6 +99,40 @@ function crmFor(organizationId: string, clientName = organizationId) {
 
 function userLegacyKey(userId = 'user-1'): string {
   return `${STORAGE_KEY}:user:${userId}`;
+}
+
+function targetKeys(scope: TenantScope) {
+  return tenantStorageNamespace(scope);
+}
+
+function assertTargetEmpty(storage: Storage, scope: TenantScope): void {
+  const namespace = targetKeys(scope);
+  assert.equal(storage.getItem(namespace.crmKey), null);
+  assert.equal(storage.getItem(namespace.syncKey), null);
+  assert.equal(storage.getItem(namespace.backupsKey), null);
+}
+
+function seedUserLegacy(
+  storage: Storage,
+  options: {
+    organizationId?: string;
+    syncRaw?: string | null;
+    backupsRaw?: string | null;
+  } = {},
+): { sourceKey: string; snapshotRaw: string; syncRaw: string | null; backupsRaw: string | null } {
+  const sourceKey = userLegacyKey();
+  const snapshotRaw = JSON.stringify(crmFor(options.organizationId ?? 'org-a', 'LEGACY'));
+  const syncRaw = options.syncRaw === undefined
+    ? JSON.stringify({ dirty: true, localGeneration: 3 })
+    : options.syncRaw;
+  const backupsRaw = options.backupsRaw === undefined
+    ? JSON.stringify([{ createdAt: '2026-09-01T00:00:00.000Z', reason: 'Legacy', crm: crmFor(options.organizationId ?? 'org-a') }])
+    : options.backupsRaw;
+
+  storage.setItem(sourceKey, snapshotRaw);
+  if (syncRaw !== null) storage.setItem(`${sourceKey}:sync`, syncRaw);
+  if (backupsRaw !== null) storage.setItem(`${sourceKey}:backups`, backupsRaw);
+  return { sourceKey, snapshotRaw, syncRaw, backupsRaw };
 }
 
 test('A1.2-B: mismo user / Org A y Org B generan namespaces distintos', () => {
@@ -308,7 +394,7 @@ test('A1.2-B static guard: migration no normaliza ni reescribe organization.id',
 
   assert.equal(/prepareCrmSyncContracts/.test(migrationSurface), false);
   assert.equal(/organization\.id\s*=/.test(migrationSurface), false);
-  assert.match(migrationSurface, /rawOrganizationId\(snapshotRaw\)/);
+  assert.match(migrationSurface, /rawOrganizationId\(/);
 });
 
 test('A1.2-B static guard: migración no corre automáticamente al importar módulo', () => {
@@ -319,7 +405,7 @@ test('A1.2-B static guard: migración no corre automáticamente al importar mód
 test('A1.2-B static guard: tenant operations delegan al motor sync-safety existente', () => {
   const source = readFileSync('src/tenant-storage.ts', 'utf8');
   assert.match(source, /from '\.\/sync-safety\.js'/);
-  assert.match(source, /return readLocalSnapshot\(tenantView\(scope, storage\)\)/);
+  assert.match(source, /readLocalSnapshot\(tenantView\(scope, storage\)\)/);
   assert.match(source, /writeLocalSnapshot\(crm, options, tenantView\(scope, storage\)\)/);
   assert.match(source, /return getSyncState\(tenantView\(scope, storage\)\)/);
   assert.equal(/localGeneration\s*:\s*\(/.test(source), false);
@@ -337,4 +423,240 @@ test('A1.2-B static guard: runtime canónico todavía no consume tenant storage'
     const source = readFileSync(path, 'utf8');
     assert.equal(source.includes('tenant-storage'), false, `${path} no debe hacer cutover A1.2-B`);
   });
+});
+
+test('A1.2-B.1 B1: scope A + CRM A pasa el boundary exacto', () => {
+  assert.doesNotThrow(() => assertTenantCrmScope(scopeA, crmFor('org-a')));
+});
+
+test('A1.2-B.1 B1: scope B + CRM A falla cerrado', () => {
+  assert.throws(
+    () => assertTenantCrmScope(scopeB, crmFor('org-a')),
+    /TENANT_SNAPSHOT_ORGANIZATION_MISMATCH/,
+  );
+});
+
+test('A1.2-B.1 B1: write B con CRM A no modifica ninguna key de B', () => {
+  const storage = new MemoryStorage();
+  assert.throws(
+    () => writeTenantSnapshot(scopeB, crmFor('org-a'), { reason: 'cross-tenant' }, storage),
+    /TENANT_SNAPSHOT_ORGANIZATION_MISMATCH/,
+  );
+  assertTargetEmpty(storage, scopeB);
+});
+
+test('A1.2-B.1 B1: markDirty B con CRM A no marca dirty ni escribe snapshot B', () => {
+  const storage = new MemoryStorage();
+  assert.throws(
+    () => markTenantDirty(scopeB, crmFor('org-a'), 'cross-tenant', storage),
+    /TENANT_SNAPSHOT_ORGANIZATION_MISMATCH/,
+  );
+  assertTargetEmpty(storage, scopeB);
+  assert.equal(readTenantSyncState(scopeB, storage).dirty, false);
+});
+
+test('A1.2-B.1 B1: syncSaveToken B con CRM A falla cerrado', () => {
+  const storage = new MemoryStorage();
+  assert.throws(
+    () => tenantSyncSaveToken(scopeB, crmFor('org-a'), storage),
+    /TENANT_SNAPSHOT_ORGANIZATION_MISMATCH/,
+  );
+  assertTargetEmpty(storage, scopeB);
+});
+
+test('A1.2-B.1 B1: snapshot A accidental bajo key B nunca se devuelve como CRM B', () => {
+  const storage = new MemoryStorage();
+  const namespace = tenantStorageNamespace(scopeB);
+  const raw = JSON.stringify(crmFor('org-a', 'Cross tenant'));
+  storage.setItem(namespace.crmKey, raw);
+
+  assert.throws(
+    () => readTenantSnapshot(scopeB, storage),
+    /TENANT_SNAPSHOT_ORGANIZATION_MISMATCH/,
+  );
+  assert.equal(storage.getItem(namespace.crmKey), raw);
+});
+
+test('A1.2-B.1 B1: organization.id textual distinto no se normaliza a match', () => {
+  assert.throws(
+    () => assertTenantCrmScope(scopeA, crmFor(' org-a ')),
+    /TENANT_SNAPSHOT_ORGANIZATION_MISMATCH/,
+  );
+});
+
+test('A1.2-B.1 B2: snapshot A + backups A permite migración exacta', () => {
+  const storage = new MemoryStorage();
+  const source = seedUserLegacy(storage);
+
+  const result = migrateLegacyStorageToTenant(scopeA, storage);
+  const namespace = tenantStorageNamespace(scopeA);
+
+  assert.equal(result.classification, 'EXACT_ORG_MATCH');
+  assert.equal(result.copied, true);
+  assert.equal(storage.getItem(namespace.crmKey), source.snapshotRaw);
+  assert.equal(storage.getItem(namespace.syncKey), source.syncRaw);
+  assert.equal(storage.getItem(namespace.backupsKey), source.backupsRaw);
+  assert.equal(storage.getItem(source.sourceKey), source.snapshotRaw);
+});
+
+test('A1.2-B.1 B2: un backup de Org B bloquea toda migración de snapshot A', () => {
+  const storage = new MemoryStorage();
+  const backupsRaw = JSON.stringify([
+    { createdAt: '2026-09-01T00:00:00.000Z', reason: 'A', crm: crmFor('org-a') },
+    { createdAt: '2026-09-02T00:00:00.000Z', reason: 'B', crm: crmFor('org-b') },
+  ]);
+  const source = seedUserLegacy(storage, { backupsRaw });
+
+  const result = migrateLegacyStorageToTenant(scopeA, storage);
+
+  assert.equal(result.classification, 'UNSAFE_LEGACY_BACKUP');
+  assert.equal(result.outcome, 'RECOVERY_REQUIRED');
+  assert.equal(result.copied, false);
+  assertTargetEmpty(storage, scopeA);
+  assert.equal(storage.getItem(`${source.sourceKey}:backups`), backupsRaw);
+});
+
+test('A1.2-B.1 B2: backup sin organization.id exige recovery y preserva source', () => {
+  const storage = new MemoryStorage();
+  const backupCrm = structuredClone(initialData) as unknown as { organization: Record<string, unknown> };
+  delete backupCrm.organization.id;
+  const backupsRaw = JSON.stringify([
+    { createdAt: '2026-09-01T00:00:00.000Z', reason: 'Sin org', crm: backupCrm },
+  ]);
+  const source = seedUserLegacy(storage, { backupsRaw });
+
+  const result = migrateLegacyStorageToTenant(scopeA, storage);
+
+  assert.equal(result.classification, 'UNSAFE_LEGACY_BACKUP');
+  assert.equal(result.outcome, 'RECOVERY_REQUIRED');
+  assertTargetEmpty(storage, scopeA);
+  assert.equal(storage.getItem(`${source.sourceKey}:backups`), backupsRaw);
+});
+
+test('A1.2-B.1 B2: backups JSON inválido exige recovery sin writes target', () => {
+  const storage = new MemoryStorage();
+  const source = seedUserLegacy(storage, { backupsRaw: '{invalid-json' });
+
+  const result = migrateLegacyStorageToTenant(scopeA, storage);
+
+  assert.equal(result.classification, 'UNSAFE_LEGACY_BACKUP');
+  assert.equal(result.outcome, 'RECOVERY_REQUIRED');
+  assertTargetEmpty(storage, scopeA);
+  assert.equal(storage.getItem(`${source.sourceKey}:backups`), '{invalid-json');
+});
+
+test('A1.2-B.1 B3: sync legacy inválido se detecta antes de primera escritura', () => {
+  const storage = new MemoryStorage();
+  seedUserLegacy(storage, { syncRaw: 'not-json' });
+
+  const result = migrateLegacyStorageToTenant(scopeA, storage);
+
+  assert.equal(result.classification, 'UNSAFE_LEGACY_SYNC');
+  assert.equal(result.outcome, 'RECOVERY_REQUIRED');
+  assertTargetEmpty(storage, scopeA);
+});
+
+test('A1.2-B.1 B3: target con sync sin CRM se clasifica TARGET_PARTIAL_EXISTS', () => {
+  const storage = new MemoryStorage();
+  const namespace = tenantStorageNamespace(scopeA);
+  storage.setItem(namespace.syncKey, JSON.stringify({ dirty: true }));
+  seedUserLegacy(storage);
+
+  const result = migrateLegacyStorageToTenant(scopeA, storage);
+
+  assert.equal(result.classification, 'TARGET_PARTIAL_EXISTS');
+  assert.equal(result.outcome, 'RECOVERY_REQUIRED');
+  assert.equal(result.copied, false);
+  assert.equal(storage.getItem(namespace.crmKey), null);
+  assert.ok(storage.getItem(namespace.syncKey));
+});
+
+test('A1.2-B.1 B3: falla escribiendo CRM deja cero target y source intacto', () => {
+  const storage = new FaultInjectingStorage();
+  const source = seedUserLegacy(storage);
+  storage.armSet('throw-before', 1);
+
+  const result = migrateLegacyStorageToTenant(scopeA, storage);
+
+  assert.equal(result.classification, 'MIGRATION_WRITE_FAILED');
+  assert.equal(result.outcome, 'RECOVERY_REQUIRED');
+  assertTargetEmpty(storage, scopeA);
+  assert.equal(storage.getItem(source.sourceKey), source.snapshotRaw);
+  assert.equal(storage.getItem(`${source.sourceKey}:sync`), source.syncRaw);
+  assert.equal(storage.getItem(`${source.sourceKey}:backups`), source.backupsRaw);
+});
+
+test('A1.2-B.1 B3: falla escribiendo sync revierte CRM y preserva source', () => {
+  const storage = new FaultInjectingStorage();
+  const source = seedUserLegacy(storage);
+  storage.armSet('throw-before', 2);
+
+  const result = migrateLegacyStorageToTenant(scopeA, storage);
+
+  assert.equal(result.classification, 'MIGRATION_WRITE_FAILED');
+  assertTargetEmpty(storage, scopeA);
+  assert.equal(storage.getItem(source.sourceKey), source.snapshotRaw);
+});
+
+test('A1.2-B.1 B3: falla escribiendo backups revierte CRM+sync y preserva source', () => {
+  const storage = new FaultInjectingStorage();
+  const source = seedUserLegacy(storage);
+  storage.armSet('throw-before', 3);
+
+  const result = migrateLegacyStorageToTenant(scopeA, storage);
+
+  assert.equal(result.classification, 'MIGRATION_WRITE_FAILED');
+  assertTargetEmpty(storage, scopeA);
+  assert.equal(storage.getItem(source.sourceKey), source.snapshotRaw);
+  assert.equal(storage.getItem(`${source.sourceKey}:sync`), source.syncRaw);
+});
+
+test('A1.2-B.1 B3: segundo intento luego de rollback limpio puede migrar', () => {
+  const storage = new FaultInjectingStorage();
+  const source = seedUserLegacy(storage);
+  storage.armSet('throw-after', 2);
+
+  const first = migrateLegacyStorageToTenant(scopeA, storage);
+  assert.equal(first.classification, 'MIGRATION_WRITE_FAILED');
+  assertTargetEmpty(storage, scopeA);
+
+  storage.disarmSet();
+  const second = migrateLegacyStorageToTenant(scopeA, storage);
+  assert.equal(second.classification, 'EXACT_ORG_MATCH');
+  assert.equal(second.copied, true);
+  assert.equal(storage.getItem(tenantStorageNamespace(scopeA).crmKey), source.snapshotRaw);
+});
+
+test('A1.2-B.1 B3: post-copy raw mismatch falla cerrado y hace rollback', () => {
+  const storage = new FaultInjectingStorage();
+  const source = seedUserLegacy(storage);
+  storage.armSet('corrupt', 2);
+
+  const result = migrateLegacyStorageToTenant(scopeA, storage);
+
+  assert.equal(result.classification, 'MIGRATION_VERIFICATION_FAILED');
+  assert.equal(result.outcome, 'RECOVERY_REQUIRED');
+  assertTargetEmpty(storage, scopeA);
+  assert.equal(storage.getItem(source.sourceKey), source.snapshotRaw);
+});
+
+test('A1.2-B.1 B3: rollback failure nunca se oculta como recovery limpio', () => {
+  const storage = new FaultInjectingStorage();
+  const source = seedUserLegacy(storage);
+  storage.armSet('throw-before', 2);
+  storage.armRollbackFailure();
+
+  assert.throws(
+    () => migrateLegacyStorageToTenant(scopeA, storage),
+    /TENANT_MIGRATION_ROLLBACK_FAILED/,
+  );
+  assert.equal(storage.getItem(source.sourceKey), source.snapshotRaw);
+});
+
+test('A1.2-B.1 static guard: guard CRM exacto protege read/write/dirty/token', () => {
+  const source = readFileSync('src/tenant-storage.ts', 'utf8');
+  assert.match(source, /export function assertTenantCrmScope/);
+  assert.match(source, /crm\.organization\.id !== scope\.organizationId/);
+  assert.equal(/crm\.organization\.id\s*=/.test(source), false);
+  assert.ok((source.match(/assertTenantCrmScope\(scope, crm\)/g) ?? []).length >= 4);
 });
