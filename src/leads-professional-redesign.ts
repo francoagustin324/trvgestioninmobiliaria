@@ -2,6 +2,7 @@ type AttentionFilter = 'all' | 'overdue' | 'missing-action' | 'new-uncontacted' 
 
 const MOBILE_QUERY = '(max-width: 720px)';
 const DESKTOP_QUERY = '(min-width: 901px)';
+const PRIORITY_REAPPLY_EVENT = 'propcontrol-leads-priority-reapply';
 const LEAD_CARD_SELECTOR = '#mvp-lead-results .mvp-lead-card';
 let attentionFilter: AttentionFilter = 'all';
 let stagesExpanded = false;
@@ -313,6 +314,7 @@ export function enhanceLeadsProfessionalRedesign(container: HTMLElement): void {
   enhanceLeadCards(container);
   organizeLeadForm();
   applyAttention(container);
+  document.dispatchEvent(new Event(PRIORITY_REAPPLY_EVENT));
 }
 
 function enhanceLeads(): void {
