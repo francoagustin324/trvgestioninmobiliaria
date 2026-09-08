@@ -6,6 +6,7 @@ export interface MobileAttentionPriority {
 }
 
 const COMPACT_MOBILE_QUERY = '(max-width: 520px)';
+const PRIORITY_REAPPLY_EVENT = 'propcontrol-leads-priority-reapply';
 const PRIORITY_RANK: Record<MobileAttentionPriorityId, number> = {
   overdue: 0,
   today: 1,
@@ -122,6 +123,7 @@ function schedulePriorityOrder(): void {
 
 function install(): void {
   if (typeof document === 'undefined' || typeof window === 'undefined') return;
+  document.addEventListener(PRIORITY_REAPPLY_EVENT, () => applyMobilePriorityOrder(document));
   document.addEventListener('trv-render', schedulePriorityOrder);
   document.addEventListener('click', schedulePriorityOrder);
   document.addEventListener('input', schedulePriorityOrder);

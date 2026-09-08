@@ -225,6 +225,46 @@ function visiblePrioritySnapshotScript() {
   };
 }
 
+interface PriorityRenderCheckpoint {
+  visible: Array<{ id: string; count: number }>;
+  replacedSinceImmediate?: boolean;
+}
+
+async function priorityRenderCycle(page: Page): Promise<{
+  immediate: PriorityRenderCheckpoint;
+  microtask: PriorityRenderCheckpoint;
+  firstFrame: PriorityRenderCheckpoint;
+  secondFrame: PriorityRenderCheckpoint;
+}> {
+  return page.evaluate(async () => {
+    const buttons = (): HTMLButtonElement[] => Array.from(document.querySelectorAll<HTMLButtonElement>('#crm [data-pc-attention]'));
+    const snapshot = (): PriorityRenderCheckpoint => ({
+      visible: buttons()
+        .filter((button) => getComputedStyle(button).display !== 'none')
+        .map((button) => ({
+          id: button.dataset.pcAttention ?? '',
+          count: Number(button.querySelector('b')?.textContent ?? '0'),
+        })),
+    });
+    const nextFrame = (): Promise<void> => new Promise((resolve) => requestAnimationFrame(() => resolve()));
+
+    document.dispatchEvent(new CustomEvent('trv-render'));
+    const immediateNodes = buttons();
+    const immediate = snapshot();
+    await Promise.resolve();
+    const microtask = snapshot();
+    await nextFrame();
+    const firstFrameNodes = buttons();
+    const firstFrame = {
+      ...snapshot(),
+      replacedSinceImmediate: firstFrameNodes.some((button, index) => button !== immediateNodes[index]),
+    };
+    await nextFrame();
+    const secondFrame = snapshot();
+    return { immediate, microtask, firstFrame, secondFrame };
+  });
+}
+
 test('prioridades móviles representan 1, varias y ninguna prioridad accionable sin hardcodear la fixture', () => {
   const one = prioritizeActionableMobileAttention([
     { id: 'overdue' as const, count: 0 },
@@ -249,6 +289,30 @@ test('prioridades móviles representan 1, varias y ninguna prioridad accionable 
     { id: 'today' as const, count: 0 },
   ]);
   assert.deepEqual(none, []);
+});
+
+test('WebKit regression #572: scheduleEnhance no expone buckets móviles con count cero', { timeout: 90_000 }, async () => {
+  const port = 62040 + Math.floor(Math.random() * 80);
+  const server = await startServer(port);
+  const browser = await webkit.launch({ headless: true });
+  const context = await webkitContext(browser, 375);
+
+  try {
+    const page = await context.newPage();
+    await load(page, `http://127.0.0.1:${port}`);
+    const cycle = await priorityRenderCycle(page);
+    const expected = [{ id: 'new-uncontacted', count: 1 }];
+
+    assert.equal(cycle.firstFrame.replacedSinceImmediate, true, 'scheduleEnhance debe reconstruir los attention chips en el primer frame');
+    assert.deepEqual(cycle.firstFrame.visible, expected, 'prioridad durante el frame de scheduleEnhance');
+    assert.deepEqual(cycle.immediate.visible, expected, 'prioridad inmediata post-render');
+    assert.deepEqual(cycle.microtask.visible, expected, 'prioridad post-microtask');
+    assert.deepEqual(cycle.secondFrame.visible, expected, 'prioridad post-segundo-frame');
+  } finally {
+    await context.close();
+    await browser.close();
+    await stopServer(server);
+  }
 });
 
 test('Chromium: prioridad accionable queda visible sin swipe y los estados múltiples/cero son compactos', { timeout: 90_000 }, async () => {
