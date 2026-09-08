@@ -5,30 +5,36 @@ import test from 'node:test';
 const recovery = readFileSync('src/sync-recovery-bootstrap.ts', 'utf8');
 const html = readFileSync('index.html', 'utf8');
 
-test('intercepta el botón de resolución antes del controlador anterior', () => {
+test('C1 recovery: intercepta resolución antes del controlador histórico', () => {
   assert.ok(recovery.includes("closest<HTMLElement>('[data-account-resolve]')"));
   assert.ok(recovery.includes('event.stopImmediatePropagation()'));
   assert.match(recovery, /document\.addEventListener\('click',[\s\S]*true\);/);
 });
 
-test('conserva ambas copias y usa la computadora sólo después de confirmación explícita', () => {
-  assert.ok(recovery.includes('reconcileCrmSnapshots(originalLocal, inspected.cloud)'));
-  assert.ok(recovery.includes('se conservará la versión de esta computadora'));
-  assert.ok(recovery.includes('Los registros exclusivos de la nube también se conservarán'));
-  assert.ok(recovery.includes('No se eliminará ningún registro'));
-  assert.ok(recovery.includes('window.confirm(confirmation)'));
+test('C1 recovery: queda explícitamente fail-closed hasta A1.2-F', () => {
+  assert.match(recovery, /TENANT_RECOVERY_CUTOVER_REQUIRED/);
+  assert.match(recovery, /No se modificó ningún dato/);
+  assert.match(recovery, /kind:\s*'error'/);
 });
 
-test('revisa nuevamente la nube y verifica el resultado final', () => {
-  assert.ok(recovery.includes('latestInspection.cloud'));
-  assert.ok(recovery.includes('stableFingerprint(latestInspection.cloud)'));
-  assert.ok(recovery.includes('authorizeConfirmedCloudResolution(latestInspection.remoteVersion)'));
-  assert.ok(recovery.includes('await pushCloudData(state.crm)'));
-  assert.ok(recovery.includes('const verified = await pullCloudData(state.crm)'));
-  assert.ok(recovery.includes('verification.localOnlyCount || verification.cloudOnlyCount || verification.conflictCount'));
+test('C1 recovery: no conserva ningún camino user-only de read/write/pull/push', () => {
+  for (const forbidden of [
+    /getSyncState\(/,
+    /markSyncError\(/,
+    /restoreSyncStateSnapshot\(/,
+    /authorizeConfirmedCloudResolution\(/,
+    /pullCloudData\(/,
+    /pushCloudData\(/,
+    /replaceData\(/,
+    /state\.crm/,
+    /sync-safety\.js/,
+    /cloud-api-compatible\.js/,
+  ]) {
+    assert.doesNotMatch(recovery, forbidden);
+  }
 });
 
-test('publica compatibilidad y recuperación históricas con mvp-main A2.2', () => {
+test('publica compatibilidad y recovery fail-closed con mvp-main A2.2', () => {
   const compatibilityVersion = html.match(/cloud-compat-bootstrap\.js\?v=([^"']+)/)?.[1];
   const mainVersion = html.match(/mvp-main\.js\?v=([^"']+)/)?.[1];
   const recoveryVersion = html.match(/sync-recovery-bootstrap\.js\?v=([^"']+)/)?.[1];
