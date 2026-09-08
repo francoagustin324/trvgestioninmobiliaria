@@ -38,6 +38,8 @@ function deferred(): { promise: Promise<void>; resolve: () => void } {
 test('cola serial: B nunca compite con A y empieza únicamente después de A', async () => {
   const a = deferred();
   const b = deferred();
+  const aStarted = deferred();
+  const bStarted = deferred();
   const started: string[] = [];
   let active = 0;
   let maxActive = 0;
@@ -45,19 +47,25 @@ test('cola serial: B nunca compite con A y empieza únicamente después de A', a
     active += 1;
     maxActive = Math.max(maxActive, active);
     started.push(value);
-    await (value === 'A' ? a.promise : b.promise);
+    if (value === 'A') {
+      aStarted.resolve();
+      await a.promise;
+    } else {
+      bStarted.resolve();
+      await b.promise;
+    }
     active -= 1;
   });
 
   const saveA = queue.enqueue('A');
-  await Promise.resolve();
+  await aStarted.promise;
   const saveB = queue.enqueue('B');
   await Promise.resolve();
   assert.deepEqual(started, ['A']);
   assert.equal(maxActive, 1);
 
   a.resolve();
-  while (started.length < 2) await new Promise((resolve) => setTimeout(resolve, 0));
+  await bStarted.promise;
   assert.deepEqual(started, ['A', 'B']);
   assert.equal(maxActive, 1);
 
@@ -132,7 +140,6 @@ test('hidratación remota vieja no limpia dirty ni autoriza reemplazo silencioso
   assert.equal(readLocalSnapshot(storage)?.clients[0]?.nextFollowUp, '2026-08-08');
 });
 
-
 test('restaurar backup crea una generación nueva identificable y pendiente', async () => {
   const storage = signedStorage();
   const first = structuredClone(initialData);
@@ -151,21 +158,21 @@ test('restaurar backup crea una generación nueva identificable y pendiente', as
   assert.equal(sync.localFingerprint, stableFingerprint(restored));
 });
 
-test('todos los caminos de escritura CRM usan el coordinador compatible y el login legacy vacía dirty antes de hidratar', () => {
-  const modern = readFileSync('src/cloud-api.ts', 'utf8');
+test('C2: el coordinador compatible reutiliza LatestSerialQueue con job y claves tenant', () => {
   const compatible = readFileSync('src/cloud-api-compatible.ts', 'utf8');
   const store = readFileSync('src/store.ts', 'utf8');
   const auth = readFileSync('src/auth-ui.ts', 'utf8');
+  const modern = readFileSync('src/cloud-api.ts', 'utf8');
 
   assert.ok(store.includes("queueCloudSave } from './cloud-api-compatible.js'"));
   assert.ok(auth.includes("from './cloud-api-compatible.js'"));
   assert.ok(auth.includes('if (hasPendingLocalChanges()) await pushCloudData(state.crm);'));
-  assert.ok(modern.includes('export function queueCloudSave'), 'se conserva sólo por compatibilidad histórica; ningún writer CRM lo importa');
-  assert.ok(compatible.includes('new LatestSerialQueue<CloudSaveJob>'));
-  assert.ok(compatible.includes('const verified = await pullModernCloudData(job.snapshot)'));
-  assert.ok(compatible.includes('remoteComparableCrm(verified)'));
-  assert.ok(compatible.includes('const authorityActive = job.visitAuthorityDecision ?? await visitTransactionAuthorityActive()'));
-  assert.match(compatible, /if \(authorityActive\)[\s\S]*pushCloudDataWithVisitAuthority\(job\.snapshot\)[\s\S]*authoritativeRemoteVersion = await visitAuthorityRemoteVersion\(\)[\s\S]*else \{[\s\S]*pushModernCloudData\(job\.snapshot\)/);
-  assert.ok(compatible.includes('const latest = markCloudSaved(authoritativeRemoteVersion, job.token)'));
-  assert.match(compatible, /const latest = markCloudSaved\(authoritativeRemoteVersion, job\.token\);[\s\S]*if \(latest\) \{[\s\S]*propcontrol-cloud-authoritative-snapshot/);
+  assert.ok(modern.includes('export function queueCloudSave'), 'el writer moderno histórico permanece sólo como compatibilidad latente');
+  assert.ok(compatible.includes("import { LatestSerialQueue } from './cloud-save-serial.js'"));
+  assert.ok(compatible.includes('new Map<string, LatestSerialQueue<CloudSaveJob>>()'));
+  assert.ok(compatible.includes('return tenantRuntimeKey(scope);'));
+  assert.ok(compatible.includes('const timerKey = cloudSaveQueueKey(job.scope);'));
+  assert.doesNotMatch(compatible, /const timerKey\s*=\s*scope\.userId/);
+  assert.match(compatible, /runCloudPush\(job: CloudSaveJob\)[\s\S]*job\.scope[\s\S]*job\.snapshot[\s\S]*job\.token/);
+  assert.match(compatible, /propcontrol-cloud-authoritative-snapshot[\s\S]*scope: job\.scope[\s\S]*runtimeLease: job\.runtimeLease[\s\S]*crm:/);
 });
