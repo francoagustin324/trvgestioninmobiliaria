@@ -13,9 +13,7 @@ import {
 } from './cloud-api-compatible.js';
 import { appIcons } from './icons.js';
 import type { CrmData } from './models.js';
-import { initialData } from './models.js';
 import {
-  activateStorageForCurrentSession,
   hasLocalBackup,
   replaceData,
   restoreLatestLocalBackup,
@@ -36,6 +34,8 @@ import {
   writeLocalSnapshot,
 } from './sync-safety.js';
 import { canManageTeam } from './team-access.js';
+import { hydrateTenantAfterAuth } from './tenant-hydration.js';
+import { requireCurrentTenantScope } from './tenant-runtime.js';
 import { escapeHtml } from './utils.js';
 
 const ACCOUNT_PANEL_ID = 'propcontrol-account-panel';
@@ -54,23 +54,6 @@ function activateMember(): void {
   if (!session) return;
   const member = state.crm.teamMembers.find((item) => item.userId === session.userId && item.status !== 'Suspendido');
   if (member) setActiveMemberId(member.id);
-}
-
-function emptyOperationalData(crm: CrmData): CrmData {
-  return {
-    ...structuredClone(crm),
-    activityLog: [],
-    clients: [],
-    properties: [],
-    contacts: [],
-    reminders: [],
-    fichas: [],
-    conversations: [],
-  };
-}
-
-function isUntouchedDemoData(crm: CrmData): boolean {
-  return stableFingerprint(crm) === stableFingerprint(initialData);
 }
 
 function dispatchCloudStatus(message: string, kind: 'success' | 'error' | 'working' = 'success'): void {
@@ -154,37 +137,15 @@ function bindAccountMenuEvents(): void {
 }
 
 async function hydrateAfterAuth(): Promise<void> {
-  activateStorageForCurrentSession();
-
-  if (hasPendingLocalChanges()) {
-    try {
-      await pushCloudData(state.crm);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'No se pudieron sincronizar los cambios locales.';
-      markSyncError(message);
-      activateMember();
-      return;
-    }
-  }
-
-  const cloud = await pullCloudData(state.crm);
-  if (cloud) {
-    replaceData(cloud);
-  } else {
-    const firstData = isUntouchedDemoData(state.crm) ? emptyOperationalData(state.crm) : state.crm;
-    if (firstData !== state.crm) replaceData(firstData);
-    await pushCloudData(state.crm);
-    const refreshed = await pullCloudData(state.crm);
-    if (refreshed) replaceData(refreshed);
-  }
-  activateMember();
+  await hydrateTenantAfterAuth();
 }
 
 async function synchronizeNow(): Promise<void> {
+  const scope = requireCurrentTenantScope();
   try {
     dispatchCloudStatus('Comprobando datos locales y de la nube…', 'working');
-    if (hasPendingLocalChanges()) await pushCloudData(state.crm);
-    const cloud = await pullCloudData(state.crm);
+    if (hasPendingLocalChanges()) await pushCloudData(scope, state.crm);
+    const cloud = await pullCloudData(scope, state.crm);
     if (cloud) replaceData(cloud);
     dispatchCloudStatus('Sincronización completada sin sobrescrituras.', 'success');
     document.dispatchEvent(new CustomEvent('trv-render'));
@@ -196,9 +157,10 @@ async function synchronizeNow(): Promise<void> {
 }
 
 async function inspectCloudWithoutChangingLocalState(local: CrmData): Promise<{ cloud: CrmData | null; remoteVersion: string }> {
+  const scope = requireCurrentTenantScope();
   const previousSyncState = getSyncState();
   try {
-    const cloud = await pullCloudData(local);
+    const cloud = await pullCloudData(scope, local);
     const inspectedState = getSyncState();
     return { cloud, remoteVersion: inspectedState.lastCloudVersion || '' };
   } finally {
@@ -212,6 +174,7 @@ function isDifferenceError(message: string | undefined): boolean {
 }
 
 async function resolveSyncDifferences(): Promise<void> {
+  const scope = requireCurrentTenantScope();
   const originalLocal = structuredClone(state.crm);
   try {
     dispatchCloudStatus('Revisando diferencias sin modificar tus datos…', 'working');
@@ -252,9 +215,9 @@ async function resolveSyncDifferences(): Promise<void> {
       backup: false,
     });
     authorizeConfirmedCloudResolution(latestInspection.remoteVersion);
-    await pushCloudData(state.crm);
+    await pushCloudData(scope, state.crm);
 
-    const verified = await pullCloudData(state.crm);
+    const verified = await pullCloudData(scope, state.crm);
     if (!verified) throw new Error('La nube no devolvió la copia verificada después de guardar.');
     const verification = reconcileCrmSnapshots(state.crm, verified);
     if (verification.localOnlyCount || verification.conflictCount) {
