@@ -87,10 +87,6 @@ export function cloudSaveQueueKey(scope: TenantScope): string {
   return tenantRuntimeKey(scope);
 }
 
-function sameSaveToken(left: Readonly<SyncSaveToken>, right: Readonly<SyncSaveToken>): boolean {
-  return left.generation === right.generation && left.fingerprint === right.fingerprint;
-}
-
 export function createCloudSaveJob(
   scope: TenantScope,
   crm: CrmData,
@@ -306,7 +302,3 @@ export function queueCloudSave(
   }, 700);
   compatibilitySaveTimers.set(timerKey, timer);
 }
-
-// Static review marker: token equality is always tenant-local because CloudSaveJob
-// is created from tenantSyncSaveToken(job.scope, snapshot), never from user-only state.
-void sameSaveToken;
