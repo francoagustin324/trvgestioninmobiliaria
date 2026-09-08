@@ -1,5 +1,13 @@
+import type { TenantScope } from './active-organization.js';
 import type { CrmData, TeamMember, TeamRole, TeamMemberStatus } from './models.js';
 import { initialData } from './models.js';
+import {
+  assertTenantRuntimeLeaseCurrent,
+  captureTenantRuntimeLease,
+  requireCurrentTenantScope,
+  TENANT_RUNTIME_SESSION_MISMATCH,
+  type TenantRuntimeLease,
+} from './tenant-runtime.js';
 import {
   cloudRecordIdentity,
   cloudRecordsToCrm,
@@ -466,23 +474,50 @@ function mapMutationMember(value: NonNullable<TeamMutationResponse['member']>): 
   };
 }
 
-async function teamMutation(path: string, method: 'POST' | 'PATCH', payload: unknown): Promise<TeamMember> {
+export const TENANT_TEAM_RESPONSE_ORGANIZATION_MISMATCH = 'TENANT_TEAM_RESPONSE_ORGANIZATION_MISMATCH';
+
+async function teamMutation(
+  scope: TenantScope,
+  runtimeLease: TenantRuntimeLease,
+  path: string,
+  method: 'POST' | 'PATCH',
+  payload: Record<string, unknown>,
+): Promise<TeamMember> {
+  assertTenantRuntimeLeaseCurrent(runtimeLease);
   const session = await requireSession();
+  assertTenantRuntimeLeaseCurrent(runtimeLease);
+  if (session.userId !== scope.userId) throw new Error(TENANT_RUNTIME_SESSION_MISMATCH);
+
   const response = await parseResponse(await fetch(path, {
     method,
     headers: { Authorization: `Bearer ${session.accessToken}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload),
+    body: JSON.stringify({ ...payload, organizationId: scope.organizationId }),
   })) as TeamMutationResponse;
+
+  assertTenantRuntimeLeaseCurrent(runtimeLease);
   if (!response.success || !response.member) throw new Error(response.error || 'No se pudo actualizar el equipo.');
+  if (response.member.organization_id !== scope.organizationId) {
+    throw new Error(TENANT_TEAM_RESPONSE_ORGANIZATION_MISMATCH);
+  }
+  assertTenantRuntimeLeaseCurrent(runtimeLease);
   return mapMutationMember(response.member);
 }
 
-export async function inviteTeamMember(input: { name: string; email: string; phone?: string; role: Exclude<TeamRole, 'Dueño'> }): Promise<TeamMember> {
-  return teamMutation('/api/team/invitations', 'POST', input);
+export async function inviteTeamMember(
+  input: { name: string; email: string; phone?: string; role: Exclude<TeamRole, 'Dueño'> },
+  scope: TenantScope = requireCurrentTenantScope(),
+  runtimeLease: TenantRuntimeLease = captureTenantRuntimeLease(scope),
+): Promise<TeamMember> {
+  return teamMutation(scope, runtimeLease, '/api/team/invitations', 'POST', input);
 }
 
-export async function updateTeamMemberAccess(memberId: number, input: { role?: Exclude<TeamRole, 'Dueño'>; status?: TeamMemberStatus }): Promise<TeamMember> {
-  return teamMutation(`/api/team/members/${memberId}`, 'PATCH', input);
+export async function updateTeamMemberAccess(
+  memberId: number,
+  input: { role?: Exclude<TeamRole, 'Dueño'>; status?: TeamMemberStatus },
+  scope: TenantScope = requireCurrentTenantScope(),
+  runtimeLease: TenantRuntimeLease = captureTenantRuntimeLease(scope),
+): Promise<TeamMember> {
+  return teamMutation(scope, runtimeLease, `/api/team/members/${memberId}`, 'PATCH', input);
 }
 
 export function queueCloudSave(crm: CrmData): void {

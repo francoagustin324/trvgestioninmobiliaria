@@ -4,6 +4,13 @@ import {
   inviteTeamMember,
   updateTeamMemberAccess,
 } from './cloud-api.js';
+import {
+  assertTenantRuntimeLeaseCurrent,
+  captureTenantRuntimeLease,
+  requireCurrentTenantScope,
+  tenantRuntimeLeaseIsCurrent,
+  type TenantRuntimeLease,
+} from './tenant-runtime.js';
 import { saveData, state } from './store.js';
 import {
   activeMember,
@@ -17,6 +24,11 @@ import {
 import { escapeHtml, field, formValues } from './utils.js';
 
 const roles: TeamRole[] = ['Dueño', 'Administrador', 'Corredor'];
+
+function teamMutationContext(): { scope: ReturnType<typeof requireCurrentTenantScope>; runtimeLease: TenantRuntimeLease } {
+  const scope = requireCurrentTenantScope();
+  return { scope, runtimeLease: captureTenantRuntimeLease(scope) };
+}
 
 function roleDescription(role: TeamRole): string {
   if (role === 'Dueño') return 'Control total, configuración, equipo y toda la operación.';
@@ -176,18 +188,21 @@ function bindTeam(container: HTMLElement): void {
     const submit = form.querySelector<HTMLButtonElement>('button[type="submit"]');
     if (submit) submit.disabled = true;
     feedback(container, 'Enviando invitación…');
+    const { scope, runtimeLease } = teamMutationContext();
     void inviteTeamMember({
       name: field(values, 'name').trim(),
       email,
       phone: field(values, 'phone').trim() || undefined,
       role: field(values, 'role') as Exclude<TeamRole, 'Dueño'>,
-    }).then((member) => {
+    }, scope, runtimeLease).then((member) => {
+      assertTenantRuntimeLeaseCurrent(runtimeLease);
       replaceMember(member);
       addActivity({ action: 'Invitación enviada', entityType: 'Equipo', entityId: member.id, detail: `${member.name} fue invitado como ${member.role}.` });
       state.openForms.member = false;
       saveData();
       document.dispatchEvent(new CustomEvent('trv-render'));
     }).catch((error) => {
+      if (!tenantRuntimeLeaseIsCurrent(runtimeLease)) return;
       feedback(container, error instanceof Error ? error.message : 'No se pudo enviar la invitación.', true);
       if (submit) submit.disabled = false;
     });
@@ -200,14 +215,17 @@ function bindTeam(container: HTMLElement): void {
     if (!target || target.role === 'Dueño') return;
     const previousRole = target.role;
     select.disabled = true;
-    void updateTeamMemberAccess(memberId, { role: select.value as Exclude<TeamRole, 'Dueño'> })
+    const { scope, runtimeLease } = teamMutationContext();
+    void updateTeamMemberAccess(memberId, { role: select.value as Exclude<TeamRole, 'Dueño'> }, scope, runtimeLease)
       .then((updated) => {
+        assertTenantRuntimeLeaseCurrent(runtimeLease);
         replaceMember(updated);
         addActivity({ action: 'Rol actualizado', entityType: 'Equipo', entityId: updated.id, detail: `${updated.name} ahora es ${updated.role}.` });
         saveData();
         document.dispatchEvent(new CustomEvent('trv-render'));
       })
       .catch((error) => {
+        if (!tenantRuntimeLeaseIsCurrent(runtimeLease)) return;
         select.value = previousRole;
         select.disabled = false;
         window.alert(error instanceof Error ? error.message : 'No se pudo cambiar el rol.');
@@ -220,14 +238,17 @@ function bindTeam(container: HTMLElement): void {
     if (!target || target.role === 'Dueño') return;
     button.disabled = true;
     const status = target.status === 'Suspendido' ? 'Activo' : 'Suspendido';
-    void updateTeamMemberAccess(target.id, { status })
+    const { scope, runtimeLease } = teamMutationContext();
+    void updateTeamMemberAccess(target.id, { status }, scope, runtimeLease)
       .then((updated) => {
+        assertTenantRuntimeLeaseCurrent(runtimeLease);
         replaceMember(updated);
         addActivity({ action: 'Estado de acceso', entityType: 'Equipo', entityId: updated.id, detail: `${updated.name}: ${updated.status}.` });
         saveData();
         document.dispatchEvent(new CustomEvent('trv-render'));
       })
       .catch((error) => {
+        if (!tenantRuntimeLeaseIsCurrent(runtimeLease)) return;
         button.disabled = false;
         window.alert(error instanceof Error ? error.message : 'No se pudo cambiar el acceso.');
       });
