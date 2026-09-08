@@ -1,0 +1,34 @@
+name: SEC-FIX-A1.2-C Targeted Validation
+
+on:
+  push:
+    branches:
+      - validation/sec-fix-a1-2-c
+
+permissions:
+  contents: read
+
+jobs:
+  targeted:
+    runs-on: ubuntu-24.04
+    env:
+      PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1'
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+      - name: Instalar dependencias
+        run: npm ci --silent
+      - name: Compilar TypeScript
+        run: npm run build --silent
+      - name: Ejecutar tests targeted C1
+        run: |
+          node --test --test-concurrency=1 \
+            dist/tests/sec-fix-a1-2-c1-tenant-hydration.test.js \
+            dist/tests/sec-fix-a1-2-a-active-organization.test.js \
+            dist/tests/sec-fix-a1-2-b-tenant-storage.test.js \
+            dist/tests/sec-fix-a1-2-b-2-tenant-storage-boundary.test.js \
+            dist/tests/sync-safety.test.js \
+            dist/tests/cloud-records.test.js \
+            dist/tests/cloud-api-compatible.test.js
