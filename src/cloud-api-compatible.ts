@@ -27,6 +27,7 @@ import {
   tenantCloudHeaders,
   tenantCloudTransport,
 } from './tenant-cloud-context.js';
+import { requireCurrentTenantScope } from './tenant-runtime.js';
 
 export {
   getCloudSession,
@@ -44,6 +45,12 @@ const compatibilitySaveTimers = new Map<string, number>();
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error ?? '');
+}
+
+function isTenantScope(value: unknown): value is TenantScope {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const scope = value as Partial<TenantScope>;
+  return typeof scope.userId === 'string' && typeof scope.organizationId === 'string';
 }
 
 export function isLegacySchemaError(error: unknown): boolean {
@@ -106,20 +113,38 @@ export async function resolveTenantVisitAuthority(scope: TenantScope): Promise<b
   return payload;
 }
 
-export async function pullCloudData(scope: TenantScope, fallback: CrmData): Promise<CrmData | null> {
+export function pullCloudData(scope: TenantScope, fallback: CrmData): Promise<CrmData | null>;
+export function pullCloudData(fallback: CrmData): Promise<CrmData | null>;
+export async function pullCloudData(
+  scopeOrFallback: TenantScope | CrmData,
+  fallbackMaybe?: CrmData,
+): Promise<CrmData | null> {
+  const scope = isTenantScope(scopeOrFallback) ? scopeOrFallback : requireCurrentTenantScope();
+  const fallback = isTenantScope(scopeOrFallback) ? fallbackMaybe : scopeOrFallback;
+  if (!fallback) throw new Error('TENANT_CLOUD_FALLBACK_REQUIRED');
   assertTenantCrmScope(scope, fallback);
   const cloud = await pullTenantCloudData(scope, fallback);
   if (cloud) assertTenantCrmScope(scope, cloud);
   return cloud;
 }
 
+export function pushCloudData(scope: TenantScope, crm: CrmData, visitAuthorityDecision?: boolean): Promise<void>;
+export function pushCloudData(crm: CrmData, expectedAccountKey?: string, visitAuthorityDecision?: boolean): Promise<void>;
 export async function pushCloudData(
-  scope: TenantScope,
-  crm: CrmData,
-  visitAuthorityDecision?: boolean,
+  scopeOrCrm: TenantScope | CrmData,
+  crmOrExpectedAccountKey?: CrmData | string,
+  visitAuthorityDecisionMaybe?: boolean,
 ): Promise<void> {
+  const scoped = isTenantScope(scopeOrCrm);
+  const scope = scoped ? scopeOrCrm : requireCurrentTenantScope();
+  const crm = scoped ? crmOrExpectedAccountKey as CrmData : scopeOrCrm;
+  const expectedAccountKey = !scoped && typeof crmOrExpectedAccountKey === 'string'
+    ? crmOrExpectedAccountKey
+    : undefined;
+  const visitAuthorityDecision = visitAuthorityDecisionMaybe;
+
   const session = getCloudSession();
-  if (!session || session.userId !== scope.userId) {
+  if (!session || session.userId !== scope.userId || (expectedAccountKey && expectedAccountKey !== scope.userId)) {
     throw new Error('La sesión activa cambió antes de iniciar la sincronización tenant.');
   }
   assertTenantCrmScope(scope, crm);
@@ -142,11 +167,20 @@ export async function pushCloudData(
   }
 }
 
+export function queueCloudSave(scope: TenantScope, crm: CrmData, visitAuthorityDecision?: boolean): void;
+export function queueCloudSave(crm: CrmData, visitAuthorityDecision?: boolean): void;
 export function queueCloudSave(
-  scope: TenantScope,
-  crm: CrmData,
-  visitAuthorityDecision?: boolean,
+  scopeOrCrm: TenantScope | CrmData,
+  crmOrVisitAuthorityDecision?: CrmData | boolean,
+  visitAuthorityDecisionMaybe?: boolean,
 ): void {
+  const scoped = isTenantScope(scopeOrCrm);
+  const scope = scoped ? scopeOrCrm : requireCurrentTenantScope();
+  const crm = scoped ? crmOrVisitAuthorityDecision as CrmData : scopeOrCrm;
+  const visitAuthorityDecision = scoped
+    ? visitAuthorityDecisionMaybe
+    : typeof crmOrVisitAuthorityDecision === 'boolean' ? crmOrVisitAuthorityDecision : undefined;
+
   const session = getCloudSession();
   if (!session || session.userId !== scope.userId) return;
   assertTenantCrmScope(scope, crm);
