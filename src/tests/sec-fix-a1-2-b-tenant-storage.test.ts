@@ -405,24 +405,35 @@ test('A1.2-B static guard: migración no corre automáticamente al importar mód
 test('A1.2-B static guard: tenant operations delegan al motor sync-safety existente', () => {
   const source = readFileSync('src/tenant-storage.ts', 'utf8');
   assert.match(source, /from '\.\/sync-safety\.js'/);
-  assert.match(source, /readLocalSnapshot\(tenantView\(scope, storage\)\)/);
+  assert.match(source, /assertExistingTenantSnapshotSafe\(namespace\.scope, target\)/);
+  assert.match(source, /readLocalSnapshot\(tenantView\(namespace\.scope, target\)\)/);
   assert.match(source, /writeLocalSnapshot\(crm, options, tenantView\(scope, storage\)\)/);
   assert.match(source, /return getSyncState\(tenantView\(scope, storage\)\)/);
   assert.equal(/localGeneration\s*:\s*\(/.test(source), false);
 });
 
-test('A1.2-B static guard: runtime canónico todavía no consume tenant storage', () => {
+test('A1.2-B post-cutover guard: runtime autorizado usa tenant-storage y no storage CRM user-only', () => {
   const runtimeFiles = [
-    'src/mvp-main.ts',
-    'src/mvp-auth.ts',
+    'src/store.ts',
+    'src/tenant-hydration.ts',
     'src/cloud-api-compatible.ts',
-    'src/visit-workflow-cutover.ts',
-    'src/sync-recovery-bootstrap.ts',
+    'src/mvp-auth.ts',
   ];
   runtimeFiles.forEach((path) => {
     const source = readFileSync(path, 'utf8');
-    assert.equal(source.includes('tenant-storage'), false, `${path} no debe hacer cutover A1.2-B`);
+    assert.match(source, /tenant-storage\.js/, `${path} debe consumir tenant-storage explícito`);
+    assert.doesNotMatch(source, /activateAccountStorage|readLocalSnapshot\(|writeLocalSnapshot\(/, `${path} no debe volver a primitives CRM user-only`);
   });
+
+  const store = readFileSync('src/store.ts', 'utf8');
+  const hydration = readFileSync('src/tenant-hydration.ts', 'utf8');
+  const auth = readFileSync('src/mvp-auth.ts', 'utf8');
+  assert.match(store, /readTenantSnapshot\(scope\)/);
+  assert.match(store, /writeTenantSnapshot\(scope, state\.crm/);
+  assert.match(hydration, /activateStorageForTenant\(scope\)/);
+  assert.match(hydration, /tenantHasPendingLocalChanges\(scope\)/);
+  assert.match(auth, /tenantHasPendingLocalChanges\(scope\)/);
+  assert.match(auth, /readTenantSyncState\(scope\)/);
 });
 
 test('A1.2-B.1 B1: scope A + CRM A pasa el boundary exacto', () => {
@@ -464,7 +475,7 @@ test('A1.2-B.1 B1: syncSaveToken B con CRM A falla cerrado', () => {
   assertTargetEmpty(storage, scopeB);
 });
 
-test('A1.2-B.1 B1: snapshot A accidental bajo key B nunca se devuelve como CRM B', () => {
+test('A1.2-B.1 B1: snapshot A accidental bajo key B falla en existing raw boundary y preserva raw', () => {
   const storage = new MemoryStorage();
   const namespace = tenantStorageNamespace(scopeB);
   const raw = JSON.stringify(crmFor('org-a', 'Cross tenant'));
@@ -472,7 +483,7 @@ test('A1.2-B.1 B1: snapshot A accidental bajo key B nunca se devuelve como CRM B
 
   assert.throws(
     () => readTenantSnapshot(scopeB, storage),
-    /TENANT_SNAPSHOT_ORGANIZATION_MISMATCH/,
+    /TENANT_EXISTING_SNAPSHOT_UNSAFE/,
   );
   assert.equal(storage.getItem(namespace.crmKey), raw);
 });
