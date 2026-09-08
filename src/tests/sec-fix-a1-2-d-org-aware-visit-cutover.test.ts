@@ -435,7 +435,25 @@ function installDocument(): EventTarget {
       },
     });
   }
-  const target = new EventTarget();
+  const target = new EventTarget() as EventTarget & {
+    getElementById: (id: string) => null;
+    createElement: (tag: string) => Record<string, unknown>;
+    head: { append: (...nodes: unknown[]) => void };
+    body: { append: (...nodes: unknown[]) => void };
+    querySelector: (selector: string) => null;
+    querySelectorAll: (selector: string) => unknown[];
+  };
+  target.getElementById = () => null;
+  target.createElement = () => ({
+    id: '', rel: '', href: '', textContent: '', innerHTML: '',
+    style: {}, dataset: {},
+    classList: { add() {}, remove() {}, toggle() { return false; }, contains() { return false; } },
+    append() {}, appendChild() {}, setAttribute() {}, addEventListener() {}, removeEventListener() {},
+  });
+  target.head = { append() {} };
+  target.body = { append() {} };
+  target.querySelector = () => null;
+  target.querySelectorAll = () => [];
   Object.defineProperty(globalThis, 'document', { configurable: true, writable: true, value: target });
   return target;
 }
