@@ -27,7 +27,11 @@ test('login y guardado automático cargan compatibilidad con TenantScope explíc
   assert.ok(index.indexOf('cloud-compat-bootstrap.js') < index.indexOf('mvp-main.js'));
   assert.match(bootstrap, /currentTenantScope\(\)/);
   assert.match(bootstrap, /tenantScopesEqual\(activeScope, eventScope\)/);
-  assert.match(bootstrap, /pushCloudData\(activeScope, state\.crm\)/);
+  assert.match(bootstrap, /retryScope: TenantScope = Object\.freeze\(\{ \.\.\.activeScope \}\)/);
+  assert.match(bootstrap, /retrySnapshot = structuredClone\(state\.crm\)/);
+  assert.match(bootstrap, /pushCloudData\(retryScope, retrySnapshot\)/);
+  assert.match(bootstrap, /retryKey = tenantRuntimeKey\(activeScope\)/);
+  assert.match(bootstrap, /captureTenantRuntimeLease\(retryScope\)/);
   assert.doesNotMatch(bootstrap, /pushCloudData\(state\.crm\)/);
   assert.doesNotMatch(bootstrap, /getCloudMembershipContext|fetchMembershipCatalog|resolveActiveOrganization/);
 });
