@@ -141,5 +141,8 @@ test('A1.2-C1 static: bootstrap de compatibilidad no puede reintentar sin event 
   const source = readFileSync('src/cloud-compat-bootstrap.ts', 'utf8');
   assert.match(source, /currentTenantScope\(\)/);
   assert.match(source, /tenantScopesEqual\(activeScope, eventScope\)/);
-  assert.match(source, /pushCloudData\(activeScope, state\.crm\)/);
+  assert.match(source, /retryScope: TenantScope = Object\.freeze\(\{ \.\.\.activeScope \}\)/);
+  assert.match(source, /retrySnapshot = structuredClone\(state\.crm\)/);
+  assert.match(source, /pushCloudData\(retryScope, retrySnapshot\)/);
+  assert.doesNotMatch(source, /pushCloudData\(state\.crm\)/);
 });
