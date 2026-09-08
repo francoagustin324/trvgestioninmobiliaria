@@ -36,19 +36,19 @@ jobs:
 
           replace_once(
               'src/tests/cloud-save-serial.test.ts',
-              r"  assert.match(authoritative, /crm: structuredClone\\(job\\.snapshot\\)/);",
-              r"  assert.match(authoritative, /function emitAuthoritativeSnapshot\\(job: CloudSaveJob, crm: CrmData = job\\.snapshot\\)/);\n  assert.match(authoritative, /crm: structuredClone\\(crm\\)/);",
+              "  assert.match(authoritative, /crm: structuredClone\\(job\\.snapshot\\)/);",
+              "  assert.match(authoritative, /function emitAuthoritativeSnapshot\\(job: CloudSaveJob, crm: CrmData = job\\.snapshot\\)/);\n  assert.match(authoritative, /crm: structuredClone\\(crm\\)/);",
           )
 
           replace_once(
               'src/tests/sec-fix-a1-2-c2-tenant-async.test.ts',
-              r"  assert.match(compatible, /resolveTenantVisitAuthority\\(job\\.scope\\)/);",
-              r"  assert.match(compatible, /resolveTenantVisitAuthority\\(job\\.scope, job\\.runtimeLease\\)/);",
+              "  assert.match(compatible, /resolveTenantVisitAuthority\\(job\\.scope\\)/);",
+              "  assert.match(compatible, /resolveTenantVisitAuthority\\(job\\.scope, job\\.runtimeLease\\)/);",
           )
           replace_once(
               'src/tests/sec-fix-a1-2-c2-tenant-async.test.ts',
-              r"  assert.match(authoritative, /crm: structuredClone\\(job\\.snapshot\\)/);",
-              r"  assert.match(authoritative, /function emitAuthoritativeSnapshot\\(job: CloudSaveJob, crm: CrmData = job\\.snapshot\\)/);\n  assert.match(authoritative, /crm: structuredClone\\(crm\\)/);",
+              "  assert.match(authoritative, /crm: structuredClone\\(job\\.snapshot\\)/);",
+              "  assert.match(authoritative, /function emitAuthoritativeSnapshot\\(job: CloudSaveJob, crm: CrmData = job\\.snapshot\\)/);\n  assert.match(authoritative, /crm: structuredClone\\(crm\\)/);",
           )
 
           replace_once(
@@ -67,7 +67,7 @@ jobs:
               text = text.replace(anchor, anchor + import_line)
 
           pattern = re.compile(r"test\('A1\.2-C1\.1 Visit capability:[\s\S]*?\n\}\);\s*$")
-          replacement = r'''test('A1.2-D Visit capability: multi-org usa scope exacto y no degrada a writer legacy', async () => {
+          replacement = '''test('A1.2-D Visit capability: multi-org usa scope exacto y no degrada a writer legacy', async () => {
             const storage = new MemoryStorage();
             storage.setItem('propcontrol-cloud-session-v1', JSON.stringify({
               accessToken: 'token',
