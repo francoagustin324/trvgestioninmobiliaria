@@ -237,6 +237,15 @@ export function activateStorageForTenant(scope: TenantScope): void {
   resetTransientState();
 }
 
+/**
+ * Transitional compatibility surface for latent callers/tests. It never derives
+ * tenant from session, CRM or membership order: it can only use the already
+ * installed runtime authority and therefore fails closed before C1 bootstrap.
+ */
+export function activateStorageForCurrentSession(): void {
+  activateStorageForTenant(requireCurrentTenantScope());
+}
+
 export function setActiveMemberId(memberId: number): void {
   const member = state.crm.teamMembers.find((item) => item.id === memberId && item.status !== 'Suspendido');
   if (!member) return;
