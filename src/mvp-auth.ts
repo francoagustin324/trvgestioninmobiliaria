@@ -26,16 +26,16 @@ import {
   reconciliationMessage,
   restoreSyncStateSnapshot,
 } from './sync-reconciliation.js';
-import {
-  getSyncState,
-  hasPendingLocalChanges,
-  markSyncError,
-  stableFingerprint,
-  writeLocalSnapshot,
-} from './sync-safety.js';
+import { stableFingerprint } from './sync-safety.js';
 import { canManageTeam } from './team-access.js';
 import { hydrateTenantAfterAuth } from './tenant-hydration.js';
 import { requireCurrentTenantScope } from './tenant-runtime.js';
+import {
+  markTenantSyncError,
+  readTenantSyncState,
+  tenantHasPendingLocalChanges,
+  writeTenantSnapshot,
+} from './tenant-storage.js';
 import { escapeHtml } from './utils.js';
 
 const ACCOUNT_PANEL_ID = 'propcontrol-account-panel';
@@ -144,27 +144,27 @@ async function synchronizeNow(): Promise<void> {
   const scope = requireCurrentTenantScope();
   try {
     dispatchCloudStatus('Comprobando datos locales y de la nube…', 'working');
-    if (hasPendingLocalChanges()) await pushCloudData(scope, state.crm);
+    if (tenantHasPendingLocalChanges(scope)) await pushCloudData(scope, state.crm);
     const cloud = await pullCloudData(scope, state.crm);
     if (cloud) replaceData(cloud);
     dispatchCloudStatus('Sincronización completada sin sobrescrituras.', 'success');
     document.dispatchEvent(new CustomEvent('trv-render'));
   } catch (error) {
     const message = error instanceof Error ? error.message : 'No se pudo sincronizar.';
-    markSyncError(message);
+    markTenantSyncError(scope, message);
     dispatchCloudStatus(message, 'error');
   }
 }
 
 async function inspectCloudWithoutChangingLocalState(local: CrmData): Promise<{ cloud: CrmData | null; remoteVersion: string }> {
   const scope = requireCurrentTenantScope();
-  const previousSyncState = getSyncState();
+  const previousSyncState = readTenantSyncState(scope);
   try {
     const cloud = await pullCloudData(scope, local);
-    const inspectedState = getSyncState();
+    const inspectedState = readTenantSyncState(scope);
     return { cloud, remoteVersion: inspectedState.lastCloudVersion || '' };
   } finally {
-    restoreSyncStateSnapshot(previousSyncState);
+    restoreSyncStateSnapshot(scope, previousSyncState);
   }
 }
 
@@ -209,12 +209,12 @@ async function resolveSyncDifferences(): Promise<void> {
     }
 
     replaceData(latestResult.merged);
-    writeLocalSnapshot(state.crm, {
+    writeTenantSnapshot(scope, state.crm, {
       markDirty: true,
       reason: 'Unión segura antes de sincronizar',
       backup: false,
     });
-    authorizeConfirmedCloudResolution(latestInspection.remoteVersion);
+    authorizeConfirmedCloudResolution(scope, latestInspection.remoteVersion);
     await pushCloudData(scope, state.crm);
 
     const verified = await pullCloudData(scope, state.crm);
@@ -229,7 +229,7 @@ async function resolveSyncDifferences(): Promise<void> {
     document.dispatchEvent(new CustomEvent('trv-render'));
   } catch (error) {
     const message = error instanceof Error ? error.message : 'No se pudieron resolver las diferencias.';
-    markSyncError(message);
+    markTenantSyncError(scope, message);
     dispatchCloudStatus(message, 'error');
     document.dispatchEvent(new CustomEvent('trv-render'));
   }
@@ -332,6 +332,7 @@ export function renderAccountMenu(): void {
     return;
   }
 
+  const scope = requireCurrentTenantScope();
   const authenticatedMember = state.crm.teamMembers.find(
     (item) => item.userId === session.userId && item.status !== 'Suspendido',
   );
@@ -347,7 +348,7 @@ export function renderAccountMenu(): void {
     email: session.email,
     userId: session.userId,
   });
-  const syncState = getSyncState();
+  const syncState = readTenantSyncState(scope);
   const sync = accountSyncPresentation(syncState);
   const differencePending = isDifferenceError(syncState.lastError);
   const backupAvailable = hasLocalBackup();
