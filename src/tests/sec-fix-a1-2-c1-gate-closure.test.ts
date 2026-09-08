@@ -104,8 +104,15 @@ test('A1.2-C1.1 manual sync: dirty A se lee desde tenant aunque user-only diga f
   const body = source.slice(start, end);
   assert.match(body, /requireCurrentTenantScope\(\)/);
   assert.match(body, /tenantHasPendingLocalChanges\(scope\)/);
-  assert.match(body, /pushCloudData\(scope, state\.crm\)/);
-  assert.match(body, /pullCloudData\(scope, state\.crm\)/);
+  assert.match(body, /const localSnapshot = structuredClone\(state\.crm\);/);
+  assert.ok(
+    body.indexOf('const localSnapshot = structuredClone(state.crm);') < body.indexOf('await '),
+    'manual sync debe capturar el snapshot antes del primer await',
+  );
+  assert.match(body, /pushCloudData\(scope, localSnapshot\)/);
+  assert.match(body, /pullCloudData\(scope, localSnapshot\)/);
+  assert.doesNotMatch(body, /pushCloudData\(scope, state\.crm\)/);
+  assert.doesNotMatch(body, /pullCloudData\(scope, state\.crm\)/);
   assert.match(body, /markTenantSyncError\(scope, message\)/);
   assert.doesNotMatch(body, /hasPendingLocalChanges\(\)/);
   assert.doesNotMatch(body, /markSyncError\(/);
