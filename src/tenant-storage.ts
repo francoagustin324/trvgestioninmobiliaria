@@ -22,6 +22,10 @@ import {
 const SESSION_KEY = 'propcontrol-cloud-session-v1';
 
 export const TENANT_SNAPSHOT_ORGANIZATION_MISMATCH = 'TENANT_SNAPSHOT_ORGANIZATION_MISMATCH';
+export const TENANT_EXISTING_SNAPSHOT_UNSAFE = 'TENANT_EXISTING_SNAPSHOT_UNSAFE';
+export const TENANT_BACKUP_SET_UNSAFE = 'TENANT_BACKUP_SET_UNSAFE';
+export const TENANT_SCOPE_IDENTIFIER_INVALID = 'TENANT_SCOPE_IDENTIFIER_INVALID';
+export const TENANT_SCOPE_IDENTIFIER_NOT_CANONICAL = 'TENANT_SCOPE_IDENTIFIER_NOT_CANONICAL';
 export const TENANT_MIGRATION_ROLLBACK_FAILED = 'TENANT_MIGRATION_ROLLBACK_FAILED';
 
 export type TenantStorageNamespace = Readonly<{
@@ -90,16 +94,20 @@ function activeStorage(storage?: Storage): Storage {
   return storage ?? localStorage;
 }
 
-function normalizedIdentifier(value: string, label: string): string {
-  const normalized = String(value ?? '').trim();
-  if (!normalized) throw new Error(`${label} requerido para storage tenant-scoped.`);
-  return normalized;
+function canonicalIdentifier(value: string, label: string): string {
+  if (typeof value !== 'string' || value.length === 0) {
+    throw new Error(`${TENANT_SCOPE_IDENTIFIER_INVALID}: ${label}`);
+  }
+  if (value !== value.trim()) {
+    throw new Error(`${TENANT_SCOPE_IDENTIFIER_NOT_CANONICAL}: ${label}`);
+  }
+  return value;
 }
 
 function frozenScopeCopy(scope: TenantScope): TenantScope {
   return Object.freeze({
-    userId: normalizedIdentifier(scope.userId, 'userId'),
-    organizationId: normalizedIdentifier(scope.organizationId, 'organizationId'),
+    userId: canonicalIdentifier(scope.userId, 'userId'),
+    organizationId: canonicalIdentifier(scope.organizationId, 'organizationId'),
   });
 }
 
@@ -121,6 +129,7 @@ export function tenantStorageNamespace(scope: TenantScope): TenantStorageNamespa
  * rewrites or repairs crm.organization.id.
  */
 export function assertTenantCrmScope(scope: TenantScope, crm: CrmData): void {
+  frozenScopeCopy(scope);
   if (crm.organization.id !== scope.organizationId) {
     throw new Error(TENANT_SNAPSHOT_ORGANIZATION_MISMATCH);
   }
@@ -178,7 +187,88 @@ function tenantView(scope: TenantScope, storage?: Storage): TenantStorageView {
   return view;
 }
 
+function rawOrganizationIdFromValue(value: unknown): string | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const organization = (value as { organization?: unknown }).organization;
+  if (!organization || typeof organization !== 'object' || Array.isArray(organization)) return null;
+  const id = (organization as { id?: unknown }).id;
+  return typeof id === 'string' && id.length > 0 ? id : null;
+}
+
+function isCrmDataShape(value: unknown): value is CrmData {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const crm = value as {
+    organization?: unknown;
+    teamMembers?: unknown;
+    activityLog?: unknown;
+    clients?: unknown;
+    properties?: unknown;
+    visits?: unknown;
+    offers?: unknown;
+    reservations?: unknown;
+    contacts?: unknown;
+    reminders?: unknown;
+    fichas?: unknown;
+    conversations?: unknown;
+    settings?: unknown;
+  };
+  return rawOrganizationIdFromValue(crm) !== null
+    && Array.isArray(crm.teamMembers)
+    && Array.isArray(crm.activityLog)
+    && Array.isArray(crm.clients)
+    && Array.isArray(crm.properties)
+    && Array.isArray(crm.visits)
+    && Array.isArray(crm.offers)
+    && Array.isArray(crm.reservations)
+    && Array.isArray(crm.contacts)
+    && Array.isArray(crm.reminders)
+    && Array.isArray(crm.fichas)
+    && Array.isArray(crm.conversations)
+    && Boolean(crm.settings && typeof crm.settings === 'object' && !Array.isArray(crm.settings));
+}
+
+function assertExistingTenantSnapshotSafe(scope: TenantScope, storage?: Storage): void {
+  const target = activeStorage(storage);
+  const namespace = tenantStorageNamespace(scope);
+  const raw = target.getItem(namespace.crmKey);
+  if (raw === null) return;
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    throw new Error(TENANT_EXISTING_SNAPSHOT_UNSAFE);
+  }
+
+  if (!isCrmDataShape(parsed) || rawOrganizationIdFromValue(parsed) !== namespace.scope.organizationId) {
+    throw new Error(TENANT_EXISTING_SNAPSHOT_UNSAFE);
+  }
+}
+
+function validBackupEntryForOrganization(value: unknown, organizationId: string): value is LocalBackup {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const backup = value as { createdAt?: unknown; reason?: unknown; crm?: unknown };
+  if (typeof backup.createdAt !== 'string' || typeof backup.reason !== 'string') return false;
+  if (!isCrmDataShape(backup.crm)) return false;
+  return rawOrganizationIdFromValue(backup.crm) === organizationId;
+}
+
+function parseTenantBackupSet(raw: string, organizationId: string): readonly LocalBackup[] {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    throw new Error(TENANT_BACKUP_SET_UNSAFE);
+  }
+
+  if (!Array.isArray(parsed) || !parsed.every((entry) => validBackupEntryForOrganization(entry, organizationId))) {
+    throw new Error(TENANT_BACKUP_SET_UNSAFE);
+  }
+  return Object.freeze(parsed as LocalBackup[]);
+}
+
 export function readTenantSnapshot(scope: TenantScope, storage?: Storage): CrmData | null {
+  tenantStorageNamespace(scope);
   const crm = readLocalSnapshot(tenantView(scope, storage));
   if (crm) assertTenantCrmScope(scope, crm);
   return crm;
@@ -190,7 +280,9 @@ export function writeTenantSnapshot(
   options: { markDirty?: boolean; reason?: string; backup?: boolean } = {},
   storage?: Storage,
 ): void {
+  tenantStorageNamespace(scope);
   assertTenantCrmScope(scope, crm);
+  assertExistingTenantSnapshotSafe(scope, storage);
   writeLocalSnapshot(crm, options, tenantView(scope, storage));
 }
 
@@ -217,7 +309,9 @@ export function markTenantDirty(
   reason = 'Cambio local',
   storage?: Storage,
 ): void {
+  tenantStorageNamespace(scope);
   assertTenantCrmScope(scope, crm);
+  assertExistingTenantSnapshotSafe(scope, storage);
   writeLocalSnapshot(crm, { reason, backup: false }, tenantView(scope, storage));
 }
 
@@ -271,23 +365,10 @@ export function hasTenantLocalBackup(scope: TenantScope, storage?: Storage): boo
 
 export function readTenantBackups(scope: TenantScope, storage?: Storage): readonly LocalBackup[] {
   const target = activeStorage(storage);
-  const { backupsKey } = tenantStorageNamespace(scope);
-  const raw = target.getItem(backupsKey);
-  if (!raw) return Object.freeze([]);
-  try {
-    const parsed: unknown = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return Object.freeze([]);
-    return Object.freeze(parsed.filter((value): value is LocalBackup => Boolean(
-      value
-      && typeof value === 'object'
-      && typeof (value as { createdAt?: unknown }).createdAt === 'string'
-      && typeof (value as { reason?: unknown }).reason === 'string'
-      && (value as { crm?: unknown }).crm
-      && typeof (value as { crm?: unknown }).crm === 'object'
-    )));
-  } catch {
-    return Object.freeze([]);
-  }
+  const namespace = tenantStorageNamespace(scope);
+  const raw = target.getItem(namespace.backupsKey);
+  if (raw === null) return Object.freeze([]);
+  return parseTenantBackupSet(raw, namespace.scope.organizationId);
 }
 
 export function tenantFingerprint(value: unknown): string {
@@ -334,14 +415,6 @@ function equivalentLegacyCandidates(left: LegacyCandidate, right: LegacyCandidat
     && left.backupsRaw === right.backupsRaw;
 }
 
-function rawOrganizationIdFromValue(value: unknown): string | null {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
-  const organization = (value as { organization?: unknown }).organization;
-  if (!organization || typeof organization !== 'object' || Array.isArray(organization)) return null;
-  const id = (organization as { id?: unknown }).id;
-  return typeof id === 'string' && id.length > 0 ? id : null;
-}
-
 function rawOrganizationId(snapshotRaw: string): string | null {
   try {
     return rawOrganizationIdFromValue(JSON.parse(snapshotRaw));
@@ -364,14 +437,8 @@ function validLegacyBackups(backupsRaw: string | null, organizationId: string): 
   if (backupsRaw === null) return true;
   try {
     const parsed: unknown = JSON.parse(backupsRaw);
-    if (!Array.isArray(parsed)) return false;
-    return parsed.every((entry) => {
-      if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return false;
-      const backup = entry as { createdAt?: unknown; reason?: unknown; crm?: unknown };
-      if (typeof backup.createdAt !== 'string' || typeof backup.reason !== 'string') return false;
-      if (!backup.crm || typeof backup.crm !== 'object' || Array.isArray(backup.crm)) return false;
-      return rawOrganizationIdFromValue(backup.crm) === organizationId;
-    });
+    return Array.isArray(parsed)
+      && parsed.every((entry) => validBackupEntryForOrganization(entry, organizationId));
   } catch {
     return false;
   }
