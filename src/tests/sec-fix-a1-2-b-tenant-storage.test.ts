@@ -669,5 +669,21 @@ test('A1.2-B.1 static guard: guard CRM exacto protege read/write/dirty/token', (
   assert.match(source, /export function assertTenantCrmScope/);
   assert.match(source, /crm\.organization\.id !== scope\.organizationId/);
   assert.equal(/crm\.organization\.id\s*=/.test(source), false);
-  assert.ok((source.match(/assertTenantCrmScope\(scope, crm\)/g) ?? []).length >= 4);
+
+  function exportedFunctionSurface(name: string): string {
+    const start = source.indexOf(`export function ${name}`);
+    assert.ok(start >= 0, `${name} debe existir`);
+    const next = source.indexOf('\nexport function ', start + 1);
+    return source.slice(start, next === -1 ? source.length : next);
+  }
+
+  const readSurface = exportedFunctionSurface('readTenantSnapshot');
+  const writeSurface = exportedFunctionSurface('writeTenantSnapshot');
+  const dirtySurface = exportedFunctionSurface('markTenantDirty');
+  const tokenSurface = exportedFunctionSurface('tenantSyncSaveToken');
+
+  assert.match(readSurface, /assertTenantCrmScope\(namespace\.scope, crm\)/);
+  assert.match(writeSurface, /assertTenantCrmScope\(scope, crm\)/);
+  assert.match(dirtySurface, /assertTenantCrmScope\(scope, crm\)/);
+  assert.match(tokenSurface, /assertTenantCrmScope\(scope, crm\)/);
 });
