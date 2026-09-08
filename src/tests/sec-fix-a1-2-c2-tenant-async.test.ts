@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
+import './sec-fix-a1-2-c2-test-setup.js';
 import type { TenantScope } from '../active-organization.js';
 import {
   cloudSaveQueueKey,
@@ -372,7 +373,16 @@ test('C2 static: save completion, status y authoritative event cargan scope+leas
   assert.match(compatible, /resolveTenantVisitAuthority\(job\.scope\)/);
   assert.match(compatible, /pushTenantModernCloudData\(job\.scope, job\.snapshot, job\.token\)/);
   assert.match(compatible, /pushTenantLegacyCloudData\(job\.scope, job\.snapshot, job\.token\)/);
-  assert.match(compatible, /propcontrol-cloud-authoritative-snapshot[\s\S]*scope: job\.scope[\s\S]*runtimeLease: job\.runtimeLease[\s\S]*crm: structuredClone\(job\.snapshot\)/);
+
+  const eventStart = compatible.indexOf('function emitAuthoritativeSnapshot');
+  const eventEnd = compatible.indexOf('export async function resolveTenantVisitAuthority');
+  assert.ok(eventStart >= 0 && eventEnd > eventStart);
+  const authoritative = compatible.slice(eventStart, eventEnd);
+  assert.match(authoritative, /scope: job\.scope/);
+  assert.match(authoritative, /runtimeLease: job\.runtimeLease/);
+  assert.match(authoritative, /crm: structuredClone\(job\.snapshot\)/);
+  assert.match(authoritative, /propcontrol-cloud-authoritative-snapshot/);
+
   assert.match(compatible, /TenantCloudStatusDetail[\s\S]*scope:[\s\S]*runtimeLease:[\s\S]*message:[\s\S]*kind:/);
   assert.doesNotMatch(compatible, /state\.crm|resolveActiveOrganization|readActiveOrganizationPreference|organization_members.*limit/);
 
