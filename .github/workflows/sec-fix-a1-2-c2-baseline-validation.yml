@@ -1,0 +1,42 @@
+name: SEC-FIX-A1.2-C2 Baseline Validation
+
+on:
+  push:
+    branches:
+      - validation/sec-fix-a1-2-c2-baseline
+  workflow_dispatch:
+
+env:
+  PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
+
+jobs:
+  c2-baseline-validation:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - name: Instalar dependencias
+        run: npm ci --silent
+      - name: Provisionar WebKit Playwright
+        run: |
+          unset PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD
+          npx playwright install --with-deps webkit
+      - name: Compilar TypeScript
+        run: npm run build --silent
+      - name: Ejecutar suite completa
+        run: |
+          set +e
+          npm run test:ci --silent > c2-full.log 2>&1
+          code=$?
+          cat c2-full.log
+          exit $code
+      - name: Guardar diagnóstico baseline C2
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: sec-fix-a1-2-c2-baseline-diagnostics
+          path: c2-full.log
+          if-no-files-found: warn
+          retention-days: 3
