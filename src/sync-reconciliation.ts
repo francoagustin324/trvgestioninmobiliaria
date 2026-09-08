@@ -1,10 +1,10 @@
+import type { TenantScope } from './active-organization.js';
 import type { CrmData } from './models.js';
+import { stableFingerprint, type SyncState } from './sync-safety.js';
 import {
-  getSyncState,
-  scopedStorageKey,
-  stableFingerprint,
-  type SyncState,
-} from './sync-safety.js';
+  authorizeTenantConfirmedCloudResolution,
+  restoreTenantSyncStateSnapshot,
+} from './tenant-storage.js';
 
 export interface ReconciliationDifference {
   key: keyof Pick<CrmData, 'clients' | 'properties' | 'visits' | 'offers' | 'reservations' | 'contacts' | 'reminders' | 'fichas' | 'conversations' | 'activityLog'>;
@@ -140,20 +140,10 @@ export function reconciliationMessage(result: ReconciliationResult): string {
   return lines.join('\n');
 }
 
-function syncStateStorageKey(): string {
-  return `${scopedStorageKey()}:sync`;
+export function restoreSyncStateSnapshot(scope: TenantScope, snapshot: SyncState): void {
+  restoreTenantSyncStateSnapshot(scope, snapshot);
 }
 
-export function restoreSyncStateSnapshot(snapshot: SyncState): void {
-  localStorage.setItem(syncStateStorageKey(), JSON.stringify(snapshot));
-}
-
-export function authorizeConfirmedCloudResolution(remoteVersion: string): void {
-  const current = getSyncState();
-  localStorage.setItem(syncStateStorageKey(), JSON.stringify({
-    ...current,
-    dirty: true,
-    lastCloudVersion: remoteVersion,
-    lastError: undefined,
-  } satisfies SyncState));
+export function authorizeConfirmedCloudResolution(scope: TenantScope, remoteVersion: string): void {
+  authorizeTenantConfirmedCloudResolution(scope, remoteVersion);
 }

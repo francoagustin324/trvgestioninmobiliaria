@@ -10,6 +10,7 @@ import {
   markCloudSaved,
   markSyncError,
   readLocalSnapshot,
+  restoreLatestBackup,
   scopedStorageKey,
   stableFingerprint,
   syncSaveToken,
@@ -268,9 +269,14 @@ function parseTenantBackupSet(raw: string, organizationId: string): readonly Loc
 }
 
 export function readTenantSnapshot(scope: TenantScope, storage?: Storage): CrmData | null {
-  tenantStorageNamespace(scope);
-  const crm = readLocalSnapshot(tenantView(scope, storage));
-  if (crm) assertTenantCrmScope(scope, crm);
+  const target = activeStorage(storage);
+  const namespace = tenantStorageNamespace(scope);
+  const raw = target.getItem(namespace.crmKey);
+  if (raw === null) return null;
+  assertExistingTenantSnapshotSafe(namespace.scope, target);
+  const crm = readLocalSnapshot(tenantView(namespace.scope, target));
+  if (!crm) throw new Error(TENANT_EXISTING_SNAPSHOT_UNSAFE);
+  assertTenantCrmScope(namespace.scope, crm);
   return crm;
 }
 
@@ -288,6 +294,30 @@ export function writeTenantSnapshot(
 
 export function readTenantSyncState(scope: TenantScope, storage?: Storage): SyncState {
   return getSyncState(tenantView(scope, storage));
+}
+
+export function restoreTenantSyncStateSnapshot(
+  scope: TenantScope,
+  snapshot: SyncState,
+  storage?: Storage,
+): void {
+  const target = activeStorage(storage);
+  const namespace = tenantStorageNamespace(scope);
+  target.setItem(namespace.syncKey, JSON.stringify(snapshot));
+}
+
+export function authorizeTenantConfirmedCloudResolution(
+  scope: TenantScope,
+  remoteVersion: string,
+  storage?: Storage,
+): void {
+  const current = readTenantSyncState(scope, storage);
+  restoreTenantSyncStateSnapshot(scope, {
+    ...current,
+    dirty: true,
+    lastCloudVersion: remoteVersion,
+    lastError: undefined,
+  }, storage);
 }
 
 export function tenantHasPendingLocalChanges(scope: TenantScope, storage?: Storage): boolean {
@@ -369,6 +399,13 @@ export function readTenantBackups(scope: TenantScope, storage?: Storage): readon
   const raw = target.getItem(namespace.backupsKey);
   if (raw === null) return Object.freeze([]);
   return parseTenantBackupSet(raw, namespace.scope.organizationId);
+}
+
+export function restoreLatestTenantBackup(scope: TenantScope, storage?: Storage): CrmData | null {
+  readTenantBackups(scope, storage);
+  const restored = restoreLatestBackup(tenantView(scope, storage));
+  if (restored) assertTenantCrmScope(scope, restored);
+  return restored;
 }
 
 export function tenantFingerprint(value: unknown): string {

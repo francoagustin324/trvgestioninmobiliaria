@@ -18,23 +18,40 @@ test('no oculta errores de contraseña o red ajenos al esquema', () => {
   assert.equal(isLegacySchemaError(new Error('Failed to fetch')), false);
 });
 
-test('login y guardado automático cargan la capa compatible', () => {
+test('login y guardado automático cargan compatibilidad con TenantScope explícito', () => {
   const auth = readFileSync('src/mvp-auth.ts', 'utf8');
   const index = readFileSync('index.html', 'utf8');
   const bootstrap = readFileSync('src/cloud-compat-bootstrap.ts', 'utf8');
   assert.ok(auth.includes("from './cloud-api-compatible.js'"));
   assert.ok(index.includes('/dist/cloud-compat-bootstrap.js'));
   assert.ok(index.indexOf('cloud-compat-bootstrap.js') < index.indexOf('mvp-main.js'));
-  assert.ok(bootstrap.includes('pushCloudData(state.crm)'));
+  assert.match(bootstrap, /currentTenantScope\(\)/);
+  assert.match(bootstrap, /tenantScopesEqual\(activeScope, eventScope\)/);
+  assert.match(bootstrap, /pushCloudData\(activeScope, state\.crm\)/);
+  assert.doesNotMatch(bootstrap, /pushCloudData\(state\.crm\)/);
+  assert.doesNotMatch(bootstrap, /getCloudMembershipContext|fetchMembershipCatalog|resolveActiveOrganization/);
 });
 
-test('la compatibilidad conserva el snapshot anterior sin tocar RLS', () => {
-  const source = readFileSync('src/cloud-api-compatible.ts', 'utf8');
-  for (const marker of [
-    "select', 'organization_id,role'",
-    "source', `eq.${SNAPSHOT_SOURCE}`",
-    "internal_data: { crm",
-    "Prefer: 'return=minimal'",
-  ]) assert.ok(source.includes(marker), marker);
-  assert.equal(source.includes('SUPABASE_SECRET_KEY'), false);
+test('compatibilidad legacy conserva invariantes tenant sin tocar RLS ni secretos', () => {
+  const context = readFileSync('src/tenant-cloud-context.ts', 'utf8');
+  const data = readFileSync('src/tenant-cloud-data.ts', 'utf8');
+  const combined = `${context}\n${data}`;
+
+  assert.match(context, /organization_members/);
+  assert.match(context, /organization_id.*scope\.organizationId/);
+  assert.match(context, /method:\s*'GET'/);
+  assert.match(context, /!activeStatus\(own\.status\)/);
+  assert.doesNotMatch(context, /searchParams\.set\('limit'/);
+  assert.doesNotMatch(context, /rows\s*\[\s*0\s*\]/);
+
+  assert.match(data, /organization_id:\s*scope\.organizationId/);
+  assert.match(data, /source:\s*SNAPSHOT_SOURCE/);
+  assert.match(data, /internal_data:\s*\{ crm,/);
+  assert.match(data, /Prefer:\s*'return=minimal'/);
+  assert.match(data, /assertTenantCrmScope\(scope,/);
+  assert.match(data, /TENANT_CLOUD_RESPONSE_MISMATCH/);
+
+  assert.equal(combined.includes('SUPABASE_SECRET_KEY'), false);
+  assert.equal(combined.includes('alter policy'), false);
+  assert.equal(combined.includes('create policy'), false);
 });

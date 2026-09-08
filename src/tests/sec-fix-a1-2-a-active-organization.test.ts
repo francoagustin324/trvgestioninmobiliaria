@@ -287,11 +287,21 @@ test('A1.2-A: aceptación explícita B0.3 permanece en invitation-auth y fuera d
   assert.doesNotMatch(discovery, /activate_my_organization_memberships/i);
 });
 
-test('A1.2-A static guard: runtime canónico todavía no consume la foundation', () => {
-  const main = readFileSync('src/mvp-main.ts', 'utf8');
-  const auth = readFileSync('src/mvp-auth.ts', 'utf8');
-  const store = readFileSync('src/store.ts', 'utf8');
-  for (const source of [main, auth, store]) {
-    assert.doesNotMatch(source, /active-organization\.js|membership-catalog\.js/i);
-  }
+test('A1.2-A post-cutover guard: hydration consume contexto/scope sin reabrir discovery implícito', () => {
+  const hydration = readFileSync('src/tenant-hydration.ts', 'utf8');
+  const catalog = readFileSync('src/membership-catalog.ts', 'utf8');
+  const resolver = readFileSync('src/active-organization.ts', 'utf8');
+
+  assert.match(hydration, /fetchMembershipCatalog\(\)/);
+  assert.match(hydration, /resolveActiveOrganization\(/);
+  assert.match(hydration, /tenantScopeFromActiveOrganization\(context\)/);
+  assert.match(hydration, /hydrateTenantAfterAuth/);
+  assert.match(hydration, /activateStorageForTenant\(scope\)/);
+  assert.match(hydration, /installTenantRuntimeScope\(scope, scope\.userId\)/);
+
+  assert.doesNotMatch(catalog, /activateMemberships\s*\(|activate_my_organization_memberships/i);
+  assert.doesNotMatch(catalog, /searchParams\.set\(['"]limit['"]/i);
+  assert.doesNotMatch(catalog, /rows\s*\[\s*0\s*\]|payload\s*\[\s*0\s*\]/i);
+  assert.doesNotMatch(hydration, /state\.crm\.organization\.id/);
+  assert.doesNotMatch(resolver, /state\.crm|rows\s*\[\s*0\s*\]/i);
 });
