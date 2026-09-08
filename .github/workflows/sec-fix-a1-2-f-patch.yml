@@ -1,0 +1,35 @@
+name: SEC-FIX-A1.2-F Patch
+
+on:
+  push:
+    branches:
+      - validation/sec-fix-a1-2-f-finalpatch
+
+permissions:
+  contents: write
+
+jobs:
+  patch-f:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: agent/sec-fix-a1-2-f-tenant-recovery-cutover
+          fetch-depth: 0
+      - name: Fetch patch script
+        run: |
+          git fetch origin validation/sec-fix-a1-2-f-finalpatch
+          git show origin/validation/sec-fix-a1-2-f-finalpatch:scripts/sec-fix-a1-2-f-patch.py > /tmp/sec-fix-f.py
+      - name: Apply F production patch
+        run: python /tmp/sec-fix-f.py
+      - name: Verify production-only diff
+        run: |
+          test "$(git diff --name-only | sort)" = "$(printf '%s\n' src/mvp-auth.ts src/store.ts src/sync-recovery-bootstrap.ts src/tenant-storage.ts | sort)"
+          git diff --check
+      - name: Commit F production patch
+        run: |
+          git config user.name "francoagustin324"
+          git config user.email "francoagustinsolis@gmail.com"
+          git add src/mvp-auth.ts src/store.ts src/sync-recovery-bootstrap.ts src/tenant-storage.ts
+          git commit -m "SEC-FIX A1.2-F — Complete tenant-aware recovery cutover"
+          git push origin HEAD:agent/sec-fix-a1-2-f-tenant-recovery-cutover
