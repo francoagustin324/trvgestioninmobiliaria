@@ -25,10 +25,16 @@ jobs:
       - name: Ejecutar tests targeted C1
         run: |
           node --test --test-concurrency=1 \
+            dist/tests/sec-fix-a1-2-c1-gate-closure.test.js \
             dist/tests/sec-fix-a1-2-c1-tenant-hydration.test.js \
             dist/tests/sec-fix-a1-2-a-active-organization.test.js \
             dist/tests/sec-fix-a1-2-b-tenant-storage.test.js \
             dist/tests/sec-fix-a1-2-b-2-tenant-storage-boundary.test.js \
-            dist/tests/sync-safety.test.js \
+            dist/tests/cloud-api-compatible.test.js \
             dist/tests/cloud-records.test.js \
-            dist/tests/cloud-api-compatible.test.js
+            dist/tests/sync-safety.test.js \
+            dist/tests/sync-reconciliation.test.js \
+            dist/tests/sync-recovery-bootstrap.test.js \
+            dist/tests/b0-1-membership-security.test.js \
+            dist/tests/b0-3-user-onboarding.test.js \
+            dist/tests/invitation-auth-flow.test.js
