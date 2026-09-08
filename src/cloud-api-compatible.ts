@@ -83,6 +83,17 @@ function isTenantScope(value: unknown): value is TenantScope {
   return typeof scope.userId === 'string' && typeof scope.organizationId === 'string';
 }
 
+function deepFreeze<T>(value: T, seen = new WeakSet<object>()): T {
+  if (value === null || typeof value !== 'object') return value;
+  const objectValue = value as object;
+  if (seen.has(objectValue)) return value;
+  seen.add(objectValue);
+  for (const nested of Object.values(value as Record<string, unknown>)) {
+    deepFreeze(nested, seen);
+  }
+  return Object.freeze(value);
+}
+
 export function cloudSaveQueueKey(scope: TenantScope): string {
   return tenantRuntimeKey(scope);
 }
@@ -94,7 +105,7 @@ export function createCloudSaveJob(
 ): CloudSaveJob {
   assertTenantCrmScope(scope, crm);
   const frozenScope: TenantScope = Object.freeze({ ...scope });
-  const snapshot = structuredClone(crm);
+  const snapshot = deepFreeze(structuredClone(crm));
   const token = Object.freeze({ ...tenantSyncSaveToken(frozenScope, snapshot) });
   const runtimeLease = captureTenantRuntimeLease(frozenScope);
   return Object.freeze({
