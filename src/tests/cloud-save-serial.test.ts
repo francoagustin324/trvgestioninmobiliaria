@@ -174,5 +174,13 @@ test('C2: el coordinador compatible reutiliza LatestSerialQueue con job y claves
   assert.ok(compatible.includes('const timerKey = cloudSaveQueueKey(job.scope);'));
   assert.doesNotMatch(compatible, /const timerKey\s*=\s*scope\.userId/);
   assert.match(compatible, /runCloudPush\(job: CloudSaveJob\)[\s\S]*job\.scope[\s\S]*job\.snapshot[\s\S]*job\.token/);
-  assert.match(compatible, /propcontrol-cloud-authoritative-snapshot[\s\S]*scope: job\.scope[\s\S]*runtimeLease: job\.runtimeLease[\s\S]*crm:/);
+
+  const eventStart = compatible.indexOf('function emitAuthoritativeSnapshot');
+  const eventEnd = compatible.indexOf('export async function resolveTenantVisitAuthority');
+  assert.ok(eventStart >= 0 && eventEnd > eventStart);
+  const authoritative = compatible.slice(eventStart, eventEnd);
+  assert.match(authoritative, /scope: job\.scope/);
+  assert.match(authoritative, /runtimeLease: job\.runtimeLease/);
+  assert.match(authoritative, /crm: structuredClone\(job\.snapshot\)/);
+  assert.match(authoritative, /propcontrol-cloud-authoritative-snapshot/);
 });
