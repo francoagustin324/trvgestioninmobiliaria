@@ -1,0 +1,136 @@
+name: SEC-FIX-A1.2-D Align Inherited Tests
+
+on:
+  push:
+    branches:
+      - validation/sec-fix-a1-2-d-test-contract-patch
+
+permissions:
+  contents: write
+
+jobs:
+  patch-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: agent/sec-fix-a1-2-d-org-aware-visit-cutover
+          fetch-depth: 0
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+      - name: Align inherited test contracts to D
+        shell: bash
+        run: |
+          python <<'PY'
+          from pathlib import Path
+          import re
+
+          def replace_once(path, old, new):
+              p = Path(path)
+              text = p.read_text()
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f'{path}: expected one exact match, got {count}')
+              p.write_text(text.replace(old, new))
+
+          replace_once(
+              'src/tests/cloud-save-serial.test.ts',
+              r"  assert.match(authoritative, /crm: structuredClone\\(job\\.snapshot\\)/);",
+              r"  assert.match(authoritative, /function emitAuthoritativeSnapshot\\(job: CloudSaveJob, crm: CrmData = job\\.snapshot\\)/);\n  assert.match(authoritative, /crm: structuredClone\\(crm\\)/);",
+          )
+
+          replace_once(
+              'src/tests/sec-fix-a1-2-c2-tenant-async.test.ts',
+              r"  assert.match(compatible, /resolveTenantVisitAuthority\\(job\\.scope\\)/);",
+              r"  assert.match(compatible, /resolveTenantVisitAuthority\\(job\\.scope, job\\.runtimeLease\\)/);",
+          )
+          replace_once(
+              'src/tests/sec-fix-a1-2-c2-tenant-async.test.ts',
+              r"  assert.match(authoritative, /crm: structuredClone\\(job\\.snapshot\\)/);",
+              r"  assert.match(authoritative, /function emitAuthoritativeSnapshot\\(job: CloudSaveJob, crm: CrmData = job\\.snapshot\\)/);\n  assert.match(authoritative, /crm: structuredClone\\(crm\\)/);",
+          )
+
+          replace_once(
+              'src/tests/sec-fix-a1-2-c1-tenant-hydration.test.ts',
+              "  assert.match(body, /active\\.length !== 1/);\n  assert.match(body, /TENANT_VISIT_CAPABILITY_INDETERMINATE/);\n  assert.equal(body.includes('activate_my_organization_memberships'), false);\n  assert.equal(body.includes(\"searchParams.set('limit'\"), false);",
+              "  assert.match(body, /captureTenantRuntimeLease\\(scope\\)/);\n  assert.match(body, /visitTransactionAuthorityActiveV2\\(scope, runtimeLease\\)/);\n  assert.doesNotMatch(body, /active\\.length|active\\[0\\]/);\n  assert.equal(body.includes('activate_my_organization_memberships'), false);\n  assert.equal(body.includes(\"searchParams.set('limit'\"), false);",
+          )
+
+          gate = Path('src/tests/sec-fix-a1-2-c1-gate-closure.test.ts')
+          text = gate.read_text()
+          import_line = "import { installTenantRuntimeScope, invalidateTenantRuntimeScope } from '../tenant-runtime.js';\n"
+          if import_line not in text:
+              anchor = "} from '../tenant-storage.js';\n"
+              if text.count(anchor) != 1:
+                  raise SystemExit('gate imports: anchor mismatch')
+              text = text.replace(anchor, anchor + import_line)
+
+          pattern = re.compile(r"test\('A1\.2-C1\.1 Visit capability:[\s\S]*?\n\}\);\s*$")
+          replacement = r'''test('A1.2-D Visit capability: multi-org usa scope exacto y no degrada a writer legacy', async () => {
+            const storage = new MemoryStorage();
+            storage.setItem('propcontrol-cloud-session-v1', JSON.stringify({
+              accessToken: 'token',
+              refreshToken: 'refresh',
+              expiresAt: Date.now() + 60_000,
+              userId,
+              email: 'user@example.com',
+            }));
+            Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: storage });
+            invalidateTenantRuntimeScope();
+            installTenantRuntimeScope(scopeA, userId);
+
+            const requests: Array<{ method: string; pathname: string }> = [];
+            Object.defineProperty(globalThis, 'fetch', {
+              configurable: true,
+              value: async (input: string | URL | Request, init?: RequestInit): Promise<Response> => {
+                const url = new URL(typeof input === 'string' || input instanceof URL ? input.toString() : input.url, 'https://app.test');
+                const method = String(init?.method || (input instanceof Request ? input.method : 'GET')).toUpperCase();
+                requests.push({ method, pathname: url.pathname });
+                if (url.pathname === '/api/cloud-config') {
+                  return json({ configured: true, url: 'https://supabase.test', publishableKey: 'key' });
+                }
+                if (url.pathname === '/rest/v1/organization_members') {
+                  assert.equal(url.searchParams.get('organization_id'), 'eq.org-a');
+                  return json([
+                    { organization_id: 'org-a', member_id: 1, user_id: userId, role: 'owner', status: 'active' },
+                  ]);
+                }
+                if (url.pathname === '/rest/v1/rpc/visit_transaction_authority_active_v2') {
+                  assert.equal(method, 'POST');
+                  assert.deepEqual(JSON.parse(String(init?.body ?? '{}')), { p_organization_id: 'org-a' });
+                  return json(true);
+                }
+                throw new Error(`unexpected ${method} ${url.pathname}`);
+              },
+            });
+
+            assert.equal(await resolveTenantVisitAuthority(scopeA), true);
+            assert.equal(requests.some((request) => request.pathname === '/rest/v1/rpc/visit_transaction_authority_active'), false);
+            assert.equal(requests.some((request) => request.pathname.includes('client_snapshot_cas')), false);
+            assert.equal(requests.some((request) => request.pathname.includes('commercial_visit_mutation')), false);
+          });
+          '''
+          text, count = pattern.subn(replacement, text)
+          if count != 1:
+              raise SystemExit(f'gate capability test: expected one match, got {count}')
+          gate.write_text(text)
+          PY
+
+          git diff --check
+          files="$(git diff --name-only)"
+          printf '%s\n' "$files"
+          expected=$'src/tests/cloud-save-serial.test.ts\nsrc/tests/sec-fix-a1-2-c1-gate-closure.test.ts\nsrc/tests/sec-fix-a1-2-c1-tenant-hydration.test.ts\nsrc/tests/sec-fix-a1-2-c2-tenant-async.test.ts'
+          test "$files" = "$expected"
+      - name: Commit test-only alignment
+        shell: bash
+        run: |
+          git config user.name 'francoagustin324'
+          git config user.email 'francoagustinsolis@gmail.com'
+          git add \
+            src/tests/cloud-save-serial.test.ts \
+            src/tests/sec-fix-a1-2-c1-gate-closure.test.ts \
+            src/tests/sec-fix-a1-2-c1-tenant-hydration.test.ts \
+            src/tests/sec-fix-a1-2-c2-tenant-async.test.ts
+          git commit -m 'SEC-FIX A1.2-D — Align inherited tests with V2 cutover'
+          git push origin HEAD:agent/sec-fix-a1-2-d-org-aware-visit-cutover
