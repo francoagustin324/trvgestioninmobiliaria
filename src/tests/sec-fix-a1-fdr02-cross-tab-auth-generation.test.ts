@@ -3,6 +3,8 @@ import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import test from 'node:test';
 import type { TenantScope } from '../active-organization.js';
+import type { CloudSession } from '../cloud-api.js';
+import type { TenantRuntimeLease } from '../tenant-runtime.js';
 
 type Deferred<T> = Readonly<{
   promise: Promise<T>;
@@ -138,7 +140,7 @@ function fixture(userId: string, suffix: string): AuthFixture {
   });
 }
 
-function sessionFor(fixtureValue: AuthFixture, expired = false): cloudApi.CloudSession {
+function sessionFor(fixtureValue: AuthFixture, expired = false): CloudSession {
   return {
     accessToken: fixtureValue.accessToken,
     refreshToken: fixtureValue.refreshToken,
@@ -303,7 +305,7 @@ function seedLegacySession(value: AuthFixture, expired = true): void {
   sharedStorage.setItem(authState.CLOUD_SESSION_KEY, JSON.stringify(sessionFor(value, expired)));
 }
 
-function externalTabCommit(session: cloudApi.CloudSession | null): string {
+function externalTabCommit(session: CloudSession | null): string {
   const before = authState.captureSharedAuthGeneration();
   const next = authState.commitSharedCloudSession(before, session);
   fakeWindow.dispatchStorage(
@@ -318,7 +320,7 @@ function scope(userId: string, organizationId = ORG_A): TenantScope {
   return Object.freeze({ userId, organizationId });
 }
 
-function installRuntime(userId: string): { scope: TenantScope; lease: tenantRuntime.TenantRuntimeLease } {
+function installRuntime(userId: string): { scope: TenantScope; lease: TenantRuntimeLease } {
   const tenantScope = scope(userId);
   tenantRuntime.installTenantRuntimeScope(tenantScope, userId);
   return { scope: tenantScope, lease: tenantRuntime.captureTenantRuntimeLease(tenantScope) };
