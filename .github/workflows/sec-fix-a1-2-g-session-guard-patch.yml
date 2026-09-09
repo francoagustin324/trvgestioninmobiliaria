@@ -1,0 +1,38 @@
+name: SEC-FIX-A1.2-G Session Guard Patch
+
+on:
+  push:
+    branches:
+      - validation/sec-fix-a1-2-g-session-guard-patch
+
+permissions:
+  contents: write
+
+jobs:
+  patch-g-session:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: validation/sec-fix-a1-2-g-session-guard-patch
+      - name: Preserve patch script
+        run: cp scripts/sec-fix-a1-2-g-session-guard-patch.py /tmp/sec-fix-a1-2-g-session-guard-patch.py
+      - name: Checkout G candidate
+        run: |
+          git fetch origin agent/sec-fix-a1-2-g-public-share-tenant-cutover
+          git checkout -B agent/sec-fix-a1-2-g-public-share-tenant-cutover origin/agent/sec-fix-a1-2-g-public-share-tenant-cutover
+      - name: Apply session completion guard
+        run: python /tmp/sec-fix-a1-2-g-session-guard-patch.py
+      - name: Verify scoped production diff
+        run: |
+          git diff --check
+          git diff --name-only | sort > /tmp/changed.txt
+          printf '%s\n' src/mvp-properties-ui.ts src/public-property-share.ts | sort > /tmp/expected.txt
+          diff -u /tmp/expected.txt /tmp/changed.txt
+      - name: Commit G session guard patch
+        run: |
+          git config user.name "francoagustin324"
+          git config user.email "francoagustinsolis@gmail.com"
+          git add src/public-property-share.ts src/mvp-properties-ui.ts
+          git commit -m "SEC-FIX A1.2-G — Suppress stale public share completions after logout"
+          git push origin HEAD:agent/sec-fix-a1-2-g-public-share-tenant-cutover
