@@ -30,6 +30,7 @@ import {
 
 const SESSION_KEY = 'propcontrol-cloud-session-v1';
 const SNAPSHOT_SOURCE = 'propcontrol_system_snapshot';
+const AUTH_SESSION_STALE = 'AUTH_SESSION_STALE';
 
 interface CloudConfig {
   configured: boolean;
@@ -84,6 +85,11 @@ interface TeamMutationResponse {
   error?: string;
 }
 
+type RefreshPromiseState = Readonly<{
+  epoch: number;
+  promise: Promise<CloudSession | null>;
+}>;
+
 class CloudHttpError extends Error {
   constructor(message: string, readonly status: number, readonly code = '') {
     super(message);
@@ -91,8 +97,23 @@ class CloudHttpError extends Error {
 }
 
 let configPromise: Promise<Required<Pick<CloudConfig, 'url' | 'publishableKey'>> & Pick<CloudConfig, 'invitationsConfigured'>> | null = null;
-let refreshPromise: Promise<CloudSession | null> | null = null;
+let authSessionEpoch = 0;
+let refreshPromise: RefreshPromiseState | null = null;
 let saveTimer: number | null = null;
+
+function authSessionEpochIsCurrent(epoch: number): boolean {
+  return authSessionEpoch === epoch;
+}
+
+function advanceAuthSessionEpoch(): number {
+  authSessionEpoch += 1;
+  refreshPromise = null;
+  return authSessionEpoch;
+}
+
+function assertAuthSessionEpochCurrent(epoch: number): void {
+  if (!authSessionEpochIsCurrent(epoch)) throw new Error(AUTH_SESSION_STALE);
+}
 
 function emitStatus(message: string, kind: 'success' | 'error' | 'working' = 'success'): void {
   document.dispatchEvent(new CustomEvent('propcontrol-cloud-status', { detail: { message, kind } }));
@@ -177,11 +198,13 @@ export function getCloudSession(): CloudSession | null {
 }
 
 export function signOutCloud(): void {
+  advanceAuthSessionEpoch();
   storeSession(null);
   emitStatus('Sesión cerrada. Los datos siguen guardados en este dispositivo.');
 }
 
 export async function signUpCloud(email: string, password: string, companyName: string): Promise<{ session: CloudSession | null; message: string }> {
+  const operationEpoch = authSessionEpoch;
   const config = await getConfig();
   const payload = await parseResponse(await fetch(`${config.url}/auth/v1/signup`, {
     method: 'POST',
@@ -193,6 +216,8 @@ export async function signUpCloud(email: string, password: string, companyName: 
     }),
   })) as AuthResponse;
   const session = toSession(payload);
+  assertAuthSessionEpochCurrent(operationEpoch);
+  advanceAuthSessionEpoch();
   storeSession(session);
   return session
     ? { session, message: 'Cuenta creada y conectada.' }
@@ -200,6 +225,7 @@ export async function signUpCloud(email: string, password: string, companyName: 
 }
 
 export async function signInCloud(email: string, password: string): Promise<CloudSession> {
+  const operationEpoch = authSessionEpoch;
   const config = await getConfig();
   const payload = await parseResponse(await fetch(`${config.url}/auth/v1/token?grant_type=password`, {
     method: 'POST',
@@ -208,14 +234,19 @@ export async function signInCloud(email: string, password: string): Promise<Clou
   })) as AuthResponse;
   const session = toSession(payload);
   if (!session) throw new Error('Supabase no devolvió una sesión válida.');
+  assertAuthSessionEpochCurrent(operationEpoch);
+  advanceAuthSessionEpoch();
   storeSession(session);
   return session;
 }
 
 async function refreshCloudSession(session: CloudSession): Promise<CloudSession | null> {
   if (session.expiresAt > Date.now()) return session;
-  if (refreshPromise) return refreshPromise;
-  refreshPromise = (async () => {
+  const operationEpoch = authSessionEpoch;
+  if (refreshPromise?.epoch === operationEpoch) return refreshPromise.promise;
+
+  let promise!: Promise<CloudSession | null>;
+  promise = (async () => {
     try {
       const config = await getConfig();
       const payload = await parseResponse(await fetch(`${config.url}/auth/v1/token?grant_type=refresh_token`, {
@@ -224,16 +255,28 @@ async function refreshCloudSession(session: CloudSession): Promise<CloudSession 
         body: JSON.stringify({ refresh_token: session.refreshToken }),
       })) as AuthResponse;
       const renewed = toSession(payload);
+      if (!authSessionEpochIsCurrent(operationEpoch)) return null;
+      if (!renewed) {
+        advanceAuthSessionEpoch();
+        storeSession(null);
+        return null;
+      }
       storeSession(renewed);
       return renewed;
     } catch {
-      storeSession(null);
+      if (authSessionEpochIsCurrent(operationEpoch)) {
+        advanceAuthSessionEpoch();
+        storeSession(null);
+      }
       return null;
     } finally {
-      refreshPromise = null;
+      if (refreshPromise?.epoch === operationEpoch && refreshPromise.promise === promise) {
+        refreshPromise = null;
+      }
     }
   })();
-  return refreshPromise;
+  refreshPromise = Object.freeze({ epoch: operationEpoch, promise });
+  return promise;
 }
 
 async function requireSession(): Promise<CloudSession> {
