@@ -78,6 +78,10 @@ test('modern: no declara éxito si la relectura remota no coincide con el snapsh
 
 test('legacy: tampoco declara éxito si el snapshot releído no coincide', async () => {
   const storage = installSession();
+  let legacyReads = 0;
+  const mismatchedRemoteCrm = tenantCrm();
+  mismatchedRemoteCrm.clients[0]!.nextFollowUp = '2030-01-01';
+
   Object.defineProperty(globalThis, 'fetch', {
     configurable: true,
     value: async (input: string | URL | Request, init?: RequestInit): Promise<Response> => {
@@ -88,7 +92,16 @@ test('legacy: tampoco declara éxito si el snapshot releído no coincide', async
       if (url.pathname.endsWith('/propcontrol_records') && method === 'GET') {
         return json({ code: 'PGRST205', message: "Could not find the table 'public.propcontrol_records' in the schema cache" }, 400);
       }
-      if (url.pathname.endsWith('/fichas') && method === 'GET') return json([]);
+      if (url.pathname.endsWith('/fichas') && method === 'GET') {
+        legacyReads += 1;
+        if (legacyReads === 1) return json([]);
+        return json([{
+          id: 'legacy-row',
+          organization_id: TENANT_SCOPE.organizationId,
+          internal_data: { crm: mismatchedRemoteCrm },
+          updated_at: '2026-09-09T12:00:00.000Z',
+        }]);
+      }
       if (url.pathname.endsWith('/fichas') && method === 'POST') return json([]);
       throw new Error(`unexpected ${method} ${url}`);
     },
