@@ -218,7 +218,7 @@ function installFetchHarness(options: HarnessOptions = {}): {
       }
       if (url.includes('/rest/v1/organization_members')) {
         membershipRequests.push(url);
-        return json([{ organization_id: ORG_B }]);
+        return json([{ organization_id: ORG_B }, { organization_id: ORG_A }]);
       }
       if (url.startsWith(`${CLOUD_URL}/rest/v1/public_property_fichas`)) {
         const body = JSON.parse(String(init.body || '{}')) as PublishBody;
