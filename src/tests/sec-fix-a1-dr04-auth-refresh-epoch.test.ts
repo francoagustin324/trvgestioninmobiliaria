@@ -104,7 +104,10 @@ class AuthHarness {
   expireCurrentSession(): void {
     const session = getCloudSession();
     if (!session) throw new Error('DR-04 esperaba una sesión current para vencer.');
-    this.storage.setItem(SESSION_KEY, JSON.stringify({ ...session, expiresAt: Date.now() - 1_000 }));
+    const raw = this.storage.getItem(SESSION_KEY);
+    if (!raw) throw new Error('DR-04 esperaba el envelope raw de la sesión current.');
+    const stored = JSON.parse(raw) as Record<string, unknown>;
+    this.storage.setItem(SESSION_KEY, JSON.stringify({ ...stored, expiresAt: Date.now() - 1_000 }));
   }
 
   queueLogin(fixture: AuthFixture): void {
