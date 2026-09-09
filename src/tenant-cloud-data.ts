@@ -24,8 +24,10 @@ import {
   type TenantCloudTransport,
 } from './tenant-cloud-context.js';
 import {
+  TENANT_RUNTIME_STALE,
   assertTenantRuntimeLeaseCurrent,
   captureTenantRuntimeLease,
+  tenantScopesEqual,
   type TenantRuntimeLease,
 } from './tenant-runtime.js';
 
@@ -84,6 +86,13 @@ function assertRowsTenant(scope: TenantScope, rows: readonly CloudRecordRow[]): 
   }
 }
 
+function assertCloudWriterLease(scope: TenantScope, runtimeLease: TenantRuntimeLease): void {
+  if (!tenantScopesEqual(scope, runtimeLease.scope)) {
+    throw new Error(TENANT_RUNTIME_STALE);
+  }
+  assertTenantRuntimeLeaseCurrent(runtimeLease);
+}
+
 function crmSyncRecords(records: readonly CloudRecordRow[]): CloudRecordRow[] {
   return records.filter((record) => !isSupervisedRecommendationTelemetryPayload(record.payload));
 }
@@ -100,42 +109,63 @@ function recordsFingerprint(records: readonly CloudRecordRow[]): string {
     .sort((left, right) => `${left.entity_type}:${left.entity_key}`.localeCompare(`${right.entity_type}:${right.entity_key}`)));
 }
 
-async function fetchCloudRecords(transport: TenantCloudTransport): Promise<CloudRecordRow[]> {
+async function fetchCloudRecords(
+  transport: TenantCloudTransport,
+  runtimeLease?: TenantRuntimeLease,
+): Promise<CloudRecordRow[]> {
+  if (runtimeLease) assertCloudWriterLease(transport.scope, runtimeLease);
   const query = new URL(`${transport.config.url}/rest/v1/propcontrol_records`);
   query.searchParams.set('select', 'organization_id,entity_type,entity_key,assigned_member_id,payload,created_by,updated_at');
   query.searchParams.set('organization_id', `eq.${transport.scope.organizationId}`);
   query.searchParams.set('order', 'entity_type.asc,entity_key.asc');
-  const payload = await parseTenantCloudJson(await fetch(query, {
+  const response = await fetch(query, {
     method: 'GET',
     headers: tenantCloudHeaders(transport.config.publishableKey, transport.accessToken),
     cache: 'no-store',
-  }));
+  });
+  if (runtimeLease) assertCloudWriterLease(transport.scope, runtimeLease);
+  const payload = await parseTenantCloudJson(response);
+  if (runtimeLease) assertCloudWriterLease(transport.scope, runtimeLease);
   if (!Array.isArray(payload)) throw new Error(TENANT_CLOUD_RESPONSE_MISMATCH);
   const rows = payload as CloudRecordRow[];
   assertRowsTenant(transport.scope, rows);
   return rows;
 }
 
-async function upsertRecords(transport: TenantCloudTransport, records: CloudRecordRow[]): Promise<void> {
+async function upsertRecords(
+  transport: TenantCloudTransport,
+  records: CloudRecordRow[],
+  runtimeLease: TenantRuntimeLease,
+): Promise<void> {
   assertRowsTenant(transport.scope, records);
+  assertCloudWriterLease(transport.scope, runtimeLease);
   for (let index = 0; index < records.length; index += 100) {
     const chunk = records.slice(index, index + 100);
     if (!chunk.length) continue;
+    assertCloudWriterLease(transport.scope, runtimeLease);
     const target = new URL(`${transport.config.url}/rest/v1/propcontrol_records`);
     target.searchParams.set('on_conflict', 'organization_id,entity_type,entity_key');
-    await parseTenantCloudJson(await fetch(target, {
+    const response = await fetch(target, {
       method: 'POST',
       headers: {
         ...tenantCloudHeaders(transport.config.publishableKey, transport.accessToken),
         Prefer: 'resolution=merge-duplicates,return=minimal',
       },
       body: JSON.stringify(chunk),
-    }));
+    });
+    assertCloudWriterLease(transport.scope, runtimeLease);
+    await parseTenantCloudJson(response);
+    assertCloudWriterLease(transport.scope, runtimeLease);
   }
 }
 
-async function deleteStaleRecords(transport: TenantCloudTransport, stale: CloudRecordRow[]): Promise<void> {
+async function deleteStaleRecords(
+  transport: TenantCloudTransport,
+  stale: CloudRecordRow[],
+  runtimeLease: TenantRuntimeLease,
+): Promise<void> {
   assertRowsTenant(transport.scope, stale);
+  assertCloudWriterLease(transport.scope, runtimeLease);
   const grouped = new Map<string, string[]>();
   stale.forEach((record) => {
     const keys = grouped.get(record.entity_type) ?? [];
@@ -144,33 +174,44 @@ async function deleteStaleRecords(transport: TenantCloudTransport, stale: CloudR
   });
   for (const [entityType, keys] of grouped) {
     for (let index = 0; index < keys.length; index += 100) {
+      assertCloudWriterLease(transport.scope, runtimeLease);
       const target = new URL(`${transport.config.url}/rest/v1/propcontrol_records`);
       target.searchParams.set('organization_id', `eq.${transport.scope.organizationId}`);
       target.searchParams.set('entity_type', `eq.${entityType}`);
       target.searchParams.set('entity_key', `in.(${keys.slice(index, index + 100).map((key) => `"${key.replaceAll('"', '')}"`).join(',')})`);
-      await parseTenantCloudJson(await fetch(target, {
+      const response = await fetch(target, {
         method: 'DELETE',
         headers: {
           ...tenantCloudHeaders(transport.config.publishableKey, transport.accessToken),
           Prefer: 'return=minimal',
         },
-      }));
+      });
+      assertCloudWriterLease(transport.scope, runtimeLease);
+      await parseTenantCloudJson(response);
+      assertCloudWriterLease(transport.scope, runtimeLease);
     }
   }
 }
 
-async function tenantLegacySnapshotRow(transport: TenantCloudTransport): Promise<LegacySnapshotRow | null> {
+async function tenantLegacySnapshotRow(
+  transport: TenantCloudTransport,
+  runtimeLease?: TenantRuntimeLease,
+): Promise<LegacySnapshotRow | null> {
+  if (runtimeLease) assertCloudWriterLease(transport.scope, runtimeLease);
   const query = new URL(`${transport.config.url}/rest/v1/fichas`);
   query.searchParams.set('select', 'id,organization_id,internal_data,updated_at');
   query.searchParams.set('organization_id', `eq.${transport.scope.organizationId}`);
   query.searchParams.set('source', `eq.${SNAPSHOT_SOURCE}`);
   query.searchParams.set('order', 'updated_at.desc');
   query.searchParams.set('limit', '1');
-  const payload = await parseTenantCloudJson(await fetch(query, {
+  const response = await fetch(query, {
     method: 'GET',
     headers: tenantCloudHeaders(transport.config.publishableKey, transport.accessToken),
     cache: 'no-store',
-  }));
+  });
+  if (runtimeLease) assertCloudWriterLease(transport.scope, runtimeLease);
+  const payload = await parseTenantCloudJson(response);
+  if (runtimeLease) assertCloudWriterLease(transport.scope, runtimeLease);
   if (!Array.isArray(payload)) throw new Error(TENANT_CLOUD_RESPONSE_MISMATCH);
   const row = (payload as LegacySnapshotRow[])[0] ?? null;
   if (!row) return null;
@@ -268,10 +309,14 @@ export async function pushTenantModernCloudData(
   scope: TenantScope,
   crm: CrmData,
   token: SyncSaveToken,
+  runtimeLease: TenantRuntimeLease,
 ): Promise<void> {
   assertTenantCrmScope(scope, crm);
+  assertCloudWriterLease(scope, runtimeLease);
   const transport = await tenantCloudTransport(scope);
-  const existing = await fetchCloudRecords(transport);
+  assertCloudWriterLease(scope, runtimeLease);
+  const existing = await fetchCloudRecords(transport, runtimeLease);
+  assertCloudWriterLease(scope, runtimeLease);
   const next = crmToCloudRecords(crm, transport.context, scope.userId);
   assertRowsTenant(scope, next);
   const existingFingerprint = recordsFingerprint(existing);
@@ -279,29 +324,42 @@ export async function pushTenantModernCloudData(
   const remoteVersion = latestRemoteVersion(crmSyncRecords(existing));
 
   assertTenantRemoteIsSafe(scope, remoteVersion, nextFingerprint, existingFingerprint);
+  assertCloudWriterLease(scope, runtimeLease);
   if (existingFingerprint === nextFingerprint) {
+    assertCloudWriterLease(scope, runtimeLease);
     markTenantCloudSaved(scope, remoteVersion, token);
+    assertCloudWriterLease(scope, runtimeLease);
     return;
   }
 
-  await upsertRecords(transport, next);
-  await deleteStaleRecords(transport, staleCloudRecords(existing, next));
-  const refreshed = await fetchCloudRecords(transport);
+  assertCloudWriterLease(scope, runtimeLease);
+  await upsertRecords(transport, next, runtimeLease);
+  assertCloudWriterLease(scope, runtimeLease);
+  await deleteStaleRecords(transport, staleCloudRecords(existing, next), runtimeLease);
+  assertCloudWriterLease(scope, runtimeLease);
+  const refreshed = await fetchCloudRecords(transport, runtimeLease);
+  assertCloudWriterLease(scope, runtimeLease);
   const refreshedFingerprint = recordsFingerprint(refreshed);
   if (refreshedFingerprint !== nextFingerprint) {
     throw new Error('La verificación remota moderna no coincide con el snapshot tenant que PropControl intentó guardar.');
   }
+  assertCloudWriterLease(scope, runtimeLease);
   markTenantCloudSaved(scope, latestRemoteVersion(crmSyncRecords(refreshed)), token);
+  assertCloudWriterLease(scope, runtimeLease);
 }
 
 export async function pushTenantLegacyCloudData(
   scope: TenantScope,
   crm: CrmData,
   token: SyncSaveToken,
+  runtimeLease: TenantRuntimeLease,
 ): Promise<void> {
   assertTenantCrmScope(scope, crm);
+  assertCloudWriterLease(scope, runtimeLease);
   const transport = await tenantCloudTransport(scope);
-  const row = await tenantLegacySnapshotRow(transport);
+  assertCloudWriterLease(scope, runtimeLease);
+  const row = await tenantLegacySnapshotRow(transport, runtimeLease);
+  assertCloudWriterLease(scope, runtimeLease);
   const localFingerprint = tenantFingerprint(crm);
   const remoteCrm = row?.internal_data?.crm;
   if (remoteCrm !== undefined && remoteCrm !== null) {
@@ -310,9 +368,12 @@ export async function pushTenantLegacyCloudData(
   }
   const remoteFingerprint = tenantFingerprint(remoteCrm ?? null);
   assertTenantRemoteIsSafe(scope, row?.updated_at || null, localFingerprint, remoteFingerprint);
+  assertCloudWriterLease(scope, runtimeLease);
 
   if (row && localFingerprint === remoteFingerprint) {
+    assertCloudWriterLease(scope, runtimeLease);
     markTenantCloudSaved(scope, row.updated_at || null, token);
+    assertCloudWriterLease(scope, runtimeLease);
     return;
   }
 
@@ -327,16 +388,22 @@ export async function pushTenantLegacyCloudData(
   const target = row
     ? `${transport.config.url}/rest/v1/fichas?id=eq.${encodeURIComponent(row.id)}&organization_id=eq.${encodeURIComponent(scope.organizationId)}`
     : `${transport.config.url}/rest/v1/fichas`;
-  await parseTenantCloudJson(await fetch(target, {
+  assertCloudWriterLease(scope, runtimeLease);
+  const response = await fetch(target, {
     method: row ? 'PATCH' : 'POST',
     headers: {
       ...tenantCloudHeaders(transport.config.publishableKey, transport.accessToken),
       Prefer: 'return=minimal',
     },
     body: JSON.stringify(payload),
-  }));
+  });
+  assertCloudWriterLease(scope, runtimeLease);
+  await parseTenantCloudJson(response);
+  assertCloudWriterLease(scope, runtimeLease);
 
-  const refreshed = await tenantLegacySnapshotRow(transport);
+  assertCloudWriterLease(scope, runtimeLease);
+  const refreshed = await tenantLegacySnapshotRow(transport, runtimeLease);
+  assertCloudWriterLease(scope, runtimeLease);
   const verifiedCrm = refreshed?.internal_data?.crm;
   if (!isCrmData(verifiedCrm)) {
     throw new Error('La verificación remota legacy no devolvió un CRM válido para el tenant.');
@@ -345,7 +412,9 @@ export async function pushTenantLegacyCloudData(
   if (tenantFingerprint(verifiedCrm) !== localFingerprint) {
     throw new Error('La verificación remota legacy no coincide con el snapshot tenant que PropControl intentó guardar.');
   }
+  assertCloudWriterLease(scope, runtimeLease);
   markTenantCloudSaved(scope, refreshed?.updated_at || new Date().toISOString(), token);
+  assertCloudWriterLease(scope, runtimeLease);
 }
 
 export async function tenantCloudRemoteVersion(scope: TenantScope): Promise<string | null> {
