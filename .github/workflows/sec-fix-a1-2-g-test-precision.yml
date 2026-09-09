@@ -1,0 +1,37 @@
+name: SEC-FIX-A1.2-G Test Precision Patch
+
+on:
+  push:
+    branches:
+      - validation/sec-fix-a1-2-g-test-precision
+
+permissions:
+  contents: write
+
+jobs:
+  patch-g-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: validation/sec-fix-a1-2-g-test-precision
+      - name: Preserve patch script
+        run: cp scripts/sec-fix-a1-2-g-test-precision.py /tmp/sec-fix-a1-2-g-test-precision.py
+      - name: Checkout G candidate
+        run: |
+          git fetch origin agent/sec-fix-a1-2-g-public-share-tenant-cutover
+          git checkout -B agent/sec-fix-a1-2-g-public-share-tenant-cutover origin/agent/sec-fix-a1-2-g-public-share-tenant-cutover
+      - name: Apply test precision patch
+        run: python /tmp/sec-fix-a1-2-g-test-precision.py
+      - name: Verify test-only diff
+        run: |
+          git diff --check
+          changed="$(git diff --name-only)"
+          test "$changed" = "src/tests/sec-fix-a1-2-g-public-property-share.test.ts"
+      - name: Commit test precision patch
+        run: |
+          git config user.name "francoagustin324"
+          git config user.email "francoagustinsolis@gmail.com"
+          git add src/tests/sec-fix-a1-2-g-public-property-share.test.ts
+          git commit -m "SEC-FIX A1.2-G — Make multi-org test explicitly B-first"
+          git push origin HEAD:agent/sec-fix-a1-2-g-public-share-tenant-cutover
