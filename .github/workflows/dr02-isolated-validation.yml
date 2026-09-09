@@ -51,15 +51,12 @@ jobs:
         run: node --test --test-concurrency=1 dist/tests/sec-fix-a1-dr02-cloud-writer-lease.test.js
 
       - name: Relevant cloud tests
-        shell: bash
         run: |
-          set -euo pipefail
-          mapfile -t tests < <(find dist/tests -maxdepth 1 -type f -name '*cloud*.test.js' ! -name 'sec-fix-a1-dr02-cloud-writer-lease.test.js' -print | sort)
-          printf 'CLOUD_TEST_FILES=%s\n' "${#tests[@]}"
-          printf '%s\n' "${tests[@]}"
-          if [ "${#tests[@]}" -gt 0 ]; then
-            node --test --test-concurrency=1 "${tests[@]}"
-          fi
+          node --test --test-concurrency=1 \
+            dist/tests/cloud-api-compatible.test.js \
+            dist/tests/cloud-records.test.js \
+            dist/tests/cloud-remote-verification.test.js \
+            dist/tests/cloud-save-serial.test.js
 
       - name: DR-01 property photo regression
         run: |
