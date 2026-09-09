@@ -32,6 +32,7 @@ import {
   invalidateTenantRuntimeScope,
   requireCurrentTenantScope,
   tenantRuntimeKey,
+  tenantRuntimeLeaseIsCurrent,
   type TenantRuntimeLease,
 } from './tenant-runtime.js';
 
@@ -236,12 +237,16 @@ async function runCloudPush(job: CloudSaveJob): Promise<void> {
   }
 
   try {
-    await pushTenantModernCloudData(job.scope, job.snapshot, job.token);
+    await pushTenantModernCloudData(job.scope, job.snapshot, job.token, job.runtimeLease);
+    assertTenantRuntimeLeaseCurrent(job.runtimeLease);
   } catch (error) {
     if (!isLegacySchemaError(error)) throw error;
-    await pushTenantLegacyCloudData(job.scope, job.snapshot, job.token);
+    assertTenantRuntimeLeaseCurrent(job.runtimeLease);
+    await pushTenantLegacyCloudData(job.scope, job.snapshot, job.token, job.runtimeLease);
+    assertTenantRuntimeLeaseCurrent(job.runtimeLease);
   }
 
+  assertTenantRuntimeLeaseCurrent(job.runtimeLease);
   if (cloudSaveJobIsLatest(job)) emitAuthoritativeSnapshot(job);
 }
 
@@ -306,15 +311,18 @@ export function queueCloudSave(
     compatibilitySaveTimers.delete(timerKey);
     const active = getCloudSession();
     if (!active || active.userId !== job.scope.userId) return;
+    if (!tenantRuntimeLeaseIsCurrent(job.runtimeLease)) return;
     if (!tenantHasPendingLocalChanges(job.scope)) return;
     emitStatus(job, 'Guardando en la nube…', 'working');
     void enqueueCloudSaveJob(job)
       .then(() => {
+        if (!tenantRuntimeLeaseIsCurrent(job.runtimeLease)) return;
         if (cloudSaveJobIsLatest(job)) {
           emitStatus(job, 'Guardado seguro en la nube.');
         }
       })
       .catch((error) => {
+        if (!tenantRuntimeLeaseIsCurrent(job.runtimeLease)) return;
         const technicalMessage = errorMessage(error) || 'No se pudo guardar en la nube.';
         const message = `Guardado localmente, sincronización pendiente. ${technicalMessage}`;
         markTenantSyncError(job.scope, message);
