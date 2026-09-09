@@ -1,0 +1,34 @@
+name: SEC-FIX A1 Photo Upload Validation
+
+on:
+  push:
+    branches:
+      - validation/sec-fix-a1-photo-upload-r1
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+      - name: Install
+        run: npm ci
+      - name: TypeScript build
+        run: npm run build --silent
+      - name: Property photo related tests
+        run: >-
+          node --test
+          dist/tests/sec-fix-a1-property-photo-tenant.test.js
+          dist/tests/property-photo-direct-upload.test.js
+          dist/tests/property-photo-storage.test.js
+          dist/tests/mvp-property-sharing.test.js
