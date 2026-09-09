@@ -55,20 +55,13 @@ jobs:
             dist/tests/property-photo-direct-upload.test.js \
             dist/tests/property-photo-storage.test.js
 
-      - name: DR-01 client tests only
+      - name: DR-01 explicit tests only
         shell: bash
         run: |
           set -euo pipefail
           node --test --test-concurrency=1 \
-            --test-name-pattern='organizationId|A→B|logout durante upload|retry no emite un segundo request|single-org' \
-            dist/tests/property-photo-direct-upload.test.js
-
-      - name: DR-01 server tests only
-        shell: bash
-        run: |
-          set -euo pipefail
-          node --test --test-concurrency=1 \
-            --test-name-pattern='ACTIVE A\+B|orden de memberships|membership inexistente|invited|suspended|missing o unknown|wrong-org|wrong-user|sin organizationId' \
+            --test-name-pattern='^DR-01 ' \
+            dist/tests/property-photo-direct-upload.test.js \
             dist/tests/property-photo-storage.test.js
 
       - name: Targeted accumulated A1 tests
