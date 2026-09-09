@@ -13,12 +13,12 @@ jobs:
     runs-on: ubuntu-latest
     env:
       PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
-      CANDIDATE_SHA: "716e74014c8ece17f3fc6bfde64689633cad823a"
+      CANDIDATE_SHA: "ef650881c64cb738e936209b19e0693eedb0a414"
     steps:
       - name: Checkout exact DR-02 candidate
         uses: actions/checkout@v7
         with:
-          ref: 716e74014c8ece17f3fc6bfde64689633cad823a
+          ref: ef650881c64cb738e936209b19e0693eedb0a414
           fetch-depth: 0
 
       - name: Verify exact candidate
