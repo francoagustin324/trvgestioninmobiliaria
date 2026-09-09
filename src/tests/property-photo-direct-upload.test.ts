@@ -35,24 +35,37 @@ test('un JPG liviano se prepara sin abrirlo ni recodificarlo', async () => {
   assert.equal(prepared.blob.size, file.size);
 });
 
-test('el navegador envía la foto como binario a PropControl', () => {
+test('el navegador envía la foto como binario a PropControl con organizationId explícito', () => {
   assert.ok(upload.includes('/api/property-photos?'));
   assert.ok(upload.includes("'Content-Type': photo.mimeType"));
   assert.ok(upload.includes('body: photo.blob'));
   assert.ok(upload.includes('uploadId: uploadIdentifier()'));
+  assert.ok(upload.includes('organizationId: scope.organizationId'));
   assert.equal(upload.includes('blobToDataUrl'), false);
   assert.equal(upload.includes('dataUrl: await'), false);
   assert.equal(upload.includes('/storage/v1/object/'), false);
 });
 
-test('el servidor guarda en una carpeta de la inmobiliaria autenticada', () => {
-  assert.ok(server.includes('authenticatedPhotoOwner'));
-  assert.ok(server.includes('return { userId, organizationId, accessToken }'));
+test('el servidor valida la organization solicitada con membership ACTIVE exacta y no usa first membership', () => {
+  assert.ok(server.includes('authenticatedPhotoUser'));
+  assert.ok(server.includes('requireActivePhotoMembership'));
+  assert.ok(server.includes("query.searchParams.set('user_id', `eq.${userId}`)"));
+  assert.ok(server.includes("query.searchParams.set('organization_id', `eq.${organizationId}`)"));
+  assert.ok(server.includes("query.searchParams.set('status', 'eq.active')"));
+  assert.ok(server.includes('exactActivePhotoOrganization(rows, userId, organizationId)'));
   assert.ok(server.includes('propertyPhotoObjectPath(\n    organizationId'));
   assert.ok(server.includes('/auth/v1/user'));
   assert.ok(server.includes('/rest/v1/organization_members'));
   assert.ok(server.includes('/storage/v1/object/'));
   assert.ok(server.includes('Authorization: `Bearer ${accessToken}`'));
+  assert.equal(server.includes("query.searchParams.set('limit', '1')"), false);
+  assert.equal(server.includes('rows[0]?.organization_id'), false);
+});
+
+test('la respuesta exitosa devuelve organizationId y el cliente exige coincidencia exacta', () => {
+  assert.ok(server.includes('organizationId,\n    url: publicPropertyPhotoUrl'));
+  assert.ok(upload.includes('record.organizationId !== scope.organizationId'));
+  assert.ok(upload.includes('PROPERTY_PHOTO_RESPONSE_ORGANIZATION_MISMATCH'));
 });
 
 test('la migración aísla las fotos por inmobiliaria', () => {

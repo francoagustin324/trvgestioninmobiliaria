@@ -1,9 +1,18 @@
+import type { TenantScope } from './active-organization.js';
 import { getCloudSession } from './cloud-api.js';
+import {
+  assertTenantRuntimeLeaseCurrent,
+  TENANT_RUNTIME_SESSION_MISMATCH,
+  TENANT_RUNTIME_STALE,
+  tenantScopesEqual,
+  type TenantRuntimeLease,
+} from './tenant-runtime.js';
 
 export const MAX_PROPERTY_PHOTOS = 8;
 export const MAX_SOURCE_PHOTO_BYTES = 20_000_000;
 export const MAX_COMPRESSED_PHOTO_BYTES = 1_700_000;
 export const MAX_PHOTO_DIMENSION = 1600;
+export const PROPERTY_PHOTO_RESPONSE_ORGANIZATION_MISMATCH = 'PROPERTY_PHOTO_RESPONSE_ORGANIZATION_MISMATCH';
 
 type AllowedPhotoMime = 'image/jpeg' | 'image/png' | 'image/webp';
 type AllowedPhotoExtension = 'jpg' | 'png' | 'webp';
@@ -11,6 +20,7 @@ type AllowedPhotoExtension = 'jpg' | 'png' | 'webp';
 interface UploadResponse {
   success?: boolean;
   url?: string;
+  organizationId?: string;
   error?: string;
   message?: string;
   msg?: string;
@@ -221,11 +231,26 @@ function responseError(payload: unknown, fallback: string): string {
     .find((value) => typeof value === 'string' && value.trim()) || fallback;
 }
 
-async function fetchWithRetry(input: RequestInfo | URL, init: RequestInit): Promise<Response> {
+function assertPhotoUploadContext(scope: TenantScope, runtimeLease: TenantRuntimeLease): void {
+  if (!tenantScopesEqual(scope, runtimeLease.scope)) throw new Error(TENANT_RUNTIME_STALE);
+  assertTenantRuntimeLeaseCurrent(runtimeLease);
+  const session = getCloudSession();
+  if (!session?.accessToken || !session.userId) {
+    throw new PropertyPhotoUploadError('La sesión venció. Volvé a ingresar.', 'SESSION_REQUIRED', true);
+  }
+  if (session.userId !== scope.userId) throw new Error(TENANT_RUNTIME_SESSION_MISMATCH);
+}
+
+async function fetchWithRetry(
+  input: RequestInfo | URL,
+  init: RequestInit,
+  assertCurrent: () => void,
+): Promise<Response> {
   try {
     return await fetch(input, init);
   } catch {
     await new Promise((resolve) => window.setTimeout(resolve, 500));
+    assertCurrent();
     try {
       return await fetch(input, init);
     } catch {
@@ -243,11 +268,20 @@ function uploadIdentifier(): string {
     : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 }
 
-async function serverStorageUpload(photo: PreparedPropertyPhoto, propertyId: number, accessToken: string): Promise<string> {
+async function serverStorageUpload(
+  photo: PreparedPropertyPhoto,
+  propertyId: number,
+  scope: TenantScope,
+  runtimeLease: TenantRuntimeLease,
+  accessToken: string,
+): Promise<string> {
   const query = new URLSearchParams({
     propertyId: String(propertyId),
     uploadId: uploadIdentifier(),
+    organizationId: scope.organizationId,
   });
+  const assertCurrent = (): void => assertPhotoUploadContext(scope, runtimeLease);
+  assertCurrent();
   const response = await fetchWithRetry(`/api/property-photos?${query.toString()}`, {
     method: 'POST',
     headers: {
@@ -256,10 +290,17 @@ async function serverStorageUpload(photo: PreparedPropertyPhoto, propertyId: num
     },
     cache: 'no-store',
     body: photo.blob,
-  });
+  }, assertCurrent);
+  assertCurrent();
   const payload = await responsePayload(response);
+  assertCurrent();
   const record = responseRecord(payload);
-  if (response.ok && record.success && record.url) return record.url;
+  if (response.ok && record.success && record.url) {
+    if (record.organizationId !== scope.organizationId) {
+      throw new Error(PROPERTY_PHOTO_RESPONSE_ORGANIZATION_MISMATCH);
+    }
+    return record.url;
+  }
   if (response.status === 401) {
     throw new PropertyPhotoUploadError(
       responseError(payload, 'La sesión venció. Volvé a ingresar.'),
@@ -267,9 +308,9 @@ async function serverStorageUpload(photo: PreparedPropertyPhoto, propertyId: num
       true,
     );
   }
-  if (response.status === 403 || /row-level security|policy|permiso|seguridad/i.test(responseError(payload, ''))) {
+  if (response.status === 403 || /row-level security|policy|permiso|seguridad|membership/i.test(responseError(payload, ''))) {
     throw new PropertyPhotoUploadError(
-      responseError(payload, 'La política de seguridad de fotos todavía no está actualizada.'),
+      responseError(payload, 'No tenés acceso activo a la inmobiliaria seleccionada.'),
       'STORAGE_FORBIDDEN',
       true,
     );
@@ -296,17 +337,26 @@ function rememberFatalUpload(error: unknown): never {
   throw error;
 }
 
-export async function uploadPropertyPhoto(file: File, propertyId: number): Promise<string> {
+export async function uploadPropertyPhoto(
+  file: File,
+  propertyId: number,
+  scope: TenantScope,
+  runtimeLease: TenantRuntimeLease,
+): Promise<string> {
   try {
     if (Date.now() < blockedFatalUntil) {
       throw new PropertyPhotoUploadError('', blockedFatalCode, true);
     }
+    assertPhotoUploadContext(scope, runtimeLease);
     const session = getCloudSession();
-    if (!session?.accessToken) {
+    if (!session?.accessToken || session.userId !== scope.userId) {
       throw new PropertyPhotoUploadError('La sesión venció. Volvé a ingresar.', 'SESSION_REQUIRED', true);
     }
     const photo = await preparePropertyPhoto(file);
-    return await serverStorageUpload(photo, propertyId, session.accessToken);
+    assertPhotoUploadContext(scope, runtimeLease);
+    const url = await serverStorageUpload(photo, propertyId, scope, runtimeLease, session.accessToken);
+    assertPhotoUploadContext(scope, runtimeLease);
+    return url;
   } catch (error) {
     rememberFatalUpload(error);
   }

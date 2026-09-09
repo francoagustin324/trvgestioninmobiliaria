@@ -11,8 +11,10 @@ interface PropertyPhotoStorageOptions {
   secretKey?: string;
 }
 
-interface MembershipRow {
+export interface PropertyPhotoMembershipRow {
   organization_id?: string;
+  user_id?: string;
+  status?: string;
 }
 
 interface PreparedPhoto {
@@ -20,6 +22,8 @@ interface PreparedPhoto {
   bytes: Buffer;
   extension: string;
 }
+
+export const PROPERTY_PHOTO_ACTIVE_MEMBERSHIP_REQUIRED = 'PROPERTY_PHOTO_ACTIVE_MEMBERSHIP_REQUIRED';
 
 function sendJson(response: ServerResponse, status: number, payload: unknown): void {
   response.writeHead(status, {
@@ -108,10 +112,36 @@ function authenticatedHeaders(options: PropertyPhotoStorageOptions, accessToken:
   };
 }
 
-async function authenticatedPhotoOwner(
+function requestedOrganizationId(value: unknown): string {
+  if (typeof value !== 'string' || !value || value !== value.trim()) {
+    throw new Error('Falta organizationId tenant válido para la foto.');
+  }
+  if (!/^[a-zA-Z0-9_-]{1,128}$/.test(value)) {
+    throw new Error('organizationId tenant inválido para la foto.');
+  }
+  return value;
+}
+
+export function exactActivePhotoOrganization(
+  rows: readonly PropertyPhotoMembershipRow[],
+  userId: string,
+  organizationId: string,
+): string {
+  const exact = rows.filter((row) => (
+    row.organization_id === organizationId
+    && row.user_id === userId
+    && row.status === 'active'
+  ));
+  if (rows.length !== 1 || exact.length !== 1) {
+    throw new Error(PROPERTY_PHOTO_ACTIVE_MEMBERSHIP_REQUIRED);
+  }
+  return organizationId;
+}
+
+async function authenticatedPhotoUser(
   request: IncomingMessage,
   options: PropertyPhotoStorageOptions,
-): Promise<{ userId: string; organizationId: string; accessToken: string }> {
+): Promise<{ userId: string; accessToken: string }> {
   const accessToken = bearerToken(request);
   const authHeaders = authenticatedHeaders(options, accessToken);
   const authResponse = await fetch(`${options.supabaseUrl}/auth/v1/user`, {
@@ -120,20 +150,27 @@ async function authenticatedPhotoOwner(
   const user = await parseResponse(authResponse) as Record<string, unknown>;
   const userId = typeof user.id === 'string' ? user.id : '';
   if (!userId) throw new Error('La sesión no identifica un usuario válido.');
+  return { userId, accessToken };
+}
 
+async function requireActivePhotoMembership(
+  userId: string,
+  organizationId: string,
+  accessToken: string,
+  options: PropertyPhotoStorageOptions,
+): Promise<string> {
   const query = new URL(`${options.supabaseUrl}/rest/v1/organization_members`);
-  query.searchParams.set('select', 'organization_id');
+  query.searchParams.set('select', 'organization_id,user_id,status');
   query.searchParams.set('user_id', `eq.${userId}`);
-  query.searchParams.set('limit', '1');
+  query.searchParams.set('organization_id', `eq.${organizationId}`);
+  query.searchParams.set('status', 'eq.active');
   const rows = await parseResponse(await fetch(query, {
     headers: {
-      ...authHeaders,
+      ...authenticatedHeaders(options, accessToken),
       Accept: 'application/json',
     },
-  })) as MembershipRow[];
-  const organizationId = rows[0]?.organization_id;
-  if (!organizationId) throw new Error('La cuenta no pertenece a una inmobiliaria.');
-  return { userId, organizationId, accessToken };
+  })) as PropertyPhotoMembershipRow[];
+  return exactActivePhotoOrganization(rows, userId, organizationId);
 }
 
 export function parsePropertyPhotoDataUrl(value: unknown): PreparedPhoto {
@@ -161,11 +198,10 @@ export function propertyPhotoObjectPath(
   extension: string,
   uploadId?: unknown,
 ): string {
-  const safeOrganizationId = organizationId.replace(/[^a-zA-Z0-9_-]/g, '');
-  if (!safeOrganizationId) throw new Error('No se pudo identificar la inmobiliaria de la foto.');
+  const exactOrganizationId = requestedOrganizationId(organizationId);
   const numericPropertyId = Number(propertyId);
   const propertySegment = Number.isInteger(numericPropertyId) && numericPropertyId > 0 ? String(numericPropertyId) : 'draft';
-  return `${safeOrganizationId}/${propertySegment}/${safeUploadIdentifier(uploadId)}.${extension}`;
+  return `${exactOrganizationId}/${propertySegment}/${safeUploadIdentifier(uploadId)}.${extension}`;
 }
 
 export function publicPropertyPhotoUrl(supabaseUrl: string, objectPath: string): string {
@@ -178,22 +214,31 @@ async function uploadPhoto(
   options: PropertyPhotoStorageOptions,
 ): Promise<void> {
   const requestUrl = new URL(request.url || '/', 'http://localhost');
-  const { organizationId, accessToken } = await authenticatedPhotoOwner(request, options);
+  const authenticated = await authenticatedPhotoUser(request, options);
   const contentType = String(request.headers['content-type'] || '').toLowerCase();
 
   let photo: PreparedPhoto;
   let propertyId: unknown = requestUrl.searchParams.get('propertyId');
   let uploadId: unknown = requestUrl.searchParams.get('uploadId');
+  let organizationIdValue: unknown = requestUrl.searchParams.get('organizationId');
 
   if (contentType.startsWith('application/json')) {
     const body = await readJson(request);
     photo = parsePropertyPhotoDataUrl(body.dataUrl);
     propertyId = body.propertyId;
     uploadId = body.uploadId;
+    organizationIdValue = body.organizationId;
   } else {
     photo = await readBinaryPhoto(request);
   }
 
+  const requestedOrganization = requestedOrganizationId(organizationIdValue);
+  const organizationId = await requireActivePhotoMembership(
+    authenticated.userId,
+    requestedOrganization,
+    authenticated.accessToken,
+    options,
+  );
   const objectPath = propertyPhotoObjectPath(
     organizationId,
     propertyId,
@@ -203,7 +248,7 @@ async function uploadPhoto(
   const uploadResponse = await fetch(`${options.supabaseUrl}/storage/v1/object/${BUCKET}/${encodedPath(objectPath)}`, {
     method: 'POST',
     headers: {
-      ...authenticatedHeaders(options, accessToken),
+      ...authenticatedHeaders(options, authenticated.accessToken),
       'Content-Type': photo.mimeType,
       'x-upsert': 'true',
       'Cache-Control': '31536000',
@@ -214,6 +259,7 @@ async function uploadPhoto(
 
   sendJson(response, 201, {
     success: true,
+    organizationId,
     url: publicPropertyPhotoUrl(options.supabaseUrl, objectPath),
   });
 }
@@ -240,7 +286,8 @@ export async function handlePropertyPhotoStorage(
   } catch (error) {
     const message = error instanceof Error ? error.message : 'No se pudo cargar la foto.';
     const rlsError = /row-level security|policy|permission|unauthorized/i.test(message);
-    const status = /sesión|usuario válido|pertenece/i.test(message) || rlsError ? 403 : 400;
+    const accessError = /sesión|usuario válido|membership|organizationId tenant/i.test(message);
+    const status = accessError || rlsError ? 403 : 400;
     sendJson(response, status, {
       success: false,
       error: rlsError

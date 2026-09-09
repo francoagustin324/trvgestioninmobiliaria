@@ -18,7 +18,7 @@ import {
 import { escapeHtml, field, formValues, nextId, safePhotoUrl } from './utils.js';
 
 let searchText = '';
-let photoUploadInProgress = false;
+let activePhotoUploadLease: TenantRuntimeLease | null = null;
 const priceFormatter = new Intl.NumberFormat('es-AR');
 
 export interface MvpPropertiesRenderOptions {
@@ -361,8 +361,30 @@ function updatePhotoManager(form: HTMLFormElement, urls: string[], statusMessage
   if (status) status.textContent = statusMessage;
 }
 
-function setPhotoUploading(form: HTMLFormElement, active: boolean, message: string): void {
-  photoUploadInProgress = active;
+export function propertyPhotoOperationIsCurrent(
+  scope: TenantScope,
+  runtimeLease: TenantRuntimeLease,
+  formConnected = true,
+): boolean {
+  return formConnected
+    && tenantRuntimeLeaseIsCurrent(runtimeLease)
+    && getCloudSession()?.userId === scope.userId;
+}
+
+function currentRuntimeHasPhotoUpload(): boolean {
+  return Boolean(activePhotoUploadLease && tenantRuntimeLeaseIsCurrent(activePhotoUploadLease));
+}
+
+function setPhotoUploading(
+  form: HTMLFormElement,
+  active: boolean,
+  message: string,
+  scope: TenantScope,
+  runtimeLease: TenantRuntimeLease,
+): void {
+  if (!propertyPhotoOperationIsCurrent(scope, runtimeLease, form.isConnected)) return;
+  if (active) activePhotoUploadLease = runtimeLease;
+  else if (activePhotoUploadLease === runtimeLease) activePhotoUploadLease = null;
   form.querySelectorAll<HTMLButtonElement>('button[type="submit"], [data-property-photo-picker], [data-cancel-property-edit]')
     .forEach((button) => { button.disabled = active; });
   const input = form.querySelector<HTMLInputElement>('[data-property-photo-input]');
@@ -373,9 +395,12 @@ function setPhotoUploading(form: HTMLFormElement, active: boolean, message: stri
 }
 
 async function handlePhotoSelection(form: HTMLFormElement, input: HTMLInputElement, propertyId: number): Promise<void> {
+  const scope = requireCurrentTenantScope();
+  const runtimeLease = captureTenantRuntimeLease(scope);
   const selected = Array.from(input.files ?? []);
   input.value = '';
   if (!selected.length) return;
+  if (!propertyPhotoOperationIsCurrent(scope, runtimeLease, form.isConnected)) return;
 
   const urls = formPhotoUrls(form);
   const available = MAX_PROPERTY_PHOTOS - urls.length;
@@ -387,23 +412,29 @@ async function handlePhotoSelection(form: HTMLFormElement, input: HTMLInputEleme
   const files = selected.slice(0, available);
   const omitted = selected.length - files.length;
   const errors: string[] = [];
-  setPhotoUploading(form, true, `Preparando 1 de ${files.length} fotos…`);
+  setPhotoUploading(form, true, `Preparando 1 de ${files.length} fotos…`, scope, runtimeLease);
 
   for (let index = 0; index < files.length; index += 1) {
+    if (!propertyPhotoOperationIsCurrent(scope, runtimeLease, form.isConnected)) return;
     const file = files[index]!;
-    setPhotoUploading(form, true, `Comprimiendo y cargando ${index + 1} de ${files.length}: ${file.name}`);
+    setPhotoUploading(form, true, `Comprimiendo y cargando ${index + 1} de ${files.length}: ${file.name}`, scope, runtimeLease);
     try {
-      urls.push(await uploadPropertyPhoto(file, propertyId));
+      const uploadedUrl = await uploadPropertyPhoto(file, propertyId, scope, runtimeLease);
+      if (!propertyPhotoOperationIsCurrent(scope, runtimeLease, form.isConnected)) return;
+      urls.push(uploadedUrl);
       updatePhotoManager(form, urls, `Foto ${index + 1} de ${files.length} cargada.`);
     } catch (error) {
+      if (!propertyPhotoOperationIsCurrent(scope, runtimeLease, form.isConnected)) return;
       errors.push(error instanceof Error ? error.message : `No se pudo cargar ${file.name}.`);
     }
   }
 
+  if (!propertyPhotoOperationIsCurrent(scope, runtimeLease, form.isConnected)) return;
   const finalMessage = errors.length
     ? `${urls.length} fotos listas. ${errors.join(' ')}`
     : `${urls.length} fotos listas para la ficha.${omitted > 0 ? ` Se omitieron ${omitted} por el límite.` : ''}`;
-  setPhotoUploading(form, false, finalMessage);
+  setPhotoUploading(form, false, finalMessage, scope, runtimeLease);
+  if (!propertyPhotoOperationIsCurrent(scope, runtimeLease, form.isConnected)) return;
   updatePhotoManager(form, urls, finalMessage);
 }
 
@@ -519,7 +550,7 @@ export function renderMvpProperties(container: HTMLElement, options: MvpProperti
   if (form) bindPhotoManager(form, formPropertyId);
 
   container.querySelector<HTMLButtonElement>('[data-cancel-property-edit]')?.addEventListener('click', () => {
-    if (photoUploadInProgress) return;
+    if (currentRuntimeHasPhotoUpload()) return;
     state.editingPropertyId = null;
     state.openForms.property = false;
     renderMvpProperties(container, options);
@@ -527,7 +558,7 @@ export function renderMvpProperties(container: HTMLElement, options: MvpProperti
 
   form?.addEventListener('submit', async (event) => {
     event.preventDefault();
-    if (photoUploadInProgress) return;
+    if (currentRuntimeHasPhotoUpload()) return;
     const values = formValues(form);
     const price = Number(field(values, 'price'));
     const error = form.querySelector<HTMLElement>('[data-property-error]');
