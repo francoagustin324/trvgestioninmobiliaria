@@ -1,0 +1,37 @@
+name: SEC-FIX-A1.2-G UI Patch
+
+on:
+  push:
+    branches:
+      - validation/sec-fix-a1-2-g-ui-patch
+
+permissions:
+  contents: write
+
+jobs:
+  patch-g-ui:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: validation/sec-fix-a1-2-g-ui-patch
+      - name: Preserve patch script
+        run: cp scripts/sec-fix-a1-2-g-ui-patch.py /tmp/sec-fix-a1-2-g-ui-patch.py
+      - name: Checkout G candidate
+        run: |
+          git fetch origin agent/sec-fix-a1-2-g-public-share-tenant-cutover
+          git checkout -B agent/sec-fix-a1-2-g-public-share-tenant-cutover origin/agent/sec-fix-a1-2-g-public-share-tenant-cutover
+      - name: Apply tenant-aware UI patch
+        run: python /tmp/sec-fix-a1-2-g-ui-patch.py
+      - name: Verify scoped production diff
+        run: |
+          git diff --check
+          changed="$(git diff --name-only)"
+          test "$changed" = "src/mvp-properties-ui.ts"
+      - name: Commit G UI patch
+        run: |
+          git config user.name "francoagustin324"
+          git config user.email "francoagustinsolis@gmail.com"
+          git add src/mvp-properties-ui.ts
+          git commit -m "SEC-FIX A1.2-G — Guard public share UI completions by tenant lease"
+          git push origin HEAD:agent/sec-fix-a1-2-g-public-share-tenant-cutover
