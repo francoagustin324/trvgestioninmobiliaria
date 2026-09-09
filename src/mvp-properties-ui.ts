@@ -18,7 +18,7 @@ import {
 import { escapeHtml, field, formValues, nextId, safePhotoUrl } from './utils.js';
 
 let searchText = '';
-let photoUploadInProgress = false;
+let photoUploadInProgress: TenantRuntimeLease | null = null;
 const priceFormatter = new Intl.NumberFormat('es-AR');
 
 export interface MvpPropertiesRenderOptions {
@@ -133,6 +133,29 @@ function assertPropertyShareOperationCurrent(
 ): void {
   assertTenantRuntimeLeaseCurrent(runtimeLease);
   if (getCloudSession()?.userId !== scope.userId) throw new Error(TENANT_RUNTIME_STALE);
+}
+
+function propertyPhotoOperationIsCurrent(
+  scope: TenantScope,
+  runtimeLease: TenantRuntimeLease,
+): boolean {
+  return tenantScopesEqual(scope, runtimeLease.scope)
+    && tenantRuntimeLeaseIsCurrent(runtimeLease)
+    && getCloudSession()?.userId === scope.userId;
+}
+
+function assertPropertyPhotoOperationCurrent(
+  scope: TenantScope,
+  runtimeLease: TenantRuntimeLease,
+): void {
+  if (!tenantScopesEqual(scope, runtimeLease.scope)) throw new Error(TENANT_RUNTIME_STALE);
+  assertTenantRuntimeLeaseCurrent(runtimeLease);
+  if (getCloudSession()?.userId !== scope.userId) throw new Error(TENANT_RUNTIME_STALE);
+}
+
+function currentPhotoUploadInProgress(): boolean {
+  const runtimeLease = photoUploadInProgress;
+  return Boolean(runtimeLease && propertyPhotoOperationIsCurrent(runtimeLease.scope, runtimeLease));
 }
 
 function assertPropertyShareTarget(
@@ -361,8 +384,16 @@ function updatePhotoManager(form: HTMLFormElement, urls: string[], statusMessage
   if (status) status.textContent = statusMessage;
 }
 
-function setPhotoUploading(form: HTMLFormElement, active: boolean, message: string): void {
-  photoUploadInProgress = active;
+function setPhotoUploading(
+  form: HTMLFormElement,
+  active: boolean,
+  message: string,
+  scope: TenantScope,
+  runtimeLease: TenantRuntimeLease,
+): void {
+  assertPropertyPhotoOperationCurrent(scope, runtimeLease);
+  if (active) photoUploadInProgress = runtimeLease;
+  else if (photoUploadInProgress === runtimeLease) photoUploadInProgress = null;
   form.querySelectorAll<HTMLButtonElement>('button[type="submit"], [data-property-photo-picker], [data-cancel-property-edit]')
     .forEach((button) => { button.disabled = active; });
   const input = form.querySelector<HTMLInputElement>('[data-property-photo-input]');
@@ -373,6 +404,11 @@ function setPhotoUploading(form: HTMLFormElement, active: boolean, message: stri
 }
 
 async function handlePhotoSelection(form: HTMLFormElement, input: HTMLInputElement, propertyId: number): Promise<void> {
+  const scope = requireCurrentTenantScope();
+  const runtimeLease = captureTenantRuntimeLease(scope);
+  const tenantContext = { scope, runtimeLease };
+  assertPropertyPhotoOperationCurrent(scope, runtimeLease);
+
   const selected = Array.from(input.files ?? []);
   input.value = '';
   if (!selected.length) return;
@@ -380,6 +416,7 @@ async function handlePhotoSelection(form: HTMLFormElement, input: HTMLInputEleme
   const urls = formPhotoUrls(form);
   const available = MAX_PROPERTY_PHOTOS - urls.length;
   if (available <= 0) {
+    assertPropertyPhotoOperationCurrent(scope, runtimeLease);
     updatePhotoManager(form, urls, `Ya cargaste el máximo de ${MAX_PROPERTY_PHOTOS} fotos.`);
     return;
   }
@@ -387,23 +424,36 @@ async function handlePhotoSelection(form: HTMLFormElement, input: HTMLInputEleme
   const files = selected.slice(0, available);
   const omitted = selected.length - files.length;
   const errors: string[] = [];
-  setPhotoUploading(form, true, `Preparando 1 de ${files.length} fotos…`);
+  setPhotoUploading(form, true, `Preparando 1 de ${files.length} fotos…`, scope, runtimeLease);
 
   for (let index = 0; index < files.length; index += 1) {
+    assertPropertyPhotoOperationCurrent(scope, runtimeLease);
     const file = files[index]!;
-    setPhotoUploading(form, true, `Comprimiendo y cargando ${index + 1} de ${files.length}: ${file.name}`);
+    setPhotoUploading(
+      form,
+      true,
+      `Comprimiendo y cargando ${index + 1} de ${files.length}: ${file.name}`,
+      scope,
+      runtimeLease,
+    );
     try {
-      urls.push(await uploadPropertyPhoto(file, propertyId));
+      const uploadedUrl = await uploadPropertyPhoto(file, propertyId, tenantContext);
+      assertPropertyPhotoOperationCurrent(scope, runtimeLease);
+      urls.push(uploadedUrl);
+      assertPropertyPhotoOperationCurrent(scope, runtimeLease);
       updatePhotoManager(form, urls, `Foto ${index + 1} de ${files.length} cargada.`);
     } catch (error) {
+      if (!propertyPhotoOperationIsCurrent(scope, runtimeLease)) return;
       errors.push(error instanceof Error ? error.message : `No se pudo cargar ${file.name}.`);
     }
   }
 
+  assertPropertyPhotoOperationCurrent(scope, runtimeLease);
   const finalMessage = errors.length
     ? `${urls.length} fotos listas. ${errors.join(' ')}`
     : `${urls.length} fotos listas para la ficha.${omitted > 0 ? ` Se omitieron ${omitted} por el límite.` : ''}`;
-  setPhotoUploading(form, false, finalMessage);
+  setPhotoUploading(form, false, finalMessage, scope, runtimeLease);
+  assertPropertyPhotoOperationCurrent(scope, runtimeLease);
   updatePhotoManager(form, urls, finalMessage);
 }
 
@@ -519,7 +569,7 @@ export function renderMvpProperties(container: HTMLElement, options: MvpProperti
   if (form) bindPhotoManager(form, formPropertyId);
 
   container.querySelector<HTMLButtonElement>('[data-cancel-property-edit]')?.addEventListener('click', () => {
-    if (photoUploadInProgress) return;
+    if (currentPhotoUploadInProgress()) return;
     state.editingPropertyId = null;
     state.openForms.property = false;
     renderMvpProperties(container, options);
@@ -527,7 +577,7 @@ export function renderMvpProperties(container: HTMLElement, options: MvpProperti
 
   form?.addEventListener('submit', async (event) => {
     event.preventDefault();
-    if (photoUploadInProgress) return;
+    if (currentPhotoUploadInProgress()) return;
     const values = formValues(form);
     const price = Number(field(values, 'price'));
     const error = form.querySelector<HTMLElement>('[data-property-error]');

@@ -1,4 +1,11 @@
+import type { TenantScope } from './active-organization.js';
 import { getCloudSession } from './cloud-api.js';
+import {
+  assertTenantRuntimeLeaseCurrent,
+  TENANT_RUNTIME_STALE,
+  tenantScopesEqual,
+  type TenantRuntimeLease,
+} from './tenant-runtime.js';
 
 export const MAX_PROPERTY_PHOTOS = 8;
 export const MAX_SOURCE_PHOTO_BYTES = 20_000_000;
@@ -11,6 +18,7 @@ type AllowedPhotoExtension = 'jpg' | 'png' | 'webp';
 interface UploadResponse {
   success?: boolean;
   url?: string;
+  organizationId?: string;
   error?: string;
   message?: string;
   msg?: string;
@@ -28,6 +36,11 @@ interface DrawablePhoto {
   width: number;
   height: number;
   close?: () => void;
+}
+
+export interface PropertyPhotoTenantContext {
+  scope: TenantScope;
+  runtimeLease: TenantRuntimeLease;
 }
 
 export type PropertyPhotoUploadErrorCode =
@@ -53,6 +66,12 @@ let blockedFatalCode: PropertyPhotoUploadErrorCode = 'UPLOAD_FAILED';
 
 export function shouldStopPropertyPhotoBatch(error: unknown): boolean {
   return error instanceof PropertyPhotoUploadError && error.stopBatch;
+}
+
+export function assertPropertyPhotoTenantContextCurrent(context: PropertyPhotoTenantContext): void {
+  if (!tenantScopesEqual(context.scope, context.runtimeLease.scope)) throw new Error(TENANT_RUNTIME_STALE);
+  assertTenantRuntimeLeaseCurrent(context.runtimeLease);
+  if (getCloudSession()?.userId !== context.scope.userId) throw new Error(TENANT_RUNTIME_STALE);
 }
 
 export function propertyPhotoMime(file: Pick<File, 'name' | 'type'>): AllowedPhotoMime | null {
@@ -221,19 +240,32 @@ function responseError(payload: unknown, fallback: string): string {
     .find((value) => typeof value === 'string' && value.trim()) || fallback;
 }
 
-async function fetchWithRetry(input: RequestInfo | URL, init: RequestInit): Promise<Response> {
+async function fetchWithRetry(
+  input: RequestInfo | URL,
+  init: RequestInit,
+  assertCurrent: () => void,
+): Promise<Response> {
+  assertCurrent();
   try {
-    return await fetch(input, init);
+    const response = await fetch(input, init);
+    assertCurrent();
+    return response;
   } catch {
-    await new Promise((resolve) => window.setTimeout(resolve, 500));
-    try {
-      return await fetch(input, init);
-    } catch {
-      throw new PropertyPhotoUploadError(
-        'No se pudo conectar con PropControl para cargar la foto.',
-        'NETWORK_ERROR',
-      );
-    }
+    assertCurrent();
+  }
+
+  await new Promise((resolve) => globalThis.setTimeout(resolve, 500));
+  assertCurrent();
+  try {
+    const response = await fetch(input, init);
+    assertCurrent();
+    return response;
+  } catch {
+    assertCurrent();
+    throw new PropertyPhotoUploadError(
+      'No se pudo conectar con PropControl para cargar la foto.',
+      'NETWORK_ERROR',
+    );
   }
 }
 
@@ -243,10 +275,17 @@ function uploadIdentifier(): string {
     : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 }
 
-async function serverStorageUpload(photo: PreparedPropertyPhoto, propertyId: number, accessToken: string): Promise<string> {
+async function serverStorageUpload(
+  photo: PreparedPropertyPhoto,
+  propertyId: number,
+  accessToken: string,
+  context: PropertyPhotoTenantContext,
+): Promise<string> {
+  assertPropertyPhotoTenantContextCurrent(context);
   const query = new URLSearchParams({
     propertyId: String(propertyId),
     uploadId: uploadIdentifier(),
+    organizationId: context.scope.organizationId,
   });
   const response = await fetchWithRetry(`/api/property-photos?${query.toString()}`, {
     method: 'POST',
@@ -256,10 +295,21 @@ async function serverStorageUpload(photo: PreparedPropertyPhoto, propertyId: num
     },
     cache: 'no-store',
     body: photo.blob,
-  });
+  }, () => assertPropertyPhotoTenantContextCurrent(context));
+  assertPropertyPhotoTenantContextCurrent(context);
   const payload = await responsePayload(response);
+  assertPropertyPhotoTenantContextCurrent(context);
   const record = responseRecord(payload);
-  if (response.ok && record.success && record.url) return record.url;
+  if (response.ok && record.success && typeof record.url === 'string' && record.url) {
+    if (record.organizationId !== context.scope.organizationId) {
+      throw new PropertyPhotoUploadError(
+        'PropControl rechazó la foto porque la inmobiliaria de la respuesta no coincide con la operación iniciada.',
+        'UPLOAD_FAILED',
+      );
+    }
+    assertPropertyPhotoTenantContextCurrent(context);
+    return record.url;
+  }
   if (response.status === 401) {
     throw new PropertyPhotoUploadError(
       responseError(payload, 'La sesión venció. Volvé a ingresar.'),
@@ -296,17 +346,25 @@ function rememberFatalUpload(error: unknown): never {
   throw error;
 }
 
-export async function uploadPropertyPhoto(file: File, propertyId: number): Promise<string> {
+export async function uploadPropertyPhoto(
+  file: File,
+  propertyId: number,
+  context: PropertyPhotoTenantContext,
+): Promise<string> {
   try {
+    assertPropertyPhotoTenantContextCurrent(context);
     if (Date.now() < blockedFatalUntil) {
       throw new PropertyPhotoUploadError('', blockedFatalCode, true);
     }
     const session = getCloudSession();
-    if (!session?.accessToken) {
-      throw new PropertyPhotoUploadError('La sesión venció. Volvé a ingresar.', 'SESSION_REQUIRED', true);
+    if (!session?.accessToken || session.userId !== context.scope.userId) {
+      throw new Error(TENANT_RUNTIME_STALE);
     }
     const photo = await preparePropertyPhoto(file);
-    return await serverStorageUpload(photo, propertyId, session.accessToken);
+    assertPropertyPhotoTenantContextCurrent(context);
+    const url = await serverStorageUpload(photo, propertyId, session.accessToken, context);
+    assertPropertyPhotoTenantContextCurrent(context);
+    return url;
   } catch (error) {
     rememberFatalUpload(error);
   }
