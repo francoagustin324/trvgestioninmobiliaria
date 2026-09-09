@@ -1,0 +1,93 @@
+name: DR02 Isolated Candidate Validation
+
+on:
+  push:
+    branches:
+      - validation/dr02-716e-isolated
+
+permissions:
+  contents: read
+
+jobs:
+  validate-dr02:
+    runs-on: ubuntu-latest
+    env:
+      PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
+      CANDIDATE_SHA: "716e74014c8ece17f3fc6bfde64689633cad823a"
+    steps:
+      - name: Checkout exact DR-02 candidate
+        uses: actions/checkout@v7
+        with:
+          ref: 716e74014c8ece17f3fc6bfde64689633cad823a
+          fetch-depth: 0
+
+      - name: Verify exact candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          actual="$(git rev-parse HEAD)"
+          echo "CANDIDATE_EXPECTED=$CANDIDATE_SHA"
+          echo "CANDIDATE_ACTUAL=$actual"
+          test "$actual" = "$CANDIDATE_SHA"
+          test -z "$(git status --porcelain)"
+
+      - name: Setup Node 22
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+
+      - name: Report runtime versions
+        run: |
+          node --version
+          npm --version
+
+      - name: Install dependencies
+        run: npm ci --silent
+
+      - name: TypeScript and build
+        run: npm run build --silent
+
+      - name: DR-02 tests
+        run: node --test --test-concurrency=1 dist/tests/sec-fix-a1-dr02-cloud-writer-lease.test.js
+
+      - name: Relevant cloud tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t tests < <(find dist/tests -maxdepth 1 -type f -name '*cloud*.test.js' ! -name 'sec-fix-a1-dr02-cloud-writer-lease.test.js' -print | sort)
+          printf 'CLOUD_TEST_FILES=%s\n' "${#tests[@]}"
+          printf '%s\n' "${tests[@]}"
+          if [ "${#tests[@]}" -gt 0 ]; then
+            node --test --test-concurrency=1 "${tests[@]}"
+          fi
+
+      - name: DR-01 property photo regression
+        run: |
+          node --test --test-concurrency=1 \
+            dist/tests/property-photo-direct-upload.test.js \
+            dist/tests/property-photo-storage.test.js
+
+      - name: DR-01 explicit regression
+        run: |
+          node --test --test-concurrency=1 \
+            --test-name-pattern='^DR-01 ' \
+            dist/tests/property-photo-direct-upload.test.js \
+            dist/tests/property-photo-storage.test.js
+
+      - name: Targeted accumulated A1 tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t tests < <(find dist/tests -maxdepth 1 -type f -name 'sec-fix-a1*.test.js' -print | sort)
+          printf 'TARGETED_A1_FILES=%s\n' "${#tests[@]}"
+          printf '%s\n' "${tests[@]}"
+          if [ "${#tests[@]}" -gt 0 ]; then
+            node --test --test-concurrency=1 "${tests[@]}"
+          fi
+
+      - name: Confirm candidate worktree unchanged by validation
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
+          echo "FINAL_CANDIDATE_SHA=$(git rev-parse HEAD)"
