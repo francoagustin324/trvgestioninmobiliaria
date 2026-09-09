@@ -21,11 +21,12 @@ test('arma una ruta pública corta bajo el dominio configurado', () => {
   );
 });
 
-test('publica por propiedad y conserva el mismo registro editable', () => {
+test('publica por propiedad, conserva el registro editable y usa snapshot tenant-aware', () => {
   assert.ok(share.includes("on_conflict', 'organization_id,property_key'"));
   assert.ok(share.includes("Prefer: 'resolution=merge-duplicates,return=representation'"));
-  assert.ok(share.includes('property.publicSlug'));
-  assert.ok(share.includes('payload: propertyToPublicFicha(property)'));
+  assert.ok(share.includes('propertySnapshot.publicSlug'));
+  assert.ok(share.includes('payload: propertyToPublicFicha(propertySnapshot)'));
+  assert.ok(share.includes('organization_id: scope.organizationId'));
 });
 
 test('la ficha corta se puede abrir sin iniciar sesión', () => {
