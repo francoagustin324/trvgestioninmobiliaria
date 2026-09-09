@@ -27,7 +27,7 @@ import {
   restoreSyncStateSnapshot,
 } from './sync-reconciliation.js';
 import { stableFingerprint } from './sync-safety.js';
-import { canManageTeam } from './team-access.js';
+import { canUseRecovery } from './team-access.js';
 import { hydrateTenantAfterAuth } from './tenant-hydration.js';
 import {
   assertTenantRuntimeLeaseCurrent,
@@ -488,10 +488,8 @@ export function renderAccountMenu(): void {
     </section>
   </div>`;
 
-  const recoveryTarget = canManageTeam()
-    ? document.querySelector<HTMLElement>('[data-settings-recovery-action]')
-    : null;
-  if (recoveryTarget) recoveryTarget.innerHTML = restoreAction;
+  const recoveryTarget = document.querySelector<HTMLElement>('[data-settings-recovery-action]');
+  if (recoveryTarget) recoveryTarget.innerHTML = canUseRecovery() ? restoreAction : '';
 
   container.querySelector<HTMLElement>('[data-account-sync]')?.addEventListener('click', () => {
     closeAccountMenuPanel({ restoreFocus: false });

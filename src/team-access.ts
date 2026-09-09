@@ -10,7 +10,7 @@ import type {
   WhatsAppConversation,
 } from './models.js';
 import { modules } from './models.js';
-import { state } from './store.js';
+import { authenticatedTenantMember, state } from './store.js';
 import { newSyncRecordMetadata } from './sync-identity.js';
 import {
   activeMembers,
@@ -65,8 +65,17 @@ export function canAdministerTeam(member = activeMember()): boolean {
   return canManageTeam(member) && canAccessModule('equipo', member);
 }
 
-export function canUseRecovery(member = activeMember()): boolean {
-  return canManageTeam(member) && canAccessSettings(member);
+/**
+ * Recovery is authorization-sensitive: unlike visual/member-view capabilities,
+ * it is always bound to the exact ACTIVE member for the current TenantScope user.
+ */
+export function canUseRecovery(): boolean {
+  const member = authenticatedTenantMember();
+  return Boolean(
+    member
+    && roleCanManageTeam(member.role)
+    && roleCanAccessModule(member.role, 'configuracion'),
+  );
 }
 
 export function canInviteTeamRole(role: Exclude<TeamRole, 'Dueño'>, member = activeMember()): boolean {

@@ -296,10 +296,26 @@ export function hasLocalBackup(): boolean {
   return scope ? hasTenantLocalBackup(scope) : false;
 }
 
-export function canRestoreLatestLocalBackup(): boolean {
-  const member = state.crm.teamMembers.find(
-    (item) => item.id === state.activeMemberId && item.status !== 'Suspendido',
+/**
+ * Authorization identity for tenant-sensitive local capabilities.
+ * activeMemberId / TEAM_VIEW_KEY remain a visual preference only and never
+ * participate in this lookup.
+ */
+export function authenticatedTenantMember(
+  scope: TenantScope | null = currentTenantScope(),
+): TeamMember | null {
+  if (!scope || !tenantScopesEqual(currentTenantScope(), scope)) return null;
+  if (state.crm.organization.id !== scope.organizationId) return null;
+  const matches = state.crm.teamMembers.filter(
+    (member) => member.userId === scope.userId && member.status === 'Activo',
   );
+  return matches.length === 1 ? matches[0]! : null;
+}
+
+export function canRestoreLatestLocalBackup(
+  scope: TenantScope | null = currentTenantScope(),
+): boolean {
+  const member = authenticatedTenantMember(scope);
   return Boolean(member && roleCanManageTeam(member.role));
 }
 
@@ -309,7 +325,7 @@ export function restoreLatestLocalBackupForTenant(
 ): boolean {
   if (!tenantScopesEqual(scope, runtimeLease.scope)) throw new Error(TENANT_RUNTIME_STALE);
   assertTenantRuntimeLeaseCurrent(runtimeLease);
-  if (!canRestoreLatestLocalBackup()) return false;
+  if (!canRestoreLatestLocalBackup(scope)) return false;
 
   // restoreLatestTenantBackup consumes the exact tenant backup and writes only
   // inside that tenant namespace. The lease is therefore revalidated directly
