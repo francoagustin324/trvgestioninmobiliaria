@@ -181,6 +181,7 @@ export async function publishPropertyFicha(
     body: JSON.stringify(payload),
   }));
   assertPublishContext(scope, runtimeLease);
+  requirePublishSession(scope);
 
   if (!Array.isArray(responsePayload) || responsePayload.length !== 1) {
     throw new Error(PUBLIC_PROPERTY_SHARE_RESPONSE_INVALID);
