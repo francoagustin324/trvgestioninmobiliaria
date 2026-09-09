@@ -109,7 +109,6 @@ const invitationAuth = await import('../invitation-auth.js');
 const tenantRuntime = await import('../tenant-runtime.js');
 
 const ORG_A = '00000000-0000-0000-0000-00000000f201';
-const ORG_B = '00000000-0000-0000-0000-00000000f202';
 
 type AuthFixture = Readonly<{
   userId: string;
@@ -520,16 +519,29 @@ test('FDR02-10 pending signIn A no puede pisar sesión B comprometida cross-tab'
   assert.equal(cloudApi.getCloudSession()?.accessToken, freshB.accessToken);
 });
 
-test('FDR02-11 SESSION_KEY productivo tiene un único owner/writer contract', () => {
+test('FDR02-11 SESSION_KEY productivo inventaría lectores legacy y un único writer contract', () => {
   const literal = 'propcontrol-cloud-session-v1';
   const matches = productTsFiles()
     .filter((file) => readFileSync(file, 'utf8').includes(literal));
-  assert.deepEqual(matches, ['src/auth-session-generation.ts']);
+  assert.deepEqual(matches, [
+    'src/auth-session-generation.ts',
+    'src/sync-safety.ts',
+    'src/tenant-storage.ts',
+  ]);
 
   const owner = readFileSync('src/auth-session-generation.ts', 'utf8');
   assert.match(owner, /storage\.setItem\(CLOUD_SESSION_KEY, JSON\.stringify\(stored\)\)/);
   assert.match(owner, /storage\.removeItem\(CLOUD_SESSION_KEY\)/);
   assert.match(owner, /storage\.setItem\(CLOUD_AUTH_GENERATION_KEY, nextGeneration\)/);
+
+  const syncSafety = readFileSync('src/sync-safety.ts', 'utf8');
+  assert.match(syncSafety, /storage\.getItem\(SESSION_KEY\)/);
+  assert.doesNotMatch(syncSafety, /(?:setItem|removeItem)\(SESSION_KEY/);
+
+  const tenantStorage = readFileSync('src/tenant-storage.ts', 'utf8');
+  assert.match(tenantStorage, /if \(key === SESSION_KEY\) return this\.syntheticSession/);
+  assert.match(tenantStorage, /if \(key === SESSION_KEY\) throw new Error\('TenantStorageView no modifica la sesión\.'\)/);
+  assert.doesNotMatch(tenantStorage, /this\.target\.(?:setItem|removeItem)\(SESSION_KEY/);
 
   const cloudSource = readFileSync('src/cloud-api.ts', 'utf8');
   const invitationSource = readFileSync('src/invitation-auth.ts', 'utf8');
