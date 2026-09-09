@@ -1,0 +1,80 @@
+name: FDR02 130e Isolated Candidate Validation
+
+on:
+  push:
+    branches:
+      - validation/fdr02-130e-isolated
+
+permissions:
+  contents: read
+
+jobs:
+  validate-fdr02:
+    runs-on: ubuntu-latest
+    env:
+      PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
+      CANDIDATE_SHA: "130e1d8ea20d1329b92a3d730c0357a754bbd73a"
+    steps:
+      - name: Checkout exact FDR-02 candidate
+        uses: actions/checkout@v7
+        with:
+          ref: 130e1d8ea20d1329b92a3d730c0357a754bbd73a
+          fetch-depth: 0
+
+      - name: Verify exact candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          actual="$(git rev-parse HEAD)"
+          echo "CANDIDATE_EXPECTED=$CANDIDATE_SHA"
+          echo "CANDIDATE_ACTUAL=$actual"
+          test "$actual" = "$CANDIDATE_SHA"
+          test -z "$(git status --porcelain)"
+
+      - name: Setup Node 22
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+
+      - name: Install dependencies
+        run: npm ci --silent
+
+      - name: TypeScript and build
+        run: npm run build --silent
+
+      - name: FDR-02 tests
+        run: node --test --test-concurrency=1 dist/tests/sec-fix-a1-fdr02-cross-tab-auth-generation.test.js
+
+      - name: FDR-01 regression
+        run: node --test --test-concurrency=1 dist/tests/sec-fix-a1-fdr01-recovery-authority.test.js
+
+      - name: DR-04 regression
+        run: node --test --test-concurrency=1 dist/tests/sec-fix-a1-dr04-auth-refresh-epoch.test.js
+
+      - name: DR-03 regression
+        run: node --test --test-concurrency=1 dist/tests/sec-fix-a1-dr03-stale-sync-metadata.test.js
+
+      - name: DR-02 regression
+        run: node --test --test-concurrency=1 dist/tests/sec-fix-a1-dr02-cloud-writer-lease.test.js
+
+      - name: DR-01 regression
+        run: |
+          node --test --test-concurrency=1 \
+            dist/tests/property-photo-direct-upload.test.js \
+            dist/tests/property-photo-storage.test.js
+
+      - name: Targeted accumulated A1 tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t tests < <(find dist/tests -maxdepth 1 -type f -name 'sec-fix-a1*.test.js' -print | sort)
+          printf 'TARGETED_A1_FILES=%s\n' "${#tests[@]}"
+          printf '%s\n' "${tests[@]}"
+          node --test --test-concurrency=1 "${tests[@]}"
+
+      - name: Confirm candidate unchanged by validation
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
+          echo "FINAL_CANDIDATE_SHA=$(git rev-parse HEAD)"
