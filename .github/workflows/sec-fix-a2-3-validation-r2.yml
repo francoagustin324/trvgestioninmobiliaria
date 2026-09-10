@@ -1,0 +1,60 @@
+name: SEC-FIX A2.3 exact candidate validation R2
+
+on:
+  push:
+    branches:
+      - validation/sec-fix-a2-3-r2-exact-sha
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-24.04
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: propcontrol_a2_3
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d propcontrol_a2_3"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      A2_3_TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/propcontrol_a2_3
+      A2_2_TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/propcontrol_a2_3
+      A2_1_TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/propcontrol_a2_3
+      CANDIDATE_SHA: 59d6e37c4af74cc7135127a106c22b3b79d1634a
+    steps:
+      - name: Checkout exact candidate SHA
+        uses: actions/checkout@v4
+        with:
+          ref: 59d6e37c4af74cc7135127a106c22b3b79d1634a
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - name: npm ci
+        run: npm ci
+      - name: PostgreSQL client
+        run: sudo apt-get update && sudo apt-get install -y postgresql-client
+      - name: Verify exact SHA
+        run: test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
+      - name: Build
+        run: npm run build --silent
+      - name: A2.3 PostgreSQL 17 ACL hardening tests
+        run: node --test --test-concurrency=1 dist/tests/sec-fix-a2-3-minimal-acl-hardening.test.js
+      - name: A2.2 active-only regression
+        run: node --test --test-concurrency=1 dist/tests/sec-fix-a2-2-active-only-membership-authority.test.js
+      - name: A2.1 canonical status regression
+        run: node --test --test-concurrency=1 dist/tests/sec-fix-a2-1-canonical-membership-status.test.js
+      - name: Onboarding invitation membership RLS regressions
+        run: node --test --test-concurrency=1 dist/tests/onboarding-org-scope.test.js dist/tests/invitation-membership.test.js dist/tests/membership-rls.test.js
+      - name: Public property share regressions
+        run: node --test --test-concurrency=1 dist/tests/mvp-property-sharing.test.js dist/tests/public-property-share.test.js
+      - name: A1 targeted regression
+        run: node --test --test-concurrency=1 dist/tests/sec-fix-a1-property-photo-tenant.test.js dist/tests/property-photo-direct-upload.test.js
