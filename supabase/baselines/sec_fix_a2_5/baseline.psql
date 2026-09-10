@@ -6,6 +6,7 @@
 -- This manifest ends immediately BEFORE SEC-FIX A2.1.
 
 \ir 20260910150000_pre_a2_1_core.sql
+\ir 20260910150100_pre_a2_1_fichas_snapshot_rls.sql
 
 -- Reuse only historical migrations that become deterministic once the missing
 -- core state above exists. Storage-managed migrations are intentionally absent.
