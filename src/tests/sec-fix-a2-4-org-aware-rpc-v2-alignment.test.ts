@@ -526,7 +526,7 @@ test('SEC-FIX A2.4 ejecuta V2 org-aware y drift alignment en PostgreSQL 17 efím
     assert.equal(psql(`select p.prosecdef from pg_catalog.pg_proc p where p.oid='public.visit_transaction_authority_active_v2(uuid)'::pg_catalog.regprocedure;`), 't');
     psql(migration);
     assert.equal(psql(`select p.prosecdef from pg_catalog.pg_proc p where p.oid='public.visit_transaction_authority_active_v2(uuid)'::pg_catalog.regprocedure;`), 'f');
-    assert.equal(psql(`select p.proconfig::text from pg_catalog.pg_proc p where p.oid='public.visit_transaction_authority_active_v2(uuid)'::pg_catalog.regprocedure;`), '{search_path=""}');
+    assert.equal(psql(`select p.proconfig = ARRAY['search_path=""']::text[] from pg_catalog.pg_proc p where p.oid='public.visit_transaction_authority_active_v2(uuid)'::pg_catalog.regprocedure;`), 't');
     assert.equal(psql(`select has_function_privilege('service_role','public.visit_transaction_authority_active_v2(uuid)','execute');`), 'f');
     assert.equal(asUser(multiOwner, authorityV2(orgA)), 't');
 
