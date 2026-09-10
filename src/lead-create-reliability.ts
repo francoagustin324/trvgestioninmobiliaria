@@ -37,6 +37,7 @@ type FeedbackKind = 'idle' | 'working' | 'success' | 'error' | 'duplicate';
 interface LeadFormTenantContext {
   scope: TenantScope;
   runtimeLease: TenantRuntimeLease;
+  viewMemberId: number;
 }
 
 function formError(form: HTMLFormElement): HTMLElement | null {
@@ -153,6 +154,7 @@ function captureLeadFormTenantContext(form: HTMLFormElement): LeadFormTenantCont
   const context = Object.freeze({
     scope: Object.freeze({ ...scope }),
     runtimeLease: captureTenantRuntimeLease(scope),
+    viewMemberId: state.activeMemberId,
   });
   formTenantContexts.set(form, context);
   return context;
@@ -178,6 +180,9 @@ function formStillAuthorized(form: HTMLFormElement): boolean {
   const context = leadFormTenantContext(form);
   const editingId = capturedEditingId(form);
   if (!context || !form.isConnected || !tenantRuntimeLeaseIsCurrent(context.runtimeLease)) return false;
+  // activeMemberId remains a view preference only. A change invalidates the old visual form,
+  // but this value is never used as tenant authority, creator, assignee or activity actor.
+  if (state.activeMemberId !== context.viewMemberId) return false;
   if (!canAccessModule('crm') || state.activeModule !== 'crm' || !state.openForms.client) return false;
   if (currentEditingId() !== editingId) return false;
   if (editingId !== null && !visibleClients().some((client) => client.id === editingId)) return false;
