@@ -1,3 +1,4 @@
+import type { TenantScope } from './active-organization.js';
 import { resolveHumanIdentity } from './human-identity.js';
 import type {
   ActivityEntry,
@@ -128,16 +129,33 @@ export function workload(memberId: number): { clients: number; properties: numbe
   };
 }
 
-export function addActivity(entry: Omit<ActivityEntry, 'id' | 'createdAt' | 'actorId'>): void {
+type NewActivityEntry = Omit<ActivityEntry, 'id' | 'createdAt' | 'actorId'>;
+
+function appendActivity(entry: NewActivityEntry, actorId: number): void {
   const id = Math.max(0, ...state.crm.activityLog.map((item) => item.id)) + 1;
   state.crm.activityLog.unshift({
     ...entry,
     ...newSyncRecordMetadata(entry.operationId),
     id,
-    actorId: activeMember().id,
+    actorId,
     createdAt: new Date().toISOString(),
   });
   state.crm.activityLog = state.crm.activityLog.slice(0, 250);
+}
+
+export function addActivityForAuthenticatedTenant(scope: TenantScope, entry: NewActivityEntry): void {
+  const member = authenticatedTenantMember(scope);
+  const matches = state.crm.teamMembers.filter((candidate) => (
+    candidate.userId === scope.userId && candidate.status === 'Activo'
+  ));
+  if (!member || matches.length !== 1 || matches[0]?.id !== member.id) {
+    throw new Error('AUTHENTICATED_TENANT_MEMBER_REQUIRED');
+  }
+  appendActivity(entry, member.id);
+}
+
+export function addActivity(entry: NewActivityEntry): void {
+  appendActivity(entry, activeMember().id);
 }
 
 export function ensureAccessibleModule(): void {
