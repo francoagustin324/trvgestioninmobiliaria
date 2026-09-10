@@ -1,0 +1,185 @@
+name: SEC-FIX A2.4 construction
+on:
+  push:
+    branches:
+      - validation/sec-fix-a2-4-construction
+permissions:
+  contents: write
+jobs:
+  construct:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout candidate branch
+        uses: actions/checkout@v4
+        with:
+          ref: agent/sec-fix-a2-4-org-aware-rpc-v2-alignment
+          fetch-depth: 0
+      - name: Build forward migration from frozen A1.1 contract
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          source_path = Path('supabase/migrations/20260907224500_sec_fix_a1_1_org_aware_db_compat.sql')
+          target_path = Path('supabase/migrations/20260910140000_sec_fix_a2_4_org_aware_rpc_v2_alignment.sql')
+          source = source_path.read_text()
+          start = source.index('create function public.visit_transaction_authority_active_v2(')
+          end = source.index('\nrevoke all on function public.visit_transaction_authority_active_v2(uuid)')
+          definitions = source[start:end]
+          definitions = definitions.replace('create function public.visit_transaction_authority_active_v2(', 'create or replace function public.visit_transaction_authority_active_v2(', 1)
+          definitions = definitions.replace('create function public.client_snapshot_cas_v2(', 'create or replace function public.client_snapshot_cas_v2(', 1)
+          definitions = definitions.replace('create function public.commercial_visit_mutation_v2(', 'create or replace function public.commercial_visit_mutation_v2(', 1)
+          definitions = definitions.replace("private.visit_normalized(member.status) = 'active'", "member.status = 'active'")
+          definitions = definitions.replace("private.visit_normalized(target_member.status) = 'active'", "target_member.status = 'active'")
+
+          preflight = r'''do $preflight$
+          declare
+            required_relation text;
+            required_function text;
+            function_name text;
+            canonical_signature text;
+            expected_return regtype;
+            expected_defaults integer;
+            candidate_oid oid;
+            candidate_return oid;
+            candidate_defaults integer;
+            candidate_kind "char";
+          begin
+            foreach required_relation in array array[
+              'public.organization_members',
+              'public.propcontrol_records',
+              'private.commercial_operations'
+            ] loop
+              if pg_catalog.to_regclass(required_relation) is null then
+                raise exception 'SEC-FIX A2.4 abortado: falta dependencia %.', required_relation;
+              end if;
+            end loop;
+
+            foreach required_function in array array[
+              'auth.uid()',
+              'private.is_active_org_member(uuid,uuid)',
+              'private.visit_authority_active(uuid)',
+              'private.visit_normalized(text)',
+              'private.visit_qualification_missing(jsonb)',
+              'private.next_commercial_legacy_id(uuid,text)',
+              'private.commercial_visit_duplicate_exists(uuid,bigint,bigint,timestamptz)'
+            ] loop
+              if pg_catalog.to_regprocedure(required_function) is null then
+                raise exception 'SEC-FIX A2.4 abortado: falta dependencia %.', required_function;
+              end if;
+            end loop;
+
+            if pg_catalog.to_regrole('anon') is null
+              or pg_catalog.to_regrole('authenticated') is null
+              or pg_catalog.to_regrole('service_role') is null then
+              raise exception 'SEC-FIX A2.4 abortado: faltan roles Supabase requeridos.';
+            end if;
+
+            if exists (
+              select 1
+              from (
+                values
+                  ('organization_id'::text, 'pg_catalog.uuid'::pg_catalog.regtype),
+                  ('user_id'::text, 'pg_catalog.uuid'::pg_catalog.regtype),
+                  ('member_id'::text, 'pg_catalog.int8'::pg_catalog.regtype),
+                  ('role'::text, 'pg_catalog.text'::pg_catalog.regtype),
+                  ('status'::text, 'pg_catalog.text'::pg_catalog.regtype)
+              ) as expected(column_name, type_oid)
+              where not exists (
+                select 1
+                from pg_catalog.pg_attribute a
+                where a.attrelid = 'public.organization_members'::pg_catalog.regclass
+                  and a.attname = expected.column_name
+                  and a.atttypid = expected.type_oid
+                  and a.attnum > 0
+                  and not a.attisdropped
+              )
+            ) then
+              raise exception 'SEC-FIX A2.4 abortado: organization_members incompatible.';
+            end if;
+
+            if exists (
+              select 1
+              from (
+                values
+                  ('organization_id'::text, 'pg_catalog.uuid'::pg_catalog.regtype),
+                  ('entity_type'::text, 'pg_catalog.text'::pg_catalog.regtype),
+                  ('entity_key'::text, 'pg_catalog.text'::pg_catalog.regtype),
+                  ('assigned_member_id'::text, 'pg_catalog.int8'::pg_catalog.regtype),
+                  ('payload'::text, 'pg_catalog.jsonb'::pg_catalog.regtype),
+                  ('created_by'::text, 'pg_catalog.uuid'::pg_catalog.regtype),
+                  ('uid'::text, 'pg_catalog.uuid'::pg_catalog.regtype),
+                  ('revision'::text, 'pg_catalog.int8'::pg_catalog.regtype)
+              ) as expected(column_name, type_oid)
+              where not exists (
+                select 1
+                from pg_catalog.pg_attribute a
+                where a.attrelid = 'public.propcontrol_records'::pg_catalog.regclass
+                  and a.attname = expected.column_name
+                  and a.atttypid = expected.type_oid
+                  and a.attnum > 0
+                  and not a.attisdropped
+              )
+            ) then
+              raise exception 'SEC-FIX A2.4 abortado: propcontrol_records incompatible.';
+            end if;
+
+            for function_name, canonical_signature, expected_return, expected_defaults in
+              select * from (values
+                ('visit_transaction_authority_active_v2'::text,
+                 'public.visit_transaction_authority_active_v2(uuid)'::text,
+                 'pg_catalog.bool'::pg_catalog.regtype, 0),
+                ('client_snapshot_cas_v2'::text,
+                 'public.client_snapshot_cas_v2(uuid,jsonb,boolean)'::text,
+                 'pg_catalog.jsonb'::pg_catalog.regtype, 1),
+                ('commercial_visit_mutation_v2'::text,
+                 'public.commercial_visit_mutation_v2(uuid,uuid,text,jsonb,boolean)'::text,
+                 'pg_catalog.jsonb'::pg_catalog.regtype, 1)
+              ) as expected(name, signature, return_type, default_count)
+            loop
+              if exists (
+                select 1
+                from pg_catalog.pg_proc p
+                join pg_catalog.pg_namespace n on n.oid = p.pronamespace
+                where n.nspname = 'public'
+                  and p.proname = function_name
+                  and p.oid <> coalesce(pg_catalog.to_regprocedure(canonical_signature), 0::oid)
+              ) then
+                raise exception 'SEC-FIX A2.4 abortado: firma/overload incompatible para public.%.', function_name;
+              end if;
+
+              candidate_oid := pg_catalog.to_regprocedure(canonical_signature);
+              if candidate_oid is not null then
+                select p.prorettype, p.pronargdefaults, p.prokind
+                into candidate_return, candidate_defaults, candidate_kind
+                from pg_catalog.pg_proc p
+                where p.oid = candidate_oid;
+                if candidate_return <> expected_return
+                   or candidate_defaults <> expected_defaults
+                   or candidate_kind <> 'f' then
+                  raise exception 'SEC-FIX A2.4 abortado: contrato de firma incompatible para %.', canonical_signature;
+                end if;
+              end if;
+            end loop;
+          end;
+          $preflight$;'''
+
+          acl = r'''revoke all privileges on function public.visit_transaction_authority_active_v2(uuid)
+            from public, anon, authenticated, service_role;
+          grant execute on function public.visit_transaction_authority_active_v2(uuid) to authenticated;
+
+          revoke all privileges on function public.client_snapshot_cas_v2(uuid, jsonb, boolean)
+            from public, anon, authenticated, service_role;
+          grant execute on function public.client_snapshot_cas_v2(uuid, jsonb, boolean) to authenticated;
+
+          revoke all privileges on function public.commercial_visit_mutation_v2(uuid, uuid, text, jsonb, boolean)
+            from public, anon, authenticated, service_role;
+          grant execute on function public.commercial_visit_mutation_v2(uuid, uuid, text, jsonb, boolean) to authenticated;'''
+
+          output = '''-- SEC-FIX A2.4 — alineación reproducible de RPC V2 org-aware.\n-- Forward-only. No modifica datos, policies ni RPC legacy.\n-- Fuente funcional: SEC-FIX A1.1; status se exige exacto según A2.1/A2.2.\n\nbegin;\n\n''' + preflight + '\n\n' + definitions.strip() + '\n\n' + acl + '\n\ncommit;\n'
+          target_path.write_text(output)
+          PY
+          git diff --check
+          git add supabase/migrations/20260910140000_sec_fix_a2_4_org_aware_rpc_v2_alignment.sql
+          git -c user.name='PropControl Validation' -c user.email='actions@users.noreply.github.com' commit -m 'SEC-FIX A2.4 — Align org-aware RPC V2 schema'
+          git push origin HEAD:agent/sec-fix-a2-4-org-aware-rpc-v2-alignment
