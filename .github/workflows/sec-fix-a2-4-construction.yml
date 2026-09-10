@@ -14,172 +14,130 @@ jobs:
         with:
           ref: agent/sec-fix-a2-4-org-aware-rpc-v2-alignment
           fetch-depth: 0
-      - name: Build forward migration from frozen A1.1 contract
+      - name: Generate A2.4 test from frozen A1.1 executable contract
         shell: bash
         run: |
           python3 - <<'PY'
           from pathlib import Path
 
-          source_path = Path('supabase/migrations/20260907224500_sec_fix_a1_1_org_aware_db_compat.sql')
-          target_path = Path('supabase/migrations/20260910140000_sec_fix_a2_4_org_aware_rpc_v2_alignment.sql')
-          source = source_path.read_text()
-          start = source.index('create function public.visit_transaction_authority_active_v2(')
-          end = source.index('\nrevoke all on function public.visit_transaction_authority_active_v2(uuid)')
-          definitions = source[start:end]
-          definitions = definitions.replace('create function public.visit_transaction_authority_active_v2(', 'create or replace function public.visit_transaction_authority_active_v2(', 1)
-          definitions = definitions.replace('create function public.client_snapshot_cas_v2(', 'create or replace function public.client_snapshot_cas_v2(', 1)
-          definitions = definitions.replace('create function public.commercial_visit_mutation_v2(', 'create or replace function public.commercial_visit_mutation_v2(', 1)
-          definitions = definitions.replace("private.visit_normalized(member.status) = 'active'", "member.status = 'active'")
-          definitions = definitions.replace("private.visit_normalized(target_member.status) = 'active'", "target_member.status = 'active'")
+          source_path = Path('src/tests/sec-fix-a1-1-org-aware-db-compat.test.ts')
+          target_path = Path('src/tests/sec-fix-a2-4-org-aware-rpc-v2-alignment.test.ts')
+          text = source_path.read_text()
+          text = text.replace(
+            "const migrationPath = 'supabase/migrations/20260907224500_sec_fix_a1_1_org_aware_db_compat.sql';",
+            "const migrationPath = 'supabase/migrations/20260910140000_sec_fix_a2_4_org_aware_rpc_v2_alignment.sql';\nconst tenantV2Path = 'src/tenant-visit-v2.ts';"
+          )
+          text = text.replace("const migration = readFileSync(migrationPath, 'utf8');", "const migration = readFileSync(migrationPath, 'utf8');\nconst tenantV2 = readFileSync(tenantV2Path, 'utf8');")
+          text = text.replace("test('SEC-FIX-A1.1 migration es aditiva, V2 explícita y conserva archivos legacy'", "test('SEC-FIX A2.4 conserva contrato A1.1, explicita tenant y no toca legacy'")
+          text = text.replace("test('SEC-FIX-A1.1 ejecuta V2 y coexistencia legacy en PostgreSQL 17 efímero'", "test('SEC-FIX A2.4 ejecuta V2 org-aware y drift alignment en PostgreSQL 17 efímero'")
+          text = text.replace("/create function public\\.visit_transaction_authority_active_v2", "/create or replace function public\\.visit_transaction_authority_active_v2")
+          text = text.replace("/create function public\\.client_snapshot_cas_v2", "/create or replace function public\\.client_snapshot_cas_v2")
+          text = text.replace("/create function public\\.commercial_visit_mutation_v2", "/create or replace function public\\.commercial_visit_mutation_v2")
+          text = text.replace("    create role authenticated nologin;", "    create role authenticated nologin;\n      create role service_role nologin;")
+          text = text.replace("and pg_catalog.lower(status)='active'", "and status='active'")
+          text = text.replace("  const noMember = 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee';", "  const noMember = 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee';\n  const unknownUser = 'abababab-abab-4bab-8bab-abababababab';")
+          text = text.replace("        ('${orgA}','${suspendedUser}',4,'admin','suspended'),", "        ('${orgA}','${suspendedUser}',4,'admin','suspended'),\n        ('${orgA}','${unknownUser}',6,'admin','unknown'),")
+          text = text.replace("for (const actor of [noMember, invitedUser, suspendedUser])", "for (const actor of [noMember, invitedUser, suspendedUser, unknownUser])")
 
-          preflight = r'''do $preflight$
-          declare
-            required_relation text;
-            required_function text;
-            function_name text;
-            canonical_signature text;
-            expected_return regtype;
-            expected_defaults integer;
-            candidate_oid oid;
-            candidate_return oid;
-            candidate_defaults integer;
-            candidate_kind "char";
-          begin
-            foreach required_relation in array array[
-              'public.organization_members',
-              'public.propcontrol_records',
-              'private.commercial_operations'
-            ] loop
-              if pg_catalog.to_regclass(required_relation) is null then
-                raise exception 'SEC-FIX A2.4 abortado: falta dependencia %.', required_relation;
-              end if;
-            end loop;
+          static_marker = "  assert.doesNotMatch(migration, /insert\\s+into\\s+private\\.commercial_entity_authority/i);"
+          static_extra = r'''
+          assert.match(migration, /and member\.status = 'active'/);
+          assert.match(migration, /and target_member\.status = 'active'/);
+          assert.doesNotMatch(migration, /visit_normalized\(member\.status\)/);
+          assert.match(migration, /firma\/overload incompatible/);
+          assert.match(tenantV2, /'visit_transaction_authority_active_v2'[\s\S]*p_organization_id: scope\.organizationId/);
+          assert.match(tenantV2, /'client_snapshot_cas_v2'[\s\S]*p_organization_id: scope\.organizationId/);
+          assert.match(tenantV2, /'commercial_visit_mutation_v2'[\s\S]*p_organization_id: scope\.organizationId/);
+          assert.doesNotMatch(migration, /public\.commercial_visit_mutation\s*\(/);
+          assert.doesNotMatch(migration, /public\.client_snapshot_cas\s*\(/);
+          assert.doesNotMatch(migration, /public\.visit_transaction_authority_active\s*\(\s*\)/);
+          '''
+          text = text.replace(static_marker, static_marker + static_extra)
 
-            foreach required_function in array array[
-              'auth.uid()',
-              'private.is_active_org_member(uuid,uuid)',
-              'private.visit_authority_active(uuid)',
-              'private.visit_normalized(text)',
-              'private.visit_qualification_missing(jsonb)',
-              'private.next_commercial_legacy_id(uuid,text)',
-              'private.commercial_visit_duplicate_exists(uuid,bigint,bigint,timestamptz)'
-            ] loop
-              if pg_catalog.to_regprocedure(required_function) is null then
-                raise exception 'SEC-FIX A2.4 abortado: falta dependencia %.', required_function;
-              end if;
-            end loop;
+          acl_marker = "    assert.equal(psql(`select has_function_privilege('anon','public.commercial_visit_mutation_v2(uuid,uuid,text,jsonb,boolean)','execute');`), 'f');"
+          acl_extra = r'''
+              assert.equal(psql(`select has_function_privilege('public','public.visit_transaction_authority_active_v2(uuid)','execute');`), 'f');
+              assert.equal(psql(`select has_function_privilege('public','public.client_snapshot_cas_v2(uuid,jsonb,boolean)','execute');`), 'f');
+              assert.equal(psql(`select has_function_privilege('public','public.commercial_visit_mutation_v2(uuid,uuid,text,jsonb,boolean)','execute');`), 'f');
+              assert.equal(psql(`select has_function_privilege('service_role','public.visit_transaction_authority_active_v2(uuid)','execute');`), 'f');
+              assert.equal(psql(`select has_function_privilege('service_role','public.client_snapshot_cas_v2(uuid,jsonb,boolean)','execute');`), 'f');
+              assert.equal(psql(`select has_function_privilege('service_role','public.commercial_visit_mutation_v2(uuid,uuid,text,jsonb,boolean)','execute');`), 'f');
+          '''
+          text = text.replace(acl_marker, acl_marker + acl_extra)
 
-            if pg_catalog.to_regrole('anon') is null
-              or pg_catalog.to_regrole('authenticated') is null
-              or pg_catalog.to_regrole('service_role') is null then
-              raise exception 'SEC-FIX A2.4 abortado: faltan roles Supabase requeridos.';
-            end if;
+          cas_marker = "    assert.match(crossClient, /NOT_FOUND/);"
+          cas_extra = r'''
 
-            if exists (
-              select 1
-              from (
-                values
-                  ('organization_id'::text, 'pg_catalog.uuid'::pg_catalog.regtype),
-                  ('user_id'::text, 'pg_catalog.uuid'::pg_catalog.regtype),
-                  ('member_id'::text, 'pg_catalog.int8'::pg_catalog.regtype),
-                  ('role'::text, 'pg_catalog.text'::pg_catalog.regtype),
-                  ('status'::text, 'pg_catalog.text'::pg_catalog.regtype)
-              ) as expected(column_name, type_oid)
-              where not exists (
-                select 1
-                from pg_catalog.pg_attribute a
-                where a.attrelid = 'public.organization_members'::pg_catalog.regclass
-                  and a.attname = expected.column_name
-                  and a.atttypid = expected.type_oid
-                  and a.attnum > 0
-                  and not a.attisdropped
-              )
-            ) then
-              raise exception 'SEC-FIX A2.4 abortado: organization_members incompatible.';
-            end if;
+              for (const actor of [invitedUser, suspendedUser, unknownUser]) {
+                const denied = asUserError(actor, casV2(orgA, {
+                  action: 'update', client: { legacyId: 2 }, expectedRevision: 0,
+                  payload: readyClient(2),
+                }));
+                assert.match(denied, /42501/);
+                assert.match(denied, /PERMISSION_DENIED/);
+              }
+              assert.match(asUserError(singleOwner, casV2(orgB, {
+                action: 'update', client: { legacyId: 200 }, expectedRevision: 0,
+                payload: readyClient(200),
+              })), /PERMISSION_DENIED/);
+          '''
+          text = text.replace(cas_marker, cas_marker + cas_extra)
 
-            if exists (
-              select 1
-              from (
-                values
-                  ('organization_id'::text, 'pg_catalog.uuid'::pg_catalog.regtype),
-                  ('entity_type'::text, 'pg_catalog.text'::pg_catalog.regtype),
-                  ('entity_key'::text, 'pg_catalog.text'::pg_catalog.regtype),
-                  ('assigned_member_id'::text, 'pg_catalog.int8'::pg_catalog.regtype),
-                  ('payload'::text, 'pg_catalog.jsonb'::pg_catalog.regtype),
-                  ('created_by'::text, 'pg_catalog.uuid'::pg_catalog.regtype),
-                  ('uid'::text, 'pg_catalog.uuid'::pg_catalog.regtype),
-                  ('revision'::text, 'pg_catalog.int8'::pg_catalog.regtype)
-              ) as expected(column_name, type_oid)
-              where not exists (
-                select 1
-                from pg_catalog.pg_attribute a
-                where a.attrelid = 'public.propcontrol_records'::pg_catalog.regclass
-                  and a.attname = expected.column_name
-                  and a.atttypid = expected.type_oid
-                  and a.attnum > 0
-                  and not a.attisdropped
-              )
-            ) then
-              raise exception 'SEC-FIX A2.4 abortado: propcontrol_records incompatible.';
-            end if;
+          visit_marker = "    assert.match(asUserError(multiOwner, visitV2(orgA, randomUUID(), 'VISIT_CREATE', createRequest(11, 200))), /NOT_FOUND/);"
+          visit_extra = r'''
+              for (const actor of [invitedUser, suspendedUser, unknownUser]) {
+                const denied = asUserError(actor, visitV2(orgA, randomUUID(), 'VISIT_CREATE', createRequest(11, 1)));
+                assert.match(denied, /42501/);
+                assert.match(denied, /PERMISSION_DENIED/);
+              }
+          '''
+          text = text.replace(visit_marker, visit_marker + visit_extra)
 
-            for function_name, canonical_signature, expected_return, expected_defaults in
-              select * from (values
-                ('visit_transaction_authority_active_v2'::text,
-                 'public.visit_transaction_authority_active_v2(uuid)'::text,
-                 'pg_catalog.bool'::pg_catalog.regtype, 0),
-                ('client_snapshot_cas_v2'::text,
-                 'public.client_snapshot_cas_v2(uuid,jsonb,boolean)'::text,
-                 'pg_catalog.jsonb'::pg_catalog.regtype, 1),
-                ('commercial_visit_mutation_v2'::text,
-                 'public.commercial_visit_mutation_v2(uuid,uuid,text,jsonb,boolean)'::text,
-                 'pg_catalog.jsonb'::pg_catalog.regtype, 1)
-              ) as expected(name, signature, return_type, default_count)
-            loop
-              if exists (
-                select 1
-                from pg_catalog.pg_proc p
-                join pg_catalog.pg_namespace n on n.oid = p.pronamespace
-                where n.nspname = 'public'
-                  and p.proname = function_name
-                  and p.oid <> coalesce(pg_catalog.to_regprocedure(canonical_signature), 0::oid)
-              ) then
-                raise exception 'SEC-FIX A2.4 abortado: firma/overload incompatible para public.%.', function_name;
-              end if;
+          end_marker = "    assert.equal(psql(`select count(*) from public.propcontrol_records where organization_id='${orgA}' and entity_type='activity' and payload->>'operationId'='${coexistOp}';`), '1');"
+          end_extra = r'''
 
-              candidate_oid := pg_catalog.to_regprocedure(canonical_signature);
-              if candidate_oid is not null then
-                select p.prorettype, p.pronargdefaults, p.prokind
-                into candidate_return, candidate_defaults, candidate_kind
-                from pg_catalog.pg_proc p
-                where p.oid = candidate_oid;
-                if candidate_return <> expected_return
-                   or candidate_defaults <> expected_defaults
-                   or candidate_kind <> 'f' then
-                  raise exception 'SEC-FIX A2.4 abortado: contrato de firma incompatible para %.', canonical_signature;
-                end if;
-              end if;
-            end loop;
-          end;
-          $preflight$;'''
+              // Schema/drift 23-25: absent fue creado arriba; rerun correcto es estable; drift reconciliable vuelve al contrato.
+              const definitionsBeforeRerun = psql(`select pg_catalog.jsonb_object_agg(p.proname, pg_catalog.md5(pg_catalog.pg_get_functiondef(p.oid)))
+                from pg_catalog.pg_proc p join pg_catalog.pg_namespace n on n.oid=p.pronamespace
+                where n.nspname='public' and p.proname in ('visit_transaction_authority_active_v2','client_snapshot_cas_v2','commercial_visit_mutation_v2');`);
+              psql(migration);
+              const definitionsAfterRerun = psql(`select pg_catalog.jsonb_object_agg(p.proname, pg_catalog.md5(pg_catalog.pg_get_functiondef(p.oid)))
+                from pg_catalog.pg_proc p join pg_catalog.pg_namespace n on n.oid=p.pronamespace
+                where n.nspname='public' and p.proname in ('visit_transaction_authority_active_v2','client_snapshot_cas_v2','commercial_visit_mutation_v2');`);
+              assert.equal(definitionsAfterRerun, definitionsBeforeRerun);
 
-          acl = r'''revoke all privileges on function public.visit_transaction_authority_active_v2(uuid)
-            from public, anon, authenticated, service_role;
-          grant execute on function public.visit_transaction_authority_active_v2(uuid) to authenticated;
+              psql(`
+                create or replace function public.visit_transaction_authority_active_v2(p_organization_id uuid)
+                returns boolean language sql stable security definer set search_path=public
+                as $drift$ select false $drift$;
+                grant execute on function public.visit_transaction_authority_active_v2(uuid) to service_role;
+              `);
+              assert.equal(psql(`select p.prosecdef from pg_catalog.pg_proc p where p.oid='public.visit_transaction_authority_active_v2(uuid)'::pg_catalog.regprocedure;`), 't');
+              psql(migration);
+              assert.equal(psql(`select p.prosecdef from pg_catalog.pg_proc p where p.oid='public.visit_transaction_authority_active_v2(uuid)'::pg_catalog.regprocedure;`), 'f');
+              assert.equal(psql(`select p.proconfig::text from pg_catalog.pg_proc p where p.oid='public.visit_transaction_authority_active_v2(uuid)'::pg_catalog.regprocedure;`), '{search_path=""}');
+              assert.equal(psql(`select has_function_privilege('service_role','public.visit_transaction_authority_active_v2(uuid)','execute');`), 'f');
+              assert.equal(asUser(multiOwner, authorityV2(orgA)), 't');
 
-          revoke all privileges on function public.client_snapshot_cas_v2(uuid, jsonb, boolean)
-            from public, anon, authenticated, service_role;
-          grant execute on function public.client_snapshot_cas_v2(uuid, jsonb, boolean) to authenticated;
+              // 26. dependencia crítica faltante: ABORT transaccional antes de reconciliar cualquier V2.
+              psql(`
+                create or replace function public.visit_transaction_authority_active_v2(p_organization_id uuid)
+                returns boolean language sql stable security definer set search_path=public
+                as $drift$ select false $drift$;
+                alter function private.visit_qualification_missing(jsonb) rename to visit_qualification_missing_missing;
+              `);
+              const missingDependency = rawPsql(migration);
+              assert.notEqual(missingDependency.status, 0);
+              assert.match(`${missingDependency.stderr}\n${missingDependency.stdout}`, /falta dependencia private\.visit_qualification_missing\(jsonb\)/);
+              assert.equal(psql(`select p.prosecdef from pg_catalog.pg_proc p where p.oid='public.visit_transaction_authority_active_v2(uuid)'::pg_catalog.regprocedure;`), 't');
+          '''
+          text = text.replace(end_marker, end_marker + end_extra)
 
-          revoke all privileges on function public.commercial_visit_mutation_v2(uuid, uuid, text, jsonb, boolean)
-            from public, anon, authenticated, service_role;
-          grant execute on function public.commercial_visit_mutation_v2(uuid, uuid, text, jsonb, boolean) to authenticated;'''
-
-          output = '''-- SEC-FIX A2.4 — alineación reproducible de RPC V2 org-aware.\n-- Forward-only. No modifica datos, policies ni RPC legacy.\n-- Fuente funcional: SEC-FIX A1.1; status se exige exacto según A2.1/A2.2.\n\nbegin;\n\n''' + preflight + '\n\n' + definitions.strip() + '\n\n' + acl + '\n\ncommit;\n'
-          target_path.write_text(output)
+          target_path.write_text(text)
           PY
           git diff --check
-          git add supabase/migrations/20260910140000_sec_fix_a2_4_org_aware_rpc_v2_alignment.sql
-          git -c user.name='PropControl Validation' -c user.email='actions@users.noreply.github.com' commit -m 'SEC-FIX A2.4 — Align org-aware RPC V2 schema'
-          git push origin HEAD:agent/sec-fix-a2-4-org-aware-rpc-v2-alignment
+          git add src/tests/sec-fix-a2-4-org-aware-rpc-v2-alignment.test.ts
+          if ! git diff --cached --quiet; then
+            git -c user.name='PropControl Validation' -c user.email='actions@users.noreply.github.com' commit -m 'SEC-FIX A2.4 — Add org-aware V2 alignment coverage'
+            git push origin HEAD:agent/sec-fix-a2-4-org-aware-rpc-v2-alignment
+          fi
