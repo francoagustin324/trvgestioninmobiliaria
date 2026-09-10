@@ -1,0 +1,72 @@
+name: SEC-FIX A2.5 Validation
+
+on:
+  push:
+    branches:
+      - codex/sec-fix-a2-5-baseline
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate-a2-5:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+
+    steps:
+      - name: Checkout exact candidate branch
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Compile test artifacts
+        run: npx tsc
+
+      - name: A2.5 two clean PostgreSQL 17 replays
+        run: node --test --test-concurrency=1 dist/tests/sec-fix-a2-5-reproducible-baseline.test.js
+
+      - name: A2.4 regression
+        run: node --test --test-concurrency=1 dist/tests/sec-fix-a2-4-org-aware-rpc-v2-alignment.test.js
+
+      - name: A2.3 regression
+        run: node --test --test-concurrency=1 dist/tests/sec-fix-a2-3-minimal-acl-hardening.test.js
+
+      - name: A2.2 regression
+        run: node --test --test-concurrency=1 dist/tests/sec-fix-a2-2-active-only-membership-authority.test.js
+
+      - name: A2.1 regression
+        run: node --test --test-concurrency=1 dist/tests/sec-fix-a2-1-canonical-membership-status.test.js
+
+      - name: Membership and RLS regressions
+        run: >-
+          node --test --test-concurrency=1
+          dist/tests/b0-1-membership-security.test.js
+          dist/tests/multiuser-rls-migration.test.js
+          dist/tests/restrictive-organization-isolation.test.js
+
+      - name: Onboarding and invitation regression
+        run: node --test --test-concurrency=1 dist/tests/b0-3-user-onboarding.test.js
+
+      - name: Public share regression
+        run: node --test --test-concurrency=1 dist/tests/sec-fix-a1-2-g-public-property-share.test.js
+
+      - name: CAS and Visit regressions
+        run: >-
+          node --test --test-concurrency=1
+          dist/tests/p1-1-a7-r2-2-visit-transaction-backend.test.js
+          dist/tests/p1-1-a7-r2-2c-visit-transaction-cutover.test.js
+          dist/tests/p1-1-a7-r2-2d-client-reassignment-cas.test.js
+
+      - name: A1 targeted regression
+        run: node --test --test-concurrency=1 dist/tests/sec-fix-a1-1-org-aware-db-compat.test.js
+
+      - name: Final build
+        run: npm run build
