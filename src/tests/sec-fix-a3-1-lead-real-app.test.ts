@@ -3,14 +3,22 @@ import { spawn, type ChildProcess } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import test from 'node:test';
 import { chromium, type Browser, type BrowserContext, type Page } from 'playwright';
+import {
+  crmToCloudRecords,
+  membershipContext,
+  type CloudMembershipRow,
+  type CloudRecordRow,
+} from '../cloud-records.js';
 import { initialData, type CrmData, type TeamMember, type TeamRole } from '../models.js';
 
-const SESSION_KEY = 'propcontrol-cloud-session-v1';
-const TEAM_VIEW_KEY = 'propcontrol-active-team-member-v1';
 const STORAGE_KEY = 'trv-crm-basico';
 const ORG_A = '00000000-0000-0000-0000-00000000a321';
 const ORG_B = '00000000-0000-0000-0000-00000000b321';
 const SHARED_USER = 'a31-shared-user';
+
+interface MockCloud {
+  writesFor(organizationId: string): number;
+}
 
 function chromeExecutable(): string | undefined {
   return ['/usr/bin/google-chrome', '/usr/bin/google-chrome-stable', '/usr/bin/chromium', '/usr/bin/chromium-browser'].find(existsSync);
@@ -112,12 +120,134 @@ function crmFixture(options: {
   return crm;
 }
 
-function legacyKey(userId: string): string {
-  return `${STORAGE_KEY}:user:${userId}`;
-}
-
 function tenantKey(userId: string, organizationId: string): string {
   return `${STORAGE_KEY}:user:${userId}:org:${organizationId}`;
+}
+
+function tenantSyncKey(userId: string, organizationId: string): string {
+  return `${tenantKey(userId, organizationId)}:sync`;
+}
+
+function cloudRole(role: TeamRole): string {
+  if (role === 'Dueño') return 'owner';
+  if (role === 'Administrador') return 'admin';
+  return 'agent';
+}
+
+function membershipRows(crm: CrmData): CloudMembershipRow[] {
+  return crm.teamMembers.map((member) => ({
+    organization_id: crm.organization.id,
+    member_id: member.id,
+    user_id: member.userId || `member-${crm.organization.id}-${member.id}`,
+    role: cloudRole(member.role),
+    status: member.status === 'Suspendido' ? 'suspended' : member.status === 'Pendiente de acceso' ? 'invited' : 'active',
+    display_name: member.name,
+    email: member.email,
+    phone: member.phone,
+    created_at: member.createdAt,
+    last_active_at: member.lastActiveAt,
+  }));
+}
+
+function organizationFilter(url: URL): string {
+  return String(url.searchParams.get('organization_id') || '').replace(/^eq\./, '');
+}
+
+function userFilter(url: URL): string {
+  return String(url.searchParams.get('user_id') || '').replace(/^eq\./, '');
+}
+
+function recordKey(row: CloudRecordRow): string {
+  return `${row.entity_type}:${row.entity_key}`;
+}
+
+async function installMockCloud(
+  context: BrowserContext,
+  crms: readonly CrmData[],
+  authenticatedUserId: string,
+): Promise<MockCloud> {
+  const memberships = crms.flatMap(membershipRows);
+  const recordsByOrg = new Map<string, CloudRecordRow[]>();
+  const writes = new Map<string, number>();
+  for (const crm of crms) {
+    const rows = membershipRows(crm);
+    const membership = membershipContext(rows, authenticatedUserId);
+    recordsByOrg.set(
+      crm.organization.id,
+      crmToCloudRecords(crm, membership, authenticatedUserId)
+        .map((row) => ({ ...row, updated_at: '2026-09-10T12:00:00.000Z' })),
+    );
+  }
+
+  await context.route('**/*', async (route) => {
+    const request = route.request();
+    const url = new URL(request.url());
+    if (url.pathname === '/api/cloud-config') {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          configured: true,
+          url: `${url.origin}/__a31_supabase`,
+          publishableKey: 'a31-publishable',
+        }),
+      });
+      return;
+    }
+    if (!url.pathname.startsWith('/__a31_supabase/')) {
+      await route.continue();
+      return;
+    }
+
+    if (url.pathname.endsWith('/rest/v1/organization_members')) {
+      let result = memberships;
+      const org = organizationFilter(url);
+      const user = userFilter(url);
+      if (org) result = result.filter((row) => row.organization_id === org);
+      if (user) result = result.filter((row) => row.user_id === user);
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(result) });
+      return;
+    }
+
+    if (url.pathname.endsWith('/rest/v1/propcontrol_records')) {
+      const org = organizationFilter(url);
+      if (request.method() === 'GET') {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify(recordsByOrg.get(org) ?? []),
+        });
+        return;
+      }
+      if (request.method() === 'POST') {
+        const incoming = JSON.parse(request.postData() || '[]') as CloudRecordRow[];
+        const targetOrg = incoming[0]?.organization_id || org;
+        const existing = new Map((recordsByOrg.get(targetOrg) ?? []).map((row) => [recordKey(row), row]));
+        incoming.forEach((row) => existing.set(recordKey(row), {
+          ...row,
+          updated_at: '2026-09-10T12:30:00.000Z',
+        }));
+        recordsByOrg.set(targetOrg, [...existing.values()]);
+        writes.set(targetOrg, (writes.get(targetOrg) ?? 0) + 1);
+        await route.fulfill({ status: 201, contentType: 'application/json', body: '' });
+        return;
+      }
+      if (request.method() === 'DELETE') {
+        writes.set(org, (writes.get(org) ?? 0) + 1);
+        await route.fulfill({ status: 204, body: '' });
+        return;
+      }
+    }
+
+    if (url.pathname.endsWith('/rest/v1/fichas')) {
+      await route.fulfill({ status: 200, contentType: 'application/json', body: '[]' });
+      return;
+    }
+
+    await route.fulfill({ status: 200, contentType: 'application/json', body: '{}' });
+  });
+
+  return { writesFor: (organizationId: string) => writes.get(organizationId) ?? 0 };
 }
 
 async function contextFor(
@@ -126,13 +256,16 @@ async function contextFor(
   userId: string,
   activeMemberId: number,
   suffix: string,
-): Promise<BrowserContext> {
+  extraCrms: readonly CrmData[] = [],
+): Promise<{ context: BrowserContext; cloud: MockCloud }> {
   const context = await browser.newContext({
     viewport: { width: 1200, height: 820 },
     locale: 'es-AR',
     timezoneId: 'America/Argentina/Cordoba',
   });
-  await context.addInitScript(({ crmData, user, viewMember, marker }) => {
+  const allCrms = [crm, ...extraCrms];
+  const cloud = await installMockCloud(context, allCrms, userId);
+  await context.addInitScript(({ crmData, tenantCrms, user, viewMember, marker }) => {
     if (localStorage.getItem(marker)) return;
     localStorage.setItem(marker, '1');
     localStorage.setItem('propcontrol-cloud-session-v1', JSON.stringify({
@@ -142,10 +275,20 @@ async function contextFor(
       userId: user,
       email: `${user}@a31.test`,
     }));
-    localStorage.setItem(`trv-crm-basico:user:${user}`, JSON.stringify(crmData));
+    for (const tenantCrm of tenantCrms) {
+      const key = `trv-crm-basico:user:${user}:org:${tenantCrm.organization.id}`;
+      localStorage.setItem(key, JSON.stringify(tenantCrm));
+      localStorage.setItem(`${key}:sync`, JSON.stringify({
+        dirty: false,
+        localUpdatedAt: '2026-09-10T12:00:00.000Z',
+        lastCloudSavedAt: '2026-09-10T12:00:00.000Z',
+        lastCloudVersion: '2026-09-10T12:00:00.000Z',
+      }));
+    }
+    localStorage.setItem(`propcontrol-active-organization-v1:user:${user}`, crmData.organization.id);
     localStorage.setItem('propcontrol-active-team-member-v1', String(viewMember));
-  }, { crmData: crm, user: userId, viewMember: activeMemberId, marker: `a31:${suffix}` });
-  return context;
+  }, { crmData: crm, tenantCrms: allCrms, user: userId, viewMember: activeMemberId, marker: `a31:${suffix}` });
+  return { context, cloud };
 }
 
 async function load(page: Page, url: string): Promise<void> {
@@ -157,6 +300,7 @@ async function openLeadForm(page: Page): Promise<ReturnType<Page['locator']>> {
   await page.locator('[data-toggle="client-form"]').click();
   const form = page.locator('#mvp-lead-form.b131-lead-form:not(.collapsed)');
   await form.waitFor({ state: 'visible', timeout: 10_000 });
+  await form.locator('[data-save-lead]').waitFor({ state: 'visible' });
   return form;
 }
 
@@ -176,26 +320,35 @@ function clientActivityActors(crm: CrmData, clientId: number): number[] {
     .map((entry) => entry.actorId);
 }
 
+async function switchTenant(page: Page, userId: string, organizationId: string, activeMemberId: number): Promise<void> {
+  await page.evaluate(async ({ user, org, memberId }) => {
+    const runtimePath = '/dist/tenant-runtime.js';
+    const storePath = '/dist/store.js';
+    const runtime = await import(runtimePath);
+    const store = await import(storePath);
+    const tenantScope = { userId: user, organizationId: org };
+    runtime.installTenantRuntimeScope(tenantScope, user);
+    store.activateStorageForTenant(tenantScope);
+    store.setActiveMemberId(memberId);
+    store.state.activeModule = 'crm';
+    store.state.openForms.client = false;
+    document.dispatchEvent(new CustomEvent('trv-render'));
+  }, { user: userId, org: organizationId, memberId: activeMemberId });
+}
+
 test('A3.1 owner autenticado conserva write identity bajo activeMemberId y TEAM_VIEW_KEY manipulados', { timeout: 120_000 }, async () => {
   const executablePath = chromeExecutable();
   assert.ok(executablePath, 'Chrome/Chromium no disponible para A3.1.');
   const port = 63400 + Math.floor(Math.random() * 100);
   const server = await startServer(port);
   const browser = await chromium.launch({ executablePath, headless: true });
-  const crm = crmFixture({
-    organizationId: ORG_A,
-    authenticatedUserId: SHARED_USER,
-    authenticatedMemberId: 11,
-    authenticatedRole: 'Dueño',
-    visualMemberId: 91,
-  });
-  const context = await contextFor(browser, crm, SHARED_USER, 11, 'owner-tamper');
+  const crm = crmFixture({ organizationId: ORG_A, authenticatedUserId: SHARED_USER, authenticatedMemberId: 11, authenticatedRole: 'Dueño', visualMemberId: 91 });
+  const harness = await contextFor(browser, crm, SHARED_USER, 11, 'owner-tamper');
   try {
-    const page = await context.newPage();
+    const page = await harness.context.newPage();
     await load(page, `http://127.0.0.1:${port}`);
     await page.evaluate(async () => {
-      const modulePath = '/dist/store.js';
-      const store = await import(modulePath);
+      const store = await import('/dist/store.js');
       store.setActiveMemberId(91);
     });
     const form = await openLeadForm(page);
@@ -222,7 +375,7 @@ test('A3.1 owner autenticado conserva write identity bajo activeMemberId y TEAM_
     assert.equal(edited?.createdById, 11);
     assert.equal(edited?.assignedToId, 11);
   } finally {
-    await context.close();
+    await harness.context.close();
     await browser.close();
     await stopServer(server);
   }
@@ -235,20 +388,13 @@ test('A3.1 agent autenticado no adquiere identidad de owner visual', { timeout: 
   const server = await startServer(port);
   const browser = await chromium.launch({ executablePath, headless: true });
   const userId = 'a31-agent-user';
-  const crm = crmFixture({
-    organizationId: ORG_A,
-    authenticatedUserId: userId,
-    authenticatedMemberId: 31,
-    authenticatedRole: 'Corredor',
-    visualMemberId: 1,
-  });
-  const context = await contextFor(browser, crm, userId, 31, 'agent-view-owner');
+  const crm = crmFixture({ organizationId: ORG_A, authenticatedUserId: userId, authenticatedMemberId: 31, authenticatedRole: 'Corredor', visualMemberId: 1 });
+  const harness = await contextFor(browser, crm, userId, 31, 'agent-view-owner');
   try {
-    const page = await context.newPage();
+    const page = await harness.context.newPage();
     await load(page, `http://127.0.0.1:${port}`);
     await page.evaluate(async () => {
-      const modulePath = '/dist/store.js';
-      const store = await import(modulePath);
+      const store = await import('/dist/store.js');
       store.setActiveMemberId(1);
     });
     const form = await openLeadForm(page);
@@ -262,7 +408,7 @@ test('A3.1 agent autenticado no adquiere identidad de owner visual', { timeout: 
     assert.equal(client.assignedToId, 31);
     assert.deepEqual([...new Set(clientActivityActors(saved, client.id))], [31]);
   } finally {
-    await context.close();
+    await harness.context.close();
     await browser.close();
     await stopServer(server);
   }
@@ -274,44 +420,18 @@ test('A3.1 mismo usuario guarda A y B en namespaces y member ids distintos', { t
   const port = 63640 + Math.floor(Math.random() * 100);
   const server = await startServer(port);
   const browser = await chromium.launch({ executablePath, headless: true });
-  const crmA = crmFixture({
-    organizationId: ORG_A,
-    authenticatedUserId: SHARED_USER,
-    authenticatedMemberId: 11,
-    authenticatedRole: 'Dueño',
-    visualMemberId: 91,
-  });
-  const crmB = crmFixture({
-    organizationId: ORG_B,
-    authenticatedUserId: SHARED_USER,
-    authenticatedMemberId: 22,
-    authenticatedRole: 'Dueño',
-    visualMemberId: 92,
-  });
-  const context = await contextFor(browser, crmA, SHARED_USER, 11, 'multi-org');
+  const crmA = crmFixture({ organizationId: ORG_A, authenticatedUserId: SHARED_USER, authenticatedMemberId: 11, authenticatedRole: 'Dueño', visualMemberId: 91 });
+  const crmB = crmFixture({ organizationId: ORG_B, authenticatedUserId: SHARED_USER, authenticatedMemberId: 22, authenticatedRole: 'Dueño', visualMemberId: 92 });
+  const harness = await contextFor(browser, crmA, SHARED_USER, 11, 'multi-org', [crmB]);
   try {
-    const page = await context.newPage();
+    const page = await harness.context.newPage();
     await load(page, `http://127.0.0.1:${port}`);
     let form = await openLeadForm(page);
     await fillLead(form, 'LEAD ORG A', '03515553211');
     await form.locator('[data-save-lead]').click();
     await page.locator('#mvp-lead-results').getByText('LEAD ORG A', { exact: true }).waitFor({ state: 'visible' });
 
-    await page.evaluate(async ({ userId, organizationId, crmData }) => {
-      const runtimePath = '/dist/tenant-runtime.js';
-      const storagePath = '/dist/tenant-storage.js';
-      const storePath = '/dist/store.js';
-      const runtime = await import(runtimePath);
-      const storage = await import(storagePath);
-      const store = await import(storePath);
-      const tenantScope = { userId, organizationId };
-      storage.writeTenantSnapshot(tenantScope, crmData, { markDirty: false, backup: false });
-      runtime.installTenantRuntimeScope(tenantScope, userId);
-      store.activateStorageForTenant(tenantScope);
-      store.state.activeModule = 'crm';
-      store.state.openForms.client = false;
-      document.dispatchEvent(new CustomEvent('trv-render'));
-    }, { userId: SHARED_USER, organizationId: ORG_B, crmData: crmB });
+    await switchTenant(page, SHARED_USER, ORG_B, 22);
     await page.waitForSelector('#crm.active', { state: 'visible' });
     form = await openLeadForm(page);
     await fillLead(form, 'LEAD ORG B', '03515553222');
@@ -324,107 +444,75 @@ test('A3.1 mismo usuario guarda A y B en namespaces y member ids distintos', { t
     assert.deepEqual(savedB.clients.map((item) => item.name), ['LEAD ORG B']);
     assert.equal(savedA.clients[0]?.createdById, 11);
     assert.equal(savedB.clients[0]?.createdById, 22);
-    assert.equal(savedA.organization.id, ORG_A);
-    assert.equal(savedB.organization.id, ORG_B);
+    assert.equal(savedA.clients[0]?.assignedToId, 11);
+    assert.equal(savedB.clients[0]?.assignedToId, 22);
+    assert.deepEqual([...new Set(clientActivityActors(savedA, savedA.clients[0]!.id))], [11]);
+    assert.deepEqual([...new Set(clientActivityActors(savedB, savedB.clients[0]!.id))], [22]);
     assert.notEqual(tenantKey(SHARED_USER, ORG_A), tenantKey(SHARED_USER, ORG_B));
   } finally {
-    await context.close();
+    await harness.context.close();
     await browser.close();
     await stopServer(server);
   }
 });
 
-test('A3.1 formulario A queda stale al cambiar runtime a B y no toca snapshot B', { timeout: 120_000 }, async () => {
+test('A3.1 formulario A queda stale al cambiar runtime a B y no toca snapshot ni cloud B', { timeout: 120_000 }, async () => {
   const executablePath = chromeExecutable();
   assert.ok(executablePath, 'Chrome/Chromium no disponible para A3.1.');
   const port = 63760 + Math.floor(Math.random() * 100);
   const server = await startServer(port);
   const browser = await chromium.launch({ executablePath, headless: true });
-  const crmA = crmFixture({
-    organizationId: ORG_A,
-    authenticatedUserId: SHARED_USER,
-    authenticatedMemberId: 11,
-    authenticatedRole: 'Dueño',
-    visualMemberId: 91,
-  });
-  const crmB = crmFixture({
-    organizationId: ORG_B,
-    authenticatedUserId: SHARED_USER,
-    authenticatedMemberId: 22,
-    authenticatedRole: 'Dueño',
-    visualMemberId: 92,
-  });
-  const context = await contextFor(browser, crmA, SHARED_USER, 11, 'stale-a-b');
+  const crmA = crmFixture({ organizationId: ORG_A, authenticatedUserId: SHARED_USER, authenticatedMemberId: 11, authenticatedRole: 'Dueño', visualMemberId: 91 });
+  const crmB = crmFixture({ organizationId: ORG_B, authenticatedUserId: SHARED_USER, authenticatedMemberId: 22, authenticatedRole: 'Dueño', visualMemberId: 92 });
+  const harness = await contextFor(browser, crmA, SHARED_USER, 11, 'stale-a-b', [crmB]);
   try {
-    const page = await context.newPage();
+    const page = await harness.context.newPage();
     await load(page, `http://127.0.0.1:${port}`);
     const form = await openLeadForm(page);
     await fillLead(form, 'STALE A MUST FAIL', '03515553333');
-    const beforeB = JSON.stringify(crmB);
-    await page.evaluate(async ({ userId, organizationId, crmData, rawB }) => {
-      localStorage.setItem(`trv-crm-basico:user:${userId}:org:${organizationId}`, rawB);
-      const runtimePath = '/dist/tenant-runtime.js';
-      const storePath = '/dist/store.js';
-      const runtime = await import(runtimePath);
-      const store = await import(storePath);
-      const tenantScope = { userId, organizationId };
-      runtime.installTenantRuntimeScope(tenantScope, userId);
-      store.activateStorageForTenant(tenantScope);
-      store.state.activeModule = 'crm';
-      store.state.openForms.client = true;
-      void crmData;
-    }, { userId: SHARED_USER, organizationId: ORG_B, crmData: crmB, rawB: beforeB });
+    const beforeB = await page.evaluate((key) => localStorage.getItem(key), tenantKey(SHARED_USER, ORG_B));
+    const writesBeforeB = harness.cloud.writesFor(ORG_B);
 
+    await switchTenant(page, SHARED_USER, ORG_B, 22);
     await form.locator('[data-save-lead]').click();
     await form.locator('[data-lead-error]').waitFor({ state: 'visible' });
     assert.match(await form.locator('[data-lead-error]').innerText(), /autorización tenant|runtime activo cambió/i);
-    const rawBAfter = await page.evaluate((key) => localStorage.getItem(key), tenantKey(SHARED_USER, ORG_B));
-    assert.equal(rawBAfter, beforeB);
+
+    const afterB = await page.evaluate((key) => localStorage.getItem(key), tenantKey(SHARED_USER, ORG_B));
+    assert.equal(afterB, beforeB);
+    assert.equal(harness.cloud.writesFor(ORG_B), writesBeforeB);
     const stateB = await page.evaluate(async () => {
-      const storePath = '/dist/store.js';
-      const store = await import(storePath);
+      const store = await import('/dist/store.js');
       return { organizationId: store.state.crm.organization.id, clients: store.state.crm.clients.length };
     });
     assert.deepEqual(stateB, { organizationId: ORG_B, clients: 0 });
   } finally {
-    await context.close();
+    await harness.context.close();
     await browser.close();
     await stopServer(server);
   }
 });
 
-test('A3.1 error de persistencia revierte sólo A y deja snapshot B byte-identical', { timeout: 120_000 }, async () => {
+test('A3.1 error de persistencia revierte únicamente A y deja snapshot B byte-identical', { timeout: 120_000 }, async () => {
   const executablePath = chromeExecutable();
   assert.ok(executablePath, 'Chrome/Chromium no disponible para A3.1.');
   const port = 63880 + Math.floor(Math.random() * 100);
   const server = await startServer(port);
   const browser = await chromium.launch({ executablePath, headless: true });
-  const crmA = crmFixture({
-    organizationId: ORG_A,
-    authenticatedUserId: SHARED_USER,
-    authenticatedMemberId: 11,
-    authenticatedRole: 'Dueño',
-    visualMemberId: 91,
-  });
-  const crmB = crmFixture({
-    organizationId: ORG_B,
-    authenticatedUserId: SHARED_USER,
-    authenticatedMemberId: 22,
-    authenticatedRole: 'Dueño',
-    visualMemberId: 92,
-  });
-  const context = await contextFor(browser, crmA, SHARED_USER, 11, 'rollback-a');
+  const crmA = crmFixture({ organizationId: ORG_A, authenticatedUserId: SHARED_USER, authenticatedMemberId: 11, authenticatedRole: 'Dueño', visualMemberId: 91 });
+  const crmB = crmFixture({ organizationId: ORG_B, authenticatedUserId: SHARED_USER, authenticatedMemberId: 22, authenticatedRole: 'Dueño', visualMemberId: 92 });
+  const harness = await contextFor(browser, crmA, SHARED_USER, 11, 'rollback-a', [crmB]);
   try {
-    const page = await context.newPage();
+    const page = await harness.context.newPage();
     await load(page, `http://127.0.0.1:${port}`);
     const form = await openLeadForm(page);
     await fillLead(form, 'ROLLBACK A31', '03515553444');
     const keyA = tenantKey(SHARED_USER, ORG_A);
     const keyB = tenantKey(SHARED_USER, ORG_B);
-    const beforeA = await page.evaluate((key) => localStorage.getItem(key), keyA);
-    const beforeB = JSON.stringify(crmB);
-    await page.evaluate(({ bKey, bRaw, aKey }) => {
-      localStorage.setItem(bKey, bRaw);
+    const beforeB = await page.evaluate((key) => localStorage.getItem(key), keyB);
+    const writesBeforeB = harness.cloud.writesFor(ORG_B);
+
+    await page.evaluate((aKey) => {
       const original = Storage.prototype.setItem;
       let failed = false;
       Storage.prototype.setItem = function (key: string, value: string): void {
@@ -434,25 +522,24 @@ test('A3.1 error de persistencia revierte sólo A y deja snapshot B byte-identic
         }
         original.call(this, key, value);
       };
-    }, { bKey: keyB, bRaw: beforeB, aKey: keyA });
+    }, keyA);
 
     await form.locator('[data-save-lead]').click();
     await form.locator('[data-lead-error]').waitFor({ state: 'visible' });
     assert.match(await form.locator('[data-lead-error]').innerText(), /No se pudo guardar el lead/i);
-    const after = await page.evaluate(({ aKey, bKey }) => ({
-      a: localStorage.getItem(aKey),
-      b: localStorage.getItem(bKey),
-    }), { aKey: keyA, bKey: keyB });
-    assert.equal(after.a, beforeA);
-    assert.equal(after.b, beforeB);
+    const afterB = await page.evaluate((key) => localStorage.getItem(key), keyB);
+    assert.equal(afterB, beforeB);
+    assert.equal(harness.cloud.writesFor(ORG_B), writesBeforeB);
     const stateA = await page.evaluate(async () => {
-      const storePath = '/dist/store.js';
-      const store = await import(storePath);
+      const store = await import('/dist/store.js');
       return { organizationId: store.state.crm.organization.id, clients: store.state.crm.clients.length };
     });
     assert.deepEqual(stateA, { organizationId: ORG_A, clients: 0 });
+    const snapshotA = await tenantCrm(page, SHARED_USER, ORG_A);
+    assert.equal(snapshotA.organization.id, ORG_A);
+    assert.equal(snapshotA.clients.length, 0);
   } finally {
-    await context.close();
+    await harness.context.close();
     await browser.close();
     await stopServer(server);
   }
