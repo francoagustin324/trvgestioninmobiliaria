@@ -434,7 +434,7 @@ async function replayFromCleanDb(label: string): Promise<{ fingerprint: string; 
     // Deterministic schema fingerprint for independent replay comparison.
     const dump = docker([
       'exec', containerName, 'pg_dump', '-U', 'postgres', '-d', 'postgres',
-      '--schema-only', '--no-owner', '--no-comments',
+      '--schema-only', '--no-owner', '--no-comments', '--restrict-key=A25REPRODUCIBLE',
     ]);
     assert.equal(dump.status, 0, dump.stderr || dump.stdout);
     const fingerprint = createHash('sha256').update(dump.stdout).digest('hex');
