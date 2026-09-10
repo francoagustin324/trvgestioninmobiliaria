@@ -1,0 +1,1 @@
+A2.3 R2 exact candidate SHA validation branch. No production changes.
