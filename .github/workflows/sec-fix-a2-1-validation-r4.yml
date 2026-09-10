@@ -1,0 +1,75 @@
+name: SEC-FIX A2.1 exact candidate validation R4
+
+on:
+  push:
+    branches:
+      - validation/sec-fix-a2-1-r4-exact-sha
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: propcontrol_a2_1
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d propcontrol_a2_1"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      A2_1_TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/propcontrol_a2_1
+      CANDIDATE_SHA: 5c85942cb63901e18fbd76951647dddb56951ce9
+    steps:
+      - name: Checkout exact candidate SHA
+        uses: actions/checkout@v4
+        with:
+          ref: 5c85942cb63901e18fbd76951647dddb56951ce9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+      - run: npm ci
+      - name: PostgreSQL client
+        run: sudo apt-get update && sudo apt-get install -y postgresql-client
+      - name: Verify exact SHA
+        run: test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
+      - name: Build
+        run: npm run build --silent
+      - name: A2.1 PostgreSQL 17 contract tests
+        run: node --test --test-concurrency=1 dist/tests/sec-fix-a2-1-canonical-membership-status.test.js
+      - name: Membership and invitation DB-relevant regressions
+        run: >-
+          node --test --test-concurrency=1
+          dist/tests/b0-1-membership-security.test.js
+          dist/tests/b0-1-controlled-authorization-staging.test.js
+          dist/tests/b0-3-user-onboarding.test.js
+          dist/tests/invitation-auth-flow.test.js
+          dist/tests/multiuser-rls-migration.test.js
+          dist/tests/suspended-member-lockout.test.js
+      - name: A1 targeted regression
+        run: >-
+          node --test --test-concurrency=1
+          dist/tests/sec-fix-a1-1-org-aware-db-compat.test.js
+          dist/tests/sec-fix-a1-2-a-active-organization.test.js
+          dist/tests/sec-fix-a1-2-b-tenant-storage.test.js
+          dist/tests/sec-fix-a1-2-b-2-tenant-storage-boundary.test.js
+          dist/tests/sec-fix-a1-2-c1-gate-closure.test.js
+          dist/tests/sec-fix-a1-2-c1-tenant-hydration.test.js
+          dist/tests/sec-fix-a1-2-c2-job-freeze.test.js
+          dist/tests/sec-fix-a1-2-c2-tenant-async.test.js
+          dist/tests/sec-fix-a1-2-c3-stale-async.test.js
+          dist/tests/sec-fix-a1-2-d-org-aware-visit-cutover.test.js
+          dist/tests/sec-fix-a1-2-e-team-tenant-authority.test.js
+          dist/tests/sec-fix-a1-2-f-recovery-async.test.js
+          dist/tests/sec-fix-a1-2-f-tenant-recovery-cutover.test.js
+          dist/tests/sec-fix-a1-2-g-public-property-share.test.js
+          dist/tests/sec-fix-a1-dr02-cloud-writer-lease.test.js
+          dist/tests/sec-fix-a1-dr03-stale-sync-metadata.test.js
+          dist/tests/sec-fix-a1-dr04-auth-refresh-epoch.test.js
+          dist/tests/sec-fix-a1-fdr01-recovery-authority.test.js
+          dist/tests/sec-fix-a1-fdr02-cross-tab-auth-generation.test.js
