@@ -1,0 +1,63 @@
+name: SEC-FIX A2.3 closure validation R4
+
+on:
+  push:
+    branches:
+      - validation/sec-fix-a2-3-r4-closure
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-24.04
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: propcontrol_a2_3
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d propcontrol_a2_3"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      A2_3_TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/propcontrol_a2_3
+      A2_2_TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/propcontrol_a2_3
+      A2_1_TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/propcontrol_a2_3
+      CANDIDATE_SHA: 59d6e37c4af74cc7135127a106c22b3b79d1634a
+    steps:
+      - name: Checkout exact candidate SHA
+        uses: actions/checkout@v4
+        with:
+          ref: 59d6e37c4af74cc7135127a106c22b3b79d1634a
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Install PostgreSQL client
+        run: sudo apt-get update && sudo apt-get install -y postgresql-client
+      - name: Verify exact SHA
+        run: test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
+      - name: Build
+        run: npm run build --silent
+      - name: A2.3 PostgreSQL 17 ACL hardening
+        run: node --test --test-concurrency=1 dist/tests/sec-fix-a2-3-minimal-acl-hardening.test.js
+      - name: A2.2 active-only regression
+        run: node --test --test-concurrency=1 dist/tests/sec-fix-a2-2-active-only-membership-authority.test.js
+      - name: A2.1 canonical status regression
+        run: node --test --test-concurrency=1 dist/tests/sec-fix-a2-1-canonical-membership-status.test.js
+      - name: Onboarding and invitation canonical regressions
+        run: node --test --test-concurrency=1 dist/tests/b0-3-user-onboarding.test.js dist/tests/invitation-auth-flow.test.js
+      - name: Membership and RLS regressions
+        run: node --test --test-concurrency=1 dist/tests/b0-1-membership-security.test.js dist/tests/multiuser-rls-migration.test.js dist/tests/restrictive-organization-isolation.test.js dist/tests/suspended-member-lockout.test.js
+      - name: Public property share regressions
+        run: node --test --test-concurrency=1 dist/tests/mvp-property-sharing.test.js dist/tests/public-property-share.test.js dist/tests/sec-fix-a1-2-g-public-property-share.test.js
+      - name: A1 property photo targeted regressions
+        run: node --test --test-concurrency=1 dist/tests/property-photo-direct-upload.test.js dist/tests/property-photo-storage.test.js dist/tests/property-photo-upload-compat.test.js
