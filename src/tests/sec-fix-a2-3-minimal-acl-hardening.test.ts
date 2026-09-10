@@ -31,7 +31,7 @@ function psql(sql: string): string {
 }
 
 function psqlAs(role: string, sql: string, userId?: string): string {
-  const claim = userId ? `select pg_catalog.set_config('request.jwt.claim.sub','${userId}',false);` : '';
+  const claim = userId ? `set request.jwt.claim.sub = '${userId}';` : '';
   return psql(`${claim} set role ${role}; ${sql} reset role;`);
 }
 
@@ -240,7 +240,6 @@ function setupFixture(): void {
     create function public.commercial_visit_mutation(p_operation_id uuid,p_operation_type text,p_request jsonb,p_force_rollback boolean default false)
     returns jsonb language sql volatile security invoker set search_path to '' as $$ select '{}'::jsonb $$;
 
-    -- V2 presentes en repo; A2.3 debe endurecerlos si existen, sin crearlos en producción.
     create function public.visit_transaction_authority_active_v2(p_organization_id uuid)
     returns boolean language sql stable security invoker set search_path to '' as $$ select true $$;
     create function public.client_snapshot_cas_v2(p_organization_id uuid,p_request jsonb,p_force_rollback boolean default false)
@@ -276,7 +275,6 @@ function setupFixture(): void {
     create policy public_ficha_insert on public.public_property_fichas for insert to authenticated with check(public.can_manage_public_property_ficha(organization_id::text));
     create policy public_ficha_update on public.public_property_fichas for update to authenticated using(public.can_manage_public_property_ficha(organization_id::text)) with check(public.can_manage_public_property_ficha(organization_id::text));
 
-    -- Simular drift histórico amplio previo a A2.3.
     grant all privileges on table public.organizations,public.organization_members,public.fichas,public.propcontrol_records,public.public_property_fichas to anon,authenticated,service_role;
     grant all privileges on sequence public.organization_members_member_id_seq to anon,authenticated,service_role;
     grant execute on all functions in schema public to anon,authenticated,service_role;
@@ -491,9 +489,6 @@ test('A2.3 PostgreSQL 17: ACL mínima, RLS, onboarding y public share', { skip: 
   });
 
   await t.test('postflight: migration no muta datos preexistentes', () => {
-    // Los inserts posteriores pertenecen a tests funcionales; validamos aquí que la aplicación
-    // inicial de A2.3, antes de esos flujos, no alteró el snapshot inicial.
-    // El digest inicial se vuelve a comprobar en un fixture limpio en el test siguiente.
     assert.ok(dataBefore.length > 0);
   });
 });
