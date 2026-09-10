@@ -1,0 +1,35 @@
+name: SEC-FIX A2.3 final targeted validation R5
+
+on:
+  push:
+    branches:
+      - validation/sec-fix-a2-3-r5-final-targeted
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-24.04
+    env:
+      CANDIDATE_SHA: 59d6e37c4af74cc7135127a106c22b3b79d1634a
+    steps:
+      - name: Checkout exact candidate SHA
+        uses: actions/checkout@v4
+        with:
+          ref: 59d6e37c4af74cc7135127a106c22b3b79d1634a
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Verify exact SHA
+        run: test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
+      - name: Build
+        run: npm run build --silent
+      - name: Canonical public property share regressions
+        run: node --test --test-concurrency=1 dist/tests/public-property-share.test.js dist/tests/sec-fix-a1-2-g-public-property-share.test.js
+      - name: A1 property photo targeted regressions
+        run: node --test --test-concurrency=1 dist/tests/property-photo-direct-upload.test.js dist/tests/property-photo-storage.test.js dist/tests/property-photo-upload-compat.test.js
