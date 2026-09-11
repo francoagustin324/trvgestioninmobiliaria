@@ -1,0 +1,59 @@
+name: SEC-FIX A3.1 Validation R4
+
+on:
+  push:
+    branches:
+      - validation/sec-fix-a3-1-r4
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout exact A3.1 candidate
+        uses: actions/checkout@v4
+        with:
+          ref: 23f428a87fcc9382ec6ab8489ae8132776bb6d85
+          fetch-depth: 1
+      - name: Assert exact candidate SHA
+        run: |
+          test "$(git rev-parse HEAD)" = "23f428a87fcc9382ec6ab8489ae8132776bb6d85"
+          echo "candidate=$(git rev-parse HEAD)"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - name: Build exact candidate
+        run: npm run build
+      - name: Lead static/edit compatibility regressions
+        run: >-
+          node --test --test-concurrency=1
+          dist/tests/b1-3-2-single-submit-owner.test.js
+          dist/tests/lead-edit.test.js
+      - name: Tenant runtime storage and multi-org regressions
+        run: >-
+          node --test --test-concurrency=1
+          dist/tests/sec-fix-a1-2-a-active-organization.test.js
+          dist/tests/sec-fix-a1-2-b-tenant-storage.test.js
+          dist/tests/sec-fix-a1-2-b-2-tenant-storage-boundary.test.js
+          dist/tests/sec-fix-a1-2-c1-tenant-hydration.test.js
+          dist/tests/sec-fix-a1-2-c2-job-freeze.test.js
+          dist/tests/sec-fix-a1-2-c3-stale-async.test.js
+      - name: Cloud save generation lease and activity regressions
+        run: >-
+          node --test --test-concurrency=1
+          dist/tests/cloud-save-serial.test.js
+          dist/tests/cloud-api-compatible.test.js
+          dist/tests/sec-fix-a1-dr02-cloud-writer-lease.test.js
+          dist/tests/team-policy.test.js
+      - name: A2 targeted regressions
+        run: >-
+          node --test --test-concurrency=1
+          dist/tests/sec-fix-a2-1-canonical-membership-status.test.js
+          dist/tests/sec-fix-a2-2-active-only-membership-authority.test.js
+          dist/tests/sec-fix-a2-4-org-aware-rpc-v2-alignment.test.js
