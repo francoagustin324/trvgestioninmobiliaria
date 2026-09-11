@@ -6,9 +6,18 @@ const ui = readFileSync('src/agenda-ui.ts', 'utf8');
 const css = readFileSync('src/agenda.css', 'utf8');
 const html = readFileSync('index.html', 'utf8');
 
-test('el formulario usa un selector buscable únicamente de leads visibles', () => {
+test('el formulario usa leads visibles y toda escritura/Activity queda ligada al tenant autenticado', () => {
   assert.ok(ui.includes('agendaRelatedOptions(visibleClients())'));
-  assert.ok(ui.includes("import { addActivity, visibleClients, visibleReminders } from './team-access.js'"));
+  assert.ok(ui.includes("import { addActivityForAuthenticatedTenant, visibleClients, visibleReminders } from './team-access.js'"));
+  assert.ok(ui.includes('const renderScope = requireCurrentTenantScope()'));
+  assert.ok(ui.includes('const renderLease = captureTenantRuntimeLease(renderScope)'));
+  assert.ok(ui.includes('const member = authenticatedTenantMember(renderScope)'));
+  assert.ok(ui.includes('assignedToId: existing?.assignedToId ?? member.id'));
+  assert.ok(ui.includes('createdById: existing?.createdById ?? member.id'));
+  assert.ok(ui.includes('addActivityForAuthenticatedTenant(renderScope, result.activity)'));
+  assert.ok(!ui.includes('addActivity(result.activity)'));
+  assert.ok(!ui.includes('actorId: state.activeMemberId'));
+  assert.ok(!ui.includes('actorId: activeMember().id'));
   assert.ok(!ui.includes('state.crm.properties'));
   assert.ok(ui.includes('filterAgendaRelatedOptions(options, input.value)'));
   assert.ok(ui.includes('<label for="agenda-related-input">Lead</label>'));
