@@ -1,0 +1,35 @@
+name: SEC-FIX A3.2 Import Graph
+on:
+  push:
+    branches:
+      - validation/sec-fix-a3-2-inventory
+permissions:
+  contents: read
+jobs:
+  classify:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 23f428a87fcc9382ec6ab8489ae8132776bb6d85
+          fetch-depth: 1
+      - name: Active import references
+        shell: bash
+        run: |
+          for name in \
+            lead-recommendation-instrumentation \
+            team-bootstrap team-ui team-scope \
+            visit-workflow-cutover visit-workflow-ui \
+            whatsapp-contact whatsapp-human-identity \
+            mvp-leads-ui lead-source-reactivation-ui lead-qualification-ui \
+            agenda-ui mvp-properties-ui offer-workflow-ui reservation-workflow-ui followup-persistence; do
+            echo "=== $name imports ==="
+            grep -RFn --include='*.ts' --exclude-dir=tests -e "'./$name.js'" -e "\"./$name.js\"" src || true
+          done
+          echo '=== main/runtime entry imports ==='
+          grep -RFn --include='*.ts' --exclude-dir=tests -e "from './team-bootstrap.js'" -e "from './team-ui.js'" -e "from './team-scope.js'" -e "from './visit-workflow-cutover.js'" -e "from './visit-workflow-ui.js'" -e "from './whatsapp-contact.js'" -e "from './whatsapp-human-identity.js'" -e "from './mvp-leads-ui.js'" src || true
+          echo '=== write-ish calls in recommendation/visit/team/whatsapp/mvp-leads ==='
+          for f in src/lead-recommendation-instrumentation.ts src/visit-workflow-cutover.ts src/visit-workflow-ui.ts src/team-bootstrap.ts src/team-ui.ts src/team-scope.ts src/whatsapp-contact.ts src/whatsapp-human-identity.ts src/mvp-leads-ui.ts; do
+            echo "--- $f ---"
+            grep -nE 'activeMember\(|activeMemberId|addActivity\(|saveData\(|queueCloudSave|createdById|assignedToId|actorId' "$f" || true
+          done
