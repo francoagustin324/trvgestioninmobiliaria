@@ -1,11 +1,11 @@
 import './sec-fix-a1-2-c2-test-setup.js';
 import test, { afterEach } from 'node:test';
 import assert from 'node:assert/strict';
+import { initialData } from '../models.js';
 import type { CrmData, TeamMember, TeamRole } from '../models.js';
 import type { TenantScope } from '../active-organization.js';
 import {
   authenticatedTenantMember,
-  initialData,
   setActiveMemberId,
   state,
 } from '../store.js';
