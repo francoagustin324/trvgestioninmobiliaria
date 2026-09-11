@@ -1,0 +1,39 @@
+name: SEC-FIX A3.1 Base Lead Regression Control
+
+on:
+  push:
+    branches:
+      - validation/sec-fix-a3-1-base-control
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  control:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout exact A2 base
+        uses: actions/checkout@v4
+        with:
+          ref: fa95a25b9ba3463a4c5fee431320626ec3f49f9c
+          fetch-depth: 1
+      - name: Assert exact base SHA
+        run: |
+          test "$(git rev-parse HEAD)" = "fa95a25b9ba3463a4c5fee431320626ec3f49f9c"
+          echo "base=$(git rev-parse HEAD)"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install chromium --with-deps
+      - run: npm run build
+      - name: Existing Lead create and edit regressions on exact A2 base
+        run: >-
+          node --test --test-concurrency=1
+          dist/tests/b1-3-1-lead-create-real-app.test.js
+          dist/tests/b1-3-2-android-lead-save-real-app.test.js
+          dist/tests/b1-3-2-single-submit-owner.test.js
+          dist/tests/lead-edit.test.js
