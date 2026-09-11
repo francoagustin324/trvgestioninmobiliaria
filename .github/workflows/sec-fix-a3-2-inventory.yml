@@ -1,0 +1,35 @@
+name: SEC-FIX A3.2 Inventory
+on:
+  push:
+    branches:
+      - validation/sec-fix-a3-2-inventory
+permissions:
+  contents: read
+jobs:
+  inventory:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout exact A3.1 base
+        uses: actions/checkout@v4
+        with:
+          ref: 23f428a87fcc9382ec6ab8489ae8132776bb6d85
+          fetch-depth: 1
+      - name: Assert exact base
+        run: |
+          test "$(git rev-parse HEAD)" = "23f428a87fcc9382ec6ab8489ae8132776bb6d85"
+          echo "BASE=$(git rev-parse HEAD)"
+      - name: Inventory visual identity and legacy storage callers
+        shell: bash
+        run: |
+          echo '=== activeMember() ==='
+          grep -RFn --include='*.ts' 'activeMember()' src || true
+          echo '=== activeMemberId ==='
+          grep -RFn --include='*.ts' 'activeMemberId' src || true
+          echo '=== TEAM_VIEW_KEY ==='
+          grep -RFn --include='*.ts' 'propcontrol-active-team-member-v1' src || true
+          echo '=== addActivity( callers ==='
+          grep -RFn --include='*.ts' 'addActivity(' src || true
+          echo '=== readLocalSnapshot/writeLocalSnapshot ==='
+          grep -RFn --include='*.ts' -e 'readLocalSnapshot' -e 'writeLocalSnapshot' src || true
+          echo '=== implicit queueCloudSave(state.crm|crm) ==='
+          grep -RFn --include='*.ts' -e 'queueCloudSave(state.crm)' -e 'queueCloudSave(crm)' src || true
