@@ -11,9 +11,12 @@ import {
   type ReminderWithStatus,
 } from './agenda.js';
 import { completeClientFollowUp, reprogramClientFollowUp } from './lead-pipeline.js';
-import { saveData, state } from './store.js';
+import { authenticatedTenantMember, saveData, state } from './store.js';
+import { assertTenantCrmScope } from './tenant-storage.js';
+import { assertTenantRuntimeLeaseCurrent, captureTenantRuntimeLease, requireCurrentTenantScope, type TenantRuntimeLease } from './tenant-runtime.js';
+import type { TenantScope } from './active-organization.js';
 import { newSyncRecordMetadata } from './sync-identity.js';
-import { addActivity, visibleClients, visibleReminders } from './team-access.js';
+import { addActivityForAuthenticatedTenant, visibleClients, visibleReminders } from './team-access.js';
 import { escapeHtml, field, formValues, nextId } from './utils.js';
 
 const dateFormatter = new Intl.DateTimeFormat('es-AR', { day: '2-digit', month: 'short', year: 'numeric', timeZone: 'UTC' });
@@ -132,7 +135,16 @@ function reminderForm(editing: ReminderWithStatus | null, today: string): string
   </form>`;
 }
 
-function saveAndRender(reason: string): void {
+function agendaWriteMember(scope: TenantScope, runtimeLease: TenantRuntimeLease) {
+  assertTenantRuntimeLeaseCurrent(runtimeLease);
+  assertTenantCrmScope(scope, state.crm);
+  const member = authenticatedTenantMember(scope);
+  if (!member) throw new Error('AUTHENTICATED_TENANT_MEMBER_REQUIRED');
+  return member;
+}
+
+function saveAndRender(reason: string, scope: TenantScope, runtimeLease: TenantRuntimeLease): void {
+  agendaWriteMember(scope, runtimeLease);
   saveData(reason);
   document.dispatchEvent(new CustomEvent('trv-render'));
 }
@@ -189,6 +201,10 @@ function bindRelatedPicker(container: HTMLElement): void {
 }
 
 export function renderAgenda(container: HTMLElement): void {
+  const renderScope = requireCurrentTenantScope();
+  const renderLease = captureTenantRuntimeLease(renderScope);
+  assertTenantRuntimeLeaseCurrent(renderLease);
+  assertTenantCrmScope(renderScope, state.crm);
   const today = todayIsoDate();
   const clients = visibleClients();
   const reminders = visibleReminders();
@@ -229,8 +245,8 @@ export function renderAgenda(container: HTMLElement): void {
       title: field(values, 'title').trim(),
       related: field(values, 'related').trim(),
       priority: field(values, 'priority'),
-      assignedToId: existing?.assignedToId ?? state.activeMemberId,
-      createdById: existing?.createdById ?? state.activeMemberId,
+      assignedToId: existing?.assignedToId ?? agendaWriteMember(renderScope, renderLease).id,
+      createdById: existing?.createdById ?? agendaWriteMember(renderScope, renderLease).id,
       completedAt: undefined,
     };
     if (existing) {
@@ -241,7 +257,7 @@ export function renderAgenda(container: HTMLElement): void {
     }
     editingReminderId = null;
     state.openForms.reminder = false;
-    saveAndRender(existing ? 'Seguimiento editado' : 'Seguimiento creado');
+    saveAndRender(existing ? 'Seguimiento editado' : 'Seguimiento creado', renderScope, renderLease);
   });
 
   container.querySelectorAll<HTMLButtonElement>('[data-edit-reminder]').forEach((button) => {
@@ -269,14 +285,14 @@ export function renderAgenda(container: HTMLElement): void {
         if (!client) return;
         const result = completeClientFollowUp(client);
         Object.assign(client, result.client);
-        addActivity(result.activity);
-        saveAndRender(`Seguimiento de lead completado: ${client.name}`);
+        addActivityForAuthenticatedTenant(renderScope, result.activity);
+        saveAndRender(`Seguimiento de lead completado: ${client.name}`, renderScope, renderLease);
         return;
       }
       const reminder = reminderRecords().find((item) => item.id === id);
       if (!reminder) return;
       reminder.completedAt = new Date().toISOString();
-      saveAndRender('Seguimiento completado');
+      saveAndRender('Seguimiento completado', renderScope, renderLease);
     });
   });
 
@@ -291,14 +307,14 @@ export function renderAgenda(container: HTMLElement): void {
         if (!client) return;
         const result = reprogramClientFollowUp(client, date);
         Object.assign(client, result.client);
-        addActivity(result.activity);
+        addActivityForAuthenticatedTenant(renderScope, result.activity);
       } else {
         const reminder = reminderRecords().find((item) => item.id === id);
         if (!reminder) return;
         reminder.date = date;
         reminder.completedAt = undefined;
       }
-      saveAndRender('Seguimiento reprogramado');
+      saveAndRender('Seguimiento reprogramado', renderScope, renderLease);
     });
   });
 
@@ -307,7 +323,7 @@ export function renderAgenda(container: HTMLElement): void {
       const reminder = reminderRecords().find((item) => item.id === Number(button.dataset.reopenReminder));
       if (!reminder) return;
       reminder.completedAt = undefined;
-      saveAndRender('Seguimiento reabierto');
+      saveAndRender('Seguimiento reabierto', renderScope, renderLease);
     });
   });
 }

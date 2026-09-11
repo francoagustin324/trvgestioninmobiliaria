@@ -1,6 +1,14 @@
+import type { TenantScope } from './active-organization.js';
 import type { FichaPublica } from './models.js';
 import { getCloudSession } from './cloud-api.js';
 import { propertyToPublicFicha, type PropertyWithFicha } from './property-ficha.js';
+import {
+  assertTenantRuntimeLeaseCurrent,
+  TENANT_RUNTIME_SESSION_MISMATCH,
+  TENANT_RUNTIME_STALE,
+  tenantScopesEqual,
+  type TenantRuntimeLease,
+} from './tenant-runtime.js';
 import { safePhotoUrl } from './utils.js';
 
 interface ShareConfig {
@@ -10,19 +18,20 @@ interface ShareConfig {
   publicUrl?: string;
 }
 
-interface MembershipRow {
-  organization_id?: string;
-}
-
 interface PublicFichaRow {
-  slug?: string;
+  organization_id?: unknown;
+  property_key?: unknown;
+  slug?: unknown;
   payload?: FichaPublica;
 }
 
-interface PublishedPropertyFicha {
+export interface PublishedPropertyFicha {
   slug: string;
   url: string;
 }
+
+export const PUBLIC_PROPERTY_SHARE_RESPONSE_INVALID = 'PUBLIC_PROPERTY_SHARE_RESPONSE_INVALID';
+export const PUBLIC_PROPERTY_SHARE_RESPONSE_MISMATCH = 'PUBLIC_PROPERTY_SHARE_RESPONSE_MISMATCH';
 
 let configPromise: Promise<Required<Pick<ShareConfig, 'url' | 'publishableKey'>> & Pick<ShareConfig, 'publicUrl'>> | null = null;
 
@@ -109,6 +118,22 @@ function randomSuffix(): string {
   return raw.slice(0, 7).toLowerCase();
 }
 
+function validStoredSlug(value: unknown): value is string {
+  return typeof value === 'string' && /^[a-z0-9][a-z0-9-]{4,79}$/.test(value);
+}
+
+function assertPublishContext(scope: TenantScope, runtimeLease: TenantRuntimeLease): void {
+  if (!tenantScopesEqual(scope, runtimeLease.scope)) throw new Error(TENANT_RUNTIME_STALE);
+  assertTenantRuntimeLeaseCurrent(runtimeLease);
+}
+
+function requirePublishSession(scope: TenantScope): Readonly<{ accessToken: string; userId: string }> {
+  const session = getCloudSession();
+  if (!session?.accessToken || !session.userId) throw new Error('La sesión venció. Volvé a ingresar.');
+  if (session.userId !== scope.userId) throw new Error(TENANT_RUNTIME_SESSION_MISMATCH);
+  return Object.freeze({ accessToken: session.accessToken, userId: session.userId });
+}
+
 export function createPropertyPublicSlug(title: string): string {
   return `${normalizedSlugBase(title)}-${randomSuffix()}`;
 }
@@ -117,54 +142,63 @@ export function propertyPublicUrl(slug: string, publicOrigin = location.origin):
   return `${publicOrigin.replace(/\/+$/g, '')}/ficha/${encodeURIComponent(slug)}`;
 }
 
-async function organizationId(
-  config: Required<Pick<ShareConfig, 'url' | 'publishableKey'>>,
-  accessToken: string,
-  userId: string,
-): Promise<string> {
-  const query = new URL(`${config.url}/rest/v1/organization_members`);
-  query.searchParams.set('select', 'organization_id');
-  query.searchParams.set('user_id', `eq.${userId}`);
-  query.searchParams.set('limit', '1');
-  const rows = await parseResponse(await fetch(query, {
-    headers: headers(config, accessToken),
-    cache: 'no-store',
-  })) as MembershipRow[];
-  const organization = rows[0]?.organization_id;
-  if (!organization) throw new Error('La cuenta no tiene una inmobiliaria asociada.');
-  return organization;
-}
+export async function publishPropertyFicha(
+  property: PropertyWithFicha,
+  scope: TenantScope,
+  runtimeLease: TenantRuntimeLease,
+): Promise<PublishedPropertyFicha> {
+  assertPublishContext(scope, runtimeLease);
+  const propertySnapshot = structuredClone(property);
+  const propertyKey = String(propertySnapshot.id);
+  const session = requirePublishSession(scope);
 
-export async function publishPropertyFicha(property: PropertyWithFicha): Promise<PublishedPropertyFicha> {
-  const session = getCloudSession();
-  if (!session?.accessToken || !session.userId) throw new Error('La sesión venció. Volvé a ingresar.');
   const config = await shareConfig();
-  const organization = await organizationId(config, session.accessToken, session.userId);
-  const slug = /^[a-z0-9][a-z0-9-]{4,79}$/.test(property.publicSlug || '')
-    ? property.publicSlug!
-    : createPropertyPublicSlug(property.title);
+  assertPublishContext(scope, runtimeLease);
+  requirePublishSession(scope);
+
+  const slug = validStoredSlug(propertySnapshot.publicSlug)
+    ? propertySnapshot.publicSlug
+    : createPropertyPublicSlug(propertySnapshot.title);
   const target = new URL(`${config.url}/rest/v1/public_property_fichas`);
   target.searchParams.set('on_conflict', 'organization_id,property_key');
   const payload = {
-    organization_id: organization,
-    property_key: String(property.id),
+    organization_id: scope.organizationId,
+    property_key: propertyKey,
     slug,
-    payload: propertyToPublicFicha(property),
+    payload: propertyToPublicFicha(propertySnapshot),
     published: true,
     created_by: session.userId,
     updated_at: new Date().toISOString(),
   };
-  const rows = await parseResponse(await fetch(target, {
+
+  assertPublishContext(scope, runtimeLease);
+  const responsePayload = await parseResponse(await fetch(target, {
     method: 'POST',
     headers: {
       ...headers(config, session.accessToken),
       Prefer: 'resolution=merge-duplicates,return=representation',
     },
     body: JSON.stringify(payload),
-  })) as PublicFichaRow[];
-  const storedSlug = rows[0]?.slug || slug;
+  }));
+  assertPublishContext(scope, runtimeLease);
+  requirePublishSession(scope);
+
+  if (!Array.isArray(responsePayload) || responsePayload.length !== 1) {
+    throw new Error(PUBLIC_PROPERTY_SHARE_RESPONSE_INVALID);
+  }
+  const [rowValue] = responsePayload;
+  if (!rowValue || typeof rowValue !== 'object' || Array.isArray(rowValue)) {
+    throw new Error(PUBLIC_PROPERTY_SHARE_RESPONSE_INVALID);
+  }
+  const row = rowValue as PublicFichaRow;
+  if (row.organization_id !== scope.organizationId || row.property_key !== propertyKey) {
+    throw new Error(PUBLIC_PROPERTY_SHARE_RESPONSE_MISMATCH);
+  }
+  if (!validStoredSlug(row.slug)) throw new Error(PUBLIC_PROPERTY_SHARE_RESPONSE_INVALID);
+
+  assertPublishContext(scope, runtimeLease);
   const origin = config.publicUrl || location.origin;
-  return { slug: storedSlug, url: propertyPublicUrl(storedSlug, origin) };
+  return { slug: row.slug, url: propertyPublicUrl(row.slug, origin) };
 }
 
 function validPublicFicha(value: unknown): FichaPublica | null {

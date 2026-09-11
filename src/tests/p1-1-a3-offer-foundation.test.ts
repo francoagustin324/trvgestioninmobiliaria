@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
+import type { TenantScope } from '../active-organization.js';
 import {
   cloudRecordsToCrm,
   crmToCloudRecords,
@@ -14,7 +15,6 @@ import {
 } from '../cloud-records.js';
 import {
   initialData,
-  STORAGE_KEY,
   type CrmData,
   type Offer,
   type OfferCurrency,
@@ -29,6 +29,14 @@ import {
   writeLocalSnapshot,
 } from '../sync-safety.js';
 import { assignmentVisible } from '../team-policy.js';
+import {
+  installTenantRuntimeScope,
+  invalidateTenantRuntimeScope,
+} from '../tenant-runtime.js';
+import {
+  readTenantSnapshot,
+  writeTenantSnapshot,
+} from '../tenant-storage.js';
 
 class MemoryStorage implements Storage {
   private readonly values = new Map<string, string>();
@@ -125,24 +133,47 @@ test('P1.1-A3 soporta parentOfferId opcional, amount numérico y rondas independ
   assert.deepEqual([first.amount, second.amount, third.amount], [75000, 82000, 79000]);
 });
 
-test('P1.1-A3 normaliza snapshot histórico sin offers a offers=[] y conserva round-trip local', async () => {
+test('P1.1-A3 Offer hace round-trip local tenant-aware y queda aislada por organización', async () => {
   const storage = new MemoryStorage();
   Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: storage });
 
-  const legacy = structuredClone(initialData) as Partial<CrmData> & { offers?: Offer[] };
-  delete legacy.offers;
-  storage.setItem(STORAGE_KEY, JSON.stringify(legacy));
+  const scope: TenantScope = Object.freeze({ userId: 'owner-user', organizationId });
+  const otherScope: TenantScope = Object.freeze({
+    userId: 'owner-user',
+    organizationId: '33333333-3333-4333-8333-333333333333',
+  });
+  const tenantCrm = structuredClone(initialData);
+  tenantCrm.organization.id = scope.organizationId;
+  tenantCrm.offers = [];
+  const otherCrm = structuredClone(initialData);
+  otherCrm.organization.id = otherScope.organizationId;
+  otherCrm.offers = [];
 
-  const store = await import('../store.js');
-  assert.deepEqual(store.state.crm.offers, []);
+  writeTenantSnapshot(scope, tenantCrm, { markDirty: false, reason: 'Offer tenant fixture' }, storage);
+  writeTenantSnapshot(otherScope, otherCrm, { markDirty: false, reason: 'Other tenant fixture' }, storage);
+  installTenantRuntimeScope(scope, scope.userId);
 
-  const expected = offer({ id: 9, assignedToId: 1, createdById: 1 });
-  store.state.crm.offers = [expected];
-  store.saveData('P1.1-A3 local Offer');
-  assert.deepEqual(readLocalSnapshot(storage)?.offers, [expected]);
+  try {
+    const store = await import('../store.js');
+    store.activateStorageForTenant(scope);
+    assert.equal(store.state.crm.organization.id, scope.organizationId);
+    assert.deepEqual(store.state.crm.offers, []);
 
-  store.activateStorageForCurrentSession();
-  assert.deepEqual(store.state.crm.offers, [expected]);
+    const expected = offer({ id: 9, assignedToId: 1, createdById: 1 });
+    store.state.crm.offers = [expected];
+    store.saveData('P1.1-A3 tenant Offer');
+
+    assert.deepEqual(readTenantSnapshot(scope, storage)?.offers, [expected]);
+    assert.deepEqual(readTenantSnapshot(otherScope, storage)?.offers, []);
+
+    installTenantRuntimeScope(otherScope, otherScope.userId);
+    store.activateStorageForTenant(otherScope);
+    assert.equal(store.state.crm.organization.id, otherScope.organizationId);
+    assert.deepEqual(store.state.crm.offers, []);
+    assert.deepEqual(readTenantSnapshot(scope, storage)?.offers, [expected]);
+  } finally {
+    invalidateTenantRuntimeScope();
+  }
 });
 
 test('P1.1-A3 backup y restore conservan offers sin estrategia paralela', () => {
@@ -264,11 +295,40 @@ test('P1.1-A3 stale Offer se detecta sin tocar telemetría B1.4.2', () => {
   assert.equal(isSupervisedRecommendationTelemetryPayload(telemetry.payload), true);
 });
 
-test('P1.1-A3 comparación remota incluye offers y Agenda/Reminder permanecen ajenos', () => {
+test('P1.1-A3 cloud tenant-aware incluye Offers y Agenda/Reminder permanecen ajenos', () => {
   const compatible = readFileSync('src/cloud-api-compatible.ts', 'utf8');
   const agenda = readFileSync('src/agenda.ts', 'utf8');
   const models = readFileSync('src/models.ts', 'utf8');
-  assert.match(compatible, /\['clients', 'properties', 'visits', 'offers', 'reservations', 'contacts', 'reminders', 'fichas', 'conversations'\]/);
+  const crm = crmFixture();
+  const owner = context('owner-user');
+  const rows = crmToCloudRecords(crm, owner, 'owner-user');
+  const offerRows = rows.filter((row) => row.entity_type === 'offer');
+
+  assert.equal(offerRows.length, crm.offers.length);
+  for (const [index, row] of offerRows.entries()) {
+    const expected = crm.offers[index]!;
+    assert.equal(row.organization_id, organizationId);
+    assert.equal(row.entity_type, 'offer');
+    assert.equal(row.entity_key, organizationScopedEntityKey(organizationId, expected.id));
+    assert.equal(row.assigned_member_id, expected.assignedToId);
+    assert.deepEqual(row.payload, expected);
+  }
+
+  const restored = cloudRecordsToCrm(rows, owner, structuredClone(crm));
+  assert.deepEqual(restored.offers, crm.offers);
+
+  const local = structuredClone(crm);
+  const cloud = structuredClone(crm);
+  local.offers = [offer({ id: 41, amount: 75000 })];
+  cloud.offers = [offer({ id: 42, amount: 82000 })];
+  const reconciled = reconcileCrmSnapshots(local, cloud);
+  assert.deepEqual(reconciled.merged.offers.map((item) => item.id), [41, 42]);
+
+  assert.match(compatible, /pullTenantCloudData/);
+  assert.match(compatible, /pushTenantModernCloudData/);
+  assert.match(compatible, /pushTenantLegacyCloudData/);
+  assert.match(compatible, /pushCloudDataWithVisitAuthorityV2/);
+  assert.doesNotMatch(compatible, /\b(?:push|pull|sync|save)Offer\w*\b/i);
   assert.doesNotMatch(agenda, /\boffers\b/);
   assert.doesNotMatch(models.match(/export interface Reminder \{([\s\S]*?)\n\}/)?.[1] ?? '', /Offer|offer/);
 });

@@ -1,14 +1,23 @@
 import { getCloudSession, pushCloudData, queueCloudSave } from './cloud-api-compatible.js';
 import type { Client, CrmData, Property, SyncedVisit, VisitInterest, VisitStatus } from './models.js';
-import { saveData, state } from './store.js';
-import { writeLocalSnapshot } from './sync-safety.js';
+import { authenticatedTenantMember, saveData, state } from './store.js';
+import { writeTenantSnapshot } from './tenant-storage.js';
+import {
+  assertTenantRuntimeLeaseCurrent,
+  captureTenantRuntimeLease,
+  currentTenantScope,
+  requireCurrentTenantScope,
+  tenantRuntimeLeaseIsCurrent,
+  tenantScopesEqual,
+  type TenantRuntimeLease,
+} from './tenant-runtime.js';
 import { canonicalUuid, normalizeRevision } from './sync-identity.js';
-import { activeMember, addActivity } from './team-access.js';
+import { addActivityForAuthenticatedTenant } from './team-access.js';
 import type { CommercialRecordReference, VisitMutationResult } from './visit-transaction-contract.js';
 import {
-  invokeVisitTransaction,
-  visitTransactionAuthorityActive,
-} from './visit-transaction-cloud.js';
+  invokeVisitTransactionV2,
+  visitTransactionAuthorityActiveV2,
+} from './tenant-visit-v2.js';
 import { executeVisitWriterSelection } from './visit-writer-selection.js';
 import { coordinateVisit, registerVisitResult } from './visit-workflow.js';
 
@@ -43,34 +52,45 @@ function upsertAuthoritativeActivity(result: VisitMutationResult): void {
   state.crm.activityLog = state.crm.activityLog.slice(0, 250);
 }
 
-function applyAuthoritativeResult(result: VisitMutationResult): void {
+function applyAuthoritativeResult(
+  result: VisitMutationResult,
+  runtimeLease: TenantRuntimeLease,
+): void {
+  assertTenantRuntimeLeaseCurrent(runtimeLease);
+  if (result.organizationId !== runtimeLease.scope.organizationId) {
+    throw new Error('TENANT_V2_ORGANIZATION_MISMATCH');
+  }
   replaceClient(result.client);
   upsertAuthoritativeVisit(result.visit);
   upsertAuthoritativeActivity(result);
-  writeLocalSnapshot(state.crm, {
+  writeTenantSnapshot(runtimeLease.scope, state.crm, {
     markDirty: false,
     reason: result.operationType === 'VISIT_CREATE'
       ? 'Visita autoritativa coordinada'
       : `Resultado de visita autoritativo: ${result.visit.status}`,
   });
-  // Si ya existían cambios locales no relacionados, la cola los conserva. El
-  // snapshot authority-aware no vuelve a escribir Visit ni su Activity.
-  queueCloudSave(state.crm, true);
+  // El job conserva scope + generación. El snapshot authority-aware no vuelve
+  // a escribir Visit ni su Activity y usa CAS V2 para Client existente.
+  queueCloudSave(runtimeLease.scope, state.crm, true);
 }
 
 async function persistHistoricalCloud(
   before: CrmData,
   reason: string,
-  accountKey: string,
+  runtimeLease: TenantRuntimeLease,
 ): Promise<void> {
-  writeLocalSnapshot(state.crm, { markDirty: true, reason });
+  assertTenantRuntimeLeaseCurrent(runtimeLease);
+  writeTenantSnapshot(runtimeLease.scope, state.crm, { markDirty: true, reason });
+  const snapshot = structuredClone(state.crm);
   try {
-    // false fija la decisión tomada por la capability. Si authority cambia a ON
-    // antes del write, los fences rechazan el writer histórico y NO se intenta RPC.
-    await pushCloudData(state.crm, accountKey, false);
+    // false es una decisión explícita devuelta por authority V2. Un error V2 no
+    // llega a este branch y por lo tanto nunca se transforma en writer histórico.
+    await pushCloudData(runtimeLease.scope, snapshot, false);
+    assertTenantRuntimeLeaseCurrent(runtimeLease);
   } catch (error) {
+    if (!tenantRuntimeLeaseIsCurrent(runtimeLease)) throw error;
     state.crm = before;
-    writeLocalSnapshot(state.crm, {
+    writeTenantSnapshot(runtimeLease.scope, state.crm, {
       markDirty: false,
       reason: `Reversión local: ${reason}`,
       backup: false,
@@ -79,8 +99,9 @@ async function persistHistoricalCloud(
   }
 }
 
-function historicalCoordinate(input: CoordinateVisitCutoverInput): string {
-  const actor = activeMember();
+function historicalCoordinate(input: CoordinateVisitCutoverInput, scope: ReturnType<typeof requireCurrentTenantScope>): string {
+  const actor = authenticatedTenantMember(scope);
+  if (!actor) throw new Error('AUTHENTICATED_TENANT_MEMBER_REQUIRED');
   const result = coordinateVisit({
     visits: state.crm.visits,
     client: input.client,
@@ -91,12 +112,13 @@ function historicalCoordinate(input: CoordinateVisitCutoverInput): string {
   });
   replaceClient(result.client);
   state.crm.visits.push(result.visit);
-  addActivity(result.activity);
+  addActivityForAuthenticatedTenant(scope, result.activity);
   return 'Visita coordinada';
 }
 
-function historicalResolve(input: RegisterVisitResultCutoverInput): string {
-  const actor = activeMember();
+function historicalResolve(input: RegisterVisitResultCutoverInput, scope: ReturnType<typeof requireCurrentTenantScope>): string {
+  const actor = authenticatedTenantMember(scope);
+  if (!actor) throw new Error('AUTHENTICATED_TENANT_MEMBER_REQUIRED');
   const result = registerVisitResult({
     visit: input.visit,
     client: input.client,
@@ -112,7 +134,7 @@ function historicalResolve(input: RegisterVisitResultCutoverInput): string {
   const index = state.crm.visits.findIndex((visit) => visit.id === input.visit.id);
   if (index < 0) throw new Error('La visita ya no está disponible.');
   state.crm.visits[index] = result.visit;
-  addActivity(result.activity);
+  addActivityForAuthenticatedTenant(scope, result.activity);
   return `Resultado de visita: ${result.visit.status}`;
 }
 
@@ -126,21 +148,29 @@ export interface CoordinateVisitCutoverInput {
 
 export async function coordinateVisitWithCutover(input: CoordinateVisitCutoverInput): Promise<void> {
   const session = getCloudSession();
+  const scope = requireCurrentTenantScope();
+  const runtimeLease = captureTenantRuntimeLease(scope);
+  assertTenantRuntimeLeaseCurrent(runtimeLease);
+
   await executeVisitWriterSelection({
     hasCloudSession: Boolean(session),
-    readAuthority: visitTransactionAuthorityActive,
+    readAuthority: async () => {
+      return visitTransactionAuthorityActiveV2(scope, runtimeLease);
+    },
     runLocal: () => {
-      const reason = historicalCoordinate(input);
+      assertTenantRuntimeLeaseCurrent(runtimeLease);
+      const reason = historicalCoordinate(input, scope);
       saveData(reason);
     },
     runLegacyCloud: async () => {
-      if (!session) throw new Error('La sesión cloud cambió durante la selección del writer.');
+      assertTenantRuntimeLeaseCurrent(runtimeLease);
       const before = structuredClone(state.crm);
-      const reason = historicalCoordinate(input);
-      await persistHistoricalCloud(before, reason, session.userId);
+      const reason = historicalCoordinate(input, scope);
+      await persistHistoricalCloud(before, reason, runtimeLease);
     },
     runTransactionalCloud: async () => {
-      const result = await invokeVisitTransaction({
+      assertTenantRuntimeLeaseCurrent(runtimeLease);
+      const result = await invokeVisitTransactionV2(scope, {
         operationId: input.operationId,
         operationType: 'VISIT_CREATE',
         client: commercialReference(input.client),
@@ -148,8 +178,9 @@ export async function coordinateVisitWithCutover(input: CoordinateVisitCutoverIn
         property: commercialReference(input.property),
         localDate: input.localDate,
         localTime: input.localTime,
-      });
-      applyAuthoritativeResult(result);
+      }, runtimeLease);
+      assertTenantRuntimeLeaseCurrent(runtimeLease);
+      applyAuthoritativeResult(result, runtimeLease);
     },
   });
 }
@@ -168,20 +199,28 @@ export interface RegisterVisitResultCutoverInput {
 
 export async function registerVisitResultWithCutover(input: RegisterVisitResultCutoverInput): Promise<void> {
   const session = getCloudSession();
+  const scope = requireCurrentTenantScope();
+  const runtimeLease = captureTenantRuntimeLease(scope);
+  assertTenantRuntimeLeaseCurrent(runtimeLease);
+
   await executeVisitWriterSelection({
     hasCloudSession: Boolean(session),
-    readAuthority: visitTransactionAuthorityActive,
+    readAuthority: async () => {
+      return visitTransactionAuthorityActiveV2(scope, runtimeLease);
+    },
     runLocal: () => {
-      const reason = historicalResolve(input);
+      assertTenantRuntimeLeaseCurrent(runtimeLease);
+      const reason = historicalResolve(input, scope);
       saveData(reason);
     },
     runLegacyCloud: async () => {
-      if (!session) throw new Error('La sesión cloud cambió durante la selección del writer.');
+      assertTenantRuntimeLeaseCurrent(runtimeLease);
       const before = structuredClone(state.crm);
-      const reason = historicalResolve(input);
-      await persistHistoricalCloud(before, reason, session.userId);
+      const reason = historicalResolve(input, scope);
+      await persistHistoricalCloud(before, reason, runtimeLease);
     },
     runTransactionalCloud: async () => {
+      assertTenantRuntimeLeaseCurrent(runtimeLease);
       const visitUid = canonicalUuid(input.visit.uid);
       if (!visitUid) {
         throw new Error('La visita histórica no tiene identidad transaccional y no puede resolverse con Visit authority activa.');
@@ -189,7 +228,7 @@ export async function registerVisitResultWithCutover(input: RegisterVisitResultC
       if (!['Realizada', 'Cancelada', 'No asistió'].includes(input.status)) {
         throw new Error('Seleccioná un resultado válido para la visita.');
       }
-      const result = await invokeVisitTransaction({
+      const result = await invokeVisitTransactionV2(scope, {
         operationId: input.operationId,
         operationType: 'VISIT_RESOLVE',
         client: commercialReference(input.client),
@@ -201,20 +240,32 @@ export async function registerVisitResultWithCutover(input: RegisterVisitResultC
         objection: input.objection,
         nextAction: input.nextAction,
         nextFollowUp: input.nextFollowUp,
-      });
-      applyAuthoritativeResult(result);
+      }, runtimeLease);
+      assertTenantRuntimeLeaseCurrent(runtimeLease);
+      applyAuthoritativeResult(result, runtimeLease);
     },
   });
 }
 
-// El coordinador cloud emite este evento únicamente después de verificar que el
-// job sigue siendo la última generación local. Reconciliamos metadata server-side
-// (por ejemplo revision de Client) sin marcar un nuevo dirty ni resetear UI transitoria.
+// El coordinador cloud emite el snapshot junto con scope+lease. Aplicamos metadata
+// server-side únicamente si la misma generación tenant continúa activa.
 document.addEventListener('propcontrol-cloud-authoritative-snapshot', (event) => {
-  const crm = (event as CustomEvent<{ crm?: CrmData }>).detail?.crm;
-  if (!crm) return;
+  const detail = (event as CustomEvent<{
+    crm?: CrmData;
+    runtimeLease?: TenantRuntimeLease;
+  }>).detail;
+  const crm = detail?.crm;
+  const runtimeLease = detail?.runtimeLease;
+  if (!crm || !runtimeLease) return;
+  const activeScope = currentTenantScope();
+  if (
+    !activeScope
+    || !tenantScopesEqual(activeScope, runtimeLease.scope)
+    || !tenantRuntimeLeaseIsCurrent(runtimeLease)
+  ) return;
+
   state.crm = structuredClone(crm);
-  writeLocalSnapshot(state.crm, {
+  writeTenantSnapshot(runtimeLease.scope, state.crm, {
     markDirty: false,
     reason: 'Reconciliación autoritativa cloud',
     backup: false,

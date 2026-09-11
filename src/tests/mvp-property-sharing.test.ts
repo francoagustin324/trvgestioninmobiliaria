@@ -6,19 +6,22 @@ const ui = readFileSync('src/mvp-properties-ui.ts', 'utf8');
 const css = readFileSync('src/mvp-properties.css', 'utf8');
 const html = readFileSync('index.html', 'utf8');
 
- test('Propiedades publica, abre y comparte una ficha corta para cliente', () => {
+ test('Propiedades publica, abre y comparte una ficha corta para cliente con scope/lease capturados', () => {
   assert.ok(ui.includes('data-share-property-ficha'));
   assert.ok(ui.includes('data-open-property-ficha'));
-  assert.ok(ui.includes('publishPropertyFicha(property)'));
+  assert.ok(ui.includes('publishAndRememberPropertyFicha(property, scope, runtimeLease)'));
+  assert.ok(ui.includes('captureTenantRuntimeLease(scope)'));
   assert.ok(ui.includes('navigator.share'));
   assert.ok(ui.includes('Enlace corto copiado'));
   assert.ok(ui.includes('Ficha publicada'));
 });
 
-test('una ficha ya publicada se actualiza al guardar cambios', () => {
+test('una ficha ya publicada se actualiza al guardar cambios bajo el mismo helper tenant-aware', () => {
   assert.ok(ui.includes('if (property.publicSlug)'));
   assert.ok(ui.includes('Actualizando ficha pública'));
-  assert.ok(ui.includes("saveData('Ficha pública actualizada')"));
+  assert.ok(ui.includes("'Ficha pública actualizada'"));
+  assert.ok(ui.includes('publishAndRememberPropertyFicha('));
+  assert.ok(ui.includes('assertPropertyShareOperationCurrent(scope, runtimeLease)'));
 });
 
 test('el formulario separa información comercial e interna', () => {

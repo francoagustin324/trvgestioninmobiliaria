@@ -89,12 +89,17 @@ test('el submit consume la fecha canónica congelada y no recalcula al cambiar e
   }), /fecha visible cambió/i);
 });
 
-test('el guardado tiene un único handler, usa estado canónico y verifica local sin Reminder paralelo', () => {
+test('el guardado tiene un único handler y verifica/rollbackea sólo el tenant capturado sin Reminder paralelo', () => {
   const ui = readFileSync('src/followup-save-ui.ts', 'utf8');
   const persistence = readFileSync('src/followup-persistence.ts', 'utf8');
   const saveStart = ui.indexOf('function saveFollowUp');
   const saveEnd = ui.indexOf('function install', saveStart);
   const saveBody = ui.slice(saveStart, saveEnd);
+  const rollbackStart = persistence.indexOf('function rollback(');
+  const rollbackEnd = persistence.indexOf('function verifiedClient', rollbackStart);
+  const rollbackBody = persistence.slice(rollbackStart, rollbackEnd);
+  const persistStart = persistence.indexOf('export function persistFollowUpSelection');
+  const persistBody = persistence.slice(persistStart);
 
   assert.ok(ui.includes("document.addEventListener('submit'"));
   assert.ok(ui.includes('event.stopImmediatePropagation()'));
@@ -103,8 +108,29 @@ test('el guardado tiene un único handler, usa estado canónico y verifica local
   assert.ok(!saveBody.includes('synchronizeSelection(form)'));
   assert.ok(ui.includes('persistFollowUpSelection'));
   assert.ok(!ui.includes('window.open('));
+
   assert.ok(persistence.includes('saveData('));
-  assert.ok(persistence.includes('readLocalSnapshot()'));
   assert.ok(persistence.includes('scheduleWhatsAppFollowUp('));
+  assert.ok(persistence.includes('requireCurrentTenantScope()'));
+  assert.ok(persistence.includes('captureTenantRuntimeLease(scope)'));
+  assert.ok(persistence.includes('assertTenantRuntimeLeaseCurrent(runtimeLease)'));
+  assert.ok(persistence.includes('assertTenantCrmScope(scope, state.crm)'));
+  assert.ok(persistence.includes('readTenantSnapshot(scope)'));
+  assert.ok(persistence.includes('writeTenantSnapshot(scope, previous'));
+  assert.ok(!persistence.includes('readLocalSnapshot'));
+  assert.ok(!persistence.includes('writeLocalSnapshot'));
+
+  assert.ok(rollbackBody.includes('scope: TenantScope'));
+  assert.ok(rollbackBody.includes('runtimeLease: TenantRuntimeLease'));
+  assert.ok(rollbackBody.includes('if (!tenantRuntimeLeaseIsCurrent(runtimeLease)) return;'));
+  assert.ok(rollbackBody.includes('assertTenantRuntimeLeaseCurrent(runtimeLease)'));
+  assert.ok(rollbackBody.includes('assertTenantCrmScope(scope, previous)'));
+  assert.ok(rollbackBody.includes('writeTenantSnapshot(scope, previous'));
+  assert.ok(!rollbackBody.includes('requireCurrentTenantScope()'), 'rollback nunca puede retargetearse al tenant visible actual');
+
+  assert.ok(persistBody.includes('const scope = requireCurrentTenantScope();'));
+  assert.ok(persistBody.includes('const runtimeLease = captureTenantRuntimeLease(scope);'));
+  assert.ok(persistBody.includes('assertTenantRuntimeLeaseCurrent(runtimeLease);'));
+  assert.ok(persistBody.includes('rollback(previous, scope, runtimeLease);'));
   assert.ok(!persistence.includes('state.crm.reminders'));
 });
