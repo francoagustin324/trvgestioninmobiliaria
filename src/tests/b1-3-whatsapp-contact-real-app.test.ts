@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { existsSync, mkdirSync } from 'node:fs';
 import test from 'node:test';
-import { chromium, type Browser, type BrowserContext, type Page } from 'playwright';
+import { chromium, type Browser, type BrowserContext, type Page, type Response } from 'playwright';
 import {
   crmToCloudRecords,
   membershipContext,
@@ -14,6 +14,7 @@ import { initialData, type CrmData, type TeamMember, type TeamRole } from '../mo
 const sessionKey = 'propcontrol-cloud-session-v1';
 const organizationId = 'b13-org';
 const artifactDir = 'artifacts/b1-3';
+const cloudHydratedPlanLabel = 'B1.3 CLOUD HYDRATED';
 const mobileUserAgent = 'Mozilla/5.0 (Linux; Android 14; Pixel 7 Build/AP2A.240705.004) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Mobile Safari/537.36';
 
 interface Identity {
@@ -160,6 +161,8 @@ function recordKey(row: CloudRecordRow): string {
 async function installTenantCloudHarness(context: BrowserContext, role: TeamRole, overdue: boolean): Promise<void> {
   const current = identity(role);
   const crm = fixture(role, overdue);
+  const cloudCrm = structuredClone(crm);
+  cloudCrm.organization.planLabel = cloudHydratedPlanLabel;
   const ownMemberships = membershipRows(crm);
   const currentMembership = ownMemberships.find((row) => row.user_id === current.userId)!;
   const memberships: CloudMembershipRow[] = [
@@ -171,7 +174,7 @@ async function installTenantCloudHarness(context: BrowserContext, role: TeamRole
     ...ownMemberships,
   ];
   const contextRows = membershipContext(ownMemberships, current.userId);
-  let records = crmToCloudRecords(crm, contextRows, current.userId)
+  let records = crmToCloudRecords(cloudCrm, contextRows, current.userId)
     .map((row) => ({ ...row, updated_at: '2026-09-10T12:00:00.000Z' }));
 
   await context.route('**/*', async (route) => {
@@ -366,10 +369,37 @@ async function contextFor(browser: Browser, role: TeamRole, viewport: { width: n
   return context;
 }
 
-async function load(page: Page, url: string, role: TeamRole): Promise<void> {
-  await page.goto(url, { waitUntil: 'domcontentloaded' });
-  await page.waitForSelector('#crm.active', { state: 'visible', timeout: 20_000 });
+function initialTenantPull(page: Page, role: TeamRole): Promise<Response> {
   const expected = identity(role);
+  return page.waitForResponse((response) => {
+    if (response.request().method() !== 'GET') return false;
+    const responseUrl = new URL(response.url());
+    return responseUrl.pathname.endsWith('/rest/v1/propcontrol_records')
+      && queryFilter(responseUrl, 'organization_id') === expected.organizationId;
+  });
+}
+
+async function waitForTenantReadiness(page: Page, role: TeamRole, tenantPull: Promise<Response>): Promise<void> {
+  const expected = identity(role);
+  const response = await tenantPull;
+  assert.equal(response.ok(), true, 'El pull tenant-aware inicial debe responder OK.');
+  await page.waitForFunction(({ storageKey, organizationPreferenceKey, organizationId, planLabel }) => {
+    if (localStorage.getItem(organizationPreferenceKey) !== organizationId) return false;
+    const raw = localStorage.getItem(storageKey);
+    if (!raw) return false;
+    try {
+      const crm = JSON.parse(raw) as CrmData;
+      return crm.organization?.id === organizationId && crm.organization?.planLabel === planLabel;
+    } catch {
+      return false;
+    }
+  }, {
+    storageKey: expected.storageKey,
+    organizationPreferenceKey: expected.organizationPreferenceKey,
+    organizationId: expected.organizationId,
+    planLabel: cloudHydratedPlanLabel,
+  });
+  await page.waitForSelector('#crm.active', { state: 'visible', timeout: 20_000 });
   const activated = await page.evaluate(async () => {
     const runtimePath = '/dist/tenant-runtime.js';
     const storePath = '/dist/store.js';
@@ -378,13 +408,21 @@ async function load(page: Page, url: string, role: TeamRole): Promise<void> {
     return {
       scope: runtime.currentTenantScope(),
       organizationId: store.state.crm.organization.id,
+      planLabel: store.state.crm.organization.planLabel,
     };
   });
   assert.deepEqual(activated, {
     scope: { userId: expected.userId, organizationId: expected.organizationId },
     organizationId: expected.organizationId,
+    planLabel: cloudHydratedPlanLabel,
   });
   await page.waitForSelector('[data-contact-whatsapp="1"]', { state: 'visible', timeout: 20_000 });
+}
+
+async function load(page: Page, url: string, role: TeamRole): Promise<void> {
+  const tenantPull = initialTenantPull(page, role);
+  await page.goto(url, { waitUntil: 'domcontentloaded' });
+  await waitForTenantReadiness(page, role, tenantPull);
 }
 
 async function crmFromStorage(page: Page, role: TeamRole): Promise<CrmData> {
@@ -417,13 +455,18 @@ test('B1.3 completa contacto, confirmación, seguimiento, reprogramación y Agen
     const page = await context.newPage();
     await load(page, url, 'Dueño');
     await page.locator('[data-contact-whatsapp="1"]').click();
-    await page.locator('.whatsapp-contact-panel').waitFor({ state: 'visible' });
+    const panel = page.locator('.whatsapp-contact-panel');
+    await panel.waitFor({ state: 'visible' });
+    const message = page.locator('[data-whatsapp-message]');
+    await message.waitFor({ state: 'visible' });
+    assert.equal(await message.isEnabled(), true, 'El mensaje WhatsApp debe estar habilitado tras readiness tenant-aware.');
+    assert.equal(await message.isEditable(), true, 'El mensaje WhatsApp debe ser editable tras readiness tenant-aware.');
     await page.screenshot({ path: `${artifactDir}/01-mobile-panel-contacto.png`, fullPage: true });
-    assert.match(await page.locator('[data-whatsapp-message]').inputValue(), /Lucía Martín/);
-    assert.match(await page.locator('[data-whatsapp-message]').inputValue(), /Dúplex en Docta/);
+    assert.match(await message.inputValue(), /Lucía Martín/);
+    assert.match(await message.inputValue(), /Dúplex en Docta/);
 
     const edited = 'Hola Lucía 👋\n¿Seguís buscando en Nueva Córdoba?';
-    await page.locator('[data-whatsapp-message]').fill(edited);
+    await message.fill(edited);
     await page.locator('[data-whatsapp-copy]').click();
     assert.equal(await page.evaluate(() => (window as unknown as B13Window).__b13Copied), edited);
 
@@ -464,8 +507,9 @@ test('B1.3 completa contacto, confirmación, seguimiento, reprogramación y Agen
     assert.equal(scheduled.clients[0]?.nextAction, 'Volver a contactar por WhatsApp');
     assert.equal(scheduled.reminders.length, 0, 'WhatsApp follow-up no crea Reminder paralelo.');
 
+    const reloadPull = initialTenantPull(page, 'Dueño');
     await page.reload({ waitUntil: 'domcontentloaded' });
-    await page.waitForSelector('[data-contact-whatsapp="1"]', { state: 'visible' });
+    await waitForTenantReadiness(page, 'Dueño', reloadPull);
     assert.equal((await crmFromStorage(page, 'Dueño')).activityLog.filter((entry) => entry.action === 'Contacto por WhatsApp').length, 1);
     await page.locator('[data-module="agenda"]:visible').first().click();
     const agendaCard = page.locator('#agenda.active .agenda-card').filter({ hasText: 'Lucía Martín' }).first();
