@@ -1,0 +1,31 @@
+name: SEC-FIX A3.2 Post-A Audit
+on:
+  push:
+    branches: [validation/sec-fix-a3-2-inventory]
+permissions:
+  contents: read
+jobs:
+  audit:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: d097a1cc9432e7233f4f6968083319aa2a13f623
+          fetch-depth: 1
+      - name: Active identity audit
+        shell: bash
+        run: |
+          echo '=== defaultAssigneeId imports/calls ==='
+          grep -RFn --include='*.ts' --exclude-dir=tests 'defaultAssigneeId' src || true
+          echo '=== activeMember direct calls in active write surfaces ==='
+          grep -nE 'activeMember\(|activeMemberId|addActivity\(' \
+            src/mvp-properties-ui.ts src/agenda-ui.ts src/offer-workflow-ui.ts src/reservation-workflow-ui.ts \
+            src/lead-source-reactivation-ui.ts src/lead-qualification-ui.ts src/mvp-leads-ui.ts \
+            src/lead-recommendation-instrumentation.ts src/whatsapp-contact.ts src/whatsapp-human-identity.ts \
+            src/visit-workflow-cutover.ts || true
+          echo '=== qualification session keys ==='
+          grep -nE 'sessions|openClientId|sessionFor\(' src/lead-qualification-ui.ts || true
+          echo '=== raw snapshots followup ==='
+          grep -nE 'readLocalSnapshot|writeLocalSnapshot|readTenantSnapshot|writeTenantSnapshot' src/followup-persistence.ts || true
+          echo '=== implicit cloud save ==='
+          grep -RFn --include='*.ts' --exclude-dir=tests -e 'queueCloudSave(state.crm)' -e 'queueCloudSave(crm)' src || true
