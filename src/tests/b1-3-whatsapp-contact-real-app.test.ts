@@ -371,8 +371,10 @@ async function load(page: Page, url: string, role: TeamRole): Promise<void> {
   await page.waitForSelector('#crm.active', { state: 'visible', timeout: 20_000 });
   const expected = identity(role);
   const activated = await page.evaluate(async () => {
-    const runtime = await import('/dist/tenant-runtime.js');
-    const store = await import('/dist/store.js');
+    const runtimePath = '/dist/tenant-runtime.js';
+    const storePath = '/dist/store.js';
+    const runtime = await import(runtimePath);
+    const store = await import(storePath);
     return {
       scope: runtime.currentTenantScope(),
       organizationId: store.state.crm.organization.id,
@@ -532,7 +534,8 @@ test('B1.3 valida escritorio, roles, referencias obsoletas, módulos y vencimien
       await page.evaluate(async () => {
         const target = window as unknown as B13Window;
         target.__b13StaleRegister = document.querySelector<HTMLButtonElement>('[data-whatsapp-manual-register]') || undefined;
-        const store = await import('/dist/store.js');
+        const storePath = '/dist/store.js';
+        const store = await import(storePath);
         store.setActiveMemberId(3);
         document.dispatchEvent(new CustomEvent('trv-render'));
         target.__b13StaleRegister?.click();
@@ -572,8 +575,10 @@ test('B1.3 garantiza idempotencia, expiración y todas las fechas programables',
     const page = await context.newPage();
     await load(page, url, 'Dueño');
     const result = await page.evaluate(async () => {
-      const contact = await import('/dist/whatsapp-contact.js');
-      const store = await import('/dist/store.js');
+      const contactPath = '/dist/whatsapp-contact.js';
+      const storePath = '/dist/store.js';
+      const contact = await import(contactPath);
+      const store = await import(storePath);
       const client = store.state.crm.clients[0];
       const attempt = contact.createPendingWhatsAppAttempt(client, '5493515110069', 'Mensaje único', new Date());
       const first = contact.registerWhatsAppContact(attempt);
