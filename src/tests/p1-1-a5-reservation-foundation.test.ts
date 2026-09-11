@@ -147,6 +147,7 @@ test('P1.1-A5 Reservation hace round-trip local tenant-aware, conserva todos sus
     assignedToId: 1,
     createdById: 1,
   });
+  const expectedWithoutOfferCanonical = JSON.parse(JSON.stringify(expectedWithoutOffer)) as Reservation;
 
   const store = await import('../store.js');
   try {
@@ -159,7 +160,7 @@ test('P1.1-A5 Reservation hace round-trip local tenant-aware, conserva todos sus
 
     const persistedA = readTenantSnapshot(scopeA, storage);
     assert.ok(persistedA);
-    assert.deepEqual(persistedA.reservations, [expected, expectedWithoutOffer]);
+    assert.equal(persistedA.reservations.length, 2);
     assert.deepEqual(persistedA.reservations[0], expected);
     assert.deepEqual(Object.keys(persistedA.reservations[0] ?? {}), [
       'id', 'clientId', 'propertyId', 'offerId', 'amount', 'currency', 'paymentMethod', 'conditions',
@@ -180,7 +181,26 @@ test('P1.1-A5 Reservation hace round-trip local tenant-aware, conserva todos sus
     assert.equal(persistedA.reservations[0]?.createdById, expected.createdById);
     assert.equal(persistedA.reservations[0]?.createdAt, expected.createdAt);
     assert.equal(persistedA.reservations[0]?.updatedAt, expected.updatedAt);
-    assert.equal(persistedA.reservations[1]?.offerId, undefined);
+
+    const persistedWithoutOffer = persistedA.reservations[1];
+    assert.ok(persistedWithoutOffer);
+    assert.deepEqual(persistedWithoutOffer, expectedWithoutOfferCanonical);
+    assert.equal(persistedWithoutOffer.id, expectedWithoutOffer.id);
+    assert.equal(persistedWithoutOffer.clientId, expectedWithoutOffer.clientId);
+    assert.equal(persistedWithoutOffer.propertyId, expectedWithoutOffer.propertyId);
+    assert.equal(persistedWithoutOffer.amount, expectedWithoutOffer.amount);
+    assert.equal(persistedWithoutOffer.currency, expectedWithoutOffer.currency);
+    assert.equal(persistedWithoutOffer.paymentMethod, expectedWithoutOffer.paymentMethod);
+    assert.equal(persistedWithoutOffer.conditions, expectedWithoutOffer.conditions);
+    assert.equal(persistedWithoutOffer.reservedAt, expectedWithoutOffer.reservedAt);
+    assert.equal(persistedWithoutOffer.expiresAt, expectedWithoutOffer.expiresAt);
+    assert.equal(persistedWithoutOffer.status, expectedWithoutOffer.status);
+    assert.equal(persistedWithoutOffer.assignedToId, expectedWithoutOffer.assignedToId);
+    assert.equal(persistedWithoutOffer.createdById, expectedWithoutOffer.createdById);
+    assert.equal(persistedWithoutOffer.createdAt, expectedWithoutOffer.createdAt);
+    assert.equal(persistedWithoutOffer.updatedAt, expectedWithoutOffer.updatedAt);
+    assert.equal(persistedWithoutOffer.offerId, undefined);
+    assert.equal(Object.hasOwn(persistedWithoutOffer, 'offerId'), false);
 
     installTenantRuntimeScope(scopeB, scopeB.userId);
     store.activateStorageForTenant(scopeB);
@@ -188,7 +208,12 @@ test('P1.1-A5 Reservation hace round-trip local tenant-aware, conserva todos sus
     assert.deepEqual(readTenantSnapshot(scopeB, storage)?.reservations, []);
 
     const rereadA = readTenantSnapshot(scopeA, storage);
-    assert.deepEqual(rereadA?.reservations, [expected, expectedWithoutOffer]);
+    assert.ok(rereadA);
+    assert.equal(rereadA.reservations.length, 2);
+    assert.deepEqual(rereadA.reservations[0], expected);
+    assert.deepEqual(rereadA.reservations[1], expectedWithoutOfferCanonical);
+    assert.equal(rereadA.reservations[1]?.offerId, undefined);
+    assert.equal(Object.hasOwn(rereadA.reservations[1] ?? {}, 'offerId'), false);
   } finally {
     invalidateTenantRuntimeScope();
   }
