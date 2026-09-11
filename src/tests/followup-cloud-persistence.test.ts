@@ -121,7 +121,15 @@ test('reproduce la pérdida física tenant-aware: contacto A en vuelo + seguimie
         return json({ configured: true, url: 'https://supabase.test', publishableKey: 'publishable-key' });
       }
       if (url.pathname.endsWith('/rpc/activate_my_organization_memberships')) return json({});
-      if (url.pathname.endsWith('/rpc/visit_transaction_authority_active')) return json(false);
+      if (url.pathname.endsWith('/rpc/visit_transaction_authority_active')) {
+        assert.fail('legacy visit_transaction_authority_active RPC must not be invoked');
+      }
+      if (url.pathname.endsWith('/rpc/visit_transaction_authority_active_v2')) {
+        assert.equal(method, 'POST');
+        const body = JSON.parse(String(init?.body || '{}')) as Record<string, unknown>;
+        assert.deepEqual(body, { p_organization_id: scopeA.organizationId });
+        return json(false);
+      }
       if (url.pathname.endsWith('/organization_members')) {
         assert.equal(url.searchParams.get('organization_id'), `eq.${scopeA.organizationId}`);
         return json([membership]);
