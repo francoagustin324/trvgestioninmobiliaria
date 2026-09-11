@@ -1,0 +1,42 @@
+name: SEC-FIX A3.2 Regression Precheck
+on:
+  push:
+    branches: [validation/sec-fix-a3-2-inventory]
+permissions:
+  contents: read
+jobs:
+  validate:
+    if: contains(github.event.head_commit.message, 'precheck regressions')
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: aa91b36121b315cf910146fa5fa64b3b88fd37da
+          fetch-depth: 1
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Build
+        run: npm run build
+      - name: Properties + Agenda
+        run: node --test --test-concurrency=1 dist/tests/mvp-properties-ui.test.js dist/tests/mvp-property-sharing.test.js dist/tests/agenda-related-ui.test.js dist/tests/agenda-workflow.test.js dist/tests/agenda.test.js
+      - name: Offers + Reservations
+        run: node --test --test-concurrency=1 dist/tests/p1-1-a3-offer-foundation.test.js dist/tests/p1-1-a4-offer-workflow.test.js dist/tests/p1-1-a5-reservation-foundation.test.js dist/tests/p1-1-a6-reservation-workflow.test.js
+      - name: Qualification + Reactivation
+        run: node --test --test-concurrency=1 dist/tests/b1-2-lead-qualification.test.js dist/tests/b1-2-1-essential-qualification.test.js dist/tests/p1-3-a1-source-reactivation.test.js
+      - name: Follow-up
+        run: node --test --test-concurrency=1 dist/tests/followup-hotfix.test.js dist/tests/followup-cloud-persistence.test.js
+      - name: Team
+        run: node --test --test-concurrency=1 dist/tests/team-policy.test.js dist/tests/team-management.test.js dist/tests/sec-fix-a1-2-e-team-tenant-authority.test.js dist/tests/b1-2-9-permission-architecture.test.js
+      - name: Tenant runtime/storage
+        run: node --test --test-concurrency=1 dist/tests/sec-fix-a1-2-a-active-organization.test.js dist/tests/sec-fix-a1-2-b-tenant-storage.test.js dist/tests/sec-fix-a1-2-b-2-tenant-storage-boundary.test.js dist/tests/sec-fix-a1-2-c1-tenant-hydration.test.js dist/tests/sec-fix-a1-2-c2-job-freeze.test.js dist/tests/sec-fix-a1-2-c3-stale-async.test.js
+      - name: Cloud lease/generation
+        run: node --test --test-concurrency=1 dist/tests/cloud-save-serial.test.js dist/tests/cloud-api-compatible.test.js dist/tests/sec-fix-a1-dr02-cloud-writer-lease.test.js
+      - name: Visit cutover
+        run: node --test --test-concurrency=1 dist/tests/p1-1-a2-visit-workflow.test.js dist/tests/p1-1-a7-r2-2c-visit-transaction-cutover.test.js dist/tests/sec-fix-a1-2-d-org-aware-visit-cutover.test.js
+      - name: A3.1 static
+        run: node --test --test-concurrency=1 dist/tests/sec-fix-a3-1-lead-explicit-tenant-write-identity.test.js
+      - name: A2 targeted
+        run: node --test --test-concurrency=1 dist/tests/sec-fix-a2-1-canonical-membership-status.test.js dist/tests/sec-fix-a2-2-active-only-membership-authority.test.js dist/tests/sec-fix-a2-3-minimal-acl-hardening.test.js dist/tests/sec-fix-a2-4-org-aware-rpc-v2-alignment.test.js
