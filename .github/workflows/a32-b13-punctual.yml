@@ -24,7 +24,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          SHA=d2f1b22a2a991ed924a7336a6da3e4eb0263bcf6
+          SHA=fcc4487782ac820473fda18aa48d3c7fc513e955
           rm -rf /tmp/b13-candidate
           git worktree add --detach /tmp/b13-candidate "$SHA"
           cd /tmp/b13-candidate
