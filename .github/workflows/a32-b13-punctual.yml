@@ -1,0 +1,40 @@
+name: A3.2 B1.3 Punctual Validation
+
+on:
+  push:
+    branches:
+      - validation/a32-b13-punctual-c143
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Exact candidate punctual gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          SHA=c143e59c347eea9bd9f53db8ddc96bc79d5570bd
+          rm -rf /tmp/b13-candidate
+          git worktree add --detach /tmp/b13-candidate "$SHA"
+          cd /tmp/b13-candidate
+          test "$(git rev-parse HEAD)" = "$SHA"
+          echo "EXACT_SHA=$(git rev-parse HEAD)"
+          node --version
+          if command -v google-chrome >/dev/null 2>&1; then google-chrome --version; elif command -v google-chrome-stable >/dev/null 2>&1; then google-chrome-stable --version; elif command -v chromium >/dev/null 2>&1; then chromium --version; else chromium-browser --version; fi
+          npm ci
+          npm run build
+          node --test --test-concurrency=1 \
+            dist/tests/b1-3-whatsapp-architecture.test.js \
+            dist/tests/b1-3-whatsapp-contact.test.js \
+            dist/tests/b1-3-whatsapp-contact-real-app.test.js
