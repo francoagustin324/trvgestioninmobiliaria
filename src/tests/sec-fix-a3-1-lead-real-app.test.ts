@@ -470,13 +470,27 @@ test('A3.1 formulario A queda stale al cambiar runtime a B y no toca snapshot ni
     await load(page, `http://127.0.0.1:${port}`);
     const form = await openLeadForm(page);
     await fillLead(form, 'STALE A MUST FAIL', '03515553333');
+    const staleForm = await form.elementHandle();
+    assert.ok(staleForm, 'El formulario A debe existir antes del cambio de tenant.');
     const beforeB = await page.evaluate((key) => localStorage.getItem(key), tenantKey(SHARED_USER, ORG_B));
     const writesBeforeB = harness.cloud.writesFor(ORG_B);
 
     await switchTenant(page, SHARED_USER, ORG_B, 22);
-    await form.locator('[data-save-lead]').click();
-    await form.locator('[data-lead-error]').waitFor({ state: 'visible' });
-    assert.match(await form.locator('[data-lead-error]').innerText(), /autorización tenant|runtime activo cambió/i);
+    await staleForm.evaluate((node) => {
+      const formNode = node as HTMLFormElement;
+      const submitter = formNode.querySelector<HTMLButtonElement>('[data-save-lead]') ?? undefined;
+      formNode.dispatchEvent(new SubmitEvent('submit', {
+        bubbles: true,
+        cancelable: true,
+        submitter,
+      }));
+    });
+    const staleError = await staleForm.evaluate((node) => {
+      const error = node.querySelector<HTMLElement>('[data-lead-error]');
+      return { hidden: error?.hidden ?? true, text: error?.textContent ?? '' };
+    });
+    assert.equal(staleError.hidden, false);
+    assert.match(staleError.text, /autorización tenant|runtime activo cambió/i);
 
     const afterB = await page.evaluate((key) => localStorage.getItem(key), tenantKey(SHARED_USER, ORG_B));
     assert.equal(afterB, beforeB);
