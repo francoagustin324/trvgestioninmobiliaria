@@ -29,8 +29,13 @@ interface QualificationSession {
   info?: string;
 }
 
-const sessions = new Map<number, QualificationSession>();
-let openClientId: number | null = null;
+const sessions = new Map<string, QualificationSession>();
+let openClientKey: string | null = null;
+
+function qualificationSessionKey(clientId: number): string {
+  const scope = requireCurrentTenantScope();
+  return JSON.stringify([scope.userId, scope.organizationId, clientId]);
+}
 const dateFormatter = new Intl.DateTimeFormat('es-AR', {
   day: '2-digit',
   month: '2-digit',
@@ -39,7 +44,8 @@ const dateFormatter = new Intl.DateTimeFormat('es-AR', {
 });
 
 function sessionFor(clientId: number): QualificationSession {
-  let session = sessions.get(clientId);
+  const key = qualificationSessionKey(clientId);
+  let session = sessions.get(key);
   if (!session) {
     const conversation = associatedConversations(clientId)[0];
     session = {
@@ -49,7 +55,7 @@ function sessionFor(clientId: number): QualificationSession {
       pastedText: '',
       analyzing: false,
     };
-    sessions.set(clientId, session);
+    sessions.set(key, session);
   }
   return session;
 }
@@ -151,13 +157,13 @@ function analysisBlock(client: Client, analysis: QualificationAnalysis): string 
 }
 
 export function isLeadQualificationOpen(clientId: number): boolean {
-  return openClientId === clientId;
+  return openClientKey === qualificationSessionKey(clientId);
 }
 
 export function requestLeadQualification(clientId: number, conversationId?: number): void {
   const client = visibleClients().find((item) => item.id === clientId);
   if (!client) return;
-  openClientId = clientId;
+  openClientKey = qualificationSessionKey(clientId);
   const session = sessionFor(clientId);
   if (conversationId && associatedConversations(clientId).some((item) => item.id === conversationId)) {
     session.source = 'conversation';
@@ -168,7 +174,7 @@ export function requestLeadQualification(clientId: number, conversationId?: numb
 }
 
 export function closeLeadQualification(): void {
-  openClientId = null;
+  openClientKey = null;
 }
 
 function mobileNavigationTop(): number {
@@ -369,7 +375,7 @@ export function bindLeadQualificationPanel(
 
 export function resetLeadQualificationForTests(): void {
   sessions.clear();
-  openClientId = null;
+  openClientKey = null;
 }
 
 export function qualificationSourceLabelForTests(source: QualificationSource): string {

@@ -1,6 +1,14 @@
 import type { Client, CrmData } from './models.js';
 import { saveData, state } from './store.js';
-import { readLocalSnapshot, writeLocalSnapshot } from './sync-safety.js';
+import { assertTenantCrmScope, readTenantSnapshot, writeTenantSnapshot } from './tenant-storage.js';
+import {
+  assertTenantRuntimeLeaseCurrent,
+  captureTenantRuntimeLease,
+  requireCurrentTenantScope,
+  tenantRuntimeLeaseIsCurrent,
+  type TenantRuntimeLease,
+} from './tenant-runtime.js';
+import type { TenantScope } from './active-organization.js';
 import { visibleClients } from './team-access.js';
 import { isValidCalendarDate } from './followup-calendar.js';
 import {
@@ -28,10 +36,13 @@ export interface FollowUpPersistenceResult {
   duplicate: boolean;
 }
 
-function rollback(previous: CrmData): void {
+function rollback(previous: CrmData, scope: TenantScope, runtimeLease: TenantRuntimeLease): void {
+  if (!tenantRuntimeLeaseIsCurrent(runtimeLease)) return;
+  assertTenantRuntimeLeaseCurrent(runtimeLease);
+  assertTenantCrmScope(scope, previous);
   state.crm = previous;
   try {
-    writeLocalSnapshot(previous, {
+    writeTenantSnapshot(scope, previous, {
       markDirty: true,
       reason: 'Reversión de seguimiento no confirmado',
       backup: false,
@@ -41,8 +52,15 @@ function rollback(previous: CrmData): void {
   }
 }
 
-function verifiedClient(clientId: number, date: string | null): Client | null {
-  const snapshot = readLocalSnapshot();
+function verifiedClient(
+  scope: TenantScope,
+  runtimeLease: TenantRuntimeLease,
+  clientId: number,
+  date: string | null,
+): Client | null {
+  assertTenantRuntimeLeaseCurrent(runtimeLease);
+  const snapshot = readTenantSnapshot(scope);
+  if (snapshot) assertTenantCrmScope(scope, snapshot);
   const client = snapshot?.clients.find((item) => item.id === clientId) ?? null;
   if (!client) return null;
   if (date) {
@@ -71,7 +89,13 @@ function assertAuthorizedContact(input: FollowUpPersistenceInput): ContactFollow
   return client;
 }
 
-function clearFollowUp(input: FollowUpPersistenceInput): FollowUpPersistenceResult {
+function clearFollowUp(
+  input: FollowUpPersistenceInput,
+  scope: TenantScope,
+  runtimeLease: TenantRuntimeLease,
+): FollowUpPersistenceResult {
+  assertTenantRuntimeLeaseCurrent(runtimeLease);
+  assertTenantCrmScope(scope, state.crm);
   const client = assertAuthorizedContact(input);
   const duplicate = !client.nextFollowUp && !client.nextAction;
   if (duplicate) return { client, date: null, duplicate: true };
@@ -83,7 +107,8 @@ function clearFollowUp(input: FollowUpPersistenceInput): FollowUpPersistenceResu
   delete client.whatsappFollowUpChannel;
   saveData(`Seguimiento sin fecha: ${client.name}`);
 
-  const persisted = verifiedClient(client.id, null);
+  assertTenantRuntimeLeaseCurrent(runtimeLease);
+  const persisted = verifiedClient(scope, runtimeLease, client.id, null);
   if (!persisted) throw new Error('El seguimiento no pudo confirmarse en el almacenamiento local.');
   return { client, date: null, duplicate: false };
 }
@@ -96,21 +121,28 @@ export function persistFollowUpSelection(input: FollowUpPersistenceInput): Follo
     throw new Error('Elegí una fecha de seguimiento válida.');
   }
 
+  const scope = requireCurrentTenantScope();
+  const runtimeLease = captureTenantRuntimeLease(scope);
+  assertTenantRuntimeLeaseCurrent(runtimeLease);
+  assertTenantCrmScope(scope, state.crm);
   const previous = structuredClone(state.crm);
+  assertTenantCrmScope(scope, previous);
   try {
-    if (input.date === null) return clearFollowUp(input);
+    if (input.date === null) return clearFollowUp(input, scope, runtimeLease);
+    assertTenantRuntimeLeaseCurrent(runtimeLease);
     const result = scheduleWhatsAppFollowUp(
       input.clientId,
       input.attemptId,
       input.activityId,
       input.date,
     );
+    assertTenantRuntimeLeaseCurrent(runtimeLease);
     if (!result) throw new Error('No se pudo guardar el seguimiento porque cambió el permiso o la identidad activa.');
-    const persisted = verifiedClient(input.clientId, input.date);
+    const persisted = verifiedClient(scope, runtimeLease, input.clientId, input.date);
     if (!persisted) throw new Error('El seguimiento no pudo confirmarse en el almacenamiento local.');
     return { client: result.client, date: input.date, duplicate: result.duplicate };
   } catch (error) {
-    rollback(previous);
+    rollback(previous, scope, runtimeLease);
     throw error;
   }
 }
