@@ -1,0 +1,207 @@
+name: SEC-FIX A3.2-A Implement
+on:
+  push:
+    branches:
+      - validation/sec-fix-a3-2-inventory
+permissions:
+  contents: write
+jobs:
+  implement:
+    if: github.event.head_commit.message == 'SEC-FIX A3.2-A: implement authenticated active write identity'
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout candidate branch
+        uses: actions/checkout@v4
+        with:
+          ref: agent/sec-fix-a3-2-authenticated-write-identity
+          fetch-depth: 0
+      - name: Assert base before A3.2-A
+        run: test "$(git rev-parse HEAD)" = "23f428a87fcc9382ec6ab8489ae8132776bb6d85"
+      - name: Apply A3.2-A bounded runtime changes
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          def edit(path, old, new, count=1):
+              p=Path(path); s=p.read_text()
+              actual=s.count(old)
+              if actual < count:
+                  raise SystemExit(f'{path}: expected at least {count} occurrences, found {actual}: {old[:80]!r}')
+              s=s.replace(old,new,count)
+              p.write_text(s)
+
+          # Properties: form-bound TenantScope/lease + authenticated creator/default assignee.
+          edit('src/mvp-properties-ui.ts',
+               "import { saveData, state } from './store.js';",
+               "import { authenticatedTenantMember, saveData, state } from './store.js';\nimport { assertTenantCrmScope } from './tenant-storage.js';")
+          edit('src/mvp-properties-ui.ts',
+               "let searchText = '';\nlet photoUploadInProgress: TenantRuntimeLease | null = null;",
+               "let searchText = '';\nlet photoUploadInProgress: TenantRuntimeLease | null = null;\nconst propertyFormWriteContexts = new WeakMap<HTMLFormElement, { scope: TenantScope; runtimeLease: TenantRuntimeLease }>();\n\nfunction capturePropertyFormWriteContext(form: HTMLFormElement): void {\n  if (form.classList.contains('collapsed')) return;\n  const scope = requireCurrentTenantScope();\n  const runtimeLease = captureTenantRuntimeLease(scope);\n  assertTenantRuntimeLeaseCurrent(runtimeLease);\n  assertTenantCrmScope(scope, state.crm);\n  propertyFormWriteContexts.set(form, { scope, runtimeLease });\n}\n\nfunction propertyFormWriteContext(form: HTMLFormElement) {\n  const context = propertyFormWriteContexts.get(form);\n  if (!context) throw new Error('TENANT_FORM_CONTEXT_REQUIRED');\n  assertTenantRuntimeLeaseCurrent(context.runtimeLease);\n  assertTenantCrmScope(context.scope, state.crm);\n  const member = authenticatedTenantMember(context.scope);\n  if (!member) throw new Error('AUTHENTICATED_TENANT_MEMBER_REQUIRED');\n  return { ...context, member };\n}")
+          edit('src/mvp-properties-ui.ts',
+               "  const form = container.querySelector<HTMLFormElement>('#mvp-property-form');\n  if (form) bindPhotoManager(form, formPropertyId);",
+               "  const form = container.querySelector<HTMLFormElement>('#mvp-property-form');\n  if (form) {\n    bindPhotoManager(form, formPropertyId);\n    capturePropertyFormWriteContext(form);\n  }")
+          edit('src/mvp-properties-ui.ts',
+               "    if (currentPhotoUploadInProgress()) return;\n    const values = formValues(form);",
+               "    if (currentPhotoUploadInProgress()) return;\n    const writeContext = propertyFormWriteContext(form);\n    const values = formValues(form);")
+          edit('src/mvp-properties-ui.ts',
+               "      assignedToId: editing?.assignedToId ?? state.activeMemberId,\n      createdById: editing?.createdById ?? state.activeMemberId,",
+               "      assignedToId: editing?.assignedToId ?? writeContext.member.id,\n      createdById: editing?.createdById ?? writeContext.member.id,")
+          edit('src/mvp-properties-ui.ts',
+               "    if (editing) {\n      const index = state.crm.properties.findIndex((item) => item.id === editing.id);",
+               "    assertTenantRuntimeLeaseCurrent(writeContext.runtimeLease);\n    assertTenantCrmScope(writeContext.scope, state.crm);\n    if (editing) {\n      const index = state.crm.properties.findIndex((item) => item.id === editing.id);")
+          edit('src/mvp-properties-ui.ts',
+               "    if (property.publicSlug) {\n      const scope = requireCurrentTenantScope();\n      const runtimeLease = captureTenantRuntimeLease(scope);",
+               "    if (property.publicSlug) {\n      const scope = writeContext.scope;\n      const runtimeLease = writeContext.runtimeLease;\n      assertTenantRuntimeLeaseCurrent(runtimeLease);")
+
+          # Agenda: render-bound tenant lease; authenticated defaults and Activity.
+          edit('src/agenda-ui.ts',
+               "import { saveData, state } from './store.js';",
+               "import { authenticatedTenantMember, saveData, state } from './store.js';\nimport { assertTenantCrmScope } from './tenant-storage.js';\nimport { assertTenantRuntimeLeaseCurrent, captureTenantRuntimeLease, requireCurrentTenantScope, type TenantRuntimeLease } from './tenant-runtime.js';\nimport type { TenantScope } from './active-organization.js';")
+          edit('src/agenda-ui.ts',
+               "import { addActivity, visibleClients, visibleReminders } from './team-access.js';",
+               "import { addActivityForAuthenticatedTenant, visibleClients, visibleReminders } from './team-access.js';")
+          edit('src/agenda-ui.ts',
+               "function saveAndRender(reason: string): void {\n  saveData(reason);",
+               "function agendaWriteMember(scope: TenantScope, runtimeLease: TenantRuntimeLease) {\n  assertTenantRuntimeLeaseCurrent(runtimeLease);\n  assertTenantCrmScope(scope, state.crm);\n  const member = authenticatedTenantMember(scope);\n  if (!member) throw new Error('AUTHENTICATED_TENANT_MEMBER_REQUIRED');\n  return member;\n}\n\nfunction saveAndRender(reason: string, scope: TenantScope, runtimeLease: TenantRuntimeLease): void {\n  agendaWriteMember(scope, runtimeLease);\n  saveData(reason);")
+          edit('src/agenda-ui.ts',
+               "export function renderAgenda(container: HTMLElement): void {\n  const today = todayIsoDate();",
+               "export function renderAgenda(container: HTMLElement): void {\n  const renderScope = requireCurrentTenantScope();\n  const renderLease = captureTenantRuntimeLease(renderScope);\n  assertTenantRuntimeLeaseCurrent(renderLease);\n  assertTenantCrmScope(renderScope, state.crm);\n  const today = todayIsoDate();")
+          edit('src/agenda-ui.ts',
+               "      assignedToId: existing?.assignedToId ?? state.activeMemberId,\n      createdById: existing?.createdById ?? state.activeMemberId,",
+               "      assignedToId: existing?.assignedToId ?? agendaWriteMember(renderScope, renderLease).id,\n      createdById: existing?.createdById ?? agendaWriteMember(renderScope, renderLease).id,")
+          edit('src/agenda-ui.ts', "    saveAndRender(existing ? 'Seguimiento editado' : 'Seguimiento creado');", "    saveAndRender(existing ? 'Seguimiento editado' : 'Seguimiento creado', renderScope, renderLease);")
+          edit('src/agenda-ui.ts', "        addActivity(result.activity);\n        saveAndRender(`Seguimiento de lead completado: ${client.name}`);", "        addActivityForAuthenticatedTenant(renderScope, result.activity);\n        saveAndRender(`Seguimiento de lead completado: ${client.name}`, renderScope, renderLease);")
+          edit('src/agenda-ui.ts', "        addActivity(result.activity);", "        addActivityForAuthenticatedTenant(renderScope, result.activity);")
+          edit('src/agenda-ui.ts', "      saveAndRender('Seguimiento completado');", "      saveAndRender('Seguimiento completado', renderScope, renderLease);")
+          edit('src/agenda-ui.ts', "      saveAndRender('Seguimiento reprogramado');", "      saveAndRender('Seguimiento reprogramado', renderScope, renderLease);")
+          edit('src/agenda-ui.ts', "      saveAndRender('Seguimiento reabierto');", "      saveAndRender('Seguimiento reabierto', renderScope, renderLease);")
+
+          # Offers: visual filtering stays activeMember; write actor/form authority is captured tenant scope+lease.
+          edit('src/offer-workflow-ui.ts',
+               "import { saveData, state } from './store.js';",
+               "import { authenticatedTenantMember, saveData, state } from './store.js';\nimport { assertTenantCrmScope } from './tenant-storage.js';\nimport { assertTenantRuntimeLeaseCurrent, captureTenantRuntimeLease, requireCurrentTenantScope, type TenantRuntimeLease } from './tenant-runtime.js';\nimport type { TenantScope } from './active-organization.js';")
+          edit('src/offer-workflow-ui.ts',
+               "let observerInstalled = false;\nlet enhancementQueued = false;",
+               "let observerInstalled = false;\nlet enhancementQueued = false;\nconst offerWriteContexts = new WeakMap<HTMLFormElement, { scope: TenantScope; runtimeLease: TenantRuntimeLease }>();")
+          edit('src/offer-workflow-ui.ts',
+               "function bindDeferredForms(section: HTMLElement, client: Client): void {",
+               "function captureOfferWriteContext(form: HTMLFormElement): void {\n  if (offerWriteContexts.has(form)) return;\n  const scope = requireCurrentTenantScope();\n  const runtimeLease = captureTenantRuntimeLease(scope);\n  assertTenantRuntimeLeaseCurrent(runtimeLease);\n  assertTenantCrmScope(scope, state.crm);\n  offerWriteContexts.set(form, { scope, runtimeLease });\n}\n\nfunction bindDeferredForms(section: HTMLElement, client: Client): void {")
+          edit('src/offer-workflow-ui.ts',
+               "      if (!body.querySelector('[data-register-offer]')) body.innerHTML = registerForm(client);",
+               "      if (!body.querySelector('[data-register-offer]')) body.innerHTML = registerForm(client);\n      const form = body.querySelector<HTMLFormElement>('[data-register-offer]');\n      if (form) captureOfferWriteContext(form);")
+          edit('src/offer-workflow-ui.ts',
+               "      if (!body.querySelector('[data-register-counteroffer]')) body.innerHTML = counterForm(offer);",
+               "      if (!body.querySelector('[data-register-counteroffer]')) body.innerHTML = counterForm(offer);\n      const form = body.querySelector<HTMLFormElement>('[data-register-counteroffer]');\n      if (form) captureOfferWriteContext(form);")
+          edit('src/offer-workflow-ui.ts',
+               "      if (!body.querySelector('[data-resolve-offer]')) body.innerHTML = resolveForm(client, offer);",
+               "      if (!body.querySelector('[data-resolve-offer]')) body.innerHTML = resolveForm(client, offer);\n      const form = body.querySelector<HTMLFormElement>('[data-resolve-offer]');\n      if (form) captureOfferWriteContext(form);")
+          edit('src/offer-workflow-ui.ts',
+               "function actor() {\n  const member = activeMember();\n  return { id: member.id, role: member.role };\n}\n\nfunction applyResult(result: { crm: typeof state.crm }): void {\n  state.crm = result.crm;",
+               "function writeContext(form: HTMLFormElement) {\n  const context = offerWriteContexts.get(form);\n  if (!context) throw new Error('TENANT_FORM_CONTEXT_REQUIRED');\n  assertTenantRuntimeLeaseCurrent(context.runtimeLease);\n  assertTenantCrmScope(context.scope, state.crm);\n  const member = authenticatedTenantMember(context.scope);\n  if (!member) throw new Error('AUTHENTICATED_TENANT_MEMBER_REQUIRED');\n  return { ...context, member };\n}\n\nfunction applyResult(result: { crm: typeof state.crm }, context: ReturnType<typeof writeContext>): void {\n  assertTenantRuntimeLeaseCurrent(context.runtimeLease);\n  assertTenantCrmScope(context.scope, result.crm);\n  state.crm = result.crm;")
+          edit('src/offer-workflow-ui.ts', "    const data = new FormData(form);\n    const clientId = Number(form.dataset.registerOffer);\n    const result = registerOffer(state.crm, actor(), {", "    const context = writeContext(form);\n    const data = new FormData(form);\n    const clientId = Number(form.dataset.registerOffer);\n    const result = registerOffer(state.crm, { id: context.member.id, role: context.member.role }, {")
+          edit('src/offer-workflow-ui.ts', "    applyResult(result);", "    applyResult(result, context);")
+          edit('src/offer-workflow-ui.ts', "    const data = new FormData(form);\n    const result = registerCounterOffer(state.crm, actor(), {", "    const context = writeContext(form);\n    const data = new FormData(form);\n    const result = registerCounterOffer(state.crm, { id: context.member.id, role: context.member.role }, {")
+          edit('src/offer-workflow-ui.ts', "    applyResult(result);", "    applyResult(result, context);")
+          edit('src/offer-workflow-ui.ts', "    const data = new FormData(form);\n    const result = resolveOffer(state.crm, actor(), {", "    const context = writeContext(form);\n    const data = new FormData(form);\n    const result = resolveOffer(state.crm, { id: context.member.id, role: context.member.role }, {")
+          edit('src/offer-workflow-ui.ts', "    applyResult(result);", "    applyResult(result, context);")
+
+          # Reservation UI is compact; replace write actor with form-bound canonical tenant context.
+          p=Path('src/reservation-workflow-ui.ts'); s=p.read_text()
+          s=s.replace("import { saveData, state } from './store.js';", "import { authenticatedTenantMember, saveData, state } from './store.js';\nimport { assertTenantCrmScope } from './tenant-storage.js';\nimport { assertTenantRuntimeLeaseCurrent, captureTenantRuntimeLease, requireCurrentTenantScope, type TenantRuntimeLease } from './tenant-runtime.js';\nimport type { TenantScope } from './active-organization.js';")
+          s=s.replace("const SECTION = '[data-lead-reservations]'; let observing = false;", "const SECTION = '[data-lead-reservations]'; let observing = false;\nconst reservationWriteContexts = new WeakMap<HTMLFormElement, { scope: TenantScope; runtimeLease: TenantRuntimeLease }>();")
+          s=s.replace("function renderSection(card: HTMLElement, client: Client, current?: HTMLElement): void { const host=card.querySelector<HTMLElement>('.mvp-lead-full-content'); if(!host)return; const wrapper=document.createElement('div');wrapper.innerHTML=section(client);const el=wrapper.firstElementChild;if(!(el instanceof HTMLElement))return;if(current)current.replaceWith(el);else{const offers=host.querySelector('[data-lead-offers]');const anchor=offers?.nextSibling??host.querySelector('.mvp-lead-history, .mvp-lead-matches, .mvp-lead-full-actions');host.insertBefore(el,anchor);}const details=el.querySelector<HTMLDetailsElement>('[data-reservation-disclosure]');details?.addEventListener('toggle',()=>{const target=details.querySelector<HTMLElement>('[data-reservation-form-host]');if(target)target.innerHTML=details.open?form(client):'';}); }",
+          "function captureReservationWriteContext(form: HTMLFormElement): void { if(reservationWriteContexts.has(form))return; const scope=requireCurrentTenantScope(); const runtimeLease=captureTenantRuntimeLease(scope); assertTenantRuntimeLeaseCurrent(runtimeLease); assertTenantCrmScope(scope,state.crm); reservationWriteContexts.set(form,{scope,runtimeLease}); }\nfunction reservationWriteContext(form: HTMLFormElement){const context=reservationWriteContexts.get(form);if(!context)throw new Error('TENANT_FORM_CONTEXT_REQUIRED');assertTenantRuntimeLeaseCurrent(context.runtimeLease);assertTenantCrmScope(context.scope,state.crm);const member=authenticatedTenantMember(context.scope);if(!member)throw new Error('AUTHENTICATED_TENANT_MEMBER_REQUIRED');return{...context,member};}\nfunction renderSection(card: HTMLElement, client: Client, current?: HTMLElement): void { const host=card.querySelector<HTMLElement>('.mvp-lead-full-content'); if(!host)return; const wrapper=document.createElement('div');wrapper.innerHTML=section(client);const el=wrapper.firstElementChild;if(!(el instanceof HTMLElement))return;if(current)current.replaceWith(el);else{const offers=host.querySelector('[data-lead-offers]');const anchor=offers?.nextSibling??host.querySelector('.mvp-lead-history, .mvp-lead-matches, .mvp-lead-full-actions');host.insertBefore(el,anchor);}el.querySelectorAll<HTMLFormElement>('[data-update-reservation]').forEach(captureReservationWriteContext);const details=el.querySelector<HTMLDetailsElement>('[data-reservation-disclosure]');details?.addEventListener('toggle',()=>{const target=details.querySelector<HTMLElement>('[data-reservation-form-host]');if(target){target.innerHTML=details.open?form(client):'';const created=target.querySelector<HTMLFormElement>('[data-register-reservation]');if(created)captureReservationWriteContext(created);}}); }")
+          old="function actor(){const x=activeMember();return{id:x.id,role:x.role};}\nfunction apply(result:{crm:typeof state.crm}):void{state.crm=result.crm;saveData('Flujo comercial de reservas');document.dispatchEvent(new CustomEvent('trv-render'));}\ndocument.addEventListener('submit',(event)=>{const target=event.target;if(!(target instanceof HTMLFormElement))return;if(!target.matches('[data-register-reservation],[data-update-reservation]'))return;event.preventDefault();if(target.dataset.submitting==='true')return;busy(target,true);try{const data=new FormData(target);if(target.matches('[data-register-reservation]')){const rawOffer=String(data.get('offerId')||'');apply(registerReservation(state.crm,actor(),{clientId:Number(target.dataset.registerReservation),propertyId:Number(data.get('propertyId')),offerId:rawOffer?Number(rawOffer):undefined,amount:Number(data.get('amount')),currency:String(data.get('currency')||'') as OfferCurrency,paymentMethod:String(data.get('paymentMethod')||''),conditions:String(data.get('conditions')||''),reservedAt:String(data.get('reservedAt')||''),expiresAt:String(data.get('expiresAt')||'')}));}else{apply(updateReservationStatus(state.crm,actor(),{reservationId:Number(target.dataset.updateReservation),status:String(data.get('status')||'')}));}}catch(value){busy(target,false);error(target,value);}});"
+          new="function apply(result:{crm:typeof state.crm},context:ReturnType<typeof reservationWriteContext>):void{assertTenantRuntimeLeaseCurrent(context.runtimeLease);assertTenantCrmScope(context.scope,result.crm);state.crm=result.crm;saveData('Flujo comercial de reservas');document.dispatchEvent(new CustomEvent('trv-render'));}\ndocument.addEventListener('submit',(event)=>{const target=event.target;if(!(target instanceof HTMLFormElement))return;if(!target.matches('[data-register-reservation],[data-update-reservation]'))return;event.preventDefault();if(target.dataset.submitting==='true')return;busy(target,true);try{const context=reservationWriteContext(target);const actor={id:context.member.id,role:context.member.role};const data=new FormData(target);if(target.matches('[data-register-reservation]')){const rawOffer=String(data.get('offerId')||'');apply(registerReservation(state.crm,actor,{clientId:Number(target.dataset.registerReservation),propertyId:Number(data.get('propertyId')),offerId:rawOffer?Number(rawOffer):undefined,amount:Number(data.get('amount')),currency:String(data.get('currency')||'') as OfferCurrency,paymentMethod:String(data.get('paymentMethod')||''),conditions:String(data.get('conditions')||''),reservedAt:String(data.get('reservedAt')||''),expiresAt:String(data.get('expiresAt')||'')}),context);}else{apply(updateReservationStatus(state.crm,actor,{reservationId:Number(target.dataset.updateReservation),status:String(data.get('status')||'')}),context);}}catch(value){busy(target,false);error(target,value);}});"
+          if old not in s: raise SystemExit('reservation actor block not found')
+          s=s.replace(old,new)
+          p.write_text(s)
+
+          # Active Activity callers: source/reactivation, qualification and lead follow-up.
+          edit('src/lead-source-reactivation-ui.ts', "import { addActivity, visibleClients } from './team-access.js';", "import { addActivityForAuthenticatedTenant, visibleClients } from './team-access.js';\nimport { assertTenantRuntimeLeaseCurrent, captureTenantRuntimeLease, requireCurrentTenantScope, type TenantRuntimeLease } from './tenant-runtime.js';\nimport type { TenantScope } from './active-organization.js';")
+          edit('src/lead-source-reactivation-ui.ts', "  expiresAt: number;\n}", "  expiresAt: number;\n  scope: TenantScope;\n  runtimeLease: TenantRuntimeLease;\n}")
+          edit('src/lead-source-reactivation-ui.ts', "    pendingSourceActivity = activity ? {\n      clientId,", "    const scope = requireCurrentTenantScope();\n    const runtimeLease = captureTenantRuntimeLease(scope);\n    assertTenantRuntimeLeaseCurrent(runtimeLease);\n    pendingSourceActivity = activity ? {\n      clientId,")
+          edit('src/lead-source-reactivation-ui.ts', "      expiresAt: Date.now() + 15_000,\n    } : null;", "      expiresAt: Date.now() + 15_000,\n      scope,\n      runtimeLease,\n    } : null;")
+          edit('src/lead-source-reactivation-ui.ts', "  const client = visibleClients().find((item) => item.id === pending.clientId);", "  try { assertTenantRuntimeLeaseCurrent(pending.runtimeLease); } catch { pendingSourceActivity = null; return; }\n  const client = visibleClients().find((item) => item.id === pending.clientId);")
+          edit('src/lead-source-reactivation-ui.ts', "  addActivity(pending.activity);", "  addActivityForAuthenticatedTenant(pending.scope, pending.activity);")
+          edit('src/lead-source-reactivation-ui.ts', "  activitiesForClientSave(previous, client).forEach((activity) => addActivity(activity));", "  const scope = requireCurrentTenantScope();\n  activitiesForClientSave(previous, client).forEach((activity) => addActivityForAuthenticatedTenant(scope, activity));")
+          edit('src/lead-source-reactivation-ui.ts', "  addActivity(result.activity);", "  addActivityForAuthenticatedTenant(requireCurrentTenantScope(), result.activity);")
+
+          edit('src/lead-qualification-ui.ts', "import { addActivity, visibleClients, visibleConversations } from './team-access.js';", "import { addActivityForAuthenticatedTenant, visibleClients, visibleConversations } from './team-access.js';\nimport { assertTenantRuntimeLeaseCurrent, captureTenantRuntimeLease, requireCurrentTenantScope } from './tenant-runtime.js';")
+          edit('src/lead-qualification-ui.ts', "  const deterministic = analyzeLeadQualification(client, text, session.source);", "  const scope = requireCurrentTenantScope();\n  const runtimeLease = captureTenantRuntimeLease(scope);\n  assertTenantRuntimeLeaseCurrent(runtimeLease);\n  const deterministic = analyzeLeadQualification(client, text, session.source);")
+          edit('src/lead-qualification-ui.ts', "  qualificationActivities(client.id, deterministic).forEach(addActivity);", "  qualificationActivities(client.id, deterministic).forEach((activity) => addActivityForAuthenticatedTenant(scope, activity));")
+          edit('src/lead-qualification-ui.ts', "  const intelligent = await requestIntelligentQualification(text, deterministic);\n  session.analysis = {", "  const intelligent = await requestIntelligentQualification(text, deterministic);\n  assertTenantRuntimeLeaseCurrent(runtimeLease);\n  session.analysis = {")
+          edit('src/lead-qualification-ui.ts', "    const current = visibleClients().find((item) => item.id === client.id);", "    const scope = requireCurrentTenantScope();\n    const runtimeLease = captureTenantRuntimeLease(scope);\n    assertTenantRuntimeLeaseCurrent(runtimeLease);\n    const current = visibleClients().find((item) => item.id === client.id);")
+          edit('src/lead-qualification-ui.ts', "    qualificationActivities(current.id, analysis, result).slice(1).forEach(addActivity);", "    qualificationActivities(current.id, analysis, result).slice(1).forEach((activity) => addActivityForAuthenticatedTenant(scope, activity));")
+          edit('src/lead-qualification-ui.ts', "    saveData(`Calificación aplicada: ${current.name}`);", "    assertTenantRuntimeLeaseCurrent(runtimeLease);\n    saveData(`Calificación aplicada: ${current.name}`);")
+
+          edit('src/mvp-leads-ui.ts', "import { addActivity,", "import { addActivityForAuthenticatedTenant,")
+          # two active follow-up calls
+          edit('src/mvp-leads-ui.ts', "    addActivity(result.activity);", "    addActivityForAuthenticatedTenant(requireCurrentTenantScope(), result.activity);", 2)
+          # Add runtime import if not already present.
+          p=Path('src/mvp-leads-ui.ts'); s=p.read_text()
+          if "from './tenant-runtime.js'" not in s:
+              anchor="import { escapeHtml"
+              idx=s.find(anchor)
+              if idx<0: raise SystemExit('mvp-leads utils import anchor missing')
+              s=s[:idx]+"import { requireCurrentTenantScope } from './tenant-runtime.js';\n"+s[idx:]
+              p.write_text(s)
+
+          # Recommendation telemetry: actor is authenticated member, not visual view member.
+          edit('src/lead-recommendation-instrumentation.ts', "import { state } from './store.js';\nimport { activeMember, visibleClients } from './team-access.js';", "import { authenticatedTenantMember, state } from './store.js';\nimport { visibleClients } from './team-access.js';\nimport { requireCurrentTenantScope } from './tenant-runtime.js';")
+          edit('src/lead-recommendation-instrumentation.ts', "  const visible = visibleClients();\n  return {\n    organizationId: state.crm.organization.id,\n    actorId: activeMember().id,", "  const visible = visibleClients();\n  const scope = requireCurrentTenantScope();\n  const member = authenticatedTenantMember(scope);\n  if (!member) throw new Error('AUTHENTICATED_TENANT_MEMBER_REQUIRED');\n  return {\n    organizationId: scope.organizationId,\n    actorId: member.id,")
+
+          # WhatsApp human identity + pending attempt storage: canonical tenant/member, no activeMemberId.
+          edit('src/whatsapp-human-identity.ts', "import { state } from './store.js';", "import { authenticatedTenantMember, state } from './store.js';\nimport { requireCurrentTenantScope } from './tenant-runtime.js';\nimport { assertTenantCrmScope } from './tenant-storage.js';")
+          old="function currentContext(): { context: CurrentIdentityContext | null; reason: string } {\n  const member = state.crm.teamMembers.find((item) => item.id === state.activeMemberId);\n  if (!member || member.status !== 'Activo') {\n    return { context: null, reason: 'El miembro activo no está disponible para firmar mensajes.' };\n  }\n\n  const session = getCloudSession();\n  if (session && !member.userId) {\n    return { context: null, reason: 'No se pudo asociar la sesión actual con un miembro verificable.' };\n  }\n  if (session && member.userId !== session.userId) {\n    return { context: null, reason: 'El usuario autenticado no coincide con el miembro activo.' };\n  }\n\n  const memberUserId = member.userId || '';\n  const actorKey = session\n    ? `cloud:${session.userId}`\n    : `local:${memberUserId || member.id}`;"
+          new="function currentContext(): { context: CurrentIdentityContext | null; reason: string } {\n  let scope;\n  try { scope = requireCurrentTenantScope(); } catch {\n    return { context: null, reason: 'No hay un tenant autenticado vigente para firmar mensajes.' };\n  }\n  try { assertTenantCrmScope(scope, state.crm); } catch {\n    return { context: null, reason: 'El CRM activo no coincide con el tenant autenticado.' };\n  }\n  const member = authenticatedTenantMember(scope);\n  if (!member) {\n    return { context: null, reason: 'No existe un miembro autenticado activo y único para firmar mensajes.' };\n  }\n\n  const session = getCloudSession();\n  if (session && session.userId !== scope.userId) {\n    return { context: null, reason: 'La sesión no coincide con el tenant autenticado.' };\n  }\n\n  const memberUserId = member.userId || '';\n  const actorKey = session ? `cloud:${scope.userId}` : `local:${scope.userId}`;"
+          edit('src/whatsapp-human-identity.ts', old, new)
+          edit('src/whatsapp-human-identity.ts', "      organizationId: state.crm.organization.id.trim(),", "      organizationId: scope.organizationId,")
+
+          edit('src/whatsapp-contact.ts', "import { saveData, state } from './store.js';", "import { authenticatedTenantMember, saveData, state } from './store.js';\nimport { currentTenantScope, requireCurrentTenantScope } from './tenant-runtime.js';")
+          edit('src/whatsapp-contact.ts', "import { addActivity, visibleClients } from './team-access.js';", "import { addActivityForAuthenticatedTenant, visibleClients } from './team-access.js';")
+          edit('src/whatsapp-contact.ts', "function attemptStorageKey(actorId = state.activeMemberId): string {", "function attemptStorageKey(actorId: number): string {")
+          edit('src/whatsapp-contact.ts', "function validAttemptShape(attempt: Partial<PendingWhatsAppAttempt>, now: Date): attempt is PendingWhatsAppAttempt {", "function validAttemptShape(attempt: Partial<PendingWhatsAppAttempt>, now: Date, expectedActorId: number): attempt is PendingWhatsAppAttempt {")
+          edit('src/whatsapp-contact.ts', "    && attempt.actorId === state.activeMemberId", "    && attempt.actorId === expectedActorId")
+          edit('src/whatsapp-contact.ts', "export function loadPendingWhatsAppAttemptResult(now = new Date()): PendingWhatsAppAttemptLoadResult {\n  const key = attemptStorageKey();", "export function loadPendingWhatsAppAttemptResult(now = new Date()): PendingWhatsAppAttemptLoadResult {\n  const scope = currentTenantScope();\n  const member = authenticatedTenantMember(scope);\n  if (!scope || !member) return { attempt: null, invalidated: true, reason: 'No existe un actor autenticado vigente.' };\n  const key = attemptStorageKey(member.id);")
+          edit('src/whatsapp-contact.ts', "    if (!validAttemptShape(attempt, now) || recordedActivityForAttempt(attempt.id)) {", "    if (!validAttemptShape(attempt, now, member.id) || recordedActivityForAttempt(attempt.id)) {")
+          edit('src/whatsapp-contact.ts', "  addActivity({", "  addActivityForAuthenticatedTenant(requireCurrentTenantScope(), {", 2)
+
+          # Visit cutover historical/local path: authenticated actor + Activity, scope captured for every path.
+          edit('src/visit-workflow-cutover.ts', "import { saveData, state } from './store.js';", "import { authenticatedTenantMember, saveData, state } from './store.js';")
+          edit('src/visit-workflow-cutover.ts', "import { activeMember, addActivity } from './team-access.js';", "import { addActivityForAuthenticatedTenant } from './team-access.js';")
+          edit('src/visit-workflow-cutover.ts', "function historicalCoordinate(input: CoordinateVisitCutoverInput): string {\n  const actor = activeMember();", "function historicalCoordinate(input: CoordinateVisitCutoverInput, scope: ReturnType<typeof requireCurrentTenantScope>): string {\n  const actor = authenticatedTenantMember(scope);\n  if (!actor) throw new Error('AUTHENTICATED_TENANT_MEMBER_REQUIRED');")
+          edit('src/visit-workflow-cutover.ts', "  addActivity(result.activity);", "  addActivityForAuthenticatedTenant(scope, result.activity);")
+          edit('src/visit-workflow-cutover.ts', "function historicalResolve(input: RegisterVisitResultCutoverInput): string {\n  const actor = activeMember();", "function historicalResolve(input: RegisterVisitResultCutoverInput, scope: ReturnType<typeof requireCurrentTenantScope>): string {\n  const actor = authenticatedTenantMember(scope);\n  if (!actor) throw new Error('AUTHENTICATED_TENANT_MEMBER_REQUIRED');")
+          edit('src/visit-workflow-cutover.ts', "  addActivity(result.activity);", "  addActivityForAuthenticatedTenant(scope, result.activity);")
+          edit('src/visit-workflow-cutover.ts', "  const session = getCloudSession();\n  const scope = session ? requireCurrentTenantScope() : null;\n  const runtimeLease = scope ? captureTenantRuntimeLease(scope) : null;", "  const session = getCloudSession();\n  const scope = requireCurrentTenantScope();\n  const runtimeLease = captureTenantRuntimeLease(scope);\n  assertTenantRuntimeLeaseCurrent(runtimeLease);")
+          edit('src/visit-workflow-cutover.ts', "      if (!scope || !runtimeLease) throw new Error('TENANT_RUNTIME_SCOPE_REQUIRED');\n      return visitTransactionAuthorityActiveV2(scope, runtimeLease);", "      return visitTransactionAuthorityActiveV2(scope, runtimeLease);")
+          edit('src/visit-workflow-cutover.ts', "      const reason = historicalCoordinate(input);", "      assertTenantRuntimeLeaseCurrent(runtimeLease);\n      const reason = historicalCoordinate(input, scope);")
+          edit('src/visit-workflow-cutover.ts', "      if (!scope || !runtimeLease) throw new Error('TENANT_RUNTIME_SCOPE_REQUIRED');\n      assertTenantRuntimeLeaseCurrent(runtimeLease);\n      const before = structuredClone(state.crm);\n      const reason = historicalCoordinate(input);", "      assertTenantRuntimeLeaseCurrent(runtimeLease);\n      const before = structuredClone(state.crm);\n      const reason = historicalCoordinate(input, scope);")
+          edit('src/visit-workflow-cutover.ts', "      if (!scope || !runtimeLease) throw new Error('TENANT_RUNTIME_SCOPE_REQUIRED');\n      assertTenantRuntimeLeaseCurrent(runtimeLease);\n      const result = await invokeVisitTransactionV2(scope, {", "      assertTenantRuntimeLeaseCurrent(runtimeLease);\n      const result = await invokeVisitTransactionV2(scope, {")
+          # second public function scope block and branches
+          edit('src/visit-workflow-cutover.ts', "  const session = getCloudSession();\n  const scope = session ? requireCurrentTenantScope() : null;\n  const runtimeLease = scope ? captureTenantRuntimeLease(scope) : null;", "  const session = getCloudSession();\n  const scope = requireCurrentTenantScope();\n  const runtimeLease = captureTenantRuntimeLease(scope);\n  assertTenantRuntimeLeaseCurrent(runtimeLease);")
+          edit('src/visit-workflow-cutover.ts', "      if (!scope || !runtimeLease) throw new Error('TENANT_RUNTIME_SCOPE_REQUIRED');\n      return visitTransactionAuthorityActiveV2(scope, runtimeLease);", "      return visitTransactionAuthorityActiveV2(scope, runtimeLease);")
+          edit('src/visit-workflow-cutover.ts', "      const reason = historicalResolve(input);", "      assertTenantRuntimeLeaseCurrent(runtimeLease);\n      const reason = historicalResolve(input, scope);")
+          edit('src/visit-workflow-cutover.ts', "      if (!scope || !runtimeLease) throw new Error('TENANT_RUNTIME_SCOPE_REQUIRED');\n      assertTenantRuntimeLeaseCurrent(runtimeLease);\n      const before = structuredClone(state.crm);\n      const reason = historicalResolve(input);", "      assertTenantRuntimeLeaseCurrent(runtimeLease);\n      const before = structuredClone(state.crm);\n      const reason = historicalResolve(input, scope);")
+          edit('src/visit-workflow-cutover.ts', "      if (!scope || !runtimeLease) throw new Error('TENANT_RUNTIME_SCOPE_REQUIRED');\n      assertTenantRuntimeLeaseCurrent(runtimeLease);\n      const visitUid = canonicalUuid(input.visit.uid);", "      assertTenantRuntimeLeaseCurrent(runtimeLease);\n      const visitUid = canonicalUuid(input.visit.uid);")
+
+          # Guard no accidental activeMember write source remains in migrated writer functions.
+          for f in ['src/mvp-properties-ui.ts','src/agenda-ui.ts','src/offer-workflow-ui.ts','src/reservation-workflow-ui.ts','src/lead-recommendation-instrumentation.ts','src/whatsapp-human-identity.ts','src/whatsapp-contact.ts','src/visit-workflow-cutover.ts']:
+              txt=Path(f).read_text()
+              if 'queueCloudSave(state.crm)' in txt:
+                  raise SystemExit(f'{f}: implicit cloud save introduced')
+          PY
+      - name: Compile A3.2-A before commit
+        run: |
+          npm ci
+          npx tsc --noEmit
+      - name: Commit A3.2-A
+        run: |
+          git config user.name "francoagustin324"
+          git config user.email "francoagustinsolis@gmail.com"
+          git add src
+          git diff --cached --stat
+          git commit -m "SEC-FIX A3.2-A: authenticate active write identity"
+          git push origin HEAD:agent/sec-fix-a3-2-authenticated-write-identity
