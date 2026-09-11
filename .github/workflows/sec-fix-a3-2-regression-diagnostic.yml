@@ -1,19 +1,17 @@
-name: SEC-FIX A3.2 Page Load Commit Bisect
+name: SEC-FIX A3.2 A Commit File Group Isolation
 on:
   push:
     branches: [validation/sec-fix-a3-2-inventory]
 permissions:
   contents: read
 jobs:
-  bisect-page-load:
-    if: contains(github.event.head_commit.message, 'bisect a3.2 page load effect')
+  isolate-a-files:
+    if: contains(github.event.head_commit.message, 'isolate a3.2-a page load file group')
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     env:
       BASE_SHA: 23f428a87fcc9382ec6ab8489ae8132776bb6d85
       A_SHA: d097a1cc9432e7233f4f6968083319aa2a13f623
-      B_SHA: aa91b36121b315cf910146fa5fa64b3b88fd37da
-      CANDIDATE_SHA: e7fb056b6ad90bfc54db896cb682e9697f656784
     steps:
       - uses: actions/checkout@v4
         with:
@@ -28,19 +26,37 @@ jobs:
           set -euo pipefail
           google-chrome --version
           echo "RUNNER=${RUNNER_OS}/${RUNNER_ARCH}"
-      - name: Prepare exact worktrees
+      - name: Prepare A variants with ephemeral group reversions
         shell: bash
         run: |
           set -euo pipefail
-          for spec in "base:$BASE_SHA" "a:$A_SHA" "b:$B_SHA" "candidate:$CANDIDATE_SHA"; do
-            label="${spec%%:*}"; sha="${spec#*:}"; dir="/tmp/a32-${label}"
+          make_variant() {
+            label="$1"; shift
+            dir="/tmp/a32-${label}"
             rm -rf "$dir"
-            git worktree add --detach "$dir" "$sha"
-            test "$(git -C "$dir" rev-parse HEAD)" = "$sha"
+            git worktree add --detach "$dir" "$A_SHA"
+            test "$(git -C "$dir" rev-parse HEAD)" = "$A_SHA"
+            if [ "$#" -gt 0 ]; then
+              git -C "$dir" checkout "$BASE_SHA" -- "$@"
+            fi
             (cd "$dir" && npm ci >/dev/null && npm run build >/dev/null)
-            echo "$label=$sha"
-          done
-      - name: Probe Chrome DOMContentLoaded proxy by dump-dom
+            echo "VARIANT=$label REVERTED=$*"
+          }
+          make_variant a-original
+          make_variant revert-g1 \
+            src/agenda-ui.ts \
+            src/lead-qualification-ui.ts \
+            src/lead-recommendation-instrumentation.ts \
+            src/lead-source-reactivation-ui.ts \
+            src/mvp-leads-ui.ts \
+            src/mvp-properties-ui.ts
+          make_variant revert-g2 \
+            src/offer-workflow-ui.ts \
+            src/reservation-workflow-ui.ts \
+            src/visit-workflow-cutover.ts \
+            src/whatsapp-contact.ts \
+            src/whatsapp-human-identity.ts
+      - name: Probe group variants
         shell: bash
         run: |
           set -euo pipefail
@@ -52,34 +68,30 @@ jobs:
               env PORT="$port" SUPABASE_URL='' SUPABASE_PUBLISHABLE_KEY='' SUPABASE_SECRET_KEY='' SUPABASE_SERVICE_ROLE_KEY='' LEAD_QUALIFICATION_AI_ENDPOINT='' LEAD_QUALIFICATION_AI_KEY='' LEAD_QUALIFICATION_AI_MODEL='' node dist/server.js
             ) >"$out" 2>"$err" &
             pid=$!
-            start=$(date +%s%3N)
             ok=0
             for i in $(seq 1 120); do
               if curl -fsS --max-time 1 "http://127.0.0.1:${port}/health" >/dev/null 2>&1; then ok=1; break; fi
               sleep 0.25
             done
             test "$ok" -eq 1
-            health_ms=$(( $(date +%s%3N) - start ))
             root_meta=$(curl -sS --max-time 5 -o /tmp/${label}-root.html -w 'HTTP=%{http_code} TIME=%{time_total}' "http://127.0.0.1:${port}/")
-            chrome_start=$(date +%s%3N)
+            start=$(date +%s%3N)
             set +e
             timeout 30s google-chrome --headless=new --no-sandbox --disable-gpu --dump-dom "http://127.0.0.1:${port}/" >/tmp/${label}-dom.out 2>/tmp/${label}-chrome.err
             rc=$?
             set -e
-            chrome_ms=$(( $(date +%s%3N) - chrome_start ))
+            ms=$(( $(date +%s%3N) - start ))
             alive=0; kill -0 "$pid" 2>/dev/null && alive=1 || true
-            echo "RESULT label=$label sha=$(git -C "$dir" rev-parse HEAD) port=$port health_ms=$health_ms root=[$root_meta] chrome_rc=$rc chrome_ms=$chrome_ms dom_bytes=$(wc -c </tmp/${label}-dom.out) server_alive=$alive"
+            echo "RESULT label=$label chrome_rc=$rc chrome_ms=$ms dom_bytes=$(wc -c </tmp/${label}-dom.out) root=[$root_meta] server_alive=$alive"
             echo "SERVER_STDOUT[$label]=$(tr '\n' ' ' < "$out")"
             echo "SERVER_STDERR[$label]=$(tr '\n' ' ' < "$err")"
             if kill -0 "$pid" 2>/dev/null; then kill -TERM "$pid" 2>/dev/null || true; set +e; wait "$pid"; set -e; fi
           }
-          probe base /tmp/a32-base 64201
-          probe a /tmp/a32-a 64202
-          probe b /tmp/a32-b 64203
-          probe candidate /tmp/a32-candidate 64204
-      - name: Classify introducing commit
+          probe a-original /tmp/a32-a-original 64301
+          probe revert-g1 /tmp/a32-revert-g1 64302
+          probe revert-g2 /tmp/a32-revert-g2 64303
+      - name: Emit isolation rule
         shell: bash
         run: |
           set -euo pipefail
-          extract_rc(){ grep "RESULT label=$1 " "$GITHUB_STEP_SUMMARY" 2>/dev/null || true; }
-          echo "Review RESULT lines above. Expected discriminator: rc=0 loads; rc=124 hangs."
+          echo 'Interpretation: original rc=124 expected. A reverted group that returns rc=0 contains the causal change (or required interaction).'
