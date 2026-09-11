@@ -1,0 +1,27 @@
+name: SEC-FIX A3.2 Test Inventory
+on:
+  push:
+    branches: [validation/sec-fix-a3-2-inventory]
+permissions:
+  contents: read
+jobs:
+  inventory:
+    if: contains(github.event.head_commit.message, 'inventory relevant tests')
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: aa91b36121b315cf910146fa5fa64b3b88fd37da
+          fetch-depth: 1
+      - name: List relevant tests
+        shell: bash
+        run: |
+          echo '=== candidate ==='
+          git rev-parse HEAD
+          echo '=== relevant test filenames ==='
+          find src/tests -maxdepth 1 -type f -printf '%f\n' | sort | grep -Ei 'a3-1|property|agenda|reminder|offer|reservation|qualif|reactiv|follow|team|tenant|visit|whatsapp|cloud|activity' || true
+          echo '=== direct module references ==='
+          for term in mvp-properties-ui agenda-ui offer-workflow-ui reservation-workflow-ui lead-qualification-ui lead-source-reactivation-ui followup-persistence mvp-users-ui whatsapp-contact visit-workflow-cutover; do
+            echo "--- $term ---"
+            grep -RFl --include='*.test.ts' "$term" src/tests | sort || true
+          done
