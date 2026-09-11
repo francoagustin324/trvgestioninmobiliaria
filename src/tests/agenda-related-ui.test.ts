@@ -11,9 +11,9 @@ test('el formulario usa leads visibles y toda escritura/Activity queda ligada al
   assert.ok(ui.includes("import { addActivityForAuthenticatedTenant, visibleClients, visibleReminders } from './team-access.js'"));
   assert.ok(ui.includes('const renderScope = requireCurrentTenantScope()'));
   assert.ok(ui.includes('const renderLease = captureTenantRuntimeLease(renderScope)'));
-  assert.ok(ui.includes('const member = authenticatedTenantMember(renderScope)'));
-  assert.ok(ui.includes('assignedToId: existing?.assignedToId ?? member.id'));
-  assert.ok(ui.includes('createdById: existing?.createdById ?? member.id'));
+  assert.match(ui, /function agendaWriteMember\(scope:\s*TenantScope,\s*runtimeLease:\s*TenantRuntimeLease\)[\s\S]*assertTenantRuntimeLeaseCurrent\(runtimeLease\)[\s\S]*assertTenantCrmScope\(scope,\s*state\.crm\)[\s\S]*authenticatedTenantMember\(scope\)/);
+  assert.ok(ui.includes('assignedToId: existing?.assignedToId ?? agendaWriteMember(renderScope, renderLease).id'));
+  assert.ok(ui.includes('createdById: existing?.createdById ?? agendaWriteMember(renderScope, renderLease).id'));
   assert.ok(ui.includes('addActivityForAuthenticatedTenant(renderScope, result.activity)'));
   assert.ok(!ui.includes('addActivity(result.activity)'));
   assert.ok(!ui.includes('actorId: state.activeMemberId'));
