@@ -1,4 +1,5 @@
 import { queueCloudSave } from './cloud-api-compatible.js';
+import type { TenantScope } from './active-organization.js';
 import type {
   ActivityEntry,
   ConversationMessage,
@@ -11,12 +12,21 @@ import type {
 } from './models.js';
 import { defaultSettings, initialData } from './models.js';
 import {
-  activateAccountStorage,
-  hasLocalBackup as hasStoredLocalBackup,
-  readLocalSnapshot,
-  restoreLatestBackup,
-  writeLocalSnapshot,
-} from './sync-safety.js';
+  assertTenantCrmScope,
+  hasTenantLocalBackup,
+  readTenantSnapshot,
+  restoreLatestTenantBackup,
+  writeTenantSnapshot,
+} from './tenant-storage.js';
+import {
+  assertTenantRuntimeLeaseCurrent,
+  captureTenantRuntimeLease,
+  currentTenantScope,
+  requireCurrentTenantScope,
+  TENANT_RUNTIME_STALE,
+  tenantScopesEqual,
+  type TenantRuntimeLease,
+} from './tenant-runtime.js';
 import {
   canonicalUuid,
   normalizedSyncMetadata,
@@ -179,9 +189,15 @@ function normalizedData(value: Partial<CrmData>): CrmData {
   };
 }
 
-function loadData(): CrmData {
-  const local = readLocalSnapshot();
-  return local ? normalizedData(local) : normalizedData(structuredClone(initialData));
+function scopedInitialData(scope: TenantScope): CrmData {
+  const initial = structuredClone(initialData);
+  initial.organization.id = scope.organizationId;
+  return normalizedData(initial);
+}
+
+function loadData(scope: TenantScope): CrmData {
+  const local = readTenantSnapshot(scope);
+  return local ? normalizedData(local) : scopedInitialData(scope);
 }
 
 function loadActiveMemberId(crm: CrmData): number {
@@ -193,7 +209,7 @@ function loadActiveMemberId(crm: CrmData): number {
     ?? 1;
 }
 
-const loadedCrm = loadData();
+const loadedCrm = normalizedData(structuredClone(initialData));
 
 export const state = {
   crm: loadedCrm,
@@ -219,10 +235,19 @@ function resetTransientState(): void {
   state.editingContactId = null;
 }
 
-export function activateStorageForCurrentSession(): void {
-  activateAccountStorage();
-  state.crm = loadData();
+export function activateStorageForTenant(scope: TenantScope): void {
+  state.crm = loadData(scope);
+  assertTenantCrmScope(scope, state.crm);
   resetTransientState();
+}
+
+/**
+ * Transitional compatibility surface for latent callers/tests. It never derives
+ * tenant from session, CRM or membership order: it can only use the already
+ * installed runtime authority and therefore fails closed before C1 bootstrap.
+ */
+export function activateStorageForCurrentSession(): void {
+  activateStorageForTenant(requireCurrentTenantScope());
 }
 
 export function setActiveMemberId(memberId: number): void {
@@ -237,39 +262,99 @@ export function setActiveMemberId(memberId: number): void {
     : null;
 }
 
-export function replaceData(data: CrmData, syncCloud = false): void {
-  state.crm = normalizedData(data);
-  resetTransientState();
-  writeLocalSnapshot(state.crm, {
+export function replaceDataForTenant(scope: TenantScope, data: CrmData, syncCloud = false): boolean {
+  if (!tenantScopesEqual(currentTenantScope(), scope)) return false;
+  assertTenantCrmScope(scope, data);
+  const normalized = normalizedData(data);
+  assertTenantCrmScope(scope, normalized);
+  writeTenantSnapshot(scope, normalized, {
     markDirty: syncCloud,
     reason: syncCloud ? 'Restauración local' : 'Carga desde la nube',
   });
-  if (syncCloud) queueCloudSave(state.crm);
+  state.crm = normalized;
+  resetTransientState();
+  if (syncCloud) queueCloudSave(scope, state.crm);
+  return true;
+}
+
+export function replaceData(data: CrmData, syncCloud = false): void {
+  const scope = requireCurrentTenantScope();
+  if (!replaceDataForTenant(scope, data, syncCloud)) {
+    throw new Error('TENANT_RUNTIME_STALE');
+  }
 }
 
 export function saveData(reason = 'Cambio local'): void {
-  writeLocalSnapshot(state.crm, { markDirty: true, reason });
-  queueCloudSave(state.crm);
+  const scope = requireCurrentTenantScope();
+  assertTenantCrmScope(scope, state.crm);
+  writeTenantSnapshot(scope, state.crm, { markDirty: true, reason });
+  queueCloudSave(scope, state.crm);
 }
 
 export function hasLocalBackup(): boolean {
-  return hasStoredLocalBackup();
+  const scope = currentTenantScope();
+  return scope ? hasTenantLocalBackup(scope) : false;
 }
 
-export function canRestoreLatestLocalBackup(): boolean {
-  const member = state.crm.teamMembers.find(
-    (item) => item.id === state.activeMemberId && item.status !== 'Suspendido',
+/**
+ * Authorization identity for tenant-sensitive local capabilities.
+ * activeMemberId / TEAM_VIEW_KEY remain a visual preference only and never
+ * participate in this lookup.
+ */
+export function authenticatedTenantMember(
+  scope: TenantScope | null = currentTenantScope(),
+): TeamMember | null {
+  if (!scope || !tenantScopesEqual(currentTenantScope(), scope)) return null;
+  if (state.crm.organization.id !== scope.organizationId) return null;
+  const matches = state.crm.teamMembers.filter(
+    (member) => member.userId === scope.userId && member.status === 'Activo',
   );
+  return matches.length === 1 ? matches[0]! : null;
+}
+
+export function canRestoreLatestLocalBackup(
+  scope: TenantScope | null = currentTenantScope(),
+): boolean {
+  const member = authenticatedTenantMember(scope);
   return Boolean(member && roleCanManageTeam(member.role));
 }
 
-export function restoreLatestLocalBackup(): boolean {
-  if (!canRestoreLatestLocalBackup()) return false;
-  const restored = restoreLatestBackup();
+export function restoreLatestLocalBackupForTenant(
+  scope: TenantScope,
+  runtimeLease: TenantRuntimeLease,
+): boolean {
+  if (!tenantScopesEqual(scope, runtimeLease.scope)) throw new Error(TENANT_RUNTIME_STALE);
+  assertTenantRuntimeLeaseCurrent(runtimeLease);
+  if (!canRestoreLatestLocalBackup(scope)) return false;
+
+  // restoreLatestTenantBackup consumes the exact tenant backup and writes only
+  // inside that tenant namespace. The lease is therefore revalidated directly
+  // before entering that synchronous material section.
+  assertTenantRuntimeLeaseCurrent(runtimeLease);
+  const restored = restoreLatestTenantBackup(scope);
   if (!restored) return false;
-  state.crm = normalizedData(restored);
+  assertTenantCrmScope(scope, restored);
+  const restoredSnapshot = normalizedData(restored);
+  assertTenantCrmScope(scope, restoredSnapshot);
+
+  assertTenantRuntimeLeaseCurrent(runtimeLease);
+  state.crm = structuredClone(restoredSnapshot);
   resetTransientState();
-  writeLocalSnapshot(state.crm, { markDirty: true, reason: 'Restauración confirmada', backup: false });
-  queueCloudSave(state.crm);
+
+  assertTenantRuntimeLeaseCurrent(runtimeLease);
+  writeTenantSnapshot(scope, restoredSnapshot, {
+    markDirty: true,
+    reason: 'Restauración confirmada',
+    backup: false,
+  });
+
+  assertTenantRuntimeLeaseCurrent(runtimeLease);
+  queueCloudSave(scope, restoredSnapshot);
   return true;
+}
+
+export function restoreLatestLocalBackup(): boolean {
+  const scope = requireCurrentTenantScope();
+  const runtimeLease = captureTenantRuntimeLease(scope);
+  return restoreLatestLocalBackupForTenant(scope, runtimeLease);
 }

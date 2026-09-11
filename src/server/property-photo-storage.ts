@@ -13,6 +13,8 @@ interface PropertyPhotoStorageOptions {
 
 interface MembershipRow {
   organization_id?: string;
+  user_id?: string;
+  status?: string;
 }
 
 interface PreparedPhoto {
@@ -108,9 +110,22 @@ function authenticatedHeaders(options: PropertyPhotoStorageOptions, accessToken:
   };
 }
 
+function requestedOrganizationId(value: unknown): string {
+  const organizationId = String(value || '');
+  if (
+    !organizationId
+    || organizationId !== organizationId.trim()
+    || !/^[a-zA-Z0-9_-]{1,120}$/.test(organizationId)
+  ) {
+    throw new Error('No se indicó una inmobiliaria válida para la foto.');
+  }
+  return organizationId;
+}
+
 async function authenticatedPhotoOwner(
   request: IncomingMessage,
   options: PropertyPhotoStorageOptions,
+  requestedOrganization: string,
 ): Promise<{ userId: string; organizationId: string; accessToken: string }> {
   const accessToken = bearerToken(request);
   const authHeaders = authenticatedHeaders(options, accessToken);
@@ -122,18 +137,31 @@ async function authenticatedPhotoOwner(
   if (!userId) throw new Error('La sesión no identifica un usuario válido.');
 
   const query = new URL(`${options.supabaseUrl}/rest/v1/organization_members`);
-  query.searchParams.set('select', 'organization_id');
+  query.searchParams.set('select', 'organization_id,user_id,status');
   query.searchParams.set('user_id', `eq.${userId}`);
-  query.searchParams.set('limit', '1');
-  const rows = await parseResponse(await fetch(query, {
+  query.searchParams.set('organization_id', `eq.${requestedOrganization}`);
+  const membershipPayload = await parseResponse(await fetch(query, {
     headers: {
       ...authHeaders,
       Accept: 'application/json',
     },
-  })) as MembershipRow[];
-  const organizationId = rows[0]?.organization_id;
-  if (!organizationId) throw new Error('La cuenta no pertenece a una inmobiliaria.');
-  return { userId, organizationId, accessToken };
+  }));
+  if (!Array.isArray(membershipPayload) || membershipPayload.length !== 1) {
+    throw new Error('La cuenta no pertenece de forma activa y única a la inmobiliaria solicitada.');
+  }
+  const row = membershipPayload[0];
+  if (!row || typeof row !== 'object' || Array.isArray(row)) {
+    throw new Error('La cuenta no pertenece de forma activa y única a la inmobiliaria solicitada.');
+  }
+  const membership = row as MembershipRow;
+  if (
+    membership.organization_id !== requestedOrganization
+    || membership.user_id !== userId
+    || membership.status !== 'active'
+  ) {
+    throw new Error('La cuenta no pertenece de forma activa y única a la inmobiliaria solicitada.');
+  }
+  return { userId, organizationId: requestedOrganization, accessToken };
 }
 
 export function parsePropertyPhotoDataUrl(value: unknown): PreparedPhoto {
@@ -178,7 +206,12 @@ async function uploadPhoto(
   options: PropertyPhotoStorageOptions,
 ): Promise<void> {
   const requestUrl = new URL(request.url || '/', 'http://localhost');
-  const { organizationId, accessToken } = await authenticatedPhotoOwner(request, options);
+  const requestedOrganization = requestedOrganizationId(requestUrl.searchParams.get('organizationId'));
+  const { organizationId, accessToken } = await authenticatedPhotoOwner(
+    request,
+    options,
+    requestedOrganization,
+  );
   const contentType = String(request.headers['content-type'] || '').toLowerCase();
 
   let photo: PreparedPhoto;
@@ -215,6 +248,7 @@ async function uploadPhoto(
   sendJson(response, 201, {
     success: true,
     url: publicPropertyPhotoUrl(options.supabaseUrl, objectPath),
+    organizationId,
   });
 }
 

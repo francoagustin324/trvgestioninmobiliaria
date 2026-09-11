@@ -1,0 +1,25 @@
+\set ON_ERROR_STOP on
+
+-- SEC-FIX A2.5 bootstrap entrypoint.
+-- Preconditions in Supabase: managed auth primitives already exist.
+-- Preconditions in isolated PostgreSQL 17: install the A2.5 auth/role fixture first.
+-- This manifest ends immediately BEFORE SEC-FIX A2.1.
+
+\ir 20260910150000_pre_a2_1_core.sql
+\ir 20260910150100_pre_a2_1_fichas_snapshot_rls.sql
+
+-- Reuse only historical migrations that become deterministic once the missing
+-- core state above exists. Storage-managed migrations are intentionally absent.
+\ir ../../migrations/20260717113000_public_property_fichas.sql
+\ir ../../migrations/20260717190000_restrictive_organization_isolation.sql
+\ir ../../migrations/20260720130000_lockout_miembros_suspendidos.sql
+\ir ../../migrations/20260724190000_harden_invited_membership_activation.sql
+\ir ../../migrations/20260727030000_guard_invited_user_onboarding.sql
+\ir ../../migrations/20260823213000_p1_1_a1_visit_entity_type.sql
+\ir ../../migrations/20260824165500_p1_1_a3_offer_entity_type.sql
+\ir ../../migrations/20260825030000_p1_1_a5_reservation_entity_type.sql
+\ir ../../migrations/20260827170000_p1_1_a7_r2_1_transaction_foundation.sql
+\ir ../../migrations/20260831120000_p1_1_a7_r2_2_visit_transaction_backend.sql
+\ir ../../migrations/20260901223000_p1_1_a7_r2_2c_visit_authority_capability.sql
+\ir ../../migrations/20260903150000_p1_1_a7_r2_2d_client_reassignment_cas.sql
+\ir ../../migrations/20260907224500_sec_fix_a1_1_org_aware_db_compat.sql

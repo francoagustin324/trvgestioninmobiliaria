@@ -1,22 +1,44 @@
+import type { TenantScope } from './active-organization.js';
 import { queueCloudSave } from './cloud-api-compatible.js';
 import { clientFromFormValues, upsertClient } from './client-editor.js';
 import { resolveLeadSchedule } from './lead-create-schedule.js';
 import { activitiesForClientSave, localIsoDate } from './lead-pipeline.js';
-import type { Client } from './models.js';
+import type { Client, TeamMember } from './models.js';
 import { findDuplicateClient, isPlausiblePhone } from './phone-normalizer.js';
-import { state } from './store.js';
-import { readLocalSnapshot, writeLocalSnapshot } from './sync-safety.js';
-import { activeMember, addActivity, canAccessModule, visibleClients } from './team-access.js';
+import { authenticatedTenantMember, state } from './store.js';
+import {
+  assertTenantCrmScope,
+  readTenantSnapshot,
+  writeTenantSnapshot,
+} from './tenant-storage.js';
+import {
+  assertTenantRuntimeLeaseCurrent,
+  captureTenantRuntimeLease,
+  requireCurrentTenantScope,
+  tenantRuntimeLeaseIsCurrent,
+  type TenantRuntimeLease,
+} from './tenant-runtime.js';
+import {
+  addActivityForAuthenticatedTenant,
+  canAccessModule,
+  visibleClients,
+} from './team-access.js';
 import { formValues, nextId, setNotice } from './utils.js';
 
 const submittingForms = new WeakSet<HTMLFormElement>();
+const formTenantContexts = new WeakMap<HTMLFormElement, LeadFormTenantContext>();
 const ENHANCED = 'b131Enhanced';
-const ACTOR = 'b131Actor';
 const EDITING = 'b131Editing';
 const DUPLICATE = 'b132DuplicateClientId';
 const SAVE_DELAY_MS = 120;
 
 type FeedbackKind = 'idle' | 'working' | 'success' | 'error' | 'duplicate';
+
+interface LeadFormTenantContext {
+  scope: TenantScope;
+  runtimeLease: TenantRuntimeLease;
+  viewMemberId: number;
+}
 
 function formError(form: HTMLFormElement): HTMLElement | null {
   return form.querySelector<HTMLElement>('[data-lead-error]');
@@ -120,13 +142,49 @@ function capturedEditingId(form: HTMLFormElement): number | null {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
+function leadFormTenantContext(form: HTMLFormElement): LeadFormTenantContext | null {
+  return formTenantContexts.get(form) ?? null;
+}
+
+function captureLeadFormTenantContext(form: HTMLFormElement): LeadFormTenantContext {
+  const existing = leadFormTenantContext(form);
+  if (existing) return existing;
+  const scope = requireCurrentTenantScope();
+  assertTenantCrmScope(scope, state.crm);
+  const context = Object.freeze({
+    scope: Object.freeze({ ...scope }),
+    runtimeLease: captureTenantRuntimeLease(scope),
+    viewMemberId: state.activeMemberId,
+  });
+  formTenantContexts.set(form, context);
+  return context;
+}
+
+function assertLeadFormTenantCurrent(context: LeadFormTenantContext): void {
+  assertTenantRuntimeLeaseCurrent(context.runtimeLease);
+  assertTenantCrmScope(context.scope, state.crm);
+}
+
+function authenticatedWriteMember(scope: TenantScope): TeamMember {
+  const member = authenticatedTenantMember(scope);
+  const matches = state.crm.teamMembers.filter((candidate) => (
+    candidate.userId === scope.userId && candidate.status === 'Activo'
+  ));
+  if (!member || matches.length !== 1 || matches[0]?.id !== member.id) {
+    throw new Error('AUTHENTICATED_TENANT_MEMBER_REQUIRED');
+  }
+  return member;
+}
+
 function formStillAuthorized(form: HTMLFormElement): boolean {
-  const member = activeMember();
-  const actorId = Number(form.dataset[ACTOR]);
+  const context = leadFormTenantContext(form);
   const editingId = capturedEditingId(form);
-  if (!form.isConnected || member.status !== 'Activo') return false;
+  if (!context || !form.isConnected || !tenantRuntimeLeaseIsCurrent(context.runtimeLease)) return false;
+  // activeMemberId remains a view preference only. A change invalidates the old visual form,
+  // but this value is never used as tenant authority, creator, assignee or activity actor.
+  if (state.activeMemberId !== context.viewMemberId) return false;
   if (!canAccessModule('crm') || state.activeModule !== 'crm' || !state.openForms.client) return false;
-  if (member.id !== actorId || currentEditingId() !== editingId) return false;
+  if (currentEditingId() !== editingId) return false;
   if (editingId !== null && !visibleClients().some((client) => client.id === editingId)) return false;
   return true;
 }
@@ -245,13 +303,19 @@ function bindDuplicateActions(form: HTMLFormElement): void {
 export function enhanceLeadForm(): void {
   const form = document.querySelector<HTMLFormElement>('#mvp-lead-form:not(.collapsed)');
   if (!form || form.dataset[ENHANCED] === 'true') return;
-  const member = activeMember();
   const heading = form.querySelector<HTMLElement>('.mvp-form-heading');
   const submit = form.querySelector<HTMLButtonElement>('button[type="submit"]');
   if (!heading || !submit) return;
 
+  try {
+    captureLeadFormTenantContext(form);
+  } catch {
+    showError(form, 'No se pudo fijar el tenant de este formulario. Volvé a abrir Nuevo lead.');
+    submit.disabled = true;
+    return;
+  }
+
   form.dataset[ENHANCED] = 'true';
-  form.dataset[ACTOR] = String(member.id);
   form.dataset[EDITING] = currentEditingId() === null ? '' : String(currentEditingId());
   form.classList.add('b131-lead-form');
   form.noValidate = true;
@@ -351,21 +415,33 @@ function validateAndResolveSchedule(
   return true;
 }
 
-function locallyContainsClient(client: Client): boolean {
-  const snapshot = readLocalSnapshot();
+function tenantSnapshotContainsClient(
+  context: LeadFormTenantContext,
+  client: Client,
+): boolean {
+  assertLeadFormTenantCurrent(context);
+  const snapshot = readTenantSnapshot(context.scope);
   return Boolean(snapshot?.clients.some((item) => item.id === client.id && item.phone === client.phone));
 }
 
-function rollbackLocalState(previousCrm: typeof state.crm): void {
-  state.crm = previousCrm;
+function rollbackTenantState(
+  context: LeadFormTenantContext,
+  previousCrm: typeof state.crm,
+): void {
+  if (!tenantRuntimeLeaseIsCurrent(context.runtimeLease)) return;
   try {
-    writeLocalSnapshot(previousCrm, {
+    assertTenantRuntimeLeaseCurrent(context.runtimeLease);
+    assertTenantCrmScope(context.scope, previousCrm);
+    state.crm = previousCrm;
+    assertTenantCrmScope(context.scope, state.crm);
+    assertTenantRuntimeLeaseCurrent(context.runtimeLease);
+    writeTenantSnapshot(context.scope, previousCrm, {
       markDirty: true,
       reason: 'Reversión de guardado incompleto',
       backup: false,
     });
   } catch {
-    // El formulario conserva los datos para que el usuario pueda reintentar.
+    // Nunca se cruza a otro tenant para intentar completar un rollback fallido.
   }
 }
 
@@ -375,8 +451,9 @@ function persistLead(
   editingId: number | null,
   previous: Client | null,
 ): void {
-  if (!formStillAuthorized(form)) {
-    showError(form, 'El usuario activo cambió. Volvé a abrir el formulario antes de guardar.');
+  const context = leadFormTenantContext(form);
+  if (!context || !formStillAuthorized(form)) {
+    showError(form, 'El tenant o runtime activo cambió. Volvé a abrir el formulario antes de guardar.');
     restoreSubmit(form);
     return;
   }
@@ -390,32 +467,45 @@ function persistLead(
     return;
   }
 
-  const previousCrm = structuredClone(state.crm);
+  let previousCrm: typeof state.crm | null = null;
   try {
-    const member = activeMember();
+    assertLeadFormTenantCurrent(context);
+    const member = authenticatedWriteMember(context.scope);
+    previousCrm = structuredClone(state.crm);
+    assertTenantCrmScope(context.scope, previousCrm);
+
     const id = editingId ?? nextId(state.crm.clients);
     const client = clientFromFormValues(id, values, previous);
     client.assignedToId = previous?.assignedToId ?? member.id;
     client.createdById = previous?.createdById ?? member.id;
 
+    assertLeadFormTenantCurrent(context);
     state.crm.clients = upsertClient(state.crm.clients, client);
-    activitiesForClientSave(previous, client).forEach((activity) => addActivity(activity));
+    activitiesForClientSave(previous, client).forEach((activity) => (
+      addActivityForAuthenticatedTenant(context.scope, activity)
+    ));
 
-    writeLocalSnapshot(state.crm, {
+    assertLeadFormTenantCurrent(context);
+    assertTenantCrmScope(context.scope, state.crm);
+    writeTenantSnapshot(context.scope, state.crm, {
       markDirty: true,
       reason: previous ? `Lead actualizado: ${client.name}` : `Lead creado: ${client.name}`,
     });
-    if (!locallyContainsClient(client)) throw new Error('No se pudo verificar la copia local del lead.');
+    if (!tenantSnapshotContainsClient(context, client)) {
+      throw new Error('No se pudo verificar la copia tenant del lead.');
+    }
 
+    assertLeadFormTenantCurrent(context);
+    queueCloudSave(context.scope, state.crm);
+    assertLeadFormTenantCurrent(context);
     state.editingClientId = null;
     state.openForms.client = false;
-    queueCloudSave(state.crm);
     document.dispatchEvent(new CustomEvent('trv-render'));
     setNotice(previous
       ? `Lead actualizado correctamente. ${client.name} fue actualizado correctamente.`
       : `Lead guardado correctamente. ${client.name} fue creado correctamente.`);
   } catch {
-    rollbackLocalState(previousCrm);
+    if (previousCrm) rollbackTenantState(context, previousCrm);
     showError(form, 'No se pudo guardar el lead. Tus datos siguen en el formulario.');
     restoreSubmit(form);
   }
@@ -430,7 +520,21 @@ export function submitLeadForm(event: SubmitEvent): void {
   clearFeedback(form);
 
   if (!formStillAuthorized(form)) {
-    showError(form, 'Este formulario ya no tiene autorización. Volvé a abrir Nuevo lead.');
+    showError(form, 'Este formulario ya no tiene autorización tenant. Volvé a abrir Nuevo lead.');
+    return;
+  }
+
+  const context = leadFormTenantContext(form);
+  if (!context) {
+    showError(form, 'Este formulario no tiene un tenant capturado. Volvé a abrir Nuevo lead.');
+    return;
+  }
+
+  try {
+    assertLeadFormTenantCurrent(context);
+    authenticatedWriteMember(context.scope);
+  } catch {
+    showError(form, 'La identidad autenticada ya no puede escribir este Lead. Volvé a abrir el formulario.');
     return;
   }
 
@@ -457,7 +561,7 @@ export function submitLeadForm(event: SubmitEvent): void {
 
   if (!validateAndResolveSchedule(form, values, editingId)) return;
   if (!formStillAuthorized(form)) {
-    showError(form, 'El usuario activo cambió. Volvé a abrir el formulario antes de guardar.');
+    showError(form, 'El tenant o runtime activo cambió. Volvé a abrir el formulario antes de guardar.');
     return;
   }
 

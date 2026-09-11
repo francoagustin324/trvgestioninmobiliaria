@@ -1,4 +1,12 @@
-const SESSION_KEY = 'propcontrol-cloud-session-v1';
+import {
+  assertSharedAuthGenerationCurrent,
+  assertSharedCloudSessionCurrent,
+  captureSharedAuthGeneration,
+  commitSharedCloudSession,
+  readSharedCloudSession,
+  type SharedCloudSession,
+} from './auth-session-generation.js';
+
 const INVITATION_KEY = 'propcontrol-pending-invitation-v1';
 
 interface PublicCloudConfig {
@@ -7,13 +15,7 @@ interface PublicCloudConfig {
   publishableKey?: string;
 }
 
-interface StoredCloudSession {
-  accessToken: string;
-  refreshToken: string;
-  expiresAt: number;
-  userId: string;
-  email: string;
-}
+type StoredCloudSession = SharedCloudSession;
 
 interface PendingInvitation {
   userId: string;
@@ -91,19 +93,7 @@ async function publicConfig(): Promise<Required<Pick<PublicCloudConfig, 'url' | 
 }
 
 function readStoredSession(): StoredCloudSession | null {
-  try {
-    const parsed = JSON.parse(localStorage.getItem(SESSION_KEY) || 'null') as Partial<StoredCloudSession> | null;
-    if (!parsed?.accessToken || !parsed.refreshToken || !parsed.userId || !parsed.expiresAt) return null;
-    return {
-      accessToken: parsed.accessToken,
-      refreshToken: parsed.refreshToken,
-      expiresAt: Number(parsed.expiresAt),
-      userId: parsed.userId,
-      email: parsed.email || '',
-    };
-  } catch {
-    return null;
-  }
+  return readSharedCloudSession();
 }
 
 function readPendingInvitation(): PendingInvitation | null {
@@ -123,6 +113,7 @@ export function hasPendingInvitationSession(): boolean {
 }
 
 export async function consumeInvitationSessionFromUrl(): Promise<void> {
+  const operationSharedGeneration = captureSharedAuthGeneration();
   const parsed = parseInvitationFragment(location.hash);
   if (parsed.errorCode || parsed.errorDescription) {
     history.replaceState(null, '', '/aceptar-invitacion');
@@ -156,7 +147,10 @@ export async function consumeInvitationSessionFromUrl(): Promise<void> {
     userId: user.id,
     email: user.email || '',
   };
-  localStorage.setItem(SESSION_KEY, JSON.stringify(session));
+
+  assertSharedAuthGenerationCurrent(operationSharedGeneration);
+  const committedGeneration = commitSharedCloudSession(operationSharedGeneration, session);
+  assertSharedCloudSessionCurrent(committedGeneration, session);
   localStorage.setItem(INVITATION_KEY, JSON.stringify({ userId: session.userId, startedAt: Date.now() }));
   history.replaceState(null, '', '/aceptar-invitacion');
 }
@@ -164,7 +158,9 @@ export async function consumeInvitationSessionFromUrl(): Promise<void> {
 async function activateInvitationMemberships(
   session: StoredCloudSession,
   config: Required<Pick<PublicCloudConfig, 'url' | 'publishableKey'>>,
+  authGeneration: string,
 ): Promise<void> {
+  assertSharedCloudSessionCurrent(authGeneration, session);
   await parseResponse(await fetch(`${config.url}/rest/v1/rpc/activate_my_organization_memberships`, {
     method: 'POST',
     headers: {
@@ -175,17 +171,21 @@ async function activateInvitationMemberships(
     body: '{}',
     cache: 'no-store',
   }));
+  assertSharedCloudSessionCurrent(authGeneration, session);
 }
 
 export async function setInvitationPassword(password: string): Promise<void> {
   if (password.length < 8) throw new Error('La contraseña debe tener al menos 8 caracteres.');
+  const authGeneration = captureSharedAuthGeneration();
   const session = readStoredSession();
   const pending = readPendingInvitation();
   if (!session || !pending || session.userId !== pending.userId) {
     throw new Error('La sesión de invitación no es válida. Pedí una nueva invitación.');
   }
+  assertSharedCloudSessionCurrent(authGeneration, session);
 
   const config = await publicConfig();
+  assertSharedCloudSessionCurrent(authGeneration, session);
   await parseResponse(await fetch(`${config.url}/auth/v1/user`, {
     method: 'PUT',
     headers: {
@@ -195,6 +195,8 @@ export async function setInvitationPassword(password: string): Promise<void> {
     },
     body: JSON.stringify({ password }),
   }));
-  await activateInvitationMemberships(session, config);
+  assertSharedCloudSessionCurrent(authGeneration, session);
+  await activateInvitationMemberships(session, config, authGeneration);
+  assertSharedCloudSessionCurrent(authGeneration, session);
   localStorage.removeItem(INVITATION_KEY);
 }

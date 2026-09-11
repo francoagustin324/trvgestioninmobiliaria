@@ -1,5 +1,23 @@
+import type { TenantScope } from './active-organization.js';
+import {
+  assertSharedAuthGenerationCurrent,
+  assertSharedCloudSessionCurrent,
+  captureSharedAuthGeneration,
+  commitSharedCloudSession,
+  readSharedCloudSession,
+  sharedAuthGenerationIsCurrent,
+  subscribeCrossTabAuthGeneration,
+  type SharedCloudSession,
+} from './auth-session-generation.js';
 import type { CrmData, TeamMember, TeamRole, TeamMemberStatus } from './models.js';
 import { initialData } from './models.js';
+import {
+  assertTenantRuntimeLeaseCurrent,
+  captureTenantRuntimeLease,
+  requireCurrentTenantScope,
+  TENANT_RUNTIME_SESSION_MISMATCH,
+  type TenantRuntimeLease,
+} from './tenant-runtime.js';
 import {
   cloudRecordIdentity,
   cloudRecordsToCrm,
@@ -20,8 +38,8 @@ import {
   stableFingerprint,
 } from './sync-safety.js';
 
-const SESSION_KEY = 'propcontrol-cloud-session-v1';
 const SNAPSHOT_SOURCE = 'propcontrol_system_snapshot';
+const AUTH_SESSION_STALE = 'AUTH_SESSION_STALE';
 
 interface CloudConfig {
   configured: boolean;
@@ -30,13 +48,7 @@ interface CloudConfig {
   invitationsConfigured?: boolean;
 }
 
-export interface CloudSession {
-  accessToken: string;
-  refreshToken: string;
-  expiresAt: number;
-  userId: string;
-  email: string;
-}
+export type CloudSession = SharedCloudSession;
 
 interface AuthResponse {
   access_token?: string;
@@ -76,6 +88,12 @@ interface TeamMutationResponse {
   error?: string;
 }
 
+type RefreshPromiseState = Readonly<{
+  epoch: number;
+  sharedGeneration: string;
+  promise: Promise<CloudSession | null>;
+}>;
+
 class CloudHttpError extends Error {
   constructor(message: string, readonly status: number, readonly code = '') {
     super(message);
@@ -83,8 +101,29 @@ class CloudHttpError extends Error {
 }
 
 let configPromise: Promise<Required<Pick<CloudConfig, 'url' | 'publishableKey'>> & Pick<CloudConfig, 'invitationsConfigured'>> | null = null;
-let refreshPromise: Promise<CloudSession | null> | null = null;
+let authSessionEpoch = 0;
+let refreshPromise: RefreshPromiseState | null = null;
 let saveTimer: number | null = null;
+
+function authSessionEpochIsCurrent(epoch: number): boolean {
+  return authSessionEpoch === epoch;
+}
+
+function advanceAuthSessionEpoch(): number {
+  authSessionEpoch += 1;
+  refreshPromise = null;
+  return authSessionEpoch;
+}
+
+function assertAuthSessionEpochCurrent(epoch: number): void {
+  if (!authSessionEpochIsCurrent(epoch)) throw new Error(AUTH_SESSION_STALE);
+}
+
+subscribeCrossTabAuthGeneration(() => {
+  // The shared-session module invalidates TenantRuntime first. This callback only
+  // invalidates this tab's in-memory DR-04 epoch/refreshPromise.
+  advanceAuthSessionEpoch();
+});
 
 function emitStatus(message: string, kind: 'success' | 'error' | 'working' = 'success'): void {
   document.dispatchEvent(new CustomEvent('propcontrol-cloud-status', { detail: { message, kind } }));
@@ -149,31 +188,26 @@ function toSession(payload: AuthResponse): CloudSession | null {
   };
 }
 
-function storeSession(session: CloudSession | null): void {
-  if (session) localStorage.setItem(SESSION_KEY, JSON.stringify(session));
-  else localStorage.removeItem(SESSION_KEY);
-}
-
 export function getCloudSession(): CloudSession | null {
-  try {
-    const parsed = JSON.parse(localStorage.getItem(SESSION_KEY) || 'null') as Partial<CloudSession> | null;
-    if (!parsed?.accessToken || !parsed.refreshToken || !parsed.userId || !parsed.expiresAt) return null;
-    return {
-      accessToken: parsed.accessToken,
-      refreshToken: parsed.refreshToken,
-      userId: parsed.userId,
-      expiresAt: Number(parsed.expiresAt),
-      email: parsed.email || '',
-    };
-  } catch { return null; }
+  return readSharedCloudSession();
 }
 
 export function signOutCloud(): void {
+  const operationSharedGeneration = captureSharedAuthGeneration();
+  const storeSession = (session: CloudSession | null): void => {
+    commitSharedCloudSession(operationSharedGeneration, session);
+  };
+  advanceAuthSessionEpoch();
   storeSession(null);
   emitStatus('Sesión cerrada. Los datos siguen guardados en este dispositivo.');
 }
 
 export async function signUpCloud(email: string, password: string, companyName: string): Promise<{ session: CloudSession | null; message: string }> {
+  const operationEpoch = authSessionEpoch;
+  const operationSharedGeneration = captureSharedAuthGeneration();
+  const storeSession = (session: CloudSession | null): void => {
+    commitSharedCloudSession(operationSharedGeneration, session);
+  };
   const config = await getConfig();
   const payload = await parseResponse(await fetch(`${config.url}/auth/v1/signup`, {
     method: 'POST',
@@ -185,6 +219,9 @@ export async function signUpCloud(email: string, password: string, companyName: 
     }),
   })) as AuthResponse;
   const session = toSession(payload);
+  assertAuthSessionEpochCurrent(operationEpoch);
+  assertSharedAuthGenerationCurrent(operationSharedGeneration);
+  advanceAuthSessionEpoch();
   storeSession(session);
   return session
     ? { session, message: 'Cuenta creada y conectada.' }
@@ -192,6 +229,11 @@ export async function signUpCloud(email: string, password: string, companyName: 
 }
 
 export async function signInCloud(email: string, password: string): Promise<CloudSession> {
+  const operationEpoch = authSessionEpoch;
+  const operationSharedGeneration = captureSharedAuthGeneration();
+  const storeSession = (session: CloudSession | null): void => {
+    commitSharedCloudSession(operationSharedGeneration, session);
+  };
   const config = await getConfig();
   const payload = await parseResponse(await fetch(`${config.url}/auth/v1/token?grant_type=password`, {
     method: 'POST',
@@ -200,14 +242,36 @@ export async function signInCloud(email: string, password: string): Promise<Clou
   })) as AuthResponse;
   const session = toSession(payload);
   if (!session) throw new Error('Supabase no devolvió una sesión válida.');
+  assertAuthSessionEpochCurrent(operationEpoch);
+  assertSharedAuthGenerationCurrent(operationSharedGeneration);
+  advanceAuthSessionEpoch();
   storeSession(session);
   return session;
 }
 
 async function refreshCloudSession(session: CloudSession): Promise<CloudSession | null> {
-  if (session.expiresAt > Date.now()) return session;
-  if (refreshPromise) return refreshPromise;
-  refreshPromise = (async () => {
+  const operationSharedGeneration = captureSharedAuthGeneration();
+  if (session.expiresAt > Date.now()) {
+    try {
+      assertSharedCloudSessionCurrent(operationSharedGeneration, session);
+      return session;
+    } catch {
+      return null;
+    }
+  }
+  const operationEpoch = authSessionEpoch;
+  if (
+    refreshPromise?.epoch === operationEpoch
+    && refreshPromise.sharedGeneration === operationSharedGeneration
+  ) {
+    return refreshPromise.promise;
+  }
+
+  const storeSession = (nextSession: CloudSession | null): void => {
+    commitSharedCloudSession(operationSharedGeneration, nextSession);
+  };
+  let promise!: Promise<CloudSession | null>;
+  promise = (async () => {
     try {
       const config = await getConfig();
       const payload = await parseResponse(await fetch(`${config.url}/auth/v1/token?grant_type=refresh_token`, {
@@ -216,16 +280,39 @@ async function refreshCloudSession(session: CloudSession): Promise<CloudSession 
         body: JSON.stringify({ refresh_token: session.refreshToken }),
       })) as AuthResponse;
       const renewed = toSession(payload);
+      if (!authSessionEpochIsCurrent(operationEpoch)) return null;
+      if (!sharedAuthGenerationIsCurrent(operationSharedGeneration)) return null;
+      if (!renewed) {
+        advanceAuthSessionEpoch();
+        storeSession(null);
+        return null;
+      }
       storeSession(renewed);
       return renewed;
     } catch {
-      storeSession(null);
+      if (authSessionEpochIsCurrent(operationEpoch)) {
+        if (sharedAuthGenerationIsCurrent(operationSharedGeneration)) {
+          advanceAuthSessionEpoch();
+          storeSession(null);
+        }
+      }
       return null;
     } finally {
-      refreshPromise = null;
+      if (
+        refreshPromise?.epoch === operationEpoch
+        && refreshPromise.sharedGeneration === operationSharedGeneration
+        && refreshPromise.promise === promise
+      ) {
+        refreshPromise = null;
+      }
     }
   })();
-  return refreshPromise;
+  refreshPromise = Object.freeze({
+    epoch: operationEpoch,
+    sharedGeneration: operationSharedGeneration,
+    promise,
+  });
+  return promise;
 }
 
 async function requireSession(): Promise<CloudSession> {
@@ -233,6 +320,8 @@ async function requireSession(): Promise<CloudSession> {
   if (!existing) throw new Error('Ingresá a tu cuenta para sincronizar.');
   const session = await refreshCloudSession(existing);
   if (!session) throw new Error('La sesión venció. Volvé a ingresar.');
+  const currentGeneration = captureSharedAuthGeneration();
+  assertSharedCloudSessionCurrent(currentGeneration, session);
   return session;
 }
 
@@ -466,23 +555,56 @@ function mapMutationMember(value: NonNullable<TeamMutationResponse['member']>): 
   };
 }
 
-async function teamMutation(path: string, method: 'POST' | 'PATCH', payload: unknown): Promise<TeamMember> {
+export const TENANT_TEAM_RESPONSE_ORGANIZATION_MISMATCH = 'TENANT_TEAM_RESPONSE_ORGANIZATION_MISMATCH';
+
+async function teamMutation(
+  scope: TenantScope,
+  runtimeLease: TenantRuntimeLease,
+  path: string,
+  method: 'POST' | 'PATCH',
+  payload: Record<string, unknown>,
+): Promise<TeamMember> {
+  assertTenantRuntimeLeaseCurrent(runtimeLease);
   const session = await requireSession();
+  const authGeneration = captureSharedAuthGeneration();
+  assertSharedCloudSessionCurrent(authGeneration, session);
+  assertTenantRuntimeLeaseCurrent(runtimeLease);
+  if (session.userId !== scope.userId) throw new Error(TENANT_RUNTIME_SESSION_MISMATCH);
+
+  assertSharedCloudSessionCurrent(authGeneration, session);
+  assertTenantRuntimeLeaseCurrent(runtimeLease);
   const response = await parseResponse(await fetch(path, {
     method,
     headers: { Authorization: `Bearer ${session.accessToken}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload),
+    body: JSON.stringify({ ...payload, organizationId: scope.organizationId }),
   })) as TeamMutationResponse;
+
+  assertSharedCloudSessionCurrent(authGeneration, session);
+  assertTenantRuntimeLeaseCurrent(runtimeLease);
   if (!response.success || !response.member) throw new Error(response.error || 'No se pudo actualizar el equipo.');
+  if (response.member.organization_id !== scope.organizationId) {
+    throw new Error(TENANT_TEAM_RESPONSE_ORGANIZATION_MISMATCH);
+  }
+  assertSharedCloudSessionCurrent(authGeneration, session);
+  assertTenantRuntimeLeaseCurrent(runtimeLease);
   return mapMutationMember(response.member);
 }
 
-export async function inviteTeamMember(input: { name: string; email: string; phone?: string; role: Exclude<TeamRole, 'Dueño'> }): Promise<TeamMember> {
-  return teamMutation('/api/team/invitations', 'POST', input);
+export async function inviteTeamMember(
+  input: { name: string; email: string; phone?: string; role: Exclude<TeamRole, 'Dueño'> },
+  scope: TenantScope = requireCurrentTenantScope(),
+  runtimeLease: TenantRuntimeLease = captureTenantRuntimeLease(scope),
+): Promise<TeamMember> {
+  return teamMutation(scope, runtimeLease, '/api/team/invitations', 'POST', input);
 }
 
-export async function updateTeamMemberAccess(memberId: number, input: { role?: Exclude<TeamRole, 'Dueño'>; status?: TeamMemberStatus }): Promise<TeamMember> {
-  return teamMutation(`/api/team/members/${memberId}`, 'PATCH', input);
+export async function updateTeamMemberAccess(
+  memberId: number,
+  input: { role?: Exclude<TeamRole, 'Dueño'>; status?: TeamMemberStatus },
+  scope: TenantScope = requireCurrentTenantScope(),
+  runtimeLease: TenantRuntimeLease = captureTenantRuntimeLease(scope),
+): Promise<TeamMember> {
+  return teamMutation(scope, runtimeLease, `/api/team/members/${memberId}`, 'PATCH', input);
 }
 
 export function queueCloudSave(crm: CrmData): void {

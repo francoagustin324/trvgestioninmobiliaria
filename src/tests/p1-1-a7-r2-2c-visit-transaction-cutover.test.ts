@@ -134,27 +134,43 @@ test('R2.2C snapshot ownership respeta OFF/ON sin segundo writer', () => {
 });
 
 test('R2.2C adapter fija decisiones OFF/ON y limita fallback schema legacy a OFF', () => {
-  assert.match(cutover, /pushCloudData\(state\.crm, accountKey, false\)/i);
-  assert.match(compatible, /job\.visitAuthorityDecision \?\? await visitTransactionAuthorityActive\(\)/i);
-  assert.match(compatible, /if \(authorityActive\)[\s\S]*pushCloudDataWithVisitAuthority[\s\S]*else[\s\S]*pushModernCloudData/i);
+  const persistStart = cutover.indexOf('async function persistHistoricalCloud');
+  const historicalCoordinateStart = cutover.indexOf('function historicalCoordinate', persistStart);
+  assert.ok(persistStart >= 0 && historicalCoordinateStart > persistStart);
+  const persistHistoricalCloud = cutover.slice(persistStart, historicalCoordinateStart);
+  assert.match(
+    persistHistoricalCloud,
+    /assertTenantRuntimeLeaseCurrent\(runtimeLease\);[\s\S]*writeTenantSnapshot\(runtimeLease\.scope, state\.crm,[\s\S]*const snapshot = structuredClone\(state\.crm\);[\s\S]*await pushCloudData\(runtimeLease\.scope, snapshot, false\);[\s\S]*assertTenantRuntimeLeaseCurrent\(runtimeLease\);/i,
+  );
+  assert.match(persistHistoricalCloud, /catch \(error\) \{[\s\S]*if \(!tenantRuntimeLeaseIsCurrent\(runtimeLease\)\) throw error;/i);
+  assert.doesNotMatch(persistHistoricalCloud, /accountKey|organization_members|limit\s*\(\s*1\s*\)|rows\s*\[\s*0\s*\]/i);
 
   const runCloudPushStart = compatible.indexOf('async function runCloudPush');
-  const latestPendingJobStart = compatible.indexOf('function latestPendingJob', runCloudPushStart);
-  assert.ok(runCloudPushStart >= 0 && latestPendingJobStart > runCloudPushStart);
-  const runCloudPush = compatible.slice(runCloudPushStart, latestPendingJobStart);
-  const authorityDecision = 'const authorityActive = job.visitAuthorityDecision ?? await visitTransactionAuthorityActive();';
-  const authorityIndex = runCloudPush.indexOf(authorityDecision);
-  const tryIndex = runCloudPush.indexOf('try {');
-  assert.ok(authorityIndex >= 0 && tryIndex > authorityIndex, 'capability debe resolverse fuera del fallback legacy');
-  assert.match(runCloudPush, /catch \(error\) \{\s*if \(authorityActive \|\| !isLegacySchemaError\(error\)\) throw error;\s*await pushLegacyCloudData\(job\.snapshot, job\.token\);/);
-  assert.equal((runCloudPush.match(/pushLegacyCloudData\(/g) ?? []).length, 1);
+  const tenantSaveQueueStart = compatible.indexOf('function tenantSaveQueue', runCloudPushStart);
+  assert.ok(runCloudPushStart >= 0 && tenantSaveQueueStart > runCloudPushStart);
+  const runCloudPush = compatible.slice(runCloudPushStart, tenantSaveQueueStart);
+  assert.match(
+    runCloudPush,
+    /const authorityActive = job\.visitAuthorityDecision\s*\?\?\s*await resolveTenantVisitAuthority\(job\.scope, job\.runtimeLease\);/i,
+  );
+  assert.match(
+    runCloudPush,
+    /if \(authorityActive\) \{[\s\S]*pushCloudDataWithVisitAuthorityV2\(\s*job\.scope,\s*job\.snapshot,\s*job\.token,\s*job\.runtimeLease,\s*\);[\s\S]*assertTenantRuntimeLeaseCurrent\(job\.runtimeLease\);[\s\S]*return;\s*\}/i,
+  );
+  assert.match(
+    runCloudPush,
+    /try \{[\s\S]*pushTenantModernCloudData\(job\.scope, job\.snapshot, job\.token, job\.runtimeLease\);[\s\S]*\} catch \(error\) \{\s*if \(!isLegacySchemaError\(error\)\) throw error;[\s\S]*pushTenantLegacyCloudData\(job\.scope, job\.snapshot, job\.token, job\.runtimeLease\);[\s\S]*\}/i,
+  );
+  assert.equal((runCloudPush.match(/pushTenantLegacyCloudData\(/g) ?? []).length, 1);
+  assert.doesNotMatch(runCloudPush, /accountKey|organization_members|limit\s*\(\s*1\s*\)|rows\s*\[\s*0\s*\]/i);
 
   const transactionalCallbacks = [...cutover.matchAll(
     /runTransactionalCloud:\s*async\s*\(\)\s*=>\s*\{([\s\S]*?)\n\s{4}\},\n\s{2}\}\);/g,
   )].map((match) => match[1] ?? '');
   assert.equal(transactionalCallbacks.length, 2);
   for (const callback of transactionalCallbacks) {
-    assert.match(callback, /invokeVisitTransaction/i);
+    assert.match(callback, /invokeVisitTransactionV2/i);
+    assert.match(callback, /assertTenantRuntimeLeaseCurrent\(runtimeLease\)[\s\S]*invokeVisitTransactionV2\(scope,[\s\S]*runtimeLease\)[\s\S]*assertTenantRuntimeLeaseCurrent\(runtimeLease\)/i);
     assert.doesNotMatch(callback, /persistHistoricalCloud|pushCloudData|historicalCoordinate|historicalResolve|runLegacyCloud/i);
   }
 });
@@ -167,22 +183,52 @@ test('R2.2C RPC cloud envía sólo intent y conserva operationId estable para re
 });
 
 test('R2.2C reconciliación latest y post-RPC conserva authority=true hasta cloud push', () => {
-  assert.match(compatible, /const latest = markCloudSaved\([\s\S]*if \(latest\)[\s\S]*propcontrol-cloud-authoritative-snapshot/i);
+  assert.match(
+    compatible,
+    /export type CloudSaveJob = Readonly<\{[\s\S]*scope: TenantScope;[\s\S]*snapshot: CrmData;[\s\S]*token: Readonly<SyncSaveToken>;[\s\S]*runtimeLease: TenantRuntimeLease;/i,
+  );
+  assert.match(
+    compatible,
+    /const frozenScope: TenantScope = Object\.freeze\(\{ \.\.\.scope \}\);[\s\S]*const snapshot = deepFreeze\(structuredClone\(crm\)\);[\s\S]*const token = Object\.freeze\(\{ \.\.\.tenantSyncSaveToken\(frozenScope, snapshot\) \}\);[\s\S]*const runtimeLease = captureTenantRuntimeLease\(frozenScope\);[\s\S]*scope: frozenScope,[\s\S]*snapshot,[\s\S]*token,[\s\S]*runtimeLease,/i,
+  );
+  assert.match(
+    compatible,
+    /export function cloudSaveJobIsLatest\(job: CloudSaveJob\): boolean \{[\s\S]*readTenantSyncState\(job\.scope\)[\s\S]*sync\.dirty === false[\s\S]*sync\.verifiedGeneration === job\.token\.generation[\s\S]*sync\.lastCloudFingerprint === job\.token\.fingerprint;/i,
+  );
+  assert.match(
+    compatible,
+    /function emitAuthoritativeSnapshot\(job: CloudSaveJob,[\s\S]*scope: job\.scope,[\s\S]*runtimeLease: job\.runtimeLease,[\s\S]*token: job\.token,[\s\S]*propcontrol-cloud-authoritative-snapshot/i,
+  );
   assert.match(cutover, /propcontrol-cloud-authoritative-snapshot[\s\S]*state\.crm = structuredClone\(crm\)[\s\S]*markDirty: false[\s\S]*trv-render/i);
-  assert.match(compatible, /key === 'clients'[\s\S]*delete record\.revision[\s\S]*delete record\.operationId/i);
   assert.doesNotMatch(cutover, /resetTransientState/);
+
+  const runCloudPushStart = compatible.indexOf('async function runCloudPush');
+  const tenantSaveQueueStart = compatible.indexOf('function tenantSaveQueue', runCloudPushStart);
+  assert.ok(runCloudPushStart >= 0 && tenantSaveQueueStart > runCloudPushStart);
+  const runCloudPush = compatible.slice(runCloudPushStart, tenantSaveQueueStart);
+  const guardedEmits = runCloudPush.match(/if \(cloudSaveJobIsLatest\(job\)\) emitAuthoritativeSnapshot\(job(?:, verified)?\);/g) ?? [];
+  assert.equal(guardedEmits.length, 2, 'V2 y modern/legacy deben emitir snapshot autoritativo sólo si el job sigue latest.');
+  assert.equal((runCloudPush.match(/emitAuthoritativeSnapshot\(/g) ?? []).length, guardedEmits.length, 'No puede existir emit autoritativo incondicional/stale.');
+  assert.match(
+    runCloudPush,
+    /if \(authorityActive\) \{[\s\S]*pushCloudDataWithVisitAuthorityV2\([\s\S]*job\.runtimeLease[\s\S]*assertTenantRuntimeLeaseCurrent\(job\.runtimeLease\);[\s\S]*if \(cloudSaveJobIsLatest\(job\)\) emitAuthoritativeSnapshot\(job, verified\);[\s\S]*return;/i,
+  );
+  assert.match(
+    runCloudPush,
+    /try \{[\s\S]*pushTenantModernCloudData\(job\.scope, job\.snapshot, job\.token, job\.runtimeLease\);[\s\S]*assertTenantRuntimeLeaseCurrent\(job\.runtimeLease\);[\s\S]*catch \(error\)[\s\S]*pushTenantLegacyCloudData\(job\.scope, job\.snapshot, job\.token, job\.runtimeLease\);[\s\S]*assertTenantRuntimeLeaseCurrent\(job\.runtimeLease\);[\s\S]*if \(cloudSaveJobIsLatest\(job\)\) emitAuthoritativeSnapshot\(job\);/i,
+  );
 
   const applyStart = cutover.indexOf('function applyAuthoritativeResult');
   const historicalStart = cutover.indexOf('async function persistHistoricalCloud', applyStart);
   assert.ok(applyStart >= 0 && historicalStart > applyStart);
   const applyAuthoritativeResult = cutover.slice(applyStart, historicalStart);
-  assert.match(applyAuthoritativeResult, /queueCloudSave\(state\.crm, true\);/);
+  assert.match(applyAuthoritativeResult, /queueCloudSave\(runtimeLease\.scope, state\.crm, true\);/);
 
   const queueStart = compatible.indexOf('export function queueCloudSave');
   assert.ok(queueStart >= 0);
   const queueCloudSave = compatible.slice(queueStart);
-  assert.match(queueCloudSave, /queueCloudSave\(crm: CrmData, visitAuthorityDecision\?: boolean\)/);
-  assert.match(queueCloudSave, /pushCloudData\(snapshot, accountKey, visitAuthorityDecision\)/);
+  assert.match(queueCloudSave, /queueCloudSave\(scope: TenantScope, crm: CrmData, visitAuthorityDecision\?: boolean\): void;/);
+  assert.match(queueCloudSave, /const job = createCloudSaveJob\(scope, crm, visitAuthorityDecision\);[\s\S]*tenantRuntimeLeaseIsCurrent\(job\.runtimeLease\)[\s\S]*enqueueCloudSaveJob\(job\)/i);
 });
 
 test('R2.2C1 capability ejecuta auth, RLS y OFF/ON en PostgreSQL 17', { timeout: 120_000 }, async () => {
