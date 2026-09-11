@@ -1,0 +1,77 @@
+name: A3.2 B1.3 Dual Control
+
+on:
+  push:
+    branches:
+      - validation/a32-b13-dual-control
+
+permissions:
+  contents: read
+
+jobs:
+  control:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Checkout diagnostic branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Browser evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --version
+          if command -v google-chrome >/dev/null 2>&1; then google-chrome --version; exit 0; fi
+          if command -v google-chrome-stable >/dev/null 2>&1; then google-chrome-stable --version; exit 0; fi
+          if command -v chromium >/dev/null 2>&1; then chromium --version; exit 0; fi
+          if command -v chromium-browser >/dev/null 2>&1; then chromium-browser --version; exit 0; fi
+          exit 1
+
+      - name: Exact base vs candidate B1.3 control
+        shell: bash
+        run: |
+          set -uo pipefail
+          BASE=23f428a87fcc9382ec6ab8489ae8132776bb6d85
+          CAND=7ded1ab3f43577853b6178a1edcee93361655a40
+          rm -rf /tmp/a32-b13-base /tmp/a32-b13-candidate
+          git worktree add --detach /tmp/a32-b13-base "$BASE"
+          git worktree add --detach /tmp/a32-b13-candidate "$CAND"
+
+          run_one() {
+            label="$1"
+            dir="$2"
+            sha="$3"
+            echo "===== $label ====="
+            cd "$dir" || exit 90
+            test "$(git rev-parse HEAD)" = "$sha" || exit 91
+            echo "EXACT_SHA=$(git rev-parse HEAD)"
+            npm ci
+            npm run build
+            set +e
+            node --test --test-concurrency=1 dist/tests/b1-3-whatsapp-contact-real-app.test.js 2>&1 | tee "/tmp/${label}.log"
+            rc=${PIPESTATUS[0]}
+            set -e
+            echo "${label}_RC=$rc"
+            cd - >/dev/null || exit 92
+            return 0
+          }
+
+          set -e
+          run_one BASE /tmp/a32-b13-base "$BASE"
+          run_one CANDIDATE /tmp/a32-b13-candidate "$CAND"
+
+          echo "===== SIGNATURES ====="
+          echo "BASE_TIMEOUTS=$(grep -c "waiting for locator('#crm.active') to be visible" /tmp/BASE.log || true)"
+          echo "CANDIDATE_TIMEOUTS=$(grep -c "waiting for locator('#crm.active') to be visible" /tmp/CANDIDATE.log || true)"
+          echo "BASE_NOT_OK=$(grep -c '^not ok' /tmp/BASE.log || true)"
+          echo "CANDIDATE_NOT_OK=$(grep -c '^not ok' /tmp/CANDIDATE.log || true)"
+          grep -E '^(not ok|# pass |# fail )|# Subtest: B1\.3' /tmp/BASE.log || true
+          grep -E '^(not ok|# pass |# fail )|# Subtest: B1\.3' /tmp/CANDIDATE.log || true
