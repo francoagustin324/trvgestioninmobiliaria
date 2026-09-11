@@ -110,9 +110,13 @@ test('A3.2 Qualification/Reactivation: session A/B y Activity usan tenant autent
 
 test('A3.2 WhatsApp/contact: identidad humana y persistencia conservan tenant autenticado exacto', () => {
   const identity = source('src/whatsapp-human-identity.ts');
-  assert.match(identity, /const scope = requireCurrentTenantScope\(\)/);
+  assert.match(identity, /try \{ scope = requireCurrentTenantScope\(\); \} catch \{/);
+  assert.match(identity, /assertTenantCrmScope\(scope,\s*state\.crm\)/);
   assert.match(identity, /authenticatedTenantMember\(scope\)/);
+  assert.match(identity, /session && session\.userId !== scope\.userId/);
   assert.match(identity, /organizationId:\s*scope\.organizationId/);
+  assert.match(identity, /actorId:\s*context\.member\.id/);
+  assert.match(identity, /whatsappIdentityStorageKey\([\s\S]*context\.organizationId,[\s\S]*context\.member\.id,[\s\S]*context\.actorKey/);
   assert.equal(identity.includes('activeMember()'), false);
   assert.equal(identity.includes('state.activeMemberId'), false);
 
