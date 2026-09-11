@@ -1,0 +1,41 @@
+name: SEC-FIX A3.2-A Runner
+on:
+  push:
+    branches:
+      - validation/sec-fix-a3-2-inventory
+permissions:
+  contents: write
+jobs:
+  implement:
+    if: contains(github.event.head_commit.message, 'run implementation A')
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout candidate
+        uses: actions/checkout@v4
+        with:
+          ref: agent/sec-fix-a3-2-authenticated-write-identity
+          fetch-depth: 0
+      - name: Assert exact A3.1 base
+        run: test "$(git rev-parse HEAD)" = "23f428a87fcc9382ec6ab8489ae8132776bb6d85"
+      - name: Extract bounded patch script
+        shell: bash
+        run: |
+          git fetch origin validation/sec-fix-a3-2-inventory
+          git show origin/validation/sec-fix-a3-2-inventory:.github/workflows/sec-fix-a3-2-implement-a.yml \
+            | sed -n "/python - <<'PY'/,/^          PY$/p" \
+            | sed '1d;$d;s/^          //' > /tmp/a32a.py
+          python -m py_compile /tmp/a32a.py
+      - name: Apply A3.2-A
+        run: python /tmp/a32a.py
+      - name: Compile
+        run: |
+          npm ci
+          npx tsc --noEmit
+      - name: Commit candidate
+        run: |
+          git config user.name "francoagustin324"
+          git config user.email "francoagustinsolis@gmail.com"
+          git add src
+          git diff --cached --stat
+          git commit -m "SEC-FIX A3.2-A: authenticate active write identity"
+          git push origin HEAD:agent/sec-fix-a3-2-authenticated-write-identity
