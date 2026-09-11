@@ -9,10 +9,16 @@ import {
   type BrowserContextOptions,
   type Page,
 } from 'playwright';
+import {
+  crmToCloudRecords,
+  membershipContext,
+  type CloudMembershipRow,
+  type CloudRecordRow,
+} from '../cloud-records.js';
 import { initialData, type Client, type CrmData, type TeamMember, type TeamRole } from '../models.js';
 
 const sessionKey = 'propcontrol-cloud-session-v1';
-const activeMemberKey = 'propcontrol-active-team-member-v1';
+const organizationId = 'b132-org';
 const artifactDir = 'artifacts/b1-3-2';
 const motorolaUserAgent = 'Mozilla/5.0 (Linux; Android 12; moto g(60) Build/S2RIS32.32-20-7-10) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Mobile Safari/537.36';
 
@@ -21,8 +27,10 @@ interface Identity {
   memberId: number;
   userId: string;
   email: string;
+  organizationId: string;
   storageKey: string;
   syncKey: string;
+  organizationPreferenceKey: string;
 }
 
 interface B132Window extends Window {
@@ -39,8 +47,10 @@ function identity(role: TeamRole): Identity {
     memberId,
     userId,
     email: `${slug}-b132@propcontrol.test`,
-    storageKey: `trv-crm-basico:user:${userId}`,
-    syncKey: `trv-crm-basico:user:${userId}:sync`,
+    organizationId,
+    storageKey: `trv-crm-basico:user:${userId}:org:${organizationId}`,
+    syncKey: `trv-crm-basico:user:${userId}:org:${organizationId}:sync`,
+    organizationPreferenceKey: `propcontrol-active-organization-v1:user:${userId}`,
   };
 }
 
@@ -79,7 +89,7 @@ function existingClient(overrides: Partial<Client> = {}): Client {
 function fixture(role: TeamRole, clients: Client[] = []): CrmData {
   const current = identity(role);
   const crm = structuredClone(initialData);
-  crm.organization = { id: 'b132-org', name: 'TRV Gestión Inmobiliaria', seatLimit: null, planLabel: 'B1.3.2' };
+  crm.organization = { id: current.organizationId, name: 'TRV Gestión Inmobiliaria', seatLimit: null, planLabel: 'B1.3.2' };
   crm.teamMembers = [member('Dueño'), member('Administrador'), member('Corredor')];
   crm.clients = structuredClone(clients);
   crm.activityLog = [];
@@ -95,7 +105,117 @@ function fixture(role: TeamRole, clients: Client[] = []): CrmData {
 }
 
 function chromeExecutable(): string | undefined {
-  return ['/usr/bin/google-chrome', '/usr/bin/google-chrome-stable', '/usr/bin/chromium', '/usr/bin/chromium-browser'].find(existsSync);
+  return [
+    '/usr/bin/google-chrome',
+    '/usr/bin/google-chrome-stable',
+    '/usr/bin/chromium',
+    '/usr/bin/chromium-browser',
+    'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
+    'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
+  ].find(existsSync);
+}
+
+function cloudRole(role: TeamRole): string {
+  if (role === 'Dueño') return 'owner';
+  if (role === 'Administrador') return 'admin';
+  return 'agent';
+}
+
+function membershipRows(crm: CrmData): CloudMembershipRow[] {
+  return crm.teamMembers.map((item) => ({
+    organization_id: crm.organization.id,
+    member_id: item.id,
+    user_id: item.userId || `member-${crm.organization.id}-${item.id}`,
+    role: cloudRole(item.role),
+    status: item.status === 'Suspendido' ? 'suspended' : item.status === 'Pendiente de acceso' ? 'invited' : 'active',
+    display_name: item.name,
+    email: item.email,
+    phone: item.phone,
+    created_at: item.createdAt,
+    last_active_at: item.lastActiveAt,
+  }));
+}
+
+function queryFilter(url: URL, name: string): string {
+  return String(url.searchParams.get(name) || '').replace(/^eq\./, '');
+}
+
+async function installTenantCloudFailure(
+  context: BrowserContext,
+  role: TeamRole,
+  clients: Client[],
+  latency: number,
+): Promise<void> {
+  const current = identity(role);
+  const crm = fixture(role, clients);
+  const ownMemberships = membershipRows(crm);
+  const memberships: CloudMembershipRow[] = [
+    {
+      ...ownMemberships.find((row) => row.user_id === current.userId)!,
+      organization_id: 'aaa-b132-other-org',
+      member_id: 900 + current.memberId,
+    },
+    ...ownMemberships,
+  ];
+  const contextRows = membershipContext(ownMemberships, current.userId);
+  const records = crmToCloudRecords(crm, contextRows, current.userId)
+    .map((row) => ({ ...row, updated_at: '2026-09-10T12:00:00.000Z' }));
+
+  await context.route('**/*', async (route) => {
+    const request = route.request();
+    const url = new URL(request.url());
+    if (url.pathname === '/api/cloud-config') {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          configured: true,
+          url: `${url.origin}/__b132_supabase`,
+          publishableKey: 'b132-publishable',
+        }),
+      });
+      return;
+    }
+    if (!url.pathname.startsWith('/__b132_supabase/')) {
+      await route.continue();
+      return;
+    }
+    if (url.pathname.endsWith('/rest/v1/organization_members')) {
+      let result = memberships;
+      const requestedOrganization = queryFilter(url, 'organization_id');
+      const requestedUser = queryFilter(url, 'user_id');
+      if (requestedOrganization) result = result.filter((row) => row.organization_id === requestedOrganization);
+      if (requestedUser) result = result.filter((row) => row.user_id === requestedUser);
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(result) });
+      return;
+    }
+    if (url.pathname.endsWith('/rest/v1/propcontrol_records')) {
+      if (request.method() === 'GET') {
+        const requestedOrganization = queryFilter(url, 'organization_id');
+        const result = requestedOrganization === current.organizationId ? records : [];
+        await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(result) });
+        return;
+      }
+      if (request.method() === 'POST') {
+        await new Promise((resolve) => setTimeout(resolve, latency));
+        await route.fulfill({
+          status: 503,
+          contentType: 'application/json',
+          body: JSON.stringify({ message: 'Nube B1.3.2 temporalmente no disponible.' }),
+        });
+        return;
+      }
+      if (request.method() === 'DELETE') {
+        await route.fulfill({ status: 204, body: '' });
+        return;
+      }
+    }
+    if (url.pathname.endsWith('/rest/v1/fichas')) {
+      await route.fulfill({ status: 200, contentType: 'application/json', body: '[]' });
+      return;
+    }
+    await route.fulfill({ status: 200, contentType: 'application/json', body: '{}' });
+  });
 }
 
 async function waitForServer(url: string): Promise<void> {
@@ -163,10 +283,12 @@ async function contextFor(
   viewport: { width: number; height: number },
   suffix: string,
   clients: Client[] = [],
+  cloudFailureLatency = 350,
 ): Promise<BrowserContext> {
   const current = identity(role);
   const context = await browser.newContext(contextOptions(viewport));
-  await context.addInitScript(({ crm, session, memberId, keys, markerKey }) => {
+  await installTenantCloudFailure(context, role, clients, cloudFailureLatency);
+  await context.addInitScript(({ crm, session, keys, markerKey }) => {
     if (localStorage.getItem(markerKey)) return;
     localStorage.setItem(markerKey, '1');
     localStorage.setItem(keys.session, JSON.stringify(session));
@@ -177,7 +299,7 @@ async function contextFor(
       lastCloudSavedAt: '2026-08-01T18:00:00-03:00',
       lastCloudVersion: '2026-08-01T18:00:00-03:00',
     }));
-    localStorage.setItem(keys.activeMember, String(memberId));
+    localStorage.setItem(keys.organizationPreference, crm.organization.id);
   }, {
     crm: fixture(role, clients),
     session: {
@@ -187,27 +309,35 @@ async function contextFor(
       userId: current.userId,
       email: current.email,
     },
-    memberId: current.memberId,
-    keys: { session: sessionKey, storage: current.storageKey, sync: current.syncKey, activeMember: activeMemberKey },
+    keys: {
+      session: sessionKey,
+      storage: current.storageKey,
+      sync: current.syncKey,
+      organizationPreference: current.organizationPreferenceKey,
+    },
     markerKey: `propcontrol-b132-fixture:${current.userId}:${suffix}`,
   });
   return context;
 }
 
-async function installCloudFailure(context: BrowserContext, latency = 350): Promise<void> {
-  await context.route('**/api/cloud-config', async (route) => {
-    await new Promise((resolve) => setTimeout(resolve, latency));
-    await route.fulfill({
-      status: 503,
-      contentType: 'application/json',
-      body: JSON.stringify({ message: 'Nube B1.3.2 temporalmente no disponible.' }),
-    });
-  });
-}
-
-async function load(page: Page, url: string): Promise<void> {
+async function load(page: Page, url: string, role: TeamRole): Promise<void> {
   await page.goto(url, { waitUntil: 'domcontentloaded' });
   await page.waitForSelector('#crm.active', { state: 'visible', timeout: 25_000 });
+  const expected = identity(role);
+  const activated = await page.evaluate(async () => {
+    const runtimePath = '/dist/tenant-runtime.js';
+    const storePath = '/dist/store.js';
+    const runtime = await import(runtimePath);
+    const store = await import(storePath);
+    return {
+      scope: runtime.currentTenantScope(),
+      organizationId: store.state.crm.organization.id,
+    };
+  });
+  assert.deepEqual(activated, {
+    scope: { userId: expected.userId, organizationId: expected.organizationId },
+    organizationId: expected.organizationId,
+  });
 }
 
 async function throttleMotorola(page: Page): Promise<void> {
@@ -299,9 +429,9 @@ async function closeAndReopenWithStorage(
   const storageState = await context.storageState();
   await context.close();
   const reopened = await browser.newContext({ ...contextOptions({ width: 390, height: 844 }), storageState });
-  await installCloudFailure(reopened, 80);
+  await installTenantCloudFailure(reopened, 'Dueño', [], 80);
   const page = await reopened.newPage();
-  await load(page, url);
+  await load(page, url, 'Dueño');
   return { context: reopened, page };
 }
 
@@ -314,10 +444,9 @@ test('B1.3.2 guarda una sola vez en Android, persiste localmente y sobrevive a n
   const server = await startServer(port);
   const browser = await chromium.launch({ executablePath, headless: true });
   let context = await contextFor(browser, 'Dueño', { width: 390, height: 844 }, 'android-save');
-  await installCloudFailure(context);
   try {
     let page = await context.newPage();
-    await load(page, url);
+    await load(page, url, 'Dueño');
     await throttleMotorola(page);
     const form = await openLeadForm(page);
     const today = await localToday(page);
@@ -403,11 +532,10 @@ test('B1.3.2 informa el WhatsApp duplicado y abre el lead existente sin escribir
   const url = `http://127.0.0.1:${port}`;
   const server = await startServer(port);
   const browser = await chromium.launch({ executablePath, headless: true });
-  const context = await contextFor(browser, 'Dueño', { width: 390, height: 844 }, 'duplicate', [existingClient()]);
-  await installCloudFailure(context, 50);
+  const context = await contextFor(browser, 'Dueño', { width: 390, height: 844 }, 'duplicate', [existingClient()], 50);
   try {
     const page = await context.newPage();
-    await load(page, url);
+    await load(page, url, 'Dueño');
     const before = JSON.stringify(await snapshot(page, 'Dueño'));
     const form = await openLeadForm(page);
     await fillLead(form, {
@@ -449,11 +577,10 @@ test('B1.3.2 mantiene errores visibles, conserva datos y bloquea formularios obs
   const url = `http://127.0.0.1:${port}`;
   const server = await startServer(port);
   const browser = await chromium.launch({ executablePath, headless: true });
-  const context = await contextFor(browser, 'Corredor', { width: 390, height: 844 }, 'errors');
-  await installCloudFailure(context, 50);
+  const context = await contextFor(browser, 'Corredor', { width: 390, height: 844 }, 'errors', [], 50);
   try {
     const page = await context.newPage();
-    await load(page, url);
+    await load(page, url, 'Corredor');
     let form = await openLeadForm(page);
     await fillLead(form, { name: 'VALIDACIONES B1.3.2', phone: '123', date: await localToday(page) });
     await form.locator('[data-save-lead]').click();
@@ -466,7 +593,11 @@ test('B1.3.2 mantiene errores visibles, conserva datos y bloquea formularios obs
     await form.locator('[data-save-lead]').click();
     await form.locator('[data-lead-status]').getByText(/fecha.*pasad[oa]|pasad[oa].*fecha/i).waitFor({ state: 'visible' });
 
-    await form.evaluate((node) => { node.dataset.b131Actor = '999'; });
+    await page.evaluate(async () => {
+      const storePath = '/dist/store.js';
+      const store = await import(storePath);
+      store.setActiveMemberId(1);
+    });
     await form.locator('input[name="nextFollowUp"]').fill(await localToday(page));
     await form.locator('[data-save-lead]').click();
     await form.locator('[data-lead-status]').getByText(/no tiene autorización/i).waitFor({ state: 'visible' });
@@ -529,11 +660,10 @@ test('B1.3.2 conserva creación por rol, edición y escritorio sin desbordes', {
   try {
     for (const [index, role] of (['Dueño', 'Administrador', 'Corredor'] as TeamRole[]).entries()) {
       const viewport = role === 'Dueño' ? { width: 1366, height: 768 } : { width: 390, height: 844 };
-      const context = await contextFor(browser, role, viewport, `role-${index}`);
-      await installCloudFailure(context, 30);
+      const context = await contextFor(browser, role, viewport, `role-${index}`, [], 30);
       try {
         const page = await context.newPage();
-        await load(page, url);
+        await load(page, url, role);
         const form = await openLeadForm(page);
         const phone = `0351511006${index + 1}`;
         await fillLead(form, {

@@ -3,10 +3,16 @@ import { spawn, type ChildProcess } from 'node:child_process';
 import { existsSync, mkdirSync } from 'node:fs';
 import test from 'node:test';
 import { chromium, type Browser, type BrowserContext, type Page } from 'playwright';
+import {
+  crmToCloudRecords,
+  membershipContext,
+  type CloudMembershipRow,
+  type CloudRecordRow,
+} from '../cloud-records.js';
 import { initialData, type CrmData, type TeamMember, type TeamRole } from '../models.js';
 
 const sessionKey = 'propcontrol-cloud-session-v1';
-const activeMemberKey = 'propcontrol-active-team-member-v1';
+const organizationId = 'b131-org';
 const artifactDir = 'artifacts/b1-3-1';
 const mobileUserAgent = 'Mozilla/5.0 (Linux; Android 14; Pixel 7 Build/AP2A.240705.004) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Mobile Safari/537.36';
 
@@ -15,8 +21,10 @@ interface Identity {
   memberId: number;
   userId: string;
   email: string;
+  organizationId: string;
   storageKey: string;
   syncKey: string;
+  organizationPreferenceKey: string;
 }
 
 interface B131Window extends Window {
@@ -28,8 +36,17 @@ function identity(role: TeamRole): Identity {
   const memberId = role === 'Dueño' ? 1 : role === 'Administrador' ? 2 : 3;
   const slug = role === 'Dueño' ? 'owner' : role === 'Administrador' ? 'admin' : 'agent';
   const userId = `b131-${slug}`;
-  const storageKey = `trv-crm-basico:user:${userId}`;
-  return { role, memberId, userId, email: `${slug}-b131@propcontrol.test`, storageKey, syncKey: `${storageKey}:sync` };
+  const storageKey = `trv-crm-basico:user:${userId}:org:${organizationId}`;
+  return {
+    role,
+    memberId,
+    userId,
+    email: `${slug}-b131@propcontrol.test`,
+    organizationId,
+    storageKey,
+    syncKey: `${storageKey}:sync`,
+    organizationPreferenceKey: `propcontrol-active-organization-v1:user:${userId}`,
+  };
 }
 
 function member(role: TeamRole): TeamMember {
@@ -49,7 +66,7 @@ function member(role: TeamRole): TeamMember {
 function fixture(role: TeamRole): CrmData {
   const current = identity(role);
   const crm = structuredClone(initialData);
-  crm.organization = { id: 'b131-org', name: 'TRV Gestión Inmobiliaria', seatLimit: null, planLabel: 'B1.3.1' };
+  crm.organization = { id: current.organizationId, name: 'TRV Gestión Inmobiliaria', seatLimit: null, planLabel: 'B1.3.1' };
   crm.teamMembers = [member('Dueño'), member('Administrador'), member('Corredor')];
   crm.clients = [];
   crm.activityLog = [];
@@ -65,7 +82,118 @@ function fixture(role: TeamRole): CrmData {
 }
 
 function chromeExecutable(): string | undefined {
-  return ['/usr/bin/google-chrome', '/usr/bin/google-chrome-stable', '/usr/bin/chromium', '/usr/bin/chromium-browser'].find(existsSync);
+  return [
+    '/usr/bin/google-chrome',
+    '/usr/bin/google-chrome-stable',
+    '/usr/bin/chromium',
+    '/usr/bin/chromium-browser',
+    'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
+    'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
+  ].find(existsSync);
+}
+
+function cloudRole(role: TeamRole): string {
+  if (role === 'Dueño') return 'owner';
+  if (role === 'Administrador') return 'admin';
+  return 'agent';
+}
+
+function membershipRows(crm: CrmData): CloudMembershipRow[] {
+  return crm.teamMembers.map((item) => ({
+    organization_id: crm.organization.id,
+    member_id: item.id,
+    user_id: item.userId || `member-${crm.organization.id}-${item.id}`,
+    role: cloudRole(item.role),
+    status: item.status === 'Suspendido' ? 'suspended' : item.status === 'Pendiente de acceso' ? 'invited' : 'active',
+    display_name: item.name,
+    email: item.email,
+    phone: item.phone,
+    created_at: item.createdAt,
+    last_active_at: item.lastActiveAt,
+  }));
+}
+
+function queryFilter(url: URL, name: string): string {
+  return String(url.searchParams.get(name) || '').replace(/^eq\./, '');
+}
+
+function recordKey(row: CloudRecordRow): string {
+  return `${row.entity_type}:${row.entity_key}`;
+}
+
+async function installTenantCloudHarness(context: BrowserContext, role: TeamRole): Promise<void> {
+  const current = identity(role);
+  const crm = fixture(role);
+  const ownMemberships = membershipRows(crm);
+  const memberships: CloudMembershipRow[] = [
+    {
+      ...ownMemberships.find((row) => row.user_id === current.userId)!,
+      organization_id: 'aaa-b131-other-org',
+      member_id: 900 + current.memberId,
+    },
+    ...ownMemberships,
+  ];
+  const contextRows = membershipContext(ownMemberships, current.userId);
+  let records = crmToCloudRecords(crm, contextRows, current.userId)
+    .map((row) => ({ ...row, updated_at: '2026-09-10T12:00:00.000Z' }));
+
+  await context.route('**/*', async (route) => {
+    const request = route.request();
+    const url = new URL(request.url());
+    if (url.pathname === '/api/cloud-config') {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          configured: true,
+          url: `${url.origin}/__b131_supabase`,
+          publishableKey: 'b131-publishable',
+        }),
+      });
+      return;
+    }
+    if (!url.pathname.startsWith('/__b131_supabase/')) {
+      await route.continue();
+      return;
+    }
+    if (url.pathname.endsWith('/rest/v1/organization_members')) {
+      let result = memberships;
+      const requestedOrganization = queryFilter(url, 'organization_id');
+      const requestedUser = queryFilter(url, 'user_id');
+      if (requestedOrganization) result = result.filter((row) => row.organization_id === requestedOrganization);
+      if (requestedUser) result = result.filter((row) => row.user_id === requestedUser);
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(result) });
+      return;
+    }
+    if (url.pathname.endsWith('/rest/v1/propcontrol_records')) {
+      if (request.method() === 'GET') {
+        const requestedOrganization = queryFilter(url, 'organization_id');
+        const result = requestedOrganization === current.organizationId ? records : [];
+        await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(result) });
+        return;
+      }
+      if (request.method() === 'POST') {
+        const incoming = JSON.parse(request.postData() || '[]') as CloudRecordRow[];
+        const merged = new Map(records.map((row) => [recordKey(row), row]));
+        incoming.forEach((row) => merged.set(recordKey(row), {
+          ...row,
+          updated_at: '2026-09-10T12:30:00.000Z',
+        }));
+        records = [...merged.values()];
+        await route.fulfill({ status: 201, contentType: 'application/json', body: '' });
+        return;
+      }
+      if (request.method() === 'DELETE') {
+        await route.fulfill({ status: 204, body: '' });
+        return;
+      }
+    }
+    if (url.pathname.endsWith('/rest/v1/fichas')) {
+      await route.fulfill({ status: 200, contentType: 'application/json', body: '[]' });
+      return;
+    }
+    await route.fulfill({ status: 200, contentType: 'application/json', body: '{}' });
+  });
 }
 
 async function waitForServer(url: string): Promise<void> {
@@ -132,7 +260,8 @@ async function contextFor(
     timezoneId: 'America/Argentina/Cordoba',
     colorScheme: 'dark',
   });
-  await context.addInitScript(({ crm, session, memberId, keys, markerKey }) => {
+  await installTenantCloudHarness(context, role);
+  await context.addInitScript(({ crm, session, keys, markerKey }) => {
     if (!localStorage.getItem(markerKey)) {
       localStorage.setItem(markerKey, '1');
       localStorage.setItem(keys.session, JSON.stringify(session));
@@ -143,7 +272,7 @@ async function contextFor(
         lastCloudSavedAt: '2026-08-01T15:30:00-03:00',
         lastCloudVersion: '2026-08-01T15:30:00-03:00',
       }));
-      localStorage.setItem(keys.activeMember, String(memberId));
+      localStorage.setItem(keys.organizationPreference, crm.organization.id);
     }
     const target = window as unknown as B131Window;
     Object.defineProperty(window, 'open', {
@@ -159,16 +288,35 @@ async function contextFor(
       userId: current.userId,
       email: current.email,
     },
-    memberId: current.memberId,
-    keys: { session: sessionKey, storage: current.storageKey, sync: current.syncKey, activeMember: activeMemberKey },
+    keys: {
+      session: sessionKey,
+      storage: current.storageKey,
+      sync: current.syncKey,
+      organizationPreference: current.organizationPreferenceKey,
+    },
     markerKey: marker,
   });
   return context;
 }
 
-async function load(page: Page, url: string): Promise<void> {
+async function load(page: Page, url: string, role: TeamRole): Promise<void> {
   await page.goto(url, { waitUntil: 'domcontentloaded' });
   await page.waitForSelector('#crm.active', { state: 'visible', timeout: 20_000 });
+  const expected = identity(role);
+  const activated = await page.evaluate(async () => {
+    const runtimePath = '/dist/tenant-runtime.js';
+    const storePath = '/dist/store.js';
+    const runtime = await import(runtimePath);
+    const store = await import(storePath);
+    return {
+      scope: runtime.currentTenantScope(),
+      organizationId: store.state.crm.organization.id,
+    };
+  });
+  assert.deepEqual(activated, {
+    scope: { userId: expected.userId, organizationId: expected.organizationId },
+    organizationId: expected.organizationId,
+  });
 }
 
 async function openLeadForm(page: Page): Promise<ReturnType<Page['locator']>> {
@@ -250,7 +398,7 @@ test('B1.3.1 guarda el lead exacto en móvil y crea un único seguimiento en Age
   const context = await contextFor(browser, 'Dueño', { width: 390, height: 844 }, 'mobile-exact');
   try {
     const page = await context.newPage();
-    await load(page, url);
+    await load(page, url, 'Dueño');
     const form = await openLeadForm(page);
     const fieldsGeometry = await form.locator('.b131-lead-form-fields').evaluate((node) => ({
       clientHeight: node.clientHeight,
@@ -338,7 +486,7 @@ test('B1.3.1 conserva datos ante error y completa Agenda automática sin abrir W
   const context = await contextFor(browser, 'Dueño', { width: 390, height: 844 }, 'validation-auto');
   try {
     const page = await context.newPage();
-    await load(page, url);
+    await load(page, url, 'Dueño');
     const form = await openLeadForm(page);
     await fillRequired(page, form, {
       name: 'AUTO WHATSAPP B1.3.1',
@@ -387,7 +535,7 @@ test('B1.3.1 permite cancelar y tocar fuera no guarda ni cierra el formulario', 
   const context = await contextFor(browser, 'Dueño', { width: 390, height: 844 }, 'cancel');
   try {
     const page = await context.newPage();
-    await load(page, url);
+    await load(page, url, 'Dueño');
     const form = await openLeadForm(page);
     await fillRequired(page, form, {
       name: 'NO GUARDAR',
@@ -420,7 +568,7 @@ test('B1.3.1 valida Dueño Administrador Corredor escritorio y referencias obsol
       const context = await contextFor(browser, role, { width: 1366, height: 768 }, `role-${role}`);
       try {
         const page = await context.newPage();
-        await load(page, url);
+        await load(page, url, role);
         const form = await openLeadForm(page);
         const submitGeometry = await saveButtonGeometry(page);
         assert.ok(submitGeometry.height >= 44, `${role}: ${JSON.stringify(submitGeometry)}`);
@@ -448,7 +596,7 @@ test('B1.3.1 valida Dueño Administrador Corredor escritorio y referencias obsol
     const staleContext = await contextFor(browser, 'Dueño', { width: 390, height: 844 }, 'stale');
     try {
       const page = await staleContext.newPage();
-      await load(page, url);
+      await load(page, url, 'Dueño');
       const form = await openLeadForm(page);
       await fillRequired(page, form, {
         name: 'REFERENCIA OBSOLETA',

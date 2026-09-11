@@ -3,10 +3,11 @@ import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
 const ui = readFileSync('src/mvp-properties-ui.ts', 'utf8');
+const photoUpload = readFileSync('src/property-photo-upload.ts', 'utf8');
 const css = readFileSync('src/mvp-properties.css', 'utf8');
 const html = readFileSync('index.html', 'utf8');
 
- test('Propiedades publica, abre y comparte una ficha corta para cliente con scope/lease capturados', () => {
+test('Propiedades publica, abre y comparte una ficha corta para cliente con scope/lease capturados', () => {
   assert.ok(ui.includes('data-share-property-ficha'));
   assert.ok(ui.includes('data-open-property-ficha'));
   assert.ok(ui.includes('publishAndRememberPropertyFicha(property, scope, runtimeLease)'));
@@ -33,11 +34,25 @@ test('el formulario separa información comercial e interna', () => {
 });
 
 test('las fotos se cargan secuencialmente, se ordenan y se eliminan de la ficha', () => {
+  const selectionStart = ui.indexOf('async function handlePhotoSelection');
+  const selectionEnd = ui.indexOf('function bindPhotoManager', selectionStart);
+  assert.ok(selectionStart >= 0 && selectionEnd > selectionStart);
+  const selection = ui.slice(selectionStart, selectionEnd);
+
   assert.ok(ui.includes('type="file"'));
   assert.ok(ui.includes('accept="image/*"'));
   assert.ok(ui.includes('multiple'));
-  assert.ok(ui.includes('for (let index = 0; index < files.length; index += 1)'));
-  assert.ok(ui.includes('await uploadPropertyPhoto(file, propertyId)'));
+  assert.ok(selection.includes('const scope = requireCurrentTenantScope()'));
+  assert.ok(selection.includes('const runtimeLease = captureTenantRuntimeLease(scope)'));
+  assert.ok(selection.includes('const tenantContext = { scope, runtimeLease }'));
+  assert.ok(selection.includes('for (let index = 0; index < files.length; index += 1)'));
+  assert.ok(selection.includes('await uploadPropertyPhoto(file, propertyId, tenantContext)'));
+  assert.ok(selection.indexOf('for (let index = 0; index < files.length; index += 1)')
+    < selection.indexOf('await uploadPropertyPhoto(file, propertyId, tenantContext)'));
+  assert.ok(photoUpload.includes('organizationId: context.scope.organizationId'));
+  assert.ok(photoUpload.includes('record.organizationId !== context.scope.organizationId'));
+  assert.equal(selection.includes('state.activeMemberId'), false);
+  assert.equal(selection.includes('propcontrol-active-team-member-v1'), false);
   assert.ok(ui.includes('data-photo-left'));
   assert.ok(ui.includes('data-photo-right'));
   assert.ok(ui.includes('data-photo-remove'));
