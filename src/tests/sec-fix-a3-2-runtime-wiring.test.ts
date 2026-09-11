@@ -62,7 +62,8 @@ test('A3.2 static negative: no aparecen writers implícitos, first-membership ni
 
 test('A3.2 Properties: create usa miembro autenticado, edit preserva metadata y stale lease queda cercado', () => {
   const text = source('src/mvp-properties-ui.ts');
-  assert.match(text, /authenticatedTenantMember\(scope\)/);
+  assert.match(text, /function propertyFormWriteContext[\s\S]*authenticatedTenantMember\(context\.scope\)/);
+  assert.match(text, /function capturePropertyFormWriteContext[\s\S]*const scope = requireCurrentTenantScope\(\)[\s\S]*captureTenantRuntimeLease\(scope\)[\s\S]*assertTenantCrmScope\(scope,\s*state\.crm\)/);
   assert.match(text, /assignedToId:\s*editing\?\.assignedToId\s*\?\?\s*writeContext\.member\.id/);
   assert.match(text, /createdById:\s*editing\?\.createdById\s*\?\?\s*writeContext\.member\.id/);
   assert.match(text, /assertTenantRuntimeLeaseCurrent\(writeContext\.runtimeLease\)/);
@@ -74,11 +75,11 @@ test('A3.2 Properties: create usa miembro autenticado, edit preserva metadata y 
 
 test('A3.2 Agenda: creator/default assignee y Activities se atan al actor autenticado del render scope', () => {
   const text = source('src/agenda-ui.ts');
+  assert.match(text, /function agendaWriteMember\(scope:\s*TenantScope,\s*runtimeLease:\s*TenantRuntimeLease\)[\s\S]*assertTenantRuntimeLeaseCurrent\(runtimeLease\)[\s\S]*assertTenantCrmScope\(scope,\s*state\.crm\)[\s\S]*authenticatedTenantMember\(scope\)/);
   assert.match(text, /const renderScope = requireCurrentTenantScope\(\)/);
   assert.match(text, /const renderLease = captureTenantRuntimeLease\(renderScope\)/);
-  assert.match(text, /const member = authenticatedTenantMember\(renderScope\)/);
-  assert.match(text, /assignedToId:\s*existing\?\.assignedToId\s*\?\?\s*member\.id/);
-  assert.match(text, /createdById:\s*existing\?\.createdById\s*\?\?\s*member\.id/);
+  assert.match(text, /assignedToId:\s*existing\?\.assignedToId\s*\?\?\s*agendaWriteMember\(renderScope,\s*renderLease\)\.id/);
+  assert.match(text, /createdById:\s*existing\?\.createdById\s*\?\?\s*agendaWriteMember\(renderScope,\s*renderLease\)\.id/);
   assert.match(text, /addActivityForAuthenticatedTenant\(renderScope,\s*result\.activity\)/);
   assert.equal(/addActivity\(result\.activity\)/.test(text), false);
 });
@@ -86,10 +87,11 @@ test('A3.2 Agenda: creator/default assignee y Activities se atan al actor autent
 test('A3.2 Offers y Reservations: mutation actor sale del authenticated tenant member, no de la vista', () => {
   for (const path of ['src/offer-workflow-ui.ts', 'src/reservation-workflow-ui.ts']) {
     const text = source(path);
-    assert.match(text, /authenticatedTenantMember\(/, `${path} debe resolver miembro autenticado.`);
+    assert.match(text, /authenticatedTenantMember\([^)]*scope\)/, `${path} debe resolver miembro autenticado.`);
     assert.match(text, /captureTenantRuntimeLease\(/, `${path} debe capturar lease.`);
     assert.match(text, /assertTenantRuntimeLeaseCurrent\(/, `${path} debe validar lease.`);
-    assert.match(text, /actor\s*=\s*\{\s*id:\s*[^}]*member\.id,\s*role:\s*[^}]*member\.role\s*\}/s, `${path} debe construir actor desde member autenticado.`);
+    assert.match(text, /id:\s*context\.member\.id/, `${path} debe pasar member.id autenticado al workflow.`);
+    assert.match(text, /role:\s*context\.member\.role/, `${path} debe pasar member.role autenticado al workflow.`);
     const mutationArea = section(text, "addEventListener('submit'", undefined);
     assert.equal(mutationArea.includes('state.activeMemberId'), false, `${path} submit no puede usar activeMemberId.`);
   }
@@ -108,7 +110,7 @@ test('A3.2 Qualification/Reactivation: session A/B y Activity usan tenant autent
 
 test('A3.2 WhatsApp/contact: identidad humana y persistencia conservan tenant autenticado exacto', () => {
   const identity = source('src/whatsapp-human-identity.ts');
-  assert.match(identity, /const scope = currentTenantScope\(\)/);
+  assert.match(identity, /const scope = requireCurrentTenantScope\(\)/);
   assert.match(identity, /authenticatedTenantMember\(scope\)/);
   assert.match(identity, /organizationId:\s*scope\.organizationId/);
   assert.equal(identity.includes('activeMember()'), false);
@@ -136,10 +138,8 @@ test('A3.2 Visit cutover: historical/local actor autenticado y V2 preserva scope
 test('A3.2 Follow-up: tenant storage exacto, rollback tenant-bound y cero storage user-only directo', () => {
   const text = source('src/followup-persistence.ts');
   assert.match(text, /readTenantSnapshot\(scope\)/);
-  assert.match(text, /writeTenantSnapshot\(scope,/);
-  assert.match(text, /assertTenantRuntimeLeaseCurrent\(runtimeLease\)/);
-  assert.match(text, /assertTenantCrmScope\(scope,\s*state\.crm\)/);
-  assert.match(text, /catch \(error\)[\s\S]*writeTenantSnapshot\(scope,\s*state\.crm,/);
+  assert.match(text, /function rollback\(previous:\s*CrmData,\s*scope:\s*TenantScope,\s*runtimeLease:\s*TenantRuntimeLease\)[\s\S]*tenantRuntimeLeaseIsCurrent\(runtimeLease\)[\s\S]*assertTenantRuntimeLeaseCurrent\(runtimeLease\)[\s\S]*assertTenantCrmScope\(scope,\s*previous\)[\s\S]*state\.crm = previous[\s\S]*writeTenantSnapshot\(scope,\s*previous,/);
+  assert.match(text, /catch \(error\)[\s\S]*rollback\(previous,\s*scope,\s*runtimeLease\)/);
   assert.equal(text.includes('readLocalSnapshot'), false);
   assert.equal(text.includes('writeLocalSnapshot'), false);
   assert.equal(text.includes("from './sync-safety.js'"), false);
