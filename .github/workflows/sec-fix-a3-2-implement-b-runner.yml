@@ -1,0 +1,153 @@
+name: SEC-FIX A3.2-B Runner
+on:
+  push:
+    branches:
+      - validation/sec-fix-a3-2-inventory
+permissions:
+  contents: write
+jobs:
+  implement:
+    if: contains(github.event.head_commit.message, 'run implementation B')
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout candidate
+        uses: actions/checkout@v4
+        with:
+          ref: agent/sec-fix-a3-2-authenticated-write-identity
+          fetch-depth: 0
+      - name: Assert A3.2-A head
+        run: test "$(git rev-parse HEAD)" = "d097a1cc9432e7233f4f6968083319aa2a13f623"
+      - name: Apply bounded A3.2-B changes
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          def edit(path, old, new, count=1):
+              p=Path(path); s=p.read_text()
+              n=s.count(old)
+              if n < count:
+                  raise SystemExit(f'{path}: expected {count}, found {n}: {old[:100]!r}')
+              p.write_text(s.replace(old,new,count))
+
+          # Qualification session state must be tenant keyed, not clientId-only.
+          edit('src/lead-qualification-ui.ts',
+               "const sessions = new Map<number, QualificationSession>();\nlet openClientId: number | null = null;",
+               "const sessions = new Map<string, QualificationSession>();\nlet openClientKey: string | null = null;\n\nfunction qualificationSessionKey(clientId: number): string {\n  const scope = requireCurrentTenantScope();\n  return JSON.stringify([scope.userId, scope.organizationId, clientId]);\n}")
+          edit('src/lead-qualification-ui.ts',
+               "function sessionFor(clientId: number): QualificationSession {\n  let session = sessions.get(clientId);",
+               "function sessionFor(clientId: number): QualificationSession {\n  const key = qualificationSessionKey(clientId);\n  let session = sessions.get(key);")
+          edit('src/lead-qualification-ui.ts', "    sessions.set(clientId, session);", "    sessions.set(key, session);")
+          edit('src/lead-qualification-ui.ts',
+               "export function isLeadQualificationOpen(clientId: number): boolean {\n  return openClientId === clientId;\n}",
+               "export function isLeadQualificationOpen(clientId: number): boolean {\n  return openClientKey === qualificationSessionKey(clientId);\n}")
+          edit('src/lead-qualification-ui.ts', "  openClientId = clientId;", "  openClientKey = qualificationSessionKey(clientId);")
+          edit('src/lead-qualification-ui.ts', "  openClientId = null;", "  openClientKey = null;", 2)
+
+          # Follow-up storage: exact TenantScope namespace + lease fences + tenant-bound rollback.
+          edit('src/followup-persistence.ts',
+               "import { saveData, state } from './store.js';\nimport { readLocalSnapshot, writeLocalSnapshot } from './sync-safety.js';",
+               "import { saveData, state } from './store.js';\nimport { assertTenantCrmScope, readTenantSnapshot, writeTenantSnapshot } from './tenant-storage.js';\nimport {\n  assertTenantRuntimeLeaseCurrent,\n  captureTenantRuntimeLease,\n  requireCurrentTenantScope,\n  tenantRuntimeLeaseIsCurrent,\n  type TenantRuntimeLease,\n} from './tenant-runtime.js';\nimport type { TenantScope } from './active-organization.js';")
+          old="""function rollback(previous: CrmData): void {
+  state.crm = previous;
+  try {
+    writeLocalSnapshot(previous, {
+      markDirty: true,
+      reason: 'Reversión de seguimiento no confirmado',
+      backup: false,
+    });
+  } catch {
+    // El formulario conserva la selección y muestra el error original.
+  }
+}
+
+function verifiedClient(clientId: number, date: string | null): Client | null {
+  const snapshot = readLocalSnapshot();
+  const client = snapshot?.clients.find((item) => item.id === clientId) ?? null;
+"""
+          new="""function rollback(previous: CrmData, scope: TenantScope, runtimeLease: TenantRuntimeLease): void {
+  if (!tenantRuntimeLeaseIsCurrent(runtimeLease)) return;
+  assertTenantRuntimeLeaseCurrent(runtimeLease);
+  assertTenantCrmScope(scope, previous);
+  state.crm = previous;
+  try {
+    writeTenantSnapshot(scope, previous, {
+      markDirty: true,
+      reason: 'Reversión de seguimiento no confirmado',
+      backup: false,
+    });
+  } catch {
+    // El formulario conserva la selección y muestra el error original.
+  }
+}
+
+function verifiedClient(
+  scope: TenantScope,
+  runtimeLease: TenantRuntimeLease,
+  clientId: number,
+  date: string | null,
+): Client | null {
+  assertTenantRuntimeLeaseCurrent(runtimeLease);
+  const snapshot = readTenantSnapshot(scope);
+  if (snapshot) assertTenantCrmScope(scope, snapshot);
+  const client = snapshot?.clients.find((item) => item.id === clientId) ?? null;
+"""
+          edit('src/followup-persistence.ts', old, new)
+          edit('src/followup-persistence.ts',
+               "function clearFollowUp(input: FollowUpPersistenceInput): FollowUpPersistenceResult {\n  const client = assertAuthorizedContact(input);",
+               "function clearFollowUp(\n  input: FollowUpPersistenceInput,\n  scope: TenantScope,\n  runtimeLease: TenantRuntimeLease,\n): FollowUpPersistenceResult {\n  assertTenantRuntimeLeaseCurrent(runtimeLease);\n  assertTenantCrmScope(scope, state.crm);\n  const client = assertAuthorizedContact(input);")
+          edit('src/followup-persistence.ts',
+               "  const persisted = verifiedClient(client.id, null);",
+               "  assertTenantRuntimeLeaseCurrent(runtimeLease);\n  const persisted = verifiedClient(scope, runtimeLease, client.id, null);")
+          edit('src/followup-persistence.ts',
+               "  const previous = structuredClone(state.crm);\n  try {\n    if (input.date === null) return clearFollowUp(input);",
+               "  const scope = requireCurrentTenantScope();\n  const runtimeLease = captureTenantRuntimeLease(scope);\n  assertTenantRuntimeLeaseCurrent(runtimeLease);\n  assertTenantCrmScope(scope, state.crm);\n  const previous = structuredClone(state.crm);\n  assertTenantCrmScope(scope, previous);\n  try {\n    if (input.date === null) return clearFollowUp(input, scope, runtimeLease);")
+          edit('src/followup-persistence.ts',
+               "    const result = scheduleWhatsAppFollowUp(",
+               "    assertTenantRuntimeLeaseCurrent(runtimeLease);\n    const result = scheduleWhatsAppFollowUp(")
+          edit('src/followup-persistence.ts',
+               "    if (!result) throw new Error('No se pudo guardar el seguimiento porque cambió el permiso o la identidad activa.');\n    const persisted = verifiedClient(input.clientId, input.date);",
+               "    assertTenantRuntimeLeaseCurrent(runtimeLease);\n    if (!result) throw new Error('No se pudo guardar el seguimiento porque cambió el permiso o la identidad activa.');\n    const persisted = verifiedClient(scope, runtimeLease, input.clientId, input.date);")
+          edit('src/followup-persistence.ts', "    rollback(previous);", "    rollback(previous, scope, runtimeLease);")
+
+          # Team frontend: actor + scope/lease captured by render; API calls receive them explicitly.
+          edit('src/mvp-users-ui.ts', "import { saveData, state } from './store.js';", "import { authenticatedTenantMember, saveData, state } from './store.js';\nimport { assertTenantCrmScope } from './tenant-storage.js';\nimport { assertTenantRuntimeLeaseCurrent, captureTenantRuntimeLease, requireCurrentTenantScope, type TenantRuntimeLease } from './tenant-runtime.js';\nimport type { TenantScope } from './active-organization.js';")
+          edit('src/mvp-users-ui.ts',
+               "function userRow(member: TeamMember): string {\n  const roleEditable = canChangeTeamMemberRole(member);\n  const statusEditable = canChangeTeamMemberStatus(member);",
+               "function userRow(member: TeamMember, actor: TeamMember): string {\n  const roleEditable = canChangeTeamMemberRole(member, actor);\n  const statusEditable = canChangeTeamMemberStatus(member, actor);")
+          edit('src/mvp-users-ui.ts',
+               "export function renderMvpUsers(container: HTMLElement): void {\n  if (!canAccessModule('equipo')) {",
+               "function authenticatedTeamActor(scope: TenantScope, runtimeLease: TenantRuntimeLease): TeamMember {\n  assertTenantRuntimeLeaseCurrent(runtimeLease);\n  assertTenantCrmScope(scope, state.crm);\n  const actor = authenticatedTenantMember(scope);\n  if (!actor) throw new Error('AUTHENTICATED_TENANT_MEMBER_REQUIRED');\n  return actor;\n}\n\nexport function renderMvpUsers(container: HTMLElement): void {\n  const renderScope = requireCurrentTenantScope();\n  const renderLease = captureTenantRuntimeLease(renderScope);\n  const actor = authenticatedTeamActor(renderScope, renderLease);\n  if (!canAccessModule('equipo', actor)) {")
+          edit('src/mvp-users-ui.ts', "  const canManage = canAdministerTeam();", "  const canManage = canAdministerTeam(actor);")
+          edit('src/mvp-users-ui.ts', "${canInviteTeamRole('Administrador') ?", "${canInviteTeamRole('Administrador', actor) ?")
+          edit('src/mvp-users-ui.ts', "${state.crm.teamMembers.map(userRow).join('')}", "${state.crm.teamMembers.map((member) => userRow(member, actor)).join('')}")
+          edit('src/mvp-users-ui.ts', "    if (!canAdministerTeam()) {", "    if (!canAdministerTeam(authenticatedTeamActor(renderScope, renderLease))) {")
+          edit('src/mvp-users-ui.ts', "    if (!canAdministerTeam() || !getCloudSession()) {", "    const submitActor = authenticatedTeamActor(renderScope, renderLease);\n    if (!canAdministerTeam(submitActor) || !getCloudSession()) {")
+          edit('src/mvp-users-ui.ts', "    if (!canInviteTeamRole(role)) {", "    if (!canInviteTeamRole(role, submitActor)) {")
+          edit('src/mvp-users-ui.ts', "    void inviteTeamMember({ name: field(values, 'name').trim(), email, role })", "    void inviteTeamMember({ name: field(values, 'name').trim(), email, role }, renderScope, renderLease)")
+          edit('src/mvp-users-ui.ts', "        if (!canAdministerTeam()) return;", "        const currentActor = authenticatedTeamActor(renderScope, renderLease);\n        if (!canAdministerTeam(currentActor)) return;")
+          edit('src/mvp-users-ui.ts', "    if (!target || !canChangeTeamMemberRole(target)) {", "    const changeActor = authenticatedTeamActor(renderScope, renderLease);\n    if (!target || !canChangeTeamMemberRole(target, changeActor)) {")
+          edit('src/mvp-users-ui.ts', "    if (!canInviteTeamRole(nextRole)) {", "    if (!canInviteTeamRole(nextRole, changeActor)) {")
+          edit('src/mvp-users-ui.ts', "    void updateTeamMemberAccess(id, { role: nextRole })", "    void updateTeamMemberAccess(id, { role: nextRole }, renderScope, renderLease)")
+          edit('src/mvp-users-ui.ts', "        if (!canChangeTeamMemberRole(target)) return;", "        const currentActor = authenticatedTeamActor(renderScope, renderLease);\n        if (!canChangeTeamMemberRole(target, currentActor)) return;")
+          edit('src/mvp-users-ui.ts', "    if (!target || !canChangeTeamMemberStatus(target)) {", "    const statusActor = authenticatedTeamActor(renderScope, renderLease);\n    if (!target || !canChangeTeamMemberStatus(target, statusActor)) {")
+          edit('src/mvp-users-ui.ts', "    void updateTeamMemberAccess(id, { status })", "    void updateTeamMemberAccess(id, { status }, renderScope, renderLease)")
+          edit('src/mvp-users-ui.ts', "        if (!canChangeTeamMemberStatus(target)) return;", "        const currentActor = authenticatedTeamActor(renderScope, renderLease);\n        if (!canChangeTeamMemberStatus(target, currentActor)) return;")
+
+          # Hard negative: A3.2-B must no longer use raw follow-up storage.
+          f=Path('src/followup-persistence.ts').read_text()
+          if 'readLocalSnapshot' in f or 'writeLocalSnapshot' in f:
+              raise SystemExit('followup raw storage remains')
+          PY
+      - name: Compile exact cumulative candidate
+        run: |
+          npm ci
+          npx tsc --noEmit
+      - name: Commit A3.2-B
+        run: |
+          git config user.name "francoagustin324"
+          git config user.email "francoagustinsolis@gmail.com"
+          git add src
+          git diff --cached --stat
+          git commit -m "SEC-FIX A3.2-B: tenant-bind follow-up and team scope"
+          git push origin HEAD:agent/sec-fix-a3-2-authenticated-write-identity
