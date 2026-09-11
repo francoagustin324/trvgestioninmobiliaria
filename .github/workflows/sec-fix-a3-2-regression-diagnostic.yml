@@ -1,14 +1,14 @@
-name: SEC-FIX A3.2 A Commit File Group Isolation
+name: SEC-FIX A3.2 A G2 Single File Isolation
 on:
   push:
     branches: [validation/sec-fix-a3-2-inventory]
 permissions:
   contents: read
 jobs:
-  isolate-a-files:
-    if: contains(github.event.head_commit.message, 'isolate a3.2-a page load file group')
+  isolate-g2-single-file:
+    if: contains(github.event.head_commit.message, 'isolate a3.2-a g2 single file')
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    timeout-minutes: 12
     env:
       BASE_SHA: 23f428a87fcc9382ec6ab8489ae8132776bb6d85
       A_SHA: d097a1cc9432e7233f4f6968083319aa2a13f623
@@ -26,37 +26,26 @@ jobs:
           set -euo pipefail
           google-chrome --version
           echo "RUNNER=${RUNNER_OS}/${RUNNER_ARCH}"
-      - name: Prepare A variants with ephemeral group reversions
+      - name: Prepare exact A variants with one G2 file reverted each
         shell: bash
         run: |
           set -euo pipefail
           make_variant() {
-            label="$1"; shift
+            label="$1"; file="$2"
             dir="/tmp/a32-${label}"
             rm -rf "$dir"
             git worktree add --detach "$dir" "$A_SHA"
             test "$(git -C "$dir" rev-parse HEAD)" = "$A_SHA"
-            if [ "$#" -gt 0 ]; then
-              git -C "$dir" checkout "$BASE_SHA" -- "$@"
-            fi
+            git -C "$dir" checkout "$BASE_SHA" -- "$file"
             (cd "$dir" && npm ci >/dev/null && npm run build >/dev/null)
-            echo "VARIANT=$label REVERTED=$*"
+            echo "VARIANT=$label REVERTED=$file"
           }
-          make_variant a-original
-          make_variant revert-g1 \
-            src/agenda-ui.ts \
-            src/lead-qualification-ui.ts \
-            src/lead-recommendation-instrumentation.ts \
-            src/lead-source-reactivation-ui.ts \
-            src/mvp-leads-ui.ts \
-            src/mvp-properties-ui.ts
-          make_variant revert-g2 \
-            src/offer-workflow-ui.ts \
-            src/reservation-workflow-ui.ts \
-            src/visit-workflow-cutover.ts \
-            src/whatsapp-contact.ts \
-            src/whatsapp-human-identity.ts
-      - name: Probe group variants
+          make_variant offer src/offer-workflow-ui.ts
+          make_variant reservation src/reservation-workflow-ui.ts
+          make_variant visit src/visit-workflow-cutover.ts
+          make_variant wa-contact src/whatsapp-contact.ts
+          make_variant wa-identity src/whatsapp-human-identity.ts
+      - name: Probe single-file variants
         shell: bash
         run: |
           set -euo pipefail
@@ -87,11 +76,13 @@ jobs:
             echo "SERVER_STDERR[$label]=$(tr '\n' ' ' < "$err")"
             if kill -0 "$pid" 2>/dev/null; then kill -TERM "$pid" 2>/dev/null || true; set +e; wait "$pid"; set -e; fi
           }
-          probe a-original /tmp/a32-a-original 64301
-          probe revert-g1 /tmp/a32-revert-g1 64302
-          probe revert-g2 /tmp/a32-revert-g2 64303
-      - name: Emit isolation rule
+          probe offer /tmp/a32-offer 64401
+          probe reservation /tmp/a32-reservation 64402
+          probe visit /tmp/a32-visit 64403
+          probe wa-contact /tmp/a32-wa-contact 64404
+          probe wa-identity /tmp/a32-wa-identity 64405
+      - name: Isolation rule
         shell: bash
         run: |
           set -euo pipefail
-          echo 'Interpretation: original rc=124 expected. A reverted group that returns rc=0 contains the causal change (or required interaction).'
+          echo 'A single-file reversion returning rc=0 identifies that file as necessary for the page-load regression. If none returns rc=0, investigate interaction between G2 files.'
