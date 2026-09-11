@@ -1,14 +1,14 @@
-name: SEC-FIX A3.2 A G2 Single File Isolation
+name: SEC-FIX A3.2 WhatsApp Contact Sufficiency Control
 on:
   push:
     branches: [validation/sec-fix-a3-2-inventory]
 permissions:
   contents: read
 jobs:
-  isolate-g2-single-file:
-    if: contains(github.event.head_commit.message, 'isolate a3.2-a g2 single file')
+  whatsapp-contact-sufficiency:
+    if: contains(github.event.head_commit.message, 'confirm whatsapp-contact page-load causality')
     runs-on: ubuntu-24.04
-    timeout-minutes: 12
+    timeout-minutes: 8
     env:
       BASE_SHA: 23f428a87fcc9382ec6ab8489ae8132776bb6d85
       A_SHA: d097a1cc9432e7233f4f6968083319aa2a13f623
@@ -26,26 +26,20 @@ jobs:
           set -euo pipefail
           google-chrome --version
           echo "RUNNER=${RUNNER_OS}/${RUNNER_ARCH}"
-      - name: Prepare exact A variants with one G2 file reverted each
+      - name: Prepare exact control variants
         shell: bash
         run: |
           set -euo pipefail
-          make_variant() {
-            label="$1"; file="$2"
-            dir="/tmp/a32-${label}"
-            rm -rf "$dir"
-            git worktree add --detach "$dir" "$A_SHA"
-            test "$(git -C "$dir" rev-parse HEAD)" = "$A_SHA"
-            git -C "$dir" checkout "$BASE_SHA" -- "$file"
-            (cd "$dir" && npm ci >/dev/null && npm run build >/dev/null)
-            echo "VARIANT=$label REVERTED=$file"
-          }
-          make_variant offer src/offer-workflow-ui.ts
-          make_variant reservation src/reservation-workflow-ui.ts
-          make_variant visit src/visit-workflow-cutover.ts
-          make_variant wa-contact src/whatsapp-contact.ts
-          make_variant wa-identity src/whatsapp-human-identity.ts
-      - name: Probe single-file variants
+          rm -rf /tmp/base-only-wa /tmp/a-revert-wa
+          git worktree add --detach /tmp/base-only-wa "$BASE_SHA"
+          git -C /tmp/base-only-wa checkout "$A_SHA" -- src/whatsapp-contact.ts
+          (cd /tmp/base-only-wa && npm ci >/dev/null && npm run build >/dev/null)
+          git worktree add --detach /tmp/a-revert-wa "$A_SHA"
+          git -C /tmp/a-revert-wa checkout "$BASE_SHA" -- src/whatsapp-contact.ts
+          (cd /tmp/a-revert-wa && npm ci >/dev/null && npm run build >/dev/null)
+          echo "BASE_PLUS_ONLY_WA=$(git -C /tmp/base-only-wa rev-parse HEAD) working-tree-file-from=$A_SHA"
+          echo "A_MINUS_WA=$(git -C /tmp/a-revert-wa rev-parse HEAD) working-tree-file-from=$BASE_SHA"
+      - name: Probe both variants
         shell: bash
         run: |
           set -euo pipefail
@@ -76,13 +70,10 @@ jobs:
             echo "SERVER_STDERR[$label]=$(tr '\n' ' ' < "$err")"
             if kill -0 "$pid" 2>/dev/null; then kill -TERM "$pid" 2>/dev/null || true; set +e; wait "$pid"; set -e; fi
           }
-          probe offer /tmp/a32-offer 64401
-          probe reservation /tmp/a32-reservation 64402
-          probe visit /tmp/a32-visit 64403
-          probe wa-contact /tmp/a32-wa-contact 64404
-          probe wa-identity /tmp/a32-wa-identity 64405
-      - name: Isolation rule
+          probe base-only-wa /tmp/base-only-wa 64501
+          probe a-revert-wa /tmp/a-revert-wa 64502
+      - name: Assert causal direction
         shell: bash
         run: |
           set -euo pipefail
-          echo 'A single-file reversion returning rc=0 identifies that file as necessary for the page-load regression. If none returns rc=0, investigate interaction between G2 files.'
+          echo 'Expected: base+only A3.2-A whatsapp-contact hangs (rc=124); A3.2-A with whatsapp-contact reverted loads (rc=0).'
