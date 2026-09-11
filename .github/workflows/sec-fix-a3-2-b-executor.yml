@@ -1,0 +1,35 @@
+name: A32B Executor
+on:
+  push:
+    branches:
+      - validation/sec-fix-a3-2-inventory
+permissions:
+  contents: write
+jobs:
+  execute:
+    if: contains(github.event.head_commit.message, 'execute A32B')
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/sec-fix-a3-2-authenticated-write-identity
+          fetch-depth: 0
+      - run: test "$(git rev-parse HEAD)" = "d097a1cc9432e7233f4f6968083319aa2a13f623"
+      - shell: bash
+        run: |
+          git fetch origin validation/sec-fix-a3-2-inventory
+          git show origin/validation/sec-fix-a3-2-inventory:.github/workflows/sec-fix-a3-2-implement-b-runner.yml \
+            | sed -n "/python - <<'PY'/,/^          PY$/p" \
+            | sed '1d;$d;s/^          //' > /tmp/a32b.py
+          python -m py_compile /tmp/a32b.py
+          python /tmp/a32b.py
+      - run: |
+          npm ci
+          npx tsc --noEmit
+      - run: |
+          git config user.name "francoagustin324"
+          git config user.email "francoagustinsolis@gmail.com"
+          git add src
+          git diff --cached --stat
+          git commit -m "SEC-FIX A3.2-B: tenant-bind follow-up and team scope"
+          git push origin HEAD:agent/sec-fix-a3-2-authenticated-write-identity
