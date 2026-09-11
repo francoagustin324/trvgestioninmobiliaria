@@ -24,6 +24,9 @@ jobs:
           git show origin/validation/sec-fix-a3-2-inventory:.github/workflows/sec-fix-a3-2-implement-a.yml \
             | sed -n "/python - <<'PY'/,/^          PY$/p" \
             | sed '1d;$d;s/^          //' > /tmp/a32a.py
+          cat >> /tmp/a32a.py <<'PY'
+          edit('src/whatsapp-contact.ts', "  localStorage.removeItem(attemptStorageKey(attempt?.actorId));", "  if (attempt) localStorage.removeItem(attemptStorageKey(attempt.actorId));")
+          PY
           python -m py_compile /tmp/a32a.py
       - name: Apply A3.2-A
         run: python /tmp/a32a.py
