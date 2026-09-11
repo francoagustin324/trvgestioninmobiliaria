@@ -150,7 +150,7 @@ function validAttemptShape(attempt: Partial<PendingWhatsAppAttempt>, now: Date, 
 export function loadPendingWhatsAppAttemptResult(now = new Date()): PendingWhatsAppAttemptLoadResult {
   const scope = currentTenantScope();
   const member = authenticatedTenantMember(scope);
-  if (!scope || !member) return { attempt: null, invalidated: true, reason: 'No existe un actor autenticado vigente.' };
+  if (!scope || !member) return { attempt: null, invalidated: false, reason: '' };
   const key = attemptStorageKey(member.id);
   const raw = localStorage.getItem(key);
   if (!raw) return { attempt: null, invalidated: false, reason: '' };

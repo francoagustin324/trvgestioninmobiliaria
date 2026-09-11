@@ -107,6 +107,7 @@ jobs:
           node --test --test-concurrency=1
           dist/tests/sec-fix-a3-2-authenticated-write-identity.test.js
           dist/tests/sec-fix-a3-2-runtime-wiring.test.js
+          dist/tests/sec-fix-a3-2-whatsapp-bootstrap-regression.test.js
 
       - name: A3.1 complete
         run: >-
