@@ -1,59 +1,148 @@
-name: SEC-FIX A3.2 Specific Diagnostic Matrix
+name: SEC-FIX A3.2 A3.1 Browser Harness Control
 on:
   push:
     branches: [validation/sec-fix-a3-2-inventory]
 permissions:
   contents: read
 jobs:
-  behavior:
-    if: contains(github.event.head_commit.message, 'run a3.2 specific diagnostic matrix')
+  compare-harness:
+    if: contains(github.event.head_commit.message, 'run a3.1 browser harness base candidate control')
     runs-on: ubuntu-24.04
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - case: owner-visual-tampering
-            pattern: 'TEAM_VIEW_KEY y activeMemberId'
-          - case: agent-no-escalation
-            pattern: 'agent autenticado mirando owner/admin'
-          - case: offers-authenticated-actor
-            pattern: 'Offers create/accept/reject'
-          - case: reservations-authenticated-actor
-            pattern: 'Reservations reserve/cancel'
-          - case: multi-org-storage
-            pattern: 'mismo usuario y mismo legacy entity id'
-          - case: qualification-multi-org
-            pattern: 'Qualification session usa userId'
-          - case: whatsapp-human-identity
-            pattern: 'WhatsApp human identity deriva'
-    name: behavior / ${{ matrix.case }}
+    timeout-minutes: 15
+    env:
+      BASE_SHA: 23f428a87fcc9382ec6ab8489ae8132776bb6d85
+      CANDIDATE_SHA: e7fb056b6ad90bfc54db896cb682e9697f656784
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: f52d34ff37eaa9b8f0c3566b3753650b3fa7d010
-          fetch-depth: 1
+          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
-      - run: npm ci
-      - run: npm run build
-      - name: Run exact behavior case
-        run: node --test --test-concurrency=1 --test-name-pattern="${{ matrix.pattern }}" dist/tests/sec-fix-a3-2-authenticated-write-identity.test.js
-
-  static-wiring:
-    if: contains(github.event.head_commit.message, 'run a3.2 specific diagnostic matrix')
-    runs-on: ubuntu-24.04
-    name: static-wiring / all
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: f52d34ff37eaa9b8f0c3566b3753650b3fa7d010
-          fetch-depth: 1
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: npm
-      - run: npm ci
-      - run: npm run build
-      - run: node --test --test-concurrency=1 dist/tests/sec-fix-a3-2-runtime-wiring.test.js
+      - name: Assert same browser setup as final gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          google-chrome --version
+          echo "RUNNER=${RUNNER_OS}/${RUNNER_ARCH}"
+          echo "BASE_SHA=$BASE_SHA"
+          echo "CANDIDATE_SHA=$CANDIDATE_SHA"
+      - name: Prepare exact base and candidate worktrees
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf /tmp/a31-base /tmp/a32-candidate
+          git worktree add --detach /tmp/a31-base "$BASE_SHA"
+          git worktree add --detach /tmp/a32-candidate "$CANDIDATE_SHA"
+          test "$(git -C /tmp/a31-base rev-parse HEAD)" = "$BASE_SHA"
+          test "$(git -C /tmp/a32-candidate rev-parse HEAD)" = "$CANDIDATE_SHA"
+          (cd /tmp/a31-base && npm ci && npm run build)
+          (cd /tmp/a32-candidate && npm ci && npm run build)
+      - name: Compare server and Chrome connectivity on same runner
+        shell: bash
+        run: |
+          set -euo pipefail
+          probe() {
+            label="$1"; dir="$2"; port="$3"
+            out="/tmp/${label}-server.out"; err="/tmp/${label}-server.err"
+            dom="/tmp/${label}-chrome-dom.out"; chromeerr="/tmp/${label}-chrome.err"
+            : > "$out"; : > "$err"; : > "$dom"; : > "$chromeerr"
+            echo "=== ${label}: SERVER_START ==="
+            echo "SHA=$(git -C "$dir" rev-parse HEAD)"
+            echo "PORT=$port"
+            start_ms=$(date +%s%3N)
+            (
+              cd "$dir"
+              env PORT="$port" \
+                SUPABASE_URL='' SUPABASE_PUBLISHABLE_KEY='' SUPABASE_SECRET_KEY='' SUPABASE_SERVICE_ROLE_KEY='' \
+                LEAD_QUALIFICATION_AI_ENDPOINT='' LEAD_QUALIFICATION_AI_KEY='' LEAD_QUALIFICATION_AI_MODEL='' \
+                node dist/server.js
+            ) >"$out" 2>"$err" &
+            pid=$!
+            echo "PID=$pid"
+            health_ok=0
+            for i in $(seq 1 120); do
+              if ! kill -0 "$pid" 2>/dev/null; then break; fi
+              if curl -fsS --max-time 1 "http://127.0.0.1:${port}/health" >/tmp/${label}-health.body 2>/tmp/${label}-health.err; then
+                health_ok=1
+                health_ms=$(( $(date +%s%3N) - start_ms ))
+                echo "HEALTH_OK=1 HEALTH_MS=$health_ms"
+                break
+              fi
+              sleep 0.25
+            done
+            if [ "$health_ok" -eq 0 ]; then echo "HEALTH_OK=0"; fi
+            if kill -0 "$pid" 2>/dev/null; then echo "SERVER_ALIVE_BEFORE_ROOT=1"; else echo "SERVER_ALIVE_BEFORE_ROOT=0"; fi
+            root_start=$(date +%s%3N)
+            set +e
+            root_meta=$(curl -sS --max-time 30 -o /tmp/${label}-root.body -w 'HTTP=%{http_code} CURL_TIME=%{time_total}' "http://127.0.0.1:${port}/" 2>/tmp/${label}-root.err)
+            root_rc=$?
+            set -e
+            root_ms=$(( $(date +%s%3N) - root_start ))
+            echo "FIRST_ROOT_GET_RC=$root_rc ROOT_MS=$root_ms $root_meta"
+            if kill -0 "$pid" 2>/dev/null; then echo "SERVER_ALIVE_AFTER_ROOT=1"; else echo "SERVER_ALIVE_AFTER_ROOT=0"; fi
+            chrome_start=$(date +%s%3N)
+            set +e
+            timeout 30s google-chrome --headless=new --no-sandbox --disable-gpu --dump-dom "http://127.0.0.1:${port}/" >"$dom" 2>"$chromeerr"
+            chrome_rc=$?
+            set -e
+            chrome_ms=$(( $(date +%s%3N) - chrome_start ))
+            echo "CHROME_CONNECT_RC=$chrome_rc CHROME_MS=$chrome_ms DOM_BYTES=$(wc -c < "$dom")"
+            echo "--- SERVER_STDOUT ${label} ---"; cat "$out" || true
+            echo "--- SERVER_STDERR ${label} ---"; cat "$err" || true
+            echo "--- ROOT_CURL_STDERR ${label} ---"; cat /tmp/${label}-root.err || true
+            echo "--- CHROME_STDERR ${label} ---"; tail -80 "$chromeerr" || true
+            if kill -0 "$pid" 2>/dev/null; then
+              echo "SERVER_ALIVE_BEFORE_SHUTDOWN=1"
+              kill -TERM "$pid" 2>/dev/null || true
+              set +e; wait "$pid"; server_rc=$?; set -e
+              echo "SERVER_EXIT_AFTER_TERM=$server_rc"
+            else
+              echo "SERVER_ALIVE_BEFORE_SHUTDOWN=0"
+              set +e; wait "$pid"; server_rc=$?; set -e
+              echo "SERVER_EXIT_PREMATURE=$server_rc"
+            fi
+          }
+          probe base /tmp/a31-base 64131
+          probe candidate /tmp/a32-candidate 64132
+      - name: Run exact A3.1 browser test on base and candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          run_test() {
+            label="$1"; dir="$2"
+            echo "=== ${label}: EXACT_TEST SHA=$(git -C "$dir" rev-parse HEAD) ==="
+            set +e
+            (cd "$dir" && node --test --test-concurrency=1 dist/tests/sec-fix-a3-1-lead-real-app.test.js) >"/tmp/${label}-a31-browser.log" 2>&1
+            rc=$?
+            set -e
+            echo "${label}_TEST_RC=$rc"
+            grep -E '^(# Subtest:|ok |not ok |# tests |# pass |# fail |# duration_ms|.*page.goto: Timeout|.*navigating to )' "/tmp/${label}-a31-browser.log" || true
+          }
+          run_test base /tmp/a31-base
+          run_test candidate /tmp/a32-candidate
+      - name: Classify base versus candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          base_timeouts=$(grep -c 'page.goto: Timeout 30000ms exceeded' /tmp/base-a31-browser.log || true)
+          candidate_timeouts=$(grep -c 'page.goto: Timeout 30000ms exceeded' /tmp/candidate-a31-browser.log || true)
+          base_fail=$(grep -E '^# fail ' /tmp/base-a31-browser.log | tail -1 | awk '{print $3}')
+          candidate_fail=$(grep -E '^# fail ' /tmp/candidate-a31-browser.log | tail -1 | awk '{print $3}')
+          echo "BASE_PAGE_GOTO_TIMEOUTS=$base_timeouts BASE_FAIL=${base_fail:-unknown}"
+          echo "CANDIDATE_PAGE_GOTO_TIMEOUTS=$candidate_timeouts CANDIDATE_FAIL=${candidate_fail:-unknown}"
+          echo '--- BASE NAVIGATION FAILURES ---'
+          grep -E 'not ok |page.goto: Timeout|navigating to ' /tmp/base-a31-browser.log || true
+          echo '--- CANDIDATE NAVIGATION FAILURES ---'
+          grep -E 'not ok |page.goto: Timeout|navigating to ' /tmp/candidate-a31-browser.log || true
+          if [ "$base_timeouts" -eq 5 ] && [ "$candidate_timeouts" -eq 5 ]; then
+            echo 'CLASSIFICATION=TEST/VALIDATION HARNESS FAILURE'
+            exit 0
+          fi
+          if [ "$base_timeouts" -eq 0 ] && [ "$candidate_timeouts" -gt 0 ]; then
+            echo 'CLASSIFICATION=POSSIBLE_A3.2_EFFECT'
+            exit 1
+          fi
+          echo 'CLASSIFICATION=INCONCLUSIVE'
+          exit 1
