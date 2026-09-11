@@ -1,6 +1,9 @@
 import { isTerminalClient, localIsoDate } from './lead-pipeline.js';
 import type { Client, Offer, OfferCurrency, OfferOrigin, OfferStatus, Property } from './models.js';
-import { saveData, state } from './store.js';
+import { authenticatedTenantMember, saveData, state } from './store.js';
+import { assertTenantCrmScope } from './tenant-storage.js';
+import { assertTenantRuntimeLeaseCurrent, captureTenantRuntimeLease, requireCurrentTenantScope, type TenantRuntimeLease } from './tenant-runtime.js';
+import type { TenantScope } from './active-organization.js';
 import { activeMember, visibleProperties } from './team-access.js';
 import { assignmentVisible } from './team-policy.js';
 import { escapeHtml } from './utils.js';
@@ -14,6 +17,7 @@ import {
 const SECTION_SELECTOR = '[data-lead-offers]';
 let observerInstalled = false;
 let enhancementQueued = false;
+const offerWriteContexts = new WeakMap<HTMLFormElement, { scope: TenantScope; runtimeLease: TenantRuntimeLease }>();
 
 const dateFormatter = new Intl.DateTimeFormat('es-AR', { dateStyle: 'medium' });
 const moneyFormatter = new Intl.NumberFormat('es-AR', { maximumFractionDigits: 2 });
@@ -172,6 +176,15 @@ function renderSection(client: Client): string {
   </section>`;
 }
 
+function captureOfferWriteContext(form: HTMLFormElement): void {
+  if (offerWriteContexts.has(form)) return;
+  const scope = requireCurrentTenantScope();
+  const runtimeLease = captureTenantRuntimeLease(scope);
+  assertTenantRuntimeLeaseCurrent(runtimeLease);
+  assertTenantCrmScope(scope, state.crm);
+  offerWriteContexts.set(form, { scope, runtimeLease });
+}
+
 function bindDeferredForms(section: HTMLElement, client: Client): void {
   const register = section.querySelector<HTMLDetailsElement>('[data-offer-register-disclosure]');
   if (register) {
@@ -180,6 +193,8 @@ function bindDeferredForms(section: HTMLElement, client: Client): void {
       if (!body) return;
       if (!register.open) { body.replaceChildren(); return; }
       if (!body.querySelector('[data-register-offer]')) body.innerHTML = registerForm(client);
+      const form = body.querySelector<HTMLFormElement>('[data-register-offer]');
+      if (form) captureOfferWriteContext(form);
     };
     register.addEventListener('toggle', sync);
     sync();
@@ -193,6 +208,8 @@ function bindDeferredForms(section: HTMLElement, client: Client): void {
       const offer = state.crm.offers.find((item) => item.id === id && item.clientId === client.id);
       if (!offer || offer.status !== 'Pendiente') { body.replaceChildren(); return; }
       if (!body.querySelector('[data-register-counteroffer]')) body.innerHTML = counterForm(offer);
+      const form = body.querySelector<HTMLFormElement>('[data-register-counteroffer]');
+      if (form) captureOfferWriteContext(form);
     };
     details.addEventListener('toggle', sync);
     sync();
@@ -206,6 +223,8 @@ function bindDeferredForms(section: HTMLElement, client: Client): void {
       const offer = state.crm.offers.find((item) => item.id === id && item.clientId === client.id);
       if (!offer || offer.status !== 'Pendiente') { body.replaceChildren(); return; }
       if (!body.querySelector('[data-resolve-offer]')) body.innerHTML = resolveForm(client, offer);
+      const form = body.querySelector<HTMLFormElement>('[data-resolve-offer]');
+      if (form) captureOfferWriteContext(form);
     };
     details.addEventListener('toggle', sync);
     sync();
@@ -252,12 +271,19 @@ function formError(form: HTMLFormElement, error: unknown): void {
   output.hidden = false;
 }
 
-function actor() {
-  const member = activeMember();
-  return { id: member.id, role: member.role };
+function writeContext(form: HTMLFormElement) {
+  const context = offerWriteContexts.get(form);
+  if (!context) throw new Error('TENANT_FORM_CONTEXT_REQUIRED');
+  assertTenantRuntimeLeaseCurrent(context.runtimeLease);
+  assertTenantCrmScope(context.scope, state.crm);
+  const member = authenticatedTenantMember(context.scope);
+  if (!member) throw new Error('AUTHENTICATED_TENANT_MEMBER_REQUIRED');
+  return { ...context, member };
 }
 
-function applyResult(result: { crm: typeof state.crm }): void {
+function applyResult(result: { crm: typeof state.crm }, context: ReturnType<typeof writeContext>): void {
+  assertTenantRuntimeLeaseCurrent(context.runtimeLease);
+  assertTenantCrmScope(context.scope, result.crm);
   state.crm = result.crm;
   saveData('Flujo comercial de ofertas');
   document.dispatchEvent(new CustomEvent('trv-render'));
@@ -280,14 +306,15 @@ function submitRegister(form: HTMLFormElement): void {
   if (form.dataset.submitting === 'true') return;
   formBusy(form, true);
   try {
+    const context = writeContext(form);
     const data = new FormData(form);
     const clientId = Number(form.dataset.registerOffer);
-    const result = registerOffer(state.crm, actor(), {
+    const result = registerOffer(state.crm, { id: context.member.id, role: context.member.role }, {
       clientId,
       propertyId: Number(data.get('propertyId')),
       ...readOfferFields(data),
     });
-    applyResult(result);
+    applyResult(result, context);
   } catch (error) { formBusy(form, false); formError(form, error); }
 }
 
@@ -295,12 +322,13 @@ function submitCounter(form: HTMLFormElement): void {
   if (form.dataset.submitting === 'true') return;
   formBusy(form, true);
   try {
+    const context = writeContext(form);
     const data = new FormData(form);
-    const result = registerCounterOffer(state.crm, actor(), {
+    const result = registerCounterOffer(state.crm, { id: context.member.id, role: context.member.role }, {
       parentOfferId: Number(form.dataset.registerCounteroffer),
       ...readOfferFields(data),
     });
-    applyResult(result);
+    applyResult(result, context);
   } catch (error) { formBusy(form, false); formError(form, error); }
 }
 
@@ -308,14 +336,15 @@ function submitResolution(form: HTMLFormElement): void {
   if (form.dataset.submitting === 'true') return;
   formBusy(form, true);
   try {
+    const context = writeContext(form);
     const data = new FormData(form);
-    const result = resolveOffer(state.crm, actor(), {
+    const result = resolveOffer(state.crm, { id: context.member.id, role: context.member.role }, {
       offerId: Number(form.dataset.resolveOffer),
       status: String(data.get('status') || ''),
       nextAction: String(data.get('nextAction') || ''),
       nextFollowUp: String(data.get('nextFollowUp') || ''),
     });
-    applyResult(result);
+    applyResult(result, context);
   } catch (error) { formBusy(form, false); formError(form, error); }
 }
 

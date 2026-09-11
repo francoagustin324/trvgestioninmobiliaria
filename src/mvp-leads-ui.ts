@@ -31,7 +31,8 @@ import { enhanceLeadForm, submitLeadForm } from './lead-create-reliability.js';
 import type { ActivityEntry, Client, CommercialStage, Temperature } from './models.js';
 import { matchPropertiesForClient, type PropertyMatch } from './property-matching.js';
 import { saveData, state } from './store.js';
-import { addActivity, memberName, visibleClients, visibleProperties } from './team-access.js';
+import { addActivityForAuthenticatedTenant, memberName, visibleClients, visibleProperties } from './team-access.js';
+import { requireCurrentTenantScope } from './tenant-runtime.js';
 import { escapeHtml } from './utils.js';
 
 interface LeadListFilters extends LeadFilters {
@@ -210,7 +211,7 @@ function bindDelegatedFollowUpActions(container: HTMLElement): void {
     if (!client || isTerminalClient(client)) return;
     const result = completeClientFollowUp(client);
     Object.assign(client, result.client);
-    addActivity(result.activity);
+    addActivityForAuthenticatedTenant(requireCurrentTenantScope(), result.activity);
     saveLeadFollowUp(`Seguimiento de lead completado: ${client.name}`, container);
   });
   container.addEventListener('submit', (event) => {
@@ -222,7 +223,7 @@ function bindDelegatedFollowUpActions(container: HTMLElement): void {
     if (!client || !date || isTerminalClient(client)) return;
     const result = reprogramClientFollowUp(client, date);
     Object.assign(client, result.client);
-    addActivity(result.activity);
+    addActivityForAuthenticatedTenant(requireCurrentTenantScope(), result.activity);
     saveLeadFollowUp(`Seguimiento reprogramado: ${client.name}`, container);
   });
 }

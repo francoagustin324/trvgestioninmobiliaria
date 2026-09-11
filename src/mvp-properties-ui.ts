@@ -4,7 +4,8 @@ import type { Property } from './models.js';
 import { MAX_PROPERTY_PHOTOS, uploadPropertyPhoto } from './property-photo-upload.js';
 import type { PropertyWithFicha } from './property-ficha.js';
 import { publishPropertyFicha, type PublishedPropertyFicha } from './public-property-share.js';
-import { saveData, state } from './store.js';
+import { authenticatedTenantMember, saveData, state } from './store.js';
+import { assertTenantCrmScope } from './tenant-storage.js';
 import { newSyncRecordMetadata } from './sync-identity.js';
 import {
   assertTenantRuntimeLeaseCurrent,
@@ -19,6 +20,26 @@ import { escapeHtml, field, formValues, nextId, safePhotoUrl } from './utils.js'
 
 let searchText = '';
 let photoUploadInProgress: TenantRuntimeLease | null = null;
+const propertyFormWriteContexts = new WeakMap<HTMLFormElement, { scope: TenantScope; runtimeLease: TenantRuntimeLease }>();
+
+function capturePropertyFormWriteContext(form: HTMLFormElement): void {
+  if (form.classList.contains('collapsed')) return;
+  const scope = requireCurrentTenantScope();
+  const runtimeLease = captureTenantRuntimeLease(scope);
+  assertTenantRuntimeLeaseCurrent(runtimeLease);
+  assertTenantCrmScope(scope, state.crm);
+  propertyFormWriteContexts.set(form, { scope, runtimeLease });
+}
+
+function propertyFormWriteContext(form: HTMLFormElement) {
+  const context = propertyFormWriteContexts.get(form);
+  if (!context) throw new Error('TENANT_FORM_CONTEXT_REQUIRED');
+  assertTenantRuntimeLeaseCurrent(context.runtimeLease);
+  assertTenantCrmScope(context.scope, state.crm);
+  const member = authenticatedTenantMember(context.scope);
+  if (!member) throw new Error('AUTHENTICATED_TENANT_MEMBER_REQUIRED');
+  return { ...context, member };
+}
 const priceFormatter = new Intl.NumberFormat('es-AR');
 
 export interface MvpPropertiesRenderOptions {
@@ -566,7 +587,10 @@ export function renderMvpProperties(container: HTMLElement, options: MvpProperti
   bindPropertyCardActions(container, options);
 
   const form = container.querySelector<HTMLFormElement>('#mvp-property-form');
-  if (form) bindPhotoManager(form, formPropertyId);
+  if (form) {
+    bindPhotoManager(form, formPropertyId);
+    capturePropertyFormWriteContext(form);
+  }
 
   container.querySelector<HTMLButtonElement>('[data-cancel-property-edit]')?.addEventListener('click', () => {
     if (currentPhotoUploadInProgress()) return;
@@ -578,6 +602,7 @@ export function renderMvpProperties(container: HTMLElement, options: MvpProperti
   form?.addEventListener('submit', async (event) => {
     event.preventDefault();
     if (currentPhotoUploadInProgress()) return;
+    const writeContext = propertyFormWriteContext(form);
     const values = formValues(form);
     const price = Number(field(values, 'price'));
     const error = form.querySelector<HTMLElement>('[data-property-error]');
@@ -612,10 +637,12 @@ export function renderMvpProperties(container: HTMLElement, options: MvpProperti
       description: field(values, 'description').trim(),
       photoUrls: formPhotoUrls(form),
       notes: field(values, 'notes').trim(),
-      assignedToId: editing?.assignedToId ?? state.activeMemberId,
-      createdById: editing?.createdById ?? state.activeMemberId,
+      assignedToId: editing?.assignedToId ?? writeContext.member.id,
+      createdById: editing?.createdById ?? writeContext.member.id,
     };
 
+    assertTenantRuntimeLeaseCurrent(writeContext.runtimeLease);
+    assertTenantCrmScope(writeContext.scope, state.crm);
     if (editing) {
       const index = state.crm.properties.findIndex((item) => item.id === editing.id);
       if (index >= 0) state.crm.properties[index] = property as Property;
@@ -626,8 +653,9 @@ export function renderMvpProperties(container: HTMLElement, options: MvpProperti
     saveData(editing ? 'Propiedad editada' : 'Propiedad creada');
 
     if (property.publicSlug) {
-      const scope = requireCurrentTenantScope();
-      const runtimeLease = captureTenantRuntimeLease(scope);
+      const scope = writeContext.scope;
+      const runtimeLease = writeContext.runtimeLease;
+      assertTenantRuntimeLeaseCurrent(runtimeLease);
       const submit = form.querySelector<HTMLButtonElement>('button[type="submit"]');
       if (submit) {
         submit.disabled = true;

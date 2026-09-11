@@ -18,7 +18,9 @@ import {
   type ReactivationSnoozeDays,
 } from './reactivation-engine.js';
 import { saveData, state } from './store.js';
-import { addActivity, visibleClients } from './team-access.js';
+import { addActivityForAuthenticatedTenant, visibleClients } from './team-access.js';
+import { assertTenantRuntimeLeaseCurrent, captureTenantRuntimeLease, requireCurrentTenantScope, type TenantRuntimeLease } from './tenant-runtime.js';
+import type { TenantScope } from './active-organization.js';
 import { escapeHtml } from './utils.js';
 
 const STYLE_ID = 'propcontrol-lead-source-reactivation-styles';
@@ -34,6 +36,8 @@ interface PendingSourceActivity {
   desiredSignature: string;
   activity: NonNullable<ReturnType<typeof leadSourceChangeActivity>>;
   expiresAt: number;
+  scope: TenantScope;
+  runtimeLease: TenantRuntimeLease;
 }
 
 let pendingSourceActivity: PendingSourceActivity | null = null;
@@ -269,11 +273,16 @@ function capturePendingSourceActivity(event: Event): void {
   try {
     const next = applyLeadSourceMetadata({ ...previous }, formValues(form), previous);
     const activity = leadSourceChangeActivity(previous, next);
+    const scope = requireCurrentTenantScope();
+    const runtimeLease = captureTenantRuntimeLease(scope);
+    assertTenantRuntimeLeaseCurrent(runtimeLease);
     pendingSourceActivity = activity ? {
       clientId,
       desiredSignature: leadSourceSignature(next),
       activity,
       expiresAt: Date.now() + 15_000,
+      scope,
+      runtimeLease,
     } : null;
   } catch {
     pendingSourceActivity = null;
@@ -287,10 +296,11 @@ function processPendingSourceActivity(): void {
     pendingSourceActivity = null;
     return;
   }
+  try { assertTenantRuntimeLeaseCurrent(pending.runtimeLease); } catch { pendingSourceActivity = null; return; }
   const client = visibleClients().find((item) => item.id === pending.clientId);
   if (!client || leadSourceSignature(client) !== pending.desiredSignature) return;
   pendingSourceActivity = null;
-  addActivity(pending.activity);
+  addActivityForAuthenticatedTenant(pending.scope, pending.activity);
   saveData(`Origen de lead actualizado: ${client.name}`);
   queueMicrotask(() => document.dispatchEvent(new CustomEvent('trv-render')));
 }
@@ -304,7 +314,8 @@ function scheduleClientFollowUp(form: HTMLFormElement): void {
   client.nextAction = client.nextAction?.trim() || 'Contactar para reactivar oportunidad';
   client.nextFollowUp = date;
   client.reactivationSnoozedUntil = undefined;
-  activitiesForClientSave(previous, client).forEach((activity) => addActivity(activity));
+  const scope = requireCurrentTenantScope();
+  activitiesForClientSave(previous, client).forEach((activity) => addActivityForAuthenticatedTenant(scope, activity));
   saveData(`Seguimiento de reactivación programado: ${client.name}`);
   document.dispatchEvent(new CustomEvent('trv-render'));
 }
@@ -314,7 +325,7 @@ function snoozeClient(clientId: number, days: ReactivationSnoozeDays): void {
   if (!client) return;
   const result = snoozeReactivation(client, days);
   Object.assign(client, result.client);
-  addActivity(result.activity);
+  addActivityForAuthenticatedTenant(requireCurrentTenantScope(), result.activity);
   saveData(`Reactivación postergada: ${client.name}`);
   document.dispatchEvent(new CustomEvent('trv-render'));
 }

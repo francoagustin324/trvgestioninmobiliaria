@@ -1,7 +1,9 @@
 import { getCloudSession } from './cloud-api.js';
 import { isHumanIdentityName, normalizeHumanIdentityName, safeOrganizationName } from './human-identity.js';
 import type { TeamMember } from './models.js';
-import { state } from './store.js';
+import { authenticatedTenantMember, state } from './store.js';
+import { requireCurrentTenantScope } from './tenant-runtime.js';
+import { assertTenantCrmScope } from './tenant-storage.js';
 
 export const WHATSAPP_IDENTITY_STORAGE_PREFIX = 'propcontrol-whatsapp-human-identity-v1';
 export const WHATSAPP_IDENTITY_CHANGED_EVENT = 'propcontrol-whatsapp-identity-changed';
@@ -66,29 +68,31 @@ export function whatsappIdentityStorageKey(
 }
 
 function currentContext(): { context: CurrentIdentityContext | null; reason: string } {
-  const member = state.crm.teamMembers.find((item) => item.id === state.activeMemberId);
-  if (!member || member.status !== 'Activo') {
-    return { context: null, reason: 'El miembro activo no está disponible para firmar mensajes.' };
+  let scope;
+  try { scope = requireCurrentTenantScope(); } catch {
+    return { context: null, reason: 'No hay un tenant autenticado vigente para firmar mensajes.' };
+  }
+  try { assertTenantCrmScope(scope, state.crm); } catch {
+    return { context: null, reason: 'El CRM activo no coincide con el tenant autenticado.' };
+  }
+  const member = authenticatedTenantMember(scope);
+  if (!member) {
+    return { context: null, reason: 'No existe un miembro autenticado activo y único para firmar mensajes.' };
   }
 
   const session = getCloudSession();
-  if (session && !member.userId) {
-    return { context: null, reason: 'No se pudo asociar la sesión actual con un miembro verificable.' };
-  }
-  if (session && member.userId !== session.userId) {
-    return { context: null, reason: 'El usuario autenticado no coincide con el miembro activo.' };
+  if (session && session.userId !== scope.userId) {
+    return { context: null, reason: 'La sesión no coincide con el tenant autenticado.' };
   }
 
   const memberUserId = member.userId || '';
-  const actorKey = session
-    ? `cloud:${session.userId}`
-    : `local:${memberUserId || member.id}`;
+  const actorKey = session ? `cloud:${scope.userId}` : `local:${scope.userId}`;
   return {
     context: {
       member,
       actorKey,
       memberUserId,
-      organizationId: state.crm.organization.id.trim(),
+      organizationId: scope.organizationId,
       organization: safeOrganizationName(
         state.crm.settings.agencyName.trim() || state.crm.organization.name.trim(),
       ),

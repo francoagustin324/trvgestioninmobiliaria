@@ -1,6 +1,6 @@
 import { getCloudSession, pushCloudData, queueCloudSave } from './cloud-api-compatible.js';
 import type { Client, CrmData, Property, SyncedVisit, VisitInterest, VisitStatus } from './models.js';
-import { saveData, state } from './store.js';
+import { authenticatedTenantMember, saveData, state } from './store.js';
 import { writeTenantSnapshot } from './tenant-storage.js';
 import {
   assertTenantRuntimeLeaseCurrent,
@@ -12,7 +12,7 @@ import {
   type TenantRuntimeLease,
 } from './tenant-runtime.js';
 import { canonicalUuid, normalizeRevision } from './sync-identity.js';
-import { activeMember, addActivity } from './team-access.js';
+import { addActivityForAuthenticatedTenant } from './team-access.js';
 import type { CommercialRecordReference, VisitMutationResult } from './visit-transaction-contract.js';
 import {
   invokeVisitTransactionV2,
@@ -99,8 +99,9 @@ async function persistHistoricalCloud(
   }
 }
 
-function historicalCoordinate(input: CoordinateVisitCutoverInput): string {
-  const actor = activeMember();
+function historicalCoordinate(input: CoordinateVisitCutoverInput, scope: ReturnType<typeof requireCurrentTenantScope>): string {
+  const actor = authenticatedTenantMember(scope);
+  if (!actor) throw new Error('AUTHENTICATED_TENANT_MEMBER_REQUIRED');
   const result = coordinateVisit({
     visits: state.crm.visits,
     client: input.client,
@@ -111,12 +112,13 @@ function historicalCoordinate(input: CoordinateVisitCutoverInput): string {
   });
   replaceClient(result.client);
   state.crm.visits.push(result.visit);
-  addActivity(result.activity);
+  addActivityForAuthenticatedTenant(scope, result.activity);
   return 'Visita coordinada';
 }
 
-function historicalResolve(input: RegisterVisitResultCutoverInput): string {
-  const actor = activeMember();
+function historicalResolve(input: RegisterVisitResultCutoverInput, scope: ReturnType<typeof requireCurrentTenantScope>): string {
+  const actor = authenticatedTenantMember(scope);
+  if (!actor) throw new Error('AUTHENTICATED_TENANT_MEMBER_REQUIRED');
   const result = registerVisitResult({
     visit: input.visit,
     client: input.client,
@@ -132,7 +134,7 @@ function historicalResolve(input: RegisterVisitResultCutoverInput): string {
   const index = state.crm.visits.findIndex((visit) => visit.id === input.visit.id);
   if (index < 0) throw new Error('La visita ya no está disponible.');
   state.crm.visits[index] = result.visit;
-  addActivity(result.activity);
+  addActivityForAuthenticatedTenant(scope, result.activity);
   return `Resultado de visita: ${result.visit.status}`;
 }
 
@@ -146,28 +148,27 @@ export interface CoordinateVisitCutoverInput {
 
 export async function coordinateVisitWithCutover(input: CoordinateVisitCutoverInput): Promise<void> {
   const session = getCloudSession();
-  const scope = session ? requireCurrentTenantScope() : null;
-  const runtimeLease = scope ? captureTenantRuntimeLease(scope) : null;
+  const scope = requireCurrentTenantScope();
+  const runtimeLease = captureTenantRuntimeLease(scope);
+  assertTenantRuntimeLeaseCurrent(runtimeLease);
 
   await executeVisitWriterSelection({
     hasCloudSession: Boolean(session),
     readAuthority: async () => {
-      if (!scope || !runtimeLease) throw new Error('TENANT_RUNTIME_SCOPE_REQUIRED');
       return visitTransactionAuthorityActiveV2(scope, runtimeLease);
     },
     runLocal: () => {
-      const reason = historicalCoordinate(input);
+      assertTenantRuntimeLeaseCurrent(runtimeLease);
+      const reason = historicalCoordinate(input, scope);
       saveData(reason);
     },
     runLegacyCloud: async () => {
-      if (!scope || !runtimeLease) throw new Error('TENANT_RUNTIME_SCOPE_REQUIRED');
       assertTenantRuntimeLeaseCurrent(runtimeLease);
       const before = structuredClone(state.crm);
-      const reason = historicalCoordinate(input);
+      const reason = historicalCoordinate(input, scope);
       await persistHistoricalCloud(before, reason, runtimeLease);
     },
     runTransactionalCloud: async () => {
-      if (!scope || !runtimeLease) throw new Error('TENANT_RUNTIME_SCOPE_REQUIRED');
       assertTenantRuntimeLeaseCurrent(runtimeLease);
       const result = await invokeVisitTransactionV2(scope, {
         operationId: input.operationId,
@@ -198,28 +199,27 @@ export interface RegisterVisitResultCutoverInput {
 
 export async function registerVisitResultWithCutover(input: RegisterVisitResultCutoverInput): Promise<void> {
   const session = getCloudSession();
-  const scope = session ? requireCurrentTenantScope() : null;
-  const runtimeLease = scope ? captureTenantRuntimeLease(scope) : null;
+  const scope = requireCurrentTenantScope();
+  const runtimeLease = captureTenantRuntimeLease(scope);
+  assertTenantRuntimeLeaseCurrent(runtimeLease);
 
   await executeVisitWriterSelection({
     hasCloudSession: Boolean(session),
     readAuthority: async () => {
-      if (!scope || !runtimeLease) throw new Error('TENANT_RUNTIME_SCOPE_REQUIRED');
       return visitTransactionAuthorityActiveV2(scope, runtimeLease);
     },
     runLocal: () => {
-      const reason = historicalResolve(input);
+      assertTenantRuntimeLeaseCurrent(runtimeLease);
+      const reason = historicalResolve(input, scope);
       saveData(reason);
     },
     runLegacyCloud: async () => {
-      if (!scope || !runtimeLease) throw new Error('TENANT_RUNTIME_SCOPE_REQUIRED');
       assertTenantRuntimeLeaseCurrent(runtimeLease);
       const before = structuredClone(state.crm);
-      const reason = historicalResolve(input);
+      const reason = historicalResolve(input, scope);
       await persistHistoricalCloud(before, reason, runtimeLease);
     },
     runTransactionalCloud: async () => {
-      if (!scope || !runtimeLease) throw new Error('TENANT_RUNTIME_SCOPE_REQUIRED');
       assertTenantRuntimeLeaseCurrent(runtimeLease);
       const visitUid = canonicalUuid(input.visit.uid);
       if (!visitUid) {

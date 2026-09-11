@@ -14,7 +14,8 @@ import {
 } from './lead-qualification.js';
 import type { Client, WhatsAppConversation } from './models.js';
 import { saveData, state } from './store.js';
-import { addActivity, visibleClients, visibleConversations } from './team-access.js';
+import { addActivityForAuthenticatedTenant, visibleClients, visibleConversations } from './team-access.js';
+import { assertTenantRuntimeLeaseCurrent, captureTenantRuntimeLease, requireCurrentTenantScope } from './tenant-runtime.js';
 import { escapeHtml } from './utils.js';
 
 interface QualificationSession {
@@ -275,11 +276,15 @@ async function analyze(client: Client, session: QualificationSession, rerender: 
   session.info = undefined;
   session.analyzing = true;
   rerender();
+  const scope = requireCurrentTenantScope();
+  const runtimeLease = captureTenantRuntimeLease(scope);
+  assertTenantRuntimeLeaseCurrent(runtimeLease);
   const deterministic = analyzeLeadQualification(client, text, session.source);
   session.analysis = deterministic;
-  qualificationActivities(client.id, deterministic).forEach(addActivity);
+  qualificationActivities(client.id, deterministic).forEach((activity) => addActivityForAuthenticatedTenant(scope, activity));
   saveData(`Calificación analizada: ${client.name}`);
   const intelligent = await requestIntelligentQualification(text, deterministic);
+  assertTenantRuntimeLeaseCurrent(runtimeLease);
   session.analysis = {
     ...deterministic,
     suggestions: mergeQualificationSuggestions(deterministic.suggestions, intelligent.suggestions),
@@ -336,6 +341,9 @@ export function bindLeadQualificationPanel(
     rerender();
   });
   panel.querySelector<HTMLButtonElement>('[data-apply-qualification]')?.addEventListener('click', () => {
+    const scope = requireCurrentTenantScope();
+    const runtimeLease = captureTenantRuntimeLease(scope);
+    assertTenantRuntimeLeaseCurrent(runtimeLease);
     const current = visibleClients().find((item) => item.id === client.id);
     const analysis = session.analysis;
     if (!current || !analysis) return;
@@ -345,7 +353,7 @@ export function bindLeadQualificationPanel(
     const index = state.crm.clients.findIndex((item) => item.id === current.id);
     if (index === -1) return;
     state.crm.clients[index] = result.client;
-    qualificationActivities(current.id, analysis, result).slice(1).forEach(addActivity);
+    qualificationActivities(current.id, analysis, result).slice(1).forEach((activity) => addActivityForAuthenticatedTenant(scope, activity));
     const alreadyConfirmed = analysis.suggestions.filter((item) => {
       const currentValue = confirmedValue(current, item.field);
       return Boolean(currentValue && sameValue(currentValue, item.value));
@@ -353,6 +361,7 @@ export function bindLeadQualificationPanel(
     const newCount = result.appliedFields.length;
     const reviewRequired = result.reviewRequiredFields.length;
     session.info = `${newCount} ${newCount === 1 ? 'dato nuevo guardado' : 'datos nuevos guardados'}; ${alreadyConfirmed} ${alreadyConfirmed === 1 ? 'dato ya estaba confirmado' : 'datos ya estaban confirmados'}; ${reviewRequired} ${reviewRequired === 1 ? 'dato requiere revisión' : 'datos requieren revisión'}.`;
+    assertTenantRuntimeLeaseCurrent(runtimeLease);
     saveData(`Calificación aplicada: ${current.name}`);
     rerender();
   });
