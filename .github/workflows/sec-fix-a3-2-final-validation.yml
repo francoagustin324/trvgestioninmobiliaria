@@ -1,0 +1,216 @@
+name: SEC-FIX A3.2 Final Validation
+
+on:
+  push:
+    branches:
+      - agent/sec-fix-a3-2-authenticated-write-identity
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sec-fix-a3-2-final-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    env:
+      A32_BASE: 23f428a87fcc9382ec6ab8489ae8132776bb6d85
+    steps:
+      - name: Checkout exact candidate
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+
+      - name: Assert exact SHA and ancestry
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          git merge-base --is-ancestor "$A32_BASE" HEAD
+          test "$(git merge-base "$A32_BASE" HEAD)" = "$A32_BASE"
+          echo "EXACT_CHECKOUT_SHA=$(git rev-parse HEAD)"
+          echo "AHEAD=$(git rev-list --count "$A32_BASE"..HEAD)"
+          echo "BEHIND=$(git rev-list --count HEAD.."$A32_BASE")"
+
+      - name: Assert forbidden diff remains zero
+        shell: bash
+        run: |
+          set -euo pipefail
+          forbidden="$(git diff --name-only "$A32_BASE"...HEAD -- 'supabase/migrations/**' 'supabase/baselines/**' '*.sql' 'docs/SEC_FIX_A2_5_BASELINE.md' 'docs/SUPABASE_PRODUCTION_BASELINE.md')"
+          if [ -n "$forbidden" ]; then
+            echo "Forbidden A3.2 diff detected:"
+            printf '%s\n' "$forbidden"
+            exit 1
+          fi
+          b13="$(git diff --name-only "$A32_BASE"...HEAD -- 'src/tests/b1-3-1-lead-create-real-app.test.ts' 'src/tests/b1-3-2-android-lead-save-real-app.test.ts')"
+          test -z "$b13"
+          echo "0 SQL / migrations / baseline changes; B1.3.1/B1.3.2 untouched."
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Browser prerequisite
+        shell: bash
+        run: |
+          set -euo pipefail
+          if command -v google-chrome >/dev/null 2>&1; then google-chrome --version; exit 0; fi
+          if command -v google-chrome-stable >/dev/null 2>&1; then google-chrome-stable --version; exit 0; fi
+          if command -v chromium >/dev/null 2>&1; then chromium --version; exit 0; fi
+          if command -v chromium-browser >/dev/null 2>&1; then chromium-browser --version; exit 0; fi
+          echo "No supported browser executable available for real-app gates."
+          exit 1
+
+      - name: Initial build
+        run: npm run build
+
+      - name: Characterize Property Sharing preexisting drift on base and candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf /tmp/a32-base
+          git worktree add --detach /tmp/a32-base "$A32_BASE"
+          (
+            cd /tmp/a32-base
+            npm ci
+            npm run build
+            set +e
+            node --test --test-concurrency=1 dist/tests/mvp-property-sharing.test.js > /tmp/a32-base-property.log 2>&1
+            rc=$?
+            set -e
+            test "$rc" -ne 0
+          )
+          set +e
+          node --test --test-concurrency=1 dist/tests/mvp-property-sharing.test.js > /tmp/a32-candidate-property.log 2>&1
+          candidate_rc=$?
+          set -e
+          test "$candidate_rc" -ne 0
+          grep -F "las fotos se cargan secuencialmente, se ordenan y se eliminan de la ficha" /tmp/a32-base-property.log
+          grep -F "las fotos se cargan secuencialmente, se ordenan y se eliminan de la ficha" /tmp/a32-candidate-property.log
+          grep -F "uploadPropertyPhoto(file, propertyId)" /tmp/a32-base-property.log
+          grep -F "uploadPropertyPhoto(file, propertyId)" /tmp/a32-candidate-property.log
+          echo "PROPERTY_SHARING_DRIFT=PREEXISTING_TEST-HARNESS_DRIFT"
+          git worktree remove --force /tmp/a32-base
+
+      - name: A3.2 specific tests
+        run: >-
+          node --test --test-concurrency=1
+          dist/tests/sec-fix-a3-2-authenticated-write-identity.test.js
+          dist/tests/sec-fix-a3-2-runtime-wiring.test.js
+
+      - name: A3.1 complete
+        run: >-
+          node --test --test-concurrency=1
+          dist/tests/sec-fix-a3-1-lead-explicit-tenant-write-identity.test.js
+          dist/tests/sec-fix-a3-1-lead-real-app.test.js
+
+      - name: Properties excluding documented preexisting drift
+        run: >-
+          node --test --test-concurrency=1
+          dist/tests/mvp-properties-ui.test.js
+          dist/tests/property-photo-upload-compat.test.js
+          dist/tests/property-photo-direct-upload.test.js
+          dist/tests/property-photo-storage.test.js
+          dist/tests/property-photo-ux.test.js
+          dist/tests/public-property-share.test.js
+          dist/tests/p1-4-a2-2-properties-actions-ux.test.js
+
+      - name: Agenda
+        run: >-
+          node --test --test-concurrency=1
+          dist/tests/agenda-related-ui.test.js
+          dist/tests/agenda-workflow.test.js
+          dist/tests/agenda.test.js
+
+      - name: Offers
+        run: >-
+          node --test --test-concurrency=1
+          dist/tests/p1-1-a3-offer-foundation.test.js
+          dist/tests/p1-1-a4-offer-workflow.test.js
+
+      - name: Reservations
+        run: >-
+          node --test --test-concurrency=1
+          dist/tests/p1-1-a5-reservation-foundation.test.js
+          dist/tests/p1-1-a6-reservation-workflow.test.js
+
+      - name: Qualification and Reactivation
+        run: >-
+          node --test --test-concurrency=1
+          dist/tests/b1-2-lead-qualification.test.js
+          dist/tests/b1-2-1-essential-qualification.test.js
+          dist/tests/p1-3-a1-source-reactivation.test.js
+
+      - name: Follow-up
+        run: >-
+          node --test --test-concurrency=1
+          dist/tests/followup-cloud-persistence.test.js
+          dist/tests/followup-hotfix.test.js
+
+      - name: WhatsApp identity and contact
+        run: >-
+          node --test --test-concurrency=1
+          dist/tests/b1-3-whatsapp-architecture.test.js
+          dist/tests/b1-3-whatsapp-contact.test.js
+          dist/tests/b1-3-whatsapp-contact-real-app.test.js
+
+      - name: Team
+        run: >-
+          node --test --test-concurrency=1
+          dist/tests/team-management.test.js
+          dist/tests/team-policy.test.js
+          dist/tests/sec-fix-a1-2-e-team-tenant-authority.test.js
+
+      - name: Tenant runtime storage and multi-org
+        run: >-
+          node --test --test-concurrency=1
+          dist/tests/sec-fix-a1-2-a-active-organization.test.js
+          dist/tests/sec-fix-a1-2-b-tenant-storage.test.js
+          dist/tests/sec-fix-a1-2-b-2-tenant-storage-boundary.test.js
+          dist/tests/sec-fix-a1-2-c2-tenant-async.test.js
+          dist/tests/sec-fix-a1-2-c3-stale-async.test.js
+
+      - name: Cloud save generation and lease
+        run: >-
+          node --test --test-concurrency=1
+          dist/tests/cloud-save-serial.test.js
+          dist/tests/sec-fix-a1-2-c2-job-freeze.test.js
+          dist/tests/sec-fix-a1-dr02-cloud-writer-lease.test.js
+          dist/tests/sec-fix-a1-dr03-stale-sync-metadata.test.js
+
+      - name: Visit cutover
+        run: >-
+          node --test --test-concurrency=1
+          dist/tests/p1-1-a2-visit-workflow.test.js
+          dist/tests/p1-1-a7-r2-2c-visit-transaction-cutover.test.js
+          dist/tests/sec-fix-a1-2-d-org-aware-visit-cutover.test.js
+
+      - name: A2 targeted regression
+        run: >-
+          node --test --test-concurrency=1
+          dist/tests/sec-fix-a2-1-canonical-membership-status.test.js
+          dist/tests/sec-fix-a2-2-active-only-membership-authority.test.js
+          dist/tests/sec-fix-a2-3-minimal-acl-hardening.test.js
+          dist/tests/sec-fix-a2-4-org-aware-rpc-v2-alignment.test.js
+
+      - name: Final build
+        run: npm run build
+
+      - name: Final exact SHA evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          echo "FINAL_EXACT_CHECKOUT_SHA=$(git rev-parse HEAD)"
+          echo "PROPERTY_SHARING_EXCLUDED=PREEXISTING_TEST-HARNESS_DRIFT"
+          echo "B1.3.1_B1.3.2_EXCLUDED=PREEXISTING_TEST-HARNESS_DRIFT"
