@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
+import type { TenantScope } from '../active-organization.js';
 import {
   cloudRecordsToCrm,
   crmToCloudRecords,
@@ -13,13 +14,13 @@ import {
 } from '../cloud-records.js';
 import {
   initialData,
-  STORAGE_KEY,
   type CrmData,
   type Reservation,
   type ReservationStatus,
 } from '../models.js';
 import { reconcileCrmSnapshots } from '../sync-reconciliation.js';
-import { readLocalSnapshot } from '../sync-safety.js';
+import { installTenantRuntimeScope, invalidateTenantRuntimeScope } from '../tenant-runtime.js';
+import { readTenantSnapshot, writeTenantSnapshot } from '../tenant-storage.js';
 import { assignmentVisible } from '../team-policy.js';
 
 class MemoryStorage implements Storage {
@@ -116,28 +117,81 @@ test('P1.1-A5 agrega CrmData.reservations e initialData.reservations=[]', () => 
   assert.deepEqual(initialData.reservations, []);
 });
 
-test('P1.1-A5 snapshot legacy sin reservations normaliza a [] y round-trip local conserva todos los campos', async () => {
+test('P1.1-A5 Reservation hace round-trip local tenant-aware, conserva todos sus campos y queda aislada por organización', async () => {
   const storage = new MemoryStorage();
   Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: storage });
 
-  const legacy = structuredClone(initialData) as Partial<CrmData> & { reservations?: Reservation[] };
-  delete legacy.reservations;
-  storage.setItem(STORAGE_KEY, JSON.stringify(legacy));
+  const scopeA: TenantScope = Object.freeze({
+    userId: 'reservation-roundtrip-user',
+    organizationId,
+  });
+  const scopeB: TenantScope = Object.freeze({
+    userId: scopeA.userId,
+    organizationId: '44444444-4444-4444-8444-444444444444',
+  });
 
-  const store = await import('../store.js');
-  assert.deepEqual(store.state.crm.reservations, []);
+  const crmA = structuredClone(initialData);
+  crmA.organization.id = scopeA.organizationId;
+  crmA.reservations = [];
+  const crmB = structuredClone(initialData);
+  crmB.organization.id = scopeB.organizationId;
+  crmB.reservations = [];
+
+  writeTenantSnapshot(scopeA, crmA, { markDirty: false, reason: 'Reservation tenant A base' }, storage);
+  writeTenantSnapshot(scopeB, crmB, { markDirty: false, reason: 'Reservation tenant B base' }, storage);
 
   const expected = reservation({ id: 9, assignedToId: 1, createdById: 1 });
-  store.state.crm.reservations = [expected];
-  store.saveData('P1.1-A5 local Reservation');
-  assert.deepEqual(readLocalSnapshot(storage)?.reservations, [expected]);
+  const expectedWithoutOffer = reservation({
+    id: 10,
+    offerId: undefined,
+    assignedToId: 1,
+    createdById: 1,
+  });
 
-  store.activateStorageForCurrentSession();
-  assert.deepEqual(store.state.crm.reservations, [expected]);
-  assert.deepEqual(Object.keys(store.state.crm.reservations[0] ?? {}), [
-    'id', 'clientId', 'propertyId', 'offerId', 'amount', 'currency', 'paymentMethod', 'conditions',
-    'reservedAt', 'expiresAt', 'status', 'assignedToId', 'createdById', 'createdAt', 'updatedAt',
-  ]);
+  const store = await import('../store.js');
+  try {
+    installTenantRuntimeScope(scopeA, scopeA.userId);
+    store.activateStorageForTenant(scopeA);
+    assert.deepEqual(store.state.crm.reservations, []);
+
+    store.state.crm.reservations = [expected, expectedWithoutOffer];
+    store.saveData('P1.1-A5 tenant-aware Reservation round-trip');
+
+    const persistedA = readTenantSnapshot(scopeA, storage);
+    assert.ok(persistedA);
+    assert.deepEqual(persistedA.reservations, [expected, expectedWithoutOffer]);
+    assert.deepEqual(persistedA.reservations[0], expected);
+    assert.deepEqual(Object.keys(persistedA.reservations[0] ?? {}), [
+      'id', 'clientId', 'propertyId', 'offerId', 'amount', 'currency', 'paymentMethod', 'conditions',
+      'reservedAt', 'expiresAt', 'status', 'assignedToId', 'createdById', 'createdAt', 'updatedAt',
+    ]);
+    assert.equal(persistedA.reservations[0]?.id, expected.id);
+    assert.equal(persistedA.reservations[0]?.clientId, expected.clientId);
+    assert.equal(persistedA.reservations[0]?.propertyId, expected.propertyId);
+    assert.equal(persistedA.reservations[0]?.offerId, expected.offerId);
+    assert.equal(persistedA.reservations[0]?.amount, expected.amount);
+    assert.equal(persistedA.reservations[0]?.currency, expected.currency);
+    assert.equal(persistedA.reservations[0]?.paymentMethod, expected.paymentMethod);
+    assert.equal(persistedA.reservations[0]?.conditions, expected.conditions);
+    assert.equal(persistedA.reservations[0]?.reservedAt, expected.reservedAt);
+    assert.equal(persistedA.reservations[0]?.expiresAt, expected.expiresAt);
+    assert.equal(persistedA.reservations[0]?.status, expected.status);
+    assert.equal(persistedA.reservations[0]?.assignedToId, expected.assignedToId);
+    assert.equal(persistedA.reservations[0]?.createdById, expected.createdById);
+    assert.equal(persistedA.reservations[0]?.createdAt, expected.createdAt);
+    assert.equal(persistedA.reservations[0]?.updatedAt, expected.updatedAt);
+    assert.equal(persistedA.reservations[1]?.offerId, undefined);
+
+    installTenantRuntimeScope(scopeB, scopeB.userId);
+    store.activateStorageForTenant(scopeB);
+    assert.deepEqual(store.state.crm.reservations, []);
+    assert.deepEqual(readTenantSnapshot(scopeB, storage)?.reservations, []);
+
+    const rereadA = readTenantSnapshot(scopeA, storage);
+    assert.deepEqual(rereadA?.reservations, [expected, expectedWithoutOffer]);
+  } finally {
+    invalidateTenantRuntimeScope();
+  }
 });
 
 test('P1.1-A5 CloudEntityType serializa reservation, hidrata y conserva offerId opcional', () => {
@@ -236,11 +290,54 @@ test('P1.1-A5 existir Reservation no modifica pipeline, nextAction, nextFollowUp
   assert.deepEqual(crm.activityLog, activityBefore);
 });
 
-test('P1.1-A5 Agenda no lee reservations y comparación remota sí las contempla', () => {
-  const agenda = readFileSync('src/agenda.ts', 'utf8');
+test('P1.1-A5 Reservations participa del cloud tenant-aware sin contaminar Agenda/Reminder', () => {
+  const crm = crmFixture();
+  const owner = context('owner-user');
+  const rows = crmToCloudRecords(crm, owner, 'owner-user');
+  const reservationRows = rows.filter((row) => row.entity_type === 'reservation');
+
+  assert.equal(reservationRows.length, 2);
+  assert.equal(reservationRows[0]?.organization_id, organizationId);
+  assert.equal(reservationRows[0]?.entity_key, organizationScopedEntityKey(organizationId, 1));
+  assert.equal(reservationRows[0]?.assigned_member_id, 20);
+  assert.deepEqual(reservationRows[0]?.payload, crm.reservations[0]);
+  assert.equal((reservationRows[0]?.payload as Reservation).offerId, 501);
+  assert.equal((reservationRows[1]?.payload as Reservation).offerId, undefined);
+
+  const restored = cloudRecordsToCrm(rows, owner, structuredClone(crm));
+  assert.deepEqual(restored.reservations, crm.reservations);
+
+  const reduced = structuredClone(crm);
+  reduced.reservations = [crm.reservations[0]!];
+  const reducedRows = crmToCloudRecords(reduced, owner, 'owner-user');
+  assert.deepEqual(
+    staleCloudRecords(rows, reducedRows)
+      .filter((row) => row.entity_type === 'reservation')
+      .map((row) => row.entity_key),
+    [organizationScopedEntityKey(organizationId, 2)],
+  );
+
+  const local = structuredClone(crm);
+  const cloud = structuredClone(crm);
+  local.reservations = [reservation({ id: 30, assignedToId: 20, createdById: 20 })];
+  cloud.reservations = [reservation({ id: 40, assignedToId: 20, createdById: 20, offerId: undefined })];
+  const reconciled = reconcileCrmSnapshots(local, cloud);
+  assert.deepEqual(reconciled.merged.reservations.map((item) => item.id), [30, 40]);
+  assert.deepEqual(reconciled.differences.find((item) => item.key === 'reservations')?.localOnly, ['Registro 30']);
+  assert.deepEqual(reconciled.differences.find((item) => item.key === 'reservations')?.cloudOnly, ['Registro 40']);
+
   const compatible = readFileSync('src/cloud-api-compatible.ts', 'utf8');
+  assert.match(compatible, /pullTenantCloudData/);
+  assert.match(compatible, /pushTenantModernCloudData/);
+  assert.match(compatible, /pushTenantLegacyCloudData/);
+  assert.match(compatible, /pushCloudDataWithVisitAuthorityV2/);
+  assert.doesNotMatch(compatible, /\b(?:push|pull|sync|save)Reservations?\w*\b/);
+
+  const agenda = readFileSync('src/agenda.ts', 'utf8');
+  const models = readFileSync('src/models.ts', 'utf8');
+  const reminderBlock = models.match(/export interface Reminder \{([\s\S]*?)\n\}/)?.[1] ?? '';
   assert.doesNotMatch(agenda, /\breservations\b/);
-  assert.match(compatible, /\['clients', 'properties', 'visits', 'offers', 'reservations', 'contacts', 'reminders', 'fichas', 'conversations'\]/);
+  assert.doesNotMatch(reminderBlock, /Reservation|reservation/);
 });
 
 test('P1.1-A5 migración amplía únicamente el CHECK con exactamente 11 entity_type canónicos', () => {
