@@ -1,0 +1,309 @@
+name: A3.3 Team Legacy Reachability Audit
+
+on:
+  push:
+    branches:
+      - validation/a33-team-legacy-reachability-readonly-6
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Checkout exact candidate
+        uses: actions/checkout@v4
+        with:
+          ref: f4bbf63b179c575b9841532054beabc9b7f7598f
+          fetch-depth: 0
+
+      - name: Assert exact candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "f4bbf63b179c575b9841532054beabc9b7f7598f"
+          test -z "$(git status --porcelain)"
+          echo "AUDIT_SHA=$(git rev-parse HEAD)"
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Read-only reachability audit
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          import path from 'node:path';
+          import { execFileSync } from 'node:child_process';
+          import * as ts from 'typescript';
+
+          const SHA = 'f4bbf63b179c575b9841532054beabc9b7f7598f';
+          const TARGETS = ['src/team-bootstrap.ts', 'src/team-ui.ts'];
+          const MODERN = 'src/mvp-users-ui.ts';
+          const normalize = (p) => p.split(path.sep).join('/').replace(/^\.\//, '');
+          const tracked = execFileSync('git', ['ls-files'], { encoding: 'utf8' }).trim().split(/\r?\n/).filter(Boolean).map(normalize);
+          const trackedSet = new Set(tracked);
+          const sourceFiles = tracked.filter((p) => p.startsWith('src/') && p.endsWith('.ts') && !p.startsWith('src/tests/') && !p.endsWith('.d.ts'));
+
+          function text(p) { return fs.readFileSync(p, 'utf8'); }
+          function parse(p, kind = ts.ScriptKind.TS) { return ts.createSourceFile(p, text(p), ts.ScriptTarget.Latest, true, kind); }
+          function resolveSource(from, spec) {
+            if (!spec.startsWith('.')) return null;
+            let candidate = normalize(path.join(path.dirname(from), spec));
+            const tries = [];
+            if (candidate.endsWith('.js')) tries.push(candidate.slice(0, -3) + '.ts');
+            else if (candidate.endsWith('.ts')) tries.push(candidate);
+            else { tries.push(candidate + '.ts'); tries.push(candidate + '/index.ts'); }
+            return tries.find((p) => trackedSet.has(p)) ?? null;
+          }
+          function sourceEdges(p) {
+            const out = new Set();
+            const sf = parse(p);
+            const add = (spec) => { const r = resolveSource(p, spec); if (r) out.add(r); };
+            const visit = (n) => {
+              if (ts.isImportDeclaration(n) && ts.isStringLiteral(n.moduleSpecifier)) add(n.moduleSpecifier.text);
+              else if (ts.isExportDeclaration(n) && n.moduleSpecifier && ts.isStringLiteral(n.moduleSpecifier)) add(n.moduleSpecifier.text);
+              else if (ts.isCallExpression(n) && n.expression.kind === ts.SyntaxKind.ImportKeyword && n.arguments.length === 1 && ts.isStringLiteralLike(n.arguments[0])) add(n.arguments[0].text);
+              ts.forEachChild(n, visit);
+            };
+            visit(sf);
+            return [...out].sort();
+          }
+
+          const graph = new Map(sourceFiles.map((p) => [p, sourceEdges(p)]));
+          const reverse = new Map(sourceFiles.map((p) => [p, []]));
+          for (const [from, tos] of graph) for (const to of tos) if (reverse.has(to)) reverse.get(to).push(from);
+          for (const list of reverse.values()) list.sort();
+
+          function frontendRoots() {
+            const html = text('index.html');
+            const roots = [];
+            for (const m of html.matchAll(/<script\b[^>]*\bsrc=["']([^"']+)["'][^>]*>/gi)) {
+              let s = m[1].split(/[?#]/)[0].replace(/^\//, '');
+              if (s.startsWith('dist/') && s.endsWith('.js')) {
+                const p = 'src/' + s.slice('dist/'.length, -3) + '.ts';
+                if (trackedSet.has(p)) roots.push(p);
+              } else if (s.startsWith('src/') && s.endsWith('.js')) {
+                const p = s.slice(0, -3) + '.ts';
+                if (trackedSet.has(p)) roots.push(p);
+              }
+            }
+            return [...new Set(roots)].sort();
+          }
+
+          function serverRoots() {
+            const pkg = JSON.parse(text('package.json'));
+            const start = String(pkg.scripts?.start ?? '');
+            const roots = [];
+            for (const m of start.matchAll(/(?:^|\s)(?:\.\/)?dist\/([A-Za-z0-9_./-]+)\.js\b/g)) {
+              const p = 'src/' + m[1] + '.ts';
+              if (trackedSet.has(p)) roots.push(p);
+            }
+            if (trackedSet.has('src/server.ts')) roots.push('src/server.ts');
+            return { start, roots: [...new Set(roots)].sort() };
+          }
+
+          function htmlScripts(htmlPath) {
+            if (!trackedSet.has(htmlPath)) return [];
+            const out = [];
+            for (const m of text(htmlPath).matchAll(/<script\b[^>]*\bsrc=["']([^"']+)["'][^>]*>/gi)) {
+              const raw = m[1].split(/[?#]/)[0];
+              if (/^(?:https?:)?\/\//i.test(raw)) continue;
+              out.push(normalize(path.join(path.dirname(htmlPath), raw)));
+            }
+            return out.filter((p) => trackedSet.has(p));
+          }
+
+          function extensionRootsAndGraph() {
+            const manifestPath = 'extension/trv-fichas-chrome/manifest.json';
+            const manifest = JSON.parse(text(manifestPath));
+            const roots = new Set();
+            const extEdges = new Map();
+            const addRoot = (rel) => { if (!rel) return; const p = normalize(path.join(path.dirname(manifestPath), rel)); if (trackedSet.has(p)) roots.add(p); };
+            addRoot(manifest.background?.service_worker);
+            for (const cs of manifest.content_scripts ?? []) for (const j of cs.js ?? []) addRoot(j);
+            addRoot(manifest.action?.default_popup);
+            addRoot(manifest.browser_action?.default_popup);
+            for (const r of [...roots]) if (r.endsWith('.html')) for (const s of htmlScripts(r)) roots.add(s);
+
+            const extCode = tracked.filter((p) => p.startsWith('extension/trv-fichas-chrome/') && /\.(?:js|mjs|cjs|html)$/.test(p));
+            const resolveMixed = (from, spec) => {
+              if (/^(?:https?:)?\/\//i.test(spec)) return null;
+              if (spec.startsWith('/dist/') || spec.startsWith('dist/')) {
+                const s = spec.replace(/^\//, '');
+                const p = 'src/' + s.slice('dist/'.length).replace(/\.js$/, '.ts');
+                return trackedSet.has(p) ? p : null;
+              }
+              if (!spec.startsWith('.')) return null;
+              const raw = normalize(path.join(path.dirname(from), spec));
+              if (trackedSet.has(raw)) return raw;
+              if (raw.endsWith('.js')) {
+                const maybeTs = raw.replace(/\.js$/, '.ts');
+                if (trackedSet.has(maybeTs)) return maybeTs;
+              }
+              return null;
+            };
+            for (const p of extCode) {
+              const out = new Set();
+              if (p.endsWith('.html')) {
+                for (const s of htmlScripts(p)) out.add(s);
+              } else {
+                const sf = ts.createSourceFile(p, text(p), ts.ScriptTarget.Latest, true, ts.ScriptKind.JS);
+                const visit = (n) => {
+                  if (ts.isImportDeclaration(n) && ts.isStringLiteral(n.moduleSpecifier)) { const r = resolveMixed(p, n.moduleSpecifier.text); if (r) out.add(r); }
+                  else if (ts.isExportDeclaration(n) && n.moduleSpecifier && ts.isStringLiteral(n.moduleSpecifier)) { const r = resolveMixed(p, n.moduleSpecifier.text); if (r) out.add(r); }
+                  else if (ts.isCallExpression(n) && n.expression.kind === ts.SyntaxKind.ImportKeyword && n.arguments.length === 1 && ts.isStringLiteralLike(n.arguments[0])) { const r = resolveMixed(p, n.arguments[0].text); if (r) out.add(r); }
+                  else if (ts.isCallExpression(n) && ts.isIdentifier(n.expression) && n.expression.text === 'importScripts') for (const a of n.arguments) if (ts.isStringLiteralLike(a)) { const r = resolveMixed(p, a.text); if (r) out.add(r); }
+                  ts.forEachChild(n, visit);
+                };
+                visit(sf);
+              }
+              extEdges.set(p, [...out].sort());
+            }
+            return { manifestPath, manifest, roots: [...roots].sort(), extEdges };
+          }
+
+          const frontend = frontendRoots();
+          const server = serverRoots();
+          const extension = extensionRootsAndGraph();
+          const productiveRoots = [...new Set([...frontend, ...server.roots, ...extension.roots])].sort();
+          const mixedGraph = new Map(graph);
+          for (const [k, v] of extension.extEdges) mixedGraph.set(k, v);
+
+          function shortestPath(root, target) {
+            const q = [[root]];
+            const seen = new Set([root]);
+            while (q.length) {
+              const pth = q.shift();
+              const last = pth[pth.length - 1];
+              if (last === target) return pth;
+              for (const n of mixedGraph.get(last) ?? []) if (!seen.has(n)) { seen.add(n); q.push([...pth, n]); }
+            }
+            return null;
+          }
+          function rootPaths(target) { return productiveRoots.map((r) => shortestPath(r, target)).filter(Boolean); }
+          function ancestors(target) {
+            const out = new Set(); const q = [...(reverse.get(target) ?? [])];
+            while (q.length) { const n = q.shift(); if (out.has(n)) continue; out.add(n); q.push(...(reverse.get(n) ?? [])); }
+            return [...out].sort();
+          }
+          function reachableFromRoots(node) { return rootPaths(node).length > 0; }
+
+          const textKinds = new Set(['.ts','.js','.mjs','.cjs','.html','.htm','.json','.md','.yml','.yaml','.txt','.css']);
+          const needles = ['team-bootstrap', 'team-ui', 'dist/team-bootstrap.js', 'dist/team-ui.js'];
+          const repoRefs = [];
+          for (const p of tracked) {
+            if (!textKinds.has(path.extname(p))) continue;
+            let t; try { t = text(p); } catch { continue; }
+            const lines = t.split(/\r?\n/);
+            lines.forEach((line, i) => {
+              if (needles.some((n) => line.includes(n))) {
+                let category = 'historical';
+                if (p.startsWith('src/tests/')) category = 'TEST-ONLY';
+                else if (p.endsWith('.md') || p.startsWith('docs/')) category = 'docs';
+                else if (p.startsWith('scripts/') || p.startsWith('.github/')) category = 'build-only';
+                else if (p.startsWith('src/')) category = reachableFromRoots(p) ? 'productive runtime' : 'historical';
+                else if (p === 'index.html' || p.startsWith('extension/')) category = 'productive runtime';
+                repoRefs.push({ path:p, line:i+1, category, text:line.trim().slice(0,220) });
+              }
+            });
+          }
+
+          function loaderRefsForTarget(targetBase) {
+            const out = [];
+            for (const p of tracked) {
+              if (!/\.(?:ts|js|mjs|cjs|html|htm|json)$/.test(p)) continue;
+              let t; try { t = text(p); } catch { continue; }
+              const lines = t.split(/\r?\n/);
+              lines.forEach((line,i) => {
+                if (!line.includes(targetBase) && !line.includes(`dist/${targetBase}.js`)) return;
+                if (/(?:<script\b|import\s*\(|importScripts\s*\(|new\s+Worker\s*\(|serviceWorker\.register\s*\(|\bfrom\s*["']|\bimport\s+["'])/.test(line)) out.push({path:p,line:i+1,text:line.trim().slice(0,220)});
+              });
+            }
+            return out;
+          }
+
+          function auditTarget(target) {
+            const direct = reverse.get(target) ?? [];
+            const trans = ancestors(target);
+            const rootPaths = rootPathsFn(target);
+            return {
+              target,
+              DIRECT_INCOMING: direct,
+              PRODUCTIVE_DIRECT_INCOMING: direct.filter(reachableFromRoots),
+              TRANSITIVE_ANCESTORS: trans,
+              PRODUCTIVE_ANCESTORS: trans.filter(reachableFromRoots),
+              PRODUCTIVE_ROOT_PATHS: rootPaths,
+              NON_TS_DIRECT_RUNTIME_REFS: repoRefs.filter((r) => !r.path.endsWith('.ts') && r.category === 'productive runtime' && (r.text.includes(path.basename(target,'.ts')) || r.text.includes(`dist/${path.basename(target,'.ts')}.js`))),
+              LOADER_LITERAL_REFS: loaderRefsForTarget(path.basename(target,'.ts')),
+              EXACT_REPO_REFS: repoRefs.filter((r) => r.text.includes(path.basename(target,'.ts')) || r.text.includes(`dist/${path.basename(target,'.ts')}.js`)),
+              TARGET_PRODUCTIVELY_REACHABLE: rootPaths.length > 0,
+            };
+          }
+          function rootPathsFn(target) { return productiveRoots.map((r) => shortestPath(r,target)).filter(Boolean); }
+
+          const teamBootstrap = auditTarget('src/team-bootstrap.ts');
+          const teamUi = auditTarget('src/team-ui.ts');
+          const modern = {
+            target: MODERN,
+            exists: trackedSet.has(MODERN),
+            DIRECT_INCOMING: reverse.get(MODERN) ?? [],
+            PRODUCTIVE_ROOT_PATHS: rootPathsFn(MODERN),
+            PRODUCTIVELY_REACHABLE: rootPathsFn(MODERN).length > 0,
+          };
+          if (trackedSet.has(MODERN)) {
+            const sf = parse(MODERN);
+            const exports = [];
+            for (const s of sf.statements) if ((ts.getCombinedModifierFlags(s) & ts.ModifierFlags.Export) !== 0 && s.name && ts.isIdentifier(s.name)) exports.push(s.name.text);
+            modern.EXPORTED_SYMBOLS = exports;
+            modern.SIGNALS = {
+              referencesTeamMembers: text(MODERN).includes('teamMembers'),
+              referencesInvitations: /invite|invit/i.test(text(MODERN)),
+              referencesRoles: /role|rol/i.test(text(MODERN)),
+              referencesAssignments: /assign|asign/i.test(text(MODERN)),
+            };
+          }
+
+          const classify = (audit) => {
+            if (audit.TARGET_PRODUCTIVELY_REACHABLE) return 'REACHABLE ACTIVE';
+            if (audit.target === 'src/team-ui.ts' && teamBootstrap.DIRECT_INCOMING.includes('src/team-bootstrap.ts') && !teamBootstrap.TARGET_PRODUCTIVELY_REACHABLE) return 'REACHABLE ONLY THROUGH DORMANT LEGACY ROOT';
+            const refs = audit.EXACT_REPO_REFS ?? [];
+            if (refs.length && refs.every((r) => r.category === 'TEST-ONLY')) return 'TEST-ONLY';
+            if ((audit.PRODUCTIVE_DIRECT_INCOMING?.length ?? 0) === 0 && (audit.PRODUCTIVE_ROOT_PATHS?.length ?? 0) === 0) return 'DORMANT / NO PRODUCTION INCOMING EDGE';
+            return 'UNKNOWN';
+          };
+          teamBootstrap.CLASSIFICATION = classify(teamBootstrap);
+          teamUi.CLASSIFICATION = classify(teamUi);
+
+          const teamUiOnlyThroughBootstrap = teamUi.DIRECT_INCOMING.length > 0 && teamUi.DIRECT_INCOMING.every((x) => x === 'src/team-bootstrap.ts' || x.startsWith('src/tests/'));
+          const legacyOnlyRequired = teamBootstrap.TARGET_PRODUCTIVELY_REACHABLE || teamUi.TARGET_PRODUCTIVELY_REACHABLE ? 'UNKNOWN' : (modern.PRODUCTIVELY_REACHABLE ? 'NO' : 'UNKNOWN');
+
+          const result = {
+            SHA,
+            ROOTS: {
+              FRONTEND: frontend,
+              SERVER_START: server.start,
+              SERVER: server.roots,
+              EXTENSION_MANIFEST: extension.manifestPath,
+              EXTENSION: extension.roots,
+              ALL_PRODUCTIVE_ROOTS: productiveRoots,
+            },
+            TARGETS: [teamBootstrap, teamUi],
+            MODERN_TEAM_UI: modern,
+            TEAM_UI_ONLY_THROUGH_BOOTSTRAP_OR_TESTS: teamUiOnlyThroughBootstrap,
+            LEGACY_ONLY_CAPABILITIES_REQUIRED_BY_PROD: legacyOnlyRequired,
+            CLUSTER: (!teamBootstrap.TARGET_PRODUCTIVELY_REACHABLE && !teamUi.TARGET_PRODUCTIVELY_REACHABLE && teamUiOnlyThroughBootstrap) ? 'TEAM LEGACY CLUSTER = DORMANT / QUARANTINE CANDIDATE' : 'NOT_DORMANT_CLUSTER',
+          };
+          console.log('A33_TEAM_REACHABILITY_JSON_START');
+          console.log(JSON.stringify(result, null, 2));
+          console.log('A33_TEAM_REACHABILITY_JSON_END');
+          NODE
