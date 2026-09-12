@@ -1,0 +1,36 @@
+name: A3.3 Telemetry Targeted Validation
+
+on:
+  push:
+    branches:
+      - validation/a33-telemetry-targeted
+
+permissions:
+  contents: read
+
+jobs:
+  gate-a:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Verify validation parent and checkout exact candidate
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD^)" = "f2ed74d622aa873822a704c6fe3cc28d194d7691"
+          git checkout --detach f2ed74d622aa873822a704c6fe3cc28d194d7691
+          test "$(git rev-parse HEAD)" = "f2ed74d622aa873822a704c6fe3cc28d194d7691"
+      - name: Install
+        run: npm ci
+      - name: Build
+        run: npm run build
+      - name: Gate A targeted telemetry and recommendation suites
+        run: |
+          node --test --test-concurrency=1 \
+            dist/tests/sec-fix-a3-3-recommendation-telemetry-tenant-authority.test.js \
+            dist/tests/b1-4-2-supervised-recommendation-instrumentation.test.js \
+            dist/tests/b1-4-2-r3-recommendation-lifecycle.test.js \
+            dist/tests/b1-4-2-r4-exactly-once-coalescing.test.js \
+            dist/tests/b1-4-2-r5-canonical-telemetry.test.js
