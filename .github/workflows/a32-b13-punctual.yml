@@ -16,7 +16,7 @@ jobs:
       - name: Checkout exact Gate B candidate
         uses: actions/checkout@v4
         with:
-          ref: cca85c36a11cc06f52b1663ea23dcbe60092b620
+          ref: f4bbf63b179c575b9841532054beabc9b7f7598f
           fetch-depth: 0
 
       - name: Assert exact history and scopes
@@ -25,10 +25,12 @@ jobs:
           set -euo pipefail
           BASE=c79a50e92bdfcfa1f85f4d2dd9e0995bb6cd50c8
           Q=b5cb9a8fd9d15ca263fcda222cd293775b230fe9
-          CANDIDATE=cca85c36a11cc06f52b1663ea23dcbe60092b620
+          STATIC=cca85c36a11cc06f52b1663ea23dcbe60092b620
+          CANDIDATE=f4bbf63b179c575b9841532054beabc9b7f7598f
           test "$(git rev-parse HEAD)" = "$CANDIDATE"
-          test "$(git rev-parse HEAD^)" = "$Q"
-          test "$(git rev-parse HEAD^^)" = "$BASE"
+          test "$(git rev-parse HEAD^)" = "$STATIC"
+          test "$(git rev-parse HEAD^^)" = "$Q"
+          test "$(git rev-parse HEAD^^^)" = "$BASE"
           test -z "$(git status --porcelain)"
 
           printf '%s\n' \
@@ -38,7 +40,8 @@ jobs:
           git diff --name-only "$BASE".."$Q" | sort > /tmp/actual-q
           diff -u /tmp/expected-q /tmp/actual-q
 
-          test "$(git diff --name-only "$Q".."$CANDIDATE")" = "src/tests/sec-fix-a3-3-anti-bypass-static-guards.test.ts"
+          test "$(git diff --name-only "$Q".."$STATIC")" = "src/tests/sec-fix-a3-3-anti-bypass-static-guards.test.ts"
+          test "$(git diff --name-only "$STATIC".."$CANDIDATE")" = "src/tests/sec-fix-a3-3-anti-bypass-static-guards.test.ts"
           if git diff --name-only "$BASE".."$CANDIDATE" | grep -E '(^|/)(supabase|migrations?|baseline)(/|$)|\.sql$' >/dev/null; then
             echo 'Forbidden SQL/migration/baseline change'
             exit 1
@@ -50,6 +53,7 @@ jobs:
           test -f src/legacy-quarantine/visit-authority-sync-version.ts
           echo "A33_GATE_B_BASE=$BASE"
           echo "A33_GATE_B_QUARANTINE=$Q"
+          echo "A33_GATE_B_STATIC=$STATIC"
           echo "A33_GATE_B_CANDIDATE=$CANDIDATE"
 
       - name: Verify quarantine modules are byte-equivalent except required relative imports
@@ -112,5 +116,5 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test "$(git rev-parse HEAD)" = "cca85c36a11cc06f52b1663ea23dcbe60092b620"
+          test "$(git rev-parse HEAD)" = "f4bbf63b179c575b9841532054beabc9b7f7598f"
           echo "FINAL_A33_GATE_B_SHA=$(git rev-parse HEAD)"
