@@ -1,5 +1,5 @@
-import { saveData, state } from './store.js';
-import { activeMember, addActivity, canViewAll, visibleClients, visibleConversations, visibleProperties, visibleReminders } from './team-access.js';
+import { saveData, state } from '../store.js';
+import { activeMember, addActivity, canViewAll, visibleClients, visibleConversations, visibleProperties, visibleReminders } from '../team-access.js';
 
 let applying = false;
 let initialized = false;

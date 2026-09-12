@@ -21,7 +21,7 @@ test('index usa solo la entrada MVP y carga las capas visuales aprobadas', () =>
   assert.match(html, /\/src\/sidebar-brand\.css/);
   assert.match(html, /\/src\/mvp-polish\.css/);
   assert.ok(html.includes('20260714-21'));
-  for (const legacy of ['/dist/main.js', 'team-bootstrap.js', 'team-scope.js', 'audio-simulation.js', 'intervention-alert.js']) {
+  for (const legacy of ['/dist/main.js', 'team-bootstrap.js', '/dist/legacy-quarantine/team-scope.js', 'audio-simulation.js', 'intervention-alert.js']) {
     assert.equal(html.includes(legacy), false, legacy);
   }
 });
