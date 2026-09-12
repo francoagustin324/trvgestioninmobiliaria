@@ -1,4 +1,4 @@
-name: A3.3-A Static Anti-Bypass Validation
+name: A3.3 Gate A Validation
 
 on:
   push:
@@ -13,26 +13,39 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
-      - name: Checkout exact A3.3-A candidate
+      - name: Checkout exact Gate A candidate
         uses: actions/checkout@v4
         with:
-          ref: 6856b4de16bc210b69fb748de29cc843932e5846
+          ref: 68baba54ec5db00f14445336b436e3b484c6c0a6
           fetch-depth: 0
 
-      - name: Assert exact candidate identity and static-only scope
+      - name: Assert exact candidate identity and TEST-ONLY scope
         shell: bash
         run: |
           set -euo pipefail
-          CANDIDATE=6856b4de16bc210b69fb748de29cc843932e5846
-          PARENT=349e9ba9e456ef79c3c740a9458290f408c651e6
-          FILE=src/tests/sec-fix-a3-3-anti-bypass-static-guards.test.ts
+          CANDIDATE=68baba54ec5db00f14445336b436e3b484c6c0a6
+          PARENT=f2ed74d622aa873822a704c6fe3cc28d194d7691
+          CONTAMINATED=fa5ff40c41996bf56ee89b5dca964f4b6bcdf426
           test "$(git rev-parse HEAD)" = "$CANDIDATE"
           test "$(git rev-parse HEAD^)" = "$PARENT"
           test "$(git merge-base "$PARENT" HEAD)" = "$PARENT"
-          test "$(git diff --name-only "$PARENT"..HEAD)" = "$FILE"
-          echo "A33_CANDIDATE_SHA=$(git rev-parse HEAD)"
-          echo "A33_PARENT_SHA=$(git rev-parse HEAD^)"
-          echo "A33_SCOPE=$FILE"
+          if git merge-base --is-ancestor "$CONTAMINATED" HEAD; then
+            echo "contaminated commit is ancestor"
+            exit 1
+          fi
+          test ! -e __noop__
+          mapfile -t files < <(git diff --name-only "$PARENT"..HEAD)
+          test "${#files[@]}" -eq 3
+          test "${files[0]}" = "src/tests/b1-4-2-r3-recommendation-lifecycle.test.ts"
+          test "${files[1]}" = "src/tests/b1-4-2-supervised-recommendation-instrumentation.test.ts"
+          test "${files[2]}" = "src/tests/sec-fix-a3-3-recommendation-telemetry-tenant-authority.test.ts"
+          if git diff --name-only "$PARENT"..HEAD | grep -Ev '^src/tests/' >/dev/null; then
+            echo "non-test file changed"
+            exit 1
+          fi
+          echo "A33_GATE_A_CANDIDATE=$CANDIDATE"
+          echo "A33_GATE_A_PARENT=$PARENT"
+          echo "A33_CONTAMINATED_NOT_ANCESTOR=$CONTAMINATED"
 
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -43,77 +56,28 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Browser prerequisite
-        shell: bash
-        run: |
-          set -euo pipefail
-          if command -v google-chrome >/dev/null 2>&1; then google-chrome --version; exit 0; fi
-          if command -v google-chrome-stable >/dev/null 2>&1; then google-chrome-stable --version; exit 0; fi
-          if command -v chromium >/dev/null 2>&1; then chromium --version; exit 0; fi
-          if command -v chromium-browser >/dev/null 2>&1; then chromium-browser --version; exit 0; fi
-          echo "No supported browser executable available for real-app gates."
-          exit 1
-
-      - name: Gate 1 - Build
+      - name: Build
         run: npm run build
 
-      - name: Gate 2 - A3.3 static anti-bypass guard
-        run: node --test --test-concurrency=1 dist/tests/sec-fix-a3-3-anti-bypass-static-guards.test.js
+      - name: Gate A - targeted tenant authority
+        run: node --test --test-concurrency=1 dist/tests/sec-fix-a3-3-recommendation-telemetry-tenant-authority.test.js
 
-      - name: Gate 3 - A3.2 specific
-        run: >-
-          node --test --test-concurrency=1
-          dist/tests/sec-fix-a3-2-authenticated-write-identity.test.js
-          dist/tests/sec-fix-a3-2-runtime-wiring.test.js
-          dist/tests/sec-fix-a3-2-whatsapp-bootstrap-regression.test.js
+      - name: Gate A - supervised recommendation instrumentation
+        run: node --test --test-concurrency=1 dist/tests/b1-4-2-supervised-recommendation-instrumentation.test.js
 
-      - name: Gate 4 - A3.1 complete
-        run: >-
-          node --test --test-concurrency=1
-          dist/tests/sec-fix-a3-1-lead-explicit-tenant-write-identity.test.js
-          dist/tests/sec-fix-a3-1-lead-real-app.test.js
+      - name: Gate A - R3 recommendation lifecycle
+        run: node --test --test-concurrency=1 dist/tests/b1-4-2-r3-recommendation-lifecycle.test.js
 
-      - name: Gate 5 - Tenant runtime storage and multi-org
-        run: >-
-          node --test --test-concurrency=1
-          dist/tests/sec-fix-a1-2-a-active-organization.test.js
-          dist/tests/sec-fix-a1-2-b-tenant-storage.test.js
-          dist/tests/sec-fix-a1-2-b-2-tenant-storage-boundary.test.js
-          dist/tests/sec-fix-a1-2-c2-tenant-async.test.js
-          dist/tests/sec-fix-a1-2-c3-stale-async.test.js
+      - name: Gate A - R4 exactly-once coalescing
+        run: node --test --test-concurrency=1 dist/tests/b1-4-2-r4-exactly-once-coalescing.test.js
 
-      - name: Gate 6 - Cloud save generation and lease
-        run: >-
-          node --test --test-concurrency=1
-          dist/tests/cloud-save-serial.test.js
-          dist/tests/sec-fix-a1-2-c2-job-freeze.test.js
-          dist/tests/sec-fix-a1-dr02-cloud-writer-lease.test.js
-          dist/tests/sec-fix-a1-dr03-stale-sync-metadata.test.js
-
-      - name: Gate 7 - Visit cutover
-        run: >-
-          node --test --test-concurrency=1
-          dist/tests/p1-1-a2-visit-workflow.test.js
-          dist/tests/p1-1-a7-r2-2c-visit-transaction-cutover.test.js
-          dist/tests/sec-fix-a1-2-d-org-aware-visit-cutover.test.js
-
-      - name: Gate 8 - Team
-        run: >-
-          node --test --test-concurrency=1
-          dist/tests/team-management.test.js
-          dist/tests/team-policy.test.js
-          dist/tests/sec-fix-a1-2-e-team-tenant-authority.test.js
-
-      - name: Gate 9 - WhatsApp identity and contact
-        run: >-
-          node --test --test-concurrency=1
-          dist/tests/b1-3-whatsapp-architecture.test.js
-          dist/tests/b1-3-whatsapp-contact.test.js
-          dist/tests/b1-3-whatsapp-contact-real-app.test.js
+      - name: Gate A - R5 canonical telemetry
+        run: node --test --test-concurrency=1 dist/tests/b1-4-2-r5-canonical-telemetry.test.js
 
       - name: Final exact SHA evidence
         shell: bash
         run: |
           set -euo pipefail
-          test "$(git rev-parse HEAD)" = "6856b4de16bc210b69fb748de29cc843932e5846"
-          echo "FINAL_A33_EXACT_SHA=$(git rev-parse HEAD)"
+          test "$(git rev-parse HEAD)" = "68baba54ec5db00f14445336b436e3b484c6c0a6"
+          test ! -e __noop__
+          echo "FINAL_A33_GATE_A_SHA=$(git rev-parse HEAD)"
