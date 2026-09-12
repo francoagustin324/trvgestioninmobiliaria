@@ -34,9 +34,7 @@ jobs:
           printf '%s\n' \
             src/legacy-quarantine/team-scope.ts \
             src/legacy-quarantine/visit-authority-sync-version.ts \
-            src/team-scope.ts \
-            src/tests/mvp-scope.test.ts \
-            src/visit-authority-sync-version.ts | sort > /tmp/expected-q
+            src/tests/mvp-scope.test.ts | sort > /tmp/expected-q
           git diff --name-only "$BASE".."$Q" | sort > /tmp/actual-q
           diff -u /tmp/expected-q /tmp/actual-q
 
