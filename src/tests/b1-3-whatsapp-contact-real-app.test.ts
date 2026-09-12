@@ -14,7 +14,6 @@ import { initialData, type CrmData, type TeamMember, type TeamRole } from '../mo
 const sessionKey = 'propcontrol-cloud-session-v1';
 const organizationId = 'b13-org';
 const artifactDir = 'artifacts/b1-3';
-const cloudHydratedPlanLabel = 'B1.3 CLOUD HYDRATED';
 const mobileUserAgent = 'Mozilla/5.0 (Linux; Android 14; Pixel 7 Build/AP2A.240705.004) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Mobile Safari/537.36';
 
 interface Identity {
@@ -162,7 +161,7 @@ async function installTenantCloudHarness(context: BrowserContext, role: TeamRole
   const current = identity(role);
   const crm = fixture(role, overdue);
   const cloudCrm = structuredClone(crm);
-  cloudCrm.organization.planLabel = cloudHydratedPlanLabel;
+  cloudCrm.clients[0]!.email = `cloud-hydrated-${current.userId}@propcontrol.test`;
   const ownMemberships = membershipRows(crm);
   const currentMembership = ownMemberships.find((row) => row.user_id === current.userId)!;
   const memberships: CloudMembershipRow[] = [
@@ -381,23 +380,31 @@ function initialTenantPull(page: Page, role: TeamRole): Promise<Response> {
 
 async function waitForTenantReadiness(page: Page, role: TeamRole, tenantPull: Promise<Response>): Promise<void> {
   const expected = identity(role);
+  const cloudClientEmail = `cloud-hydrated-${expected.userId}@propcontrol.test`;
   const response = await tenantPull;
+  const responseUrl = new URL(response.url());
+  assert.equal(response.request().method(), 'GET', 'El pull tenant-aware inicial debe ser GET.');
+  assert.equal(responseUrl.pathname.endsWith('/rest/v1/propcontrol_records'), true, 'El pull inicial debe apuntar a propcontrol_records.');
+  assert.equal(queryFilter(responseUrl, 'organization_id'), expected.organizationId, 'El pull inicial debe usar la organization_id autenticada exacta.');
   assert.equal(response.ok(), true, 'El pull tenant-aware inicial debe responder OK.');
-  await page.waitForFunction(({ storageKey, organizationPreferenceKey, organizationId, planLabel }) => {
+  await page.waitForFunction(({ userId, storageKey, organizationPreferenceKey, organizationId, cloudClientEmail }) => {
+    if (storageKey !== `trv-crm-basico:user:${userId}:org:${organizationId}`) return false;
     if (localStorage.getItem(organizationPreferenceKey) !== organizationId) return false;
     const raw = localStorage.getItem(storageKey);
     if (!raw) return false;
     try {
       const crm = JSON.parse(raw) as CrmData;
-      return crm.organization?.id === organizationId && crm.organization?.planLabel === planLabel;
+      const client = crm.clients?.find((item) => item.id === 1);
+      return crm.organization?.id === organizationId && client?.email === cloudClientEmail;
     } catch {
       return false;
     }
   }, {
+    userId: expected.userId,
     storageKey: expected.storageKey,
     organizationPreferenceKey: expected.organizationPreferenceKey,
     organizationId: expected.organizationId,
-    planLabel: cloudHydratedPlanLabel,
+    cloudClientEmail,
   });
   await page.waitForSelector('#crm.active', { state: 'visible', timeout: 20_000 });
   const activated = await page.evaluate(async () => {
@@ -405,16 +412,17 @@ async function waitForTenantReadiness(page: Page, role: TeamRole, tenantPull: Pr
     const storePath = '/dist/store.js';
     const runtime = await import(runtimePath);
     const store = await import(storePath);
+    const client = store.state.crm.clients.find((item: { id: number }) => item.id === 1);
     return {
       scope: runtime.currentTenantScope(),
       organizationId: store.state.crm.organization.id,
-      planLabel: store.state.crm.organization.planLabel,
+      clientEmail: client?.email || null,
     };
   });
   assert.deepEqual(activated, {
     scope: { userId: expected.userId, organizationId: expected.organizationId },
     organizationId: expected.organizationId,
-    planLabel: cloudHydratedPlanLabel,
+    clientEmail: cloudClientEmail,
   });
   await page.waitForSelector('[data-contact-whatsapp="1"]', { state: 'visible', timeout: 20_000 });
 }
@@ -457,23 +465,41 @@ test('B1.3 completa contacto, confirmación, seguimiento, reprogramación y Agen
     await page.locator('[data-contact-whatsapp="1"]').click();
     const panel = page.locator('.whatsapp-contact-panel');
     await panel.waitFor({ state: 'visible' });
+    const preview = page.locator('[data-whatsapp-message-preview]');
+    await preview.waitFor({ state: 'visible' });
+    const previewText = (await preview.textContent()) || '';
+    assert.match(previewText, /Lucía Martín/);
+    assert.match(previewText, /Dúplex en Docta/);
+    const editMessage = page.locator('[data-whatsapp-edit-message]');
+    await editMessage.waitFor({ state: 'visible' });
+    assert.equal(await editMessage.isEnabled(), true, 'Editar mensaje debe estar habilitado en la UX Zero Training.');
+    await editMessage.click();
     const message = page.locator('[data-whatsapp-message]');
     await message.waitFor({ state: 'visible' });
-    assert.equal(await message.isEnabled(), true, 'El mensaje WhatsApp debe estar habilitado tras readiness tenant-aware.');
-    assert.equal(await message.isEditable(), true, 'El mensaje WhatsApp debe ser editable tras readiness tenant-aware.');
+    assert.equal(await message.isEnabled(), true, 'El mensaje WhatsApp debe estar habilitado después de Editar mensaje.');
+    assert.equal(await message.isEditable(), true, 'El mensaje WhatsApp debe ser editable después de Editar mensaje.');
     await page.screenshot({ path: `${artifactDir}/01-mobile-panel-contacto.png`, fullPage: true });
     assert.match(await message.inputValue(), /Lucía Martín/);
     assert.match(await message.inputValue(), /Dúplex en Docta/);
 
     const edited = 'Hola Lucía 👋\n¿Seguís buscando en Nueva Córdoba?';
     await message.fill(edited);
-    await page.locator('[data-whatsapp-copy]').click();
+    const moreOptionsSummary = page.locator('details.whatsapp-zero-more-options > summary');
+    await moreOptionsSummary.waitFor({ state: 'visible' });
+    await moreOptionsSummary.click();
+    const copy = page.locator('[data-whatsapp-copy]');
+    await copy.waitFor({ state: 'visible' });
+    await copy.click();
     assert.equal(await page.evaluate(() => (window as unknown as B13Window).__b13Copied), edited);
 
-    await page.locator('[data-whatsapp-phone]').fill('+54 9 351 ABC');
+    const phone = page.locator('[data-whatsapp-phone]');
+    await phone.waitFor({ state: 'visible' });
+    await phone.fill('+54 9 351 ABC');
     assert.equal(await page.locator('[data-whatsapp-open]').isDisabled(), true);
     await page.screenshot({ path: `${artifactDir}/06-numero-invalido.png`, fullPage: true });
-    await page.locator('[data-whatsapp-phone]').fill('0351 15 5110069');
+    const correctedPhone = page.locator('[data-whatsapp-phone]');
+    await correctedPhone.waitFor({ state: 'visible' });
+    await correctedPhone.fill('0351 15 5110069');
     await openAndReturn(page);
     const openedUrl = await page.evaluate(() => (window as unknown as B13Window).__b13OpenedUrl || '');
     assert.equal(openedUrl, `https://wa.me/5493515110069?text=${encodeURIComponent(edited)}`);
