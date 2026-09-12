@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
-import { readdirSync, readFileSync } from 'node:fs';
-import { join, relative, sep } from 'node:path';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
+import { dirname, join, relative, sep } from 'node:path';
 import test from 'node:test';
 import * as ts from 'typescript';
 
@@ -8,6 +8,11 @@ const SRC_ROOT = 'src';
 const LEGACY_CLOUD_API = 'src/cloud-api.ts';
 const LEGACY_VISIT_MODULE = 'src/visit-transaction-cloud.ts';
 const LEGACY_TEAM_UI = 'src/team-ui.ts';
+const QUARANTINE_ROOT = 'src/legacy-quarantine/';
+const QUARANTINED_LEGACY_MODULES = new Set([
+  'src/legacy-quarantine/visit-authority-sync-version.ts',
+  'src/legacy-quarantine/team-scope.ts',
+]);
 const VISUAL_COMPATIBILITY = new Set([
   'src/store.ts',
   'src/team-access.ts',
@@ -44,10 +49,24 @@ const LEGACY_VISUAL_WRITER_HELPERS = new Set([
   'defaultAssigneeId',
 ]);
 
+const TENANT_TABLE_ENDPOINTS = [
+  '/rest/v1/propcontrol_records',
+  '/rest/v1/fichas',
+  '/rest/v1/organization_members',
+  '/rest/v1/public_property_fichas',
+] as const;
+const MUTATION_METHODS = new Set(['POST', 'PATCH', 'PUT', 'DELETE']);
+
 type NamedImportBinding = Readonly<{
   imported: string;
   local: string;
   isTypeOnly: boolean;
+}>;
+
+type RawTenantMutation = Readonly<{
+  endpoint: string;
+  method: string;
+  line: number;
 }>;
 
 function normalizedPath(path: string): string {
@@ -164,7 +183,7 @@ function importsModule(parsed: ts.SourceFile, moduleSpecifier: string): boolean 
       ts.isCallExpression(node)
       && node.expression.kind === ts.SyntaxKind.ImportKeyword
       && node.arguments.length === 1
-      && ts.isStringLiteral(node.arguments[0]!)
+      && ts.isStringLiteralLike(node.arguments[0]!)
       && moduleSpecifierMatches(node.arguments[0]!.text, moduleSpecifier)
     ) {
       hit = true;
@@ -207,15 +226,226 @@ function hasFirstMembershipAuthority(text: string): boolean {
   return membershipQuery && limitOne && firstRow;
 }
 
-function hasTenantBoundRawMutation(text: string): boolean {
-  const tenantTables = [
-    '/rest/v1/propcontrol_records',
-    '/rest/v1/fichas',
-    '/rest/v1/organization_members',
-    '/rest/v1/public_property_fichas',
-  ];
-  return tenantTables.some((table) => text.includes(table))
-    && /method\s*:\s*['"](?:POST|PATCH|PUT|DELETE)['"]/.test(text);
+function resolveRelativeSourceModule(fromPath: string, specifier: string): string | null {
+  if (!specifier.startsWith('.')) return null;
+  const joined = normalizedPath(join(dirname(fromPath), specifier));
+  if (joined.endsWith('.js')) return joined.replace(/\.js$/, '.ts');
+  if (joined.endsWith('.ts')) return joined;
+  return `${joined}.ts`;
+}
+
+function quarantineModuleEdges(path: string, parsed = parseSource(path)): string[] {
+  const hits = new Set<string>();
+  const inspect = (specifier: string): void => {
+    const resolved = resolveRelativeSourceModule(path, specifier);
+    if (resolved && QUARANTINED_LEGACY_MODULES.has(resolved)) hits.add(resolved);
+  };
+  const visit = (node: ts.Node): void => {
+    if (ts.isImportDeclaration(node) && ts.isStringLiteral(node.moduleSpecifier)) {
+      inspect(node.moduleSpecifier.text);
+    } else if (ts.isExportDeclaration(node) && node.moduleSpecifier && ts.isStringLiteral(node.moduleSpecifier)) {
+      inspect(node.moduleSpecifier.text);
+    } else if (
+      ts.isCallExpression(node)
+      && node.expression.kind === ts.SyntaxKind.ImportKeyword
+      && node.arguments.length === 1
+      && ts.isStringLiteralLike(node.arguments[0]!)
+    ) {
+      inspect(node.arguments[0]!.text);
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(parsed);
+  return [...hits].sort();
+}
+
+function quarantineLoaderLiterals(path: string): string[] {
+  const parsed = parseSource(path);
+  const hits = new Set<string>();
+  const visit = (node: ts.Node): void => {
+    if (ts.isStringLiteralLike(node) && node.text.includes('legacy-quarantine/')) hits.add(node.text);
+    ts.forEachChild(node, visit);
+  };
+  visit(parsed);
+  return [...hits].sort();
+}
+
+function nearestVariableInitializer(
+  parsed: ts.SourceFile,
+  identifier: string,
+  beforePosition: number,
+): ts.Expression | null {
+  let best: { position: number; initializer: ts.Expression } | null = null;
+  const visit = (node: ts.Node): void => {
+    if (
+      ts.isVariableDeclaration(node)
+      && ts.isIdentifier(node.name)
+      && node.name.text === identifier
+      && node.initializer
+      && node.getStart(parsed) < beforePosition
+    ) {
+      const position = node.getStart(parsed);
+      if (!best || position > best.position) best = { position, initializer: node.initializer };
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(parsed);
+  return best?.initializer ?? null;
+}
+
+function staticStringValue(
+  parsed: ts.SourceFile,
+  expression: ts.Expression,
+  beforePosition: number,
+  seen = new Set<string>(),
+): string | null {
+  const value = unwrapExpression(expression);
+  if (ts.isStringLiteralLike(value)) return value.text;
+  if (ts.isNoSubstitutionTemplateLiteral(value)) return value.text;
+  if (ts.isTemplateExpression(value)) {
+    return `${value.head.text}${value.templateSpans.map((span) => `*${span.literal.text}`).join('')}`;
+  }
+  if (ts.isIdentifier(value)) {
+    if (seen.has(value.text)) return null;
+    seen.add(value.text);
+    const initializer = nearestVariableInitializer(parsed, value.text, beforePosition);
+    return initializer ? staticStringValue(parsed, initializer, beforePosition, seen) : null;
+  }
+  return null;
+}
+
+function staticEndpointValue(
+  parsed: ts.SourceFile,
+  expression: ts.Expression,
+  beforePosition: number,
+  seen = new Set<string>(),
+): string | null {
+  const value = unwrapExpression(expression);
+  if (ts.isNewExpression(value) && ts.isIdentifier(value.expression) && value.expression.text === 'URL') {
+    const first = value.arguments?.[0];
+    return first ? staticStringValue(parsed, first, beforePosition, seen) : null;
+  }
+  if (ts.isCallExpression(value) && ts.isIdentifier(value.expression) && value.expression.text === 'URL') {
+    const first = value.arguments[0];
+    return first ? staticStringValue(parsed, first, beforePosition, seen) : null;
+  }
+  if (ts.isIdentifier(value)) {
+    if (seen.has(value.text)) return null;
+    seen.add(value.text);
+    const initializer = nearestVariableInitializer(parsed, value.text, beforePosition);
+    return initializer ? staticEndpointValue(parsed, initializer, beforePosition, seen) : null;
+  }
+  return staticStringValue(parsed, value, beforePosition, seen);
+}
+
+function objectLiteralFromExpression(
+  parsed: ts.SourceFile,
+  expression: ts.Expression,
+  beforePosition: number,
+): ts.ObjectLiteralExpression | null {
+  const value = unwrapExpression(expression);
+  if (ts.isObjectLiteralExpression(value)) return value;
+  if (ts.isIdentifier(value)) {
+    const initializer = nearestVariableInitializer(parsed, value.text, beforePosition);
+    if (!initializer) return null;
+    const unwrapped = unwrapExpression(initializer);
+    return ts.isObjectLiteralExpression(unwrapped) ? unwrapped : null;
+  }
+  return null;
+}
+
+function fetchMethod(parsed: ts.SourceFile, call: ts.CallExpression): string {
+  const options = call.arguments[1];
+  if (!options) return 'GET';
+  const object = objectLiteralFromExpression(parsed, options, call.getStart(parsed));
+  if (!object) return 'GET';
+  for (const property of object.properties) {
+    if (!ts.isPropertyAssignment(property) && !ts.isShorthandPropertyAssignment(property)) continue;
+    const name = property.name && (ts.isIdentifier(property.name) || ts.isStringLiteralLike(property.name))
+      ? property.name.text
+      : '';
+    if (name !== 'method') continue;
+    const expression = ts.isPropertyAssignment(property)
+      ? property.initializer
+      : nearestVariableInitializer(parsed, property.name.text, call.getStart(parsed));
+    if (!expression) return 'GET';
+    return (staticStringValue(parsed, expression, call.getStart(parsed)) || 'GET').toUpperCase();
+  }
+  return 'GET';
+}
+
+function rawTenantMutationRequests(parsed: ts.SourceFile): RawTenantMutation[] {
+  const hits: RawTenantMutation[] = [];
+  const visit = (node: ts.Node): void => {
+    if (
+      ts.isCallExpression(node)
+      && ts.isIdentifier(node.expression)
+      && node.expression.text === 'fetch'
+      && node.arguments[0]
+    ) {
+      const endpoint = staticEndpointValue(parsed, node.arguments[0], node.getStart(parsed));
+      const method = fetchMethod(parsed, node);
+      if (endpoint && MUTATION_METHODS.has(method) && TENANT_TABLE_ENDPOINTS.some((table) => endpoint.includes(table))) {
+        hits.push({
+          endpoint,
+          method,
+          line: parsed.getLineAndCharacterOfPosition(node.getStart(parsed)).line + 1,
+        });
+      }
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(parsed);
+  return hits;
+}
+
+function hasTenantBoundRawMutation(text: string, fileName = 'fixture.ts'): boolean {
+  return rawTenantMutationRequests(parseText(text, fileName)).length > 0;
+}
+
+function expressionUsesMutableTenant(expression: ts.Expression, parsed: ts.SourceFile): boolean {
+  return /\b(?:record|payload|form|values)\.organizationId\b/.test(expression.getText(parsed));
+}
+
+function mutableTenantAuthoritySinkHits(path: string): string[] {
+  const parsed = parseSource(path);
+  const rawMutation = rawTenantMutationRequests(parsed).length > 0;
+  const hits: string[] = [];
+  const visit = (node: ts.Node): void => {
+    if (
+      ts.isCallExpression(node)
+      && ts.isPropertyAccessExpression(node.expression)
+      && node.expression.name.text === 'set'
+      && node.arguments.length >= 2
+      && ts.isStringLiteralLike(node.arguments[0]!)
+      && node.arguments[0]!.text === 'organization_id'
+      && expressionUsesMutableTenant(node.arguments[1]!, parsed)
+    ) {
+      hits.push(`organization_id query @${parsed.getLineAndCharacterOfPosition(node.getStart(parsed)).line + 1}`);
+    }
+    if (ts.isPropertyAssignment(node)) {
+      const name = ts.isIdentifier(node.name) || ts.isStringLiteralLike(node.name) ? node.name.text : '';
+      if (name === 'p_organization_id' && expressionUsesMutableTenant(node.initializer, parsed)) {
+        hits.push(`p_organization_id RPC @${parsed.getLineAndCharacterOfPosition(node.getStart(parsed)).line + 1}`);
+      }
+      if (name === 'organization_id' && rawMutation && expressionUsesMutableTenant(node.initializer, parsed)) {
+        hits.push(`organization_id raw row @${parsed.getLineAndCharacterOfPosition(node.getStart(parsed)).line + 1}`);
+      }
+    }
+    if (ts.isCallExpression(node)) {
+      const callee = node.expression.getText(parsed);
+      if (/tenantCloudTransport|writeTenantSnapshot|queueCloudSave/.test(callee)) {
+        for (const argument of node.arguments) {
+          if (expressionUsesMutableTenant(argument, parsed)) {
+            hits.push(`${callee} mutable tenant @${parsed.getLineAndCharacterOfPosition(node.getStart(parsed)).line + 1}`);
+          }
+        }
+      }
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(parsed);
+  return hits;
 }
 
 function relativeRuntime(path: string): string {
@@ -257,13 +487,77 @@ test('A3.3 AST helpers distinguen procedencia, aliases y símbolos homónimos', 
   assert.equal(callExpressionsByIdentifier(aliased, 'session').length, 1);
 });
 
+test('A3.3 request-level raw mutation parser correlaciona endpoint y method del mismo fetch', () => {
+  const safe = parseText(`
+    const membership = new URL('/rest/v1/organization_members');
+    fetch(membership, { method: 'GET' });
+    fetch('/storage/v1/object/photo', { method: 'POST' });
+  `);
+  assert.deepEqual(rawTenantMutationRequests(safe), []);
+
+  const membershipPost = parseText(`
+    const membership = new URL('/rest/v1/organization_members');
+    fetch(membership, { method: 'POST' });
+  `);
+  assert.deepEqual(rawTenantMutationRequests(membershipPost).map(({ method }) => method), ['POST']);
+
+  const directDelete = parseText("fetch('/rest/v1/propcontrol_records', { method: 'DELETE' });");
+  assert.deepEqual(rawTenantMutationRequests(directDelete).map(({ method }) => method), ['DELETE']);
+});
+
+test('A3.3 Guard 0: quarantine existe y ningún source productivo puede alcanzarlo', () => {
+  assert.deepEqual(
+    [...QUARANTINED_LEGACY_MODULES].sort(),
+    [
+      'src/legacy-quarantine/team-scope.ts',
+      'src/legacy-quarantine/visit-authority-sync-version.ts',
+    ],
+    'El quarantine es un set exacto; no puede crecer implícitamente por carpeta.',
+  );
+  for (const quarantined of QUARANTINED_LEGACY_MODULES) {
+    assert.equal(existsSync(quarantined), true, `${quarantined}: la evidencia legacy quarantine debe seguir existiendo.`);
+  }
+
+  for (const path of runtimeSourcePaths()) {
+    if (QUARANTINED_LEGACY_MODULES.has(path)) continue;
+    assert.deepEqual(
+      quarantineModuleEdges(path),
+      [],
+      `${path}: no puede importar/re-exportar/dynamic-importar un módulo de legacy-quarantine.`,
+    );
+    assert.deepEqual(
+      quarantineLoaderLiterals(path),
+      [],
+      `${path}: contiene un loader literal hacia legacy-quarantine.`,
+    );
+  }
+
+  const fixturePath = 'src/fixture.ts';
+  for (const fixture of [
+    "import { x } from './legacy-quarantine/team-scope.js';",
+    "import './legacy-quarantine/team-scope.js';",
+    "export { x } from './legacy-quarantine/team-scope.js';",
+    "void import('./legacy-quarantine/team-scope.js');",
+  ]) {
+    assert.deepEqual(
+      quarantineModuleEdges(fixturePath, parseText(fixture, fixturePath)),
+      ['src/legacy-quarantine/team-scope.ts'],
+      fixture,
+    );
+  }
+
+  const index = source('index.html');
+  assert.doesNotMatch(index, /\/dist\/legacy-quarantine\//,
+    'index.html no puede cargar ningún módulo compilado de legacy-quarantine.');
+});
+
 test('A3.3 Guard 1: visit-transaction-cloud permanece sin imports productivos', () => {
   const legacy = source(LEGACY_VISIT_MODULE);
   assert.match(legacy, /getCloudMembershipContext/,
     'El allowlist sólo es válido mientras visit-transaction-cloud siga siendo el módulo legacy identificado.');
 
   for (const path of runtimeSourcePaths()) {
-    if (path === LEGACY_VISIT_MODULE) continue;
+    if (path === LEGACY_VISIT_MODULE || QUARANTINED_LEGACY_MODULES.has(path)) continue;
     assert.equal(
       importsModule(parseSource(path), 'visit-transaction-cloud.js'),
       false,
@@ -274,16 +568,18 @@ test('A3.3 Guard 1: visit-transaction-cloud permanece sin imports productivos', 
 
 test('A3.3 Guard 2: first-membership authority queda confinada al compatibility legacy conocido', () => {
   const firstMembershipHits = runtimeSources()
+    .filter(([path]) => !QUARANTINED_LEGACY_MODULES.has(path))
     .filter(([, text]) => hasFirstMembershipAuthority(text))
     .map(([path]) => path);
   assert.deepEqual(
     firstMembershipHits,
     [LEGACY_CLOUD_API],
-    'organization_members + limit(1) + first-row sólo puede sobrevivir en cloud-api.ts legacy hasta quarantine; ningún runtime nuevo puede usarlo.',
+    'organization_members + limit(1) + first-row sólo puede sobrevivir en cloud-api.ts legacy; quarantine queda unreachable por Guard 0.',
   );
 
   const legacyImportAllowlist = new Set([LEGACY_VISIT_MODULE]);
   for (const path of runtimeSourcePaths()) {
+    if (QUARANTINED_LEGACY_MODULES.has(path)) continue;
     const importedLegacyMembership = namedImportsFrom(path, 'cloud-api.js')
       .filter((name) => LEGACY_MEMBERSHIP_SYMBOLS.has(name));
     if (importedLegacyMembership.length === 0) continue;
@@ -293,6 +589,10 @@ test('A3.3 Guard 2: first-membership authority queda confinada al compatibility 
       `${path}: importa discovery legacy ${importedLegacyMembership.join(', ')} desde cloud-api.ts. Consumí TenantScope/membership catalog explícito.`,
     );
   }
+
+  const quarantinedVisit = source('src/legacy-quarantine/visit-authority-sync-version.ts');
+  assert.match(quarantinedVisit, /getCloudMembershipContext\(\)/,
+    'El primitive histórico se preserva sólo dentro del módulo quarantine exacto y unreachable.');
 
   const telemetryPath = 'src/lead-recommendation-telemetry.ts';
   const telemetryAst = parseSource(telemetryPath);
@@ -323,6 +623,7 @@ test('A3.3 Guard 3: RPC comerciales canónicas son exclusivamente V2', () => {
     /['"]commercial_visit_mutation['"]/,
   ];
   for (const [path, text] of runtimeSources()) {
+    if (QUARANTINED_LEGACY_MODULES.has(path)) continue;
     for (const pattern of legacyRpcLiterals) {
       if (!pattern.test(text)) continue;
       assert.equal(
@@ -356,7 +657,7 @@ test('A3.3 Guard 3: RPC comerciales canónicas son exclusivamente V2', () => {
 test('A3.3 Guard 4: callers productivos de queueCloudSave siempre pasan TenantScope explícito', () => {
   const definitionAllowlist = new Set([LEGACY_CLOUD_API, 'src/cloud-api-compatible.ts']);
   for (const path of runtimeSourcePaths()) {
-    if (definitionAllowlist.has(path)) continue;
+    if (definitionAllowlist.has(path) || QUARANTINED_LEGACY_MODULES.has(path)) continue;
     const parsed = parseSource(path);
     for (const call of callExpressionsByIdentifier(parsed, 'queueCloudSave')) {
       assert.ok(
@@ -393,6 +694,7 @@ test('A3.3 Guard 5: identidad visual no puede alimentar write actor ni Activity 
   ];
 
   for (const [path, text] of runtimeSources()) {
+    if (QUARANTINED_LEGACY_MODULES.has(path)) continue;
     if (!VISUAL_COMPATIBILITY.has(path)) {
       for (const pattern of forbiddenWriterIdentity) {
         pattern.lastIndex = 0;
@@ -414,6 +716,12 @@ test('A3.3 Guard 5: identidad visual no puede alimentar write actor ni Activity 
     }
   }
 
+  const quarantinedTeam = source('src/legacy-quarantine/team-scope.ts');
+  assert.match(quarantinedTeam, /\bactiveMember\(\)/,
+    'El actor visual histórico se preserva sólo en el módulo quarantine exacto y unreachable.');
+  assert.match(quarantinedTeam, /\baddActivity\s*\(/,
+    'El writer visual histórico se preserva sólo en el módulo quarantine exacto y unreachable.');
+
   const store = source('src/store.ts');
   assert.match(store, /activeMemberId \/ TEAM_VIEW_KEY remain a visual preference only and never[\s\S]*authenticatedTenantMember/);
   const legacyTeam = source(LEGACY_TEAM_UI);
@@ -422,20 +730,24 @@ test('A3.3 Guard 5: identidad visual no puede alimentar write actor ni Activity 
 });
 
 test('A3.3 Guard 6: tenant de escritura no se deriva de CRM/record/payload mutable', () => {
-  const forbiddenTenantWriters = [
+  const forbiddenStateTenantWriters = [
     /organization_id\s*:\s*state\.crm\.organization\.id/g,
     /p_organization_id\s*:\s*state\.crm\.organization\.id/g,
     /searchParams\.set\(\s*['"]organization_id['"]\s*,\s*`[^`]*\$\{state\.crm\.organization\.id\}/g,
-    /organizationId\s*:\s*(?:record|payload|form|values)\.organizationId/g,
   ];
   const compatibility = new Set([LEGACY_CLOUD_API, LEGACY_VISIT_MODULE, LEGACY_TEAM_UI]);
   for (const [path, text] of runtimeSources()) {
-    if (compatibility.has(path)) continue;
-    for (const pattern of forbiddenTenantWriters) {
+    if (compatibility.has(path) || QUARANTINED_LEGACY_MODULES.has(path)) continue;
+    for (const pattern of forbiddenStateTenantWriters) {
       pattern.lastIndex = 0;
       assert.equal(pattern.test(text), false,
-        `${path}: tenant de escritura deriva de estado/payload mutable; debe usar TenantScope capturado/revalidado.`);
+        `${path}: tenant de escritura deriva de state.crm.organization.id; debe usar TenantScope capturado/revalidado.`);
     }
+    assert.deepEqual(
+      mutableTenantAuthoritySinkHits(path),
+      [],
+      `${path}: record/payload/form mutable alimenta un authority sink tenant-bound.`,
+    );
   }
 
   const tenantVisit = source('src/tenant-visit-v2.ts');
@@ -455,12 +767,23 @@ test('A3.3 Guard 6: tenant de escritura no se deriva de CRM/record/payload mutab
   assert.match(teamServer, /requestedOrganizationId\(body\.organizationId\)/);
   assert.match(teamServer, /requesterMembership\(user\.id!,\s*organizationId,\s*options\)/);
   assert.match(teamServer, /query\.searchParams\.set\('organization_id',\s*`eq\.\$\{organizationId\}`\)/);
+
+  const telemetryPath = 'src/lead-recommendation-telemetry.ts';
+  const telemetry = source(telemetryPath);
+  assert.match(telemetry, /event\.organizationId !== authorization\.organizationId/,
+    `${telemetryPath}: debe validar organization exacta antes de persistir eventos.`);
+  assert.match(telemetry, /event\.actorId !== authorization\.currentMemberId/,
+    `${telemetryPath}: debe validar actor exacto antes de persistir eventos.`);
+  assert.match(telemetry, /insertTenantCloudRecordsIgnoreDuplicates/,
+    `${telemetryPath}: debe usar adapter tenant-aware append-only.`);
+  assert.equal(rawTenantMutationRequests(parseSource(telemetryPath)).length, 0,
+    `${telemetryPath}: no puede contener raw tenant mutation.`);
 });
 
 test('A3.3 Guard 7: raw tenant writers sólo existen en adapters/compatibility exactos', () => {
-  const hits = runtimeSources()
-    .filter(([, text]) => hasTenantBoundRawMutation(text))
-    .map(([path]) => path);
+  const hits = runtimeSourcePaths()
+    .filter((path) => !QUARANTINED_LEGACY_MODULES.has(path))
+    .filter((path) => rawTenantMutationRequests(parseSource(path)).length > 0);
 
   for (const path of hits) {
     assert.equal(
@@ -474,9 +797,13 @@ test('A3.3 Guard 7: raw tenant writers sólo existen en adapters/compatibility e
     assert.equal(hits.includes(expected), true, `${expected}: adapter canónico esperado dejó de ser detectado; revisar precisión del guard.`);
   }
 
+  const propertyPhotoPath = 'src/server/property-photo-storage.ts';
+  assert.equal(rawTenantMutationRequests(parseSource(propertyPhotoPath)).length, 0,
+    `${propertyPhotoPath}: GET membership + POST storage object no puede confundirse con mutation de tabla tenant.`);
+
   const telemetryPath = 'src/lead-recommendation-telemetry.ts';
   const telemetry = source(telemetryPath);
-  assert.equal(hasTenantBoundRawMutation(telemetry), false,
+  assert.equal(hasTenantBoundRawMutation(telemetry, telemetryPath), false,
     `${telemetryPath}: telemetry no puede emitir raw tenant mutations.`);
   assert.equal(telemetry.includes('/rest/v1/propcontrol_records'), false,
     `${telemetryPath}: endpoint raw propcontrol_records está prohibido.`);
@@ -498,6 +825,7 @@ test('A3.3 Guard 8: UI/comercial no importa raw cloud adapters y legacy UI perma
     'visit-transaction-cloud.js',
   ];
   for (const path of runtimeSourcePaths()) {
+    if (QUARANTINED_LEGACY_MODULES.has(path)) continue;
     const isUiOrCommercial = /(?:-ui|^src\/mvp-|commercial-(?:close|mutation))/.test(path);
     if (!isUiOrCommercial || path === LEGACY_TEAM_UI) continue;
     const parsed = parseSource(path);
@@ -511,7 +839,7 @@ test('A3.3 Guard 8: UI/comercial no importa raw cloud adapters y legacy UI perma
   }
 
   for (const path of runtimeSourcePaths()) {
-    if (path === LEGACY_CLOUD_API || path === LEGACY_VISIT_MODULE) continue;
+    if (path === LEGACY_CLOUD_API || path === LEGACY_VISIT_MODULE || QUARANTINED_LEGACY_MODULES.has(path)) continue;
     const directImports = directCloudApiValueImports(path);
     for (const imported of directImports) {
       assert.equal(
@@ -523,13 +851,13 @@ test('A3.3 Guard 8: UI/comercial no importa raw cloud adapters y legacy UI perma
   }
 
   const index = source('index.html');
-  assert.doesNotMatch(index, /(?:\/dist\/team-ui\.js|\/dist\/visit-transaction-cloud\.js)/,
-    'Los módulos legacy no pueden volver a publicarse como entrypoints browser.');
+  assert.doesNotMatch(index, /(?:\/dist\/team-ui\.js|\/dist\/visit-transaction-cloud\.js|\/dist\/legacy-quarantine\/)/,
+    'Los módulos legacy/quarantine no pueden volver a publicarse como entrypoints browser.');
   const main = source('src/mvp-main.ts');
-  assert.doesNotMatch(main, /team-ui|visit-transaction-cloud/,
-    'mvp-main no puede reactivar UI/Visit legacy.');
+  assert.doesNotMatch(main, /team-ui|visit-transaction-cloud|legacy-quarantine/,
+    'mvp-main no puede reactivar UI/Visit legacy ni quarantine.');
   for (const path of runtimeSourcePaths()) {
-    if (path === LEGACY_TEAM_UI) continue;
+    if (path === LEGACY_TEAM_UI || QUARANTINED_LEGACY_MODULES.has(path)) continue;
     assert.equal(
       importsModule(parseSource(path), 'team-ui.js'),
       false,
@@ -545,4 +873,9 @@ test('A3.3 static inventory scans source paths, not dist/tests', () => {
   assert.equal(paths.some((path) => path.startsWith('dist/')), false);
   assert.equal(paths.some((path) => path.startsWith('src/tests/')), false);
   assert.equal(paths.every((path) => relativeRuntime(path).startsWith('src/')), true);
+  assert.deepEqual(
+    paths.filter((path) => path.startsWith(QUARANTINE_ROOT)).sort(),
+    [...QUARANTINED_LEGACY_MODULES].sort(),
+    'No puede aparecer un tercer módulo quarantine sin autorización explícita y actualización del set exacto.',
+  );
 });
