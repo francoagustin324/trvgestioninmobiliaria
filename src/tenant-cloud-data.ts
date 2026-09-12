@@ -159,6 +159,33 @@ async function upsertRecords(
   }
 }
 
+export async function insertTenantCloudRecordsIgnoreDuplicates(
+  transport: TenantCloudTransport,
+  records: readonly CloudRecordRow[],
+  runtimeLease: TenantRuntimeLease,
+): Promise<void> {
+  assertRowsTenant(transport.scope, records);
+  assertCloudWriterLease(transport.scope, runtimeLease);
+  for (let index = 0; index < records.length; index += 100) {
+    const chunk = records.slice(index, index + 100);
+    if (!chunk.length) continue;
+    assertCloudWriterLease(transport.scope, runtimeLease);
+    const target = new URL(`${transport.config.url}/rest/v1/propcontrol_records`);
+    target.searchParams.set('on_conflict', 'organization_id,entity_type,entity_key');
+    const response = await fetch(target, {
+      method: 'POST',
+      headers: {
+        ...tenantCloudHeaders(transport.config.publishableKey, transport.accessToken),
+        Prefer: 'resolution=ignore-duplicates,return=minimal',
+      },
+      body: JSON.stringify(chunk),
+    });
+    assertCloudWriterLease(transport.scope, runtimeLease);
+    await parseTenantCloudJson(response);
+    assertCloudWriterLease(transport.scope, runtimeLease);
+  }
+}
+
 async function deleteStaleRecords(
   transport: TenantCloudTransport,
   stale: CloudRecordRow[],
