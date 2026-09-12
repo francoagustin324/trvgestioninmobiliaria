@@ -1,4 +1,4 @@
-name: A3.3 Gate B Quarantine Validation
+name: A3.3 Team Quarantine Static Commit
 
 on:
   push:
@@ -6,115 +6,190 @@ on:
       - validation/a32-b13-punctual-c143
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
-  validate:
+  patch:
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 10
     steps:
-      - name: Checkout exact Gate B candidate
+      - name: Checkout candidate branch
         uses: actions/checkout@v4
         with:
-          ref: f4bbf63b179c575b9841532054beabc9b7f7598f
+          ref: agent/sec-fix-a3-3-gate-a-clean
           fetch-depth: 0
+          persist-credentials: true
 
-      - name: Assert exact history and scopes
+      - name: Create exact static-only commit
         shell: bash
         run: |
           set -euo pipefail
-          BASE=c79a50e92bdfcfa1f85f4d2dd9e0995bb6cd50c8
-          Q=b5cb9a8fd9d15ca263fcda222cd293775b230fe9
-          STATIC=cca85c36a11cc06f52b1663ea23dcbe60092b620
-          CANDIDATE=f4bbf63b179c575b9841532054beabc9b7f7598f
-          test "$(git rev-parse HEAD)" = "$CANDIDATE"
-          test "$(git rev-parse HEAD^)" = "$STATIC"
-          test "$(git rev-parse HEAD^^)" = "$Q"
-          test "$(git rev-parse HEAD^^^)" = "$BASE"
-          test -z "$(git status --porcelain)"
+          test "$(git rev-parse HEAD)" = "389d164e2de199a25db820b473d9b2968722ebba"
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('src/tests/sec-fix-a3-3-anti-bypass-static-guards.test.ts')
+          text = p.read_text()
 
-          printf '%s\n' \
-            src/legacy-quarantine/team-scope.ts \
-            src/legacy-quarantine/visit-authority-sync-version.ts \
-            src/tests/mvp-scope.test.ts | sort > /tmp/expected-q
-          git diff --name-only "$BASE".."$Q" | sort > /tmp/actual-q
-          diff -u /tmp/expected-q /tmp/actual-q
+          old = """const LEGACY_TEAM_UI = 'src/team-ui.ts';
+const QUARANTINE_ROOT = 'src/legacy-quarantine/';
+const QUARANTINED_LEGACY_MODULES = new Set([
+  'src/legacy-quarantine/visit-authority-sync-version.ts',
+  'src/legacy-quarantine/team-scope.ts',
+]);"""
+          new = """const LEGACY_TEAM_BOOTSTRAP = 'src/legacy-quarantine/team-bootstrap.ts';
+const LEGACY_TEAM_UI = 'src/legacy-quarantine/team-ui.ts';
+const QUARANTINE_ROOT = 'src/legacy-quarantine/';
+const QUARANTINED_LEGACY_MODULES = new Set([
+  'src/legacy-quarantine/team-bootstrap.ts',
+  'src/legacy-quarantine/team-scope.ts',
+  'src/legacy-quarantine/team-ui.ts',
+  'src/legacy-quarantine/visit-authority-sync-version.ts',
+]);"""
+          assert text.count(old) == 1
+          text = text.replace(old, new, 1)
 
-          test "$(git diff --name-only "$Q".."$STATIC")" = "src/tests/sec-fix-a3-3-anti-bypass-static-guards.test.ts"
-          test "$(git diff --name-only "$STATIC".."$CANDIDATE")" = "src/tests/sec-fix-a3-3-anti-bypass-static-guards.test.ts"
-          if git diff --name-only "$BASE".."$CANDIDATE" | grep -E '(^|/)(supabase|migrations?|baseline)(/|$)|\.sql$' >/dev/null; then
-            echo 'Forbidden SQL/migration/baseline change'
-            exit 1
-          fi
+          old = """    [
+      'src/legacy-quarantine/team-scope.ts',
+      'src/legacy-quarantine/visit-authority-sync-version.ts',
+    ],"""
+          new = """    [
+      'src/legacy-quarantine/team-bootstrap.ts',
+      'src/legacy-quarantine/team-scope.ts',
+      'src/legacy-quarantine/team-ui.ts',
+      'src/legacy-quarantine/visit-authority-sync-version.ts',
+    ],"""
+          assert text.count(old) == 1
+          text = text.replace(old, new, 1)
 
-          test ! -e src/team-scope.ts
-          test ! -e src/visit-authority-sync-version.ts
-          test -f src/legacy-quarantine/team-scope.ts
-          test -f src/legacy-quarantine/visit-authority-sync-version.ts
-          echo "A33_GATE_B_BASE=$BASE"
-          echo "A33_GATE_B_QUARANTINE=$Q"
-          echo "A33_GATE_B_STATIC=$STATIC"
-          echo "A33_GATE_B_CANDIDATE=$CANDIDATE"
+          anchor = """  for (const fixture of [
+    \"import { x } from './legacy-quarantine/team-scope.js';\",
+    \"import './legacy-quarantine/team-scope.js';\",
+    \"export { x } from './legacy-quarantine/team-scope.js';\",
+    \"void import('./legacy-quarantine/team-scope.js');\",
+  ]) {
+    assert.deepEqual(
+      quarantineModuleEdges(fixturePath, parseText(fixture, fixturePath)),
+      ['src/legacy-quarantine/team-scope.ts'],
+      fixture,
+    );
+  }
 
-      - name: Verify quarantine modules are byte-equivalent except required relative imports
-        shell: bash
-        run: |
-          set -euo pipefail
-          node --input-type=module <<'NODE'
-          import fs from 'node:fs';
-          import { execFileSync } from 'node:child_process';
-          const base = 'c79a50e92bdfcfa1f85f4d2dd9e0995bb6cd50c8';
-          const oldVisit = execFileSync('git', ['show', `${base}:src/visit-authority-sync-version.ts`], { encoding: 'utf8' });
-          const newVisit = fs.readFileSync('src/legacy-quarantine/visit-authority-sync-version.ts', 'utf8')
-            .replaceAll("from '../cloud-records.js'", "from './cloud-records.js'")
-            .replaceAll("from '../cloud-api.js'", "from './cloud-api.js'")
-            .replaceAll("from '../sync-safety.js'", "from './sync-safety.js'");
-          if (oldVisit !== newVisit) throw new Error('visit-authority quarantine changed beyond required import paths');
+"""
+          addition = anchor + """  const internalFixture = parseText(
+    \"import { renderTeam } from './team-ui.js';\",
+    LEGACY_TEAM_BOOTSTRAP,
+  );
+  assert.deepEqual(
+    quarantineModuleEdges(LEGACY_TEAM_BOOTSTRAP, internalFixture),
+    [LEGACY_TEAM_UI],
+    'La relación quarantine → quarantine se preserva como evidencia histórica interna y no constituye reachability productivo.',
+  );
 
-          const oldTeam = execFileSync('git', ['show', `${base}:src/team-scope.ts`], { encoding: 'utf8' });
-          const newTeam = fs.readFileSync('src/legacy-quarantine/team-scope.ts', 'utf8')
-            .replaceAll("from '../store.js'", "from './store.js'")
-            .replaceAll("from '../team-access.js'", "from './team-access.js'");
-          if (oldTeam !== newTeam) throw new Error('team-scope quarantine changed beyond required import paths');
-          console.log('QUARANTINE_BYTE_EQUIVALENT_EXCEPT_IMPORT_PATHS=PASS');
-          NODE
+"""
+          assert text.count(anchor) == 1
+          text = text.replace(anchor, addition, 1)
 
-      - name: Setup Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: npm
+          old = """  const legacyTeam = source(LEGACY_TEAM_UI);
+  assert.match(legacyTeam, /\\baddActivity\\s*\\(/,
+    'team-ui.ts se mantiene explícitamente identificado como UI legacy antes de quarantine.');"""
+          new = """  const legacyTeam = source(LEGACY_TEAM_UI);
+  assert.match(legacyTeam, /\\bactiveMember\\(\\)/,
+    'team-ui.ts preserva activeMember únicamente dentro del quarantine exacto y unreachable.');
+  assert.match(legacyTeam, /\\baddActivity\\s*\\(/,
+    'team-ui.ts preserva addActivity únicamente dentro del quarantine exacto y unreachable.');"""
+          assert text.count(old) == 1
+          text = text.replace(old, new, 1)
 
-      - name: Install dependencies
-        run: npm ci
+          start = text.index("test('A3.3 Guard 8:")
+          end = text.index("\n// Keep the helper", start)
+          replacement = r'''test('A3.3 Guard 8: UI/comercial no importa raw cloud adapters y Team legacy permanece quarantined', () => {
+  const unsafeRawModules = [
+    'tenant-cloud-data.js',
+    'tenant-visit-v2.js',
+    'visit-transaction-cloud.js',
+  ];
+  for (const path of runtimeSourcePaths()) {
+    if (QUARANTINED_LEGACY_MODULES.has(path)) continue;
+    const isUiOrCommercial = /(?:-ui|^src\/mvp-|commercial-(?:close|mutation))/.test(path);
+    if (!isUiOrCommercial) continue;
+    const parsed = parseSource(path);
+    for (const moduleName of unsafeRawModules) {
+      assert.equal(importsModule(parsed, moduleName), false,
+        `${path}: UI/comercial importa raw adapter ${moduleName}; debe atravesar el adapter/cutover autorizado.`);
+    }
+  }
 
-      - name: Build
-        run: npm run build
+  for (const path of runtimeSourcePaths()) {
+    if (path === LEGACY_CLOUD_API || path === LEGACY_VISIT_MODULE || QUARANTINED_LEGACY_MODULES.has(path)) continue;
+    for (const imported of directCloudApiValueImports(path)) {
+      assert.equal(SAFE_DIRECT_CLOUD_API_IMPORTS.has(imported), true,
+        `${path}: import directo inseguro ${imported} desde cloud-api.ts legacy. Usá cloud-api-compatible/TenantScope.`);
+    }
+  }
 
-      - name: Quarantine regression - mvp scope
-        run: node --test --test-concurrency=1 dist/tests/mvp-scope.test.js
+  assert.equal(existsSync('src/team-bootstrap.ts'), false,
+    'src/team-bootstrap.ts top-level no puede reaparecer fuera del quarantine.');
+  assert.equal(existsSync('src/team-ui.ts'), false,
+    'src/team-ui.ts top-level no puede reaparecer fuera del quarantine.');
+  assert.equal(existsSync(LEGACY_TEAM_BOOTSTRAP), true,
+    'team-bootstrap histórico debe permanecer preservado dentro del quarantine exacto.');
+  assert.equal(existsSync(LEGACY_TEAM_UI), true,
+    'team-ui histórico debe permanecer preservado dentro del quarantine exacto.');
 
-      - name: Gate B - static anti-bypass firewall
-        run: node --test --test-concurrency=1 dist/tests/sec-fix-a3-3-anti-bypass-static-guards.test.js
+  const index = source('index.html');
+  for (const forbiddenEntrypoint of [
+    '/dist/team-bootstrap.js',
+    '/dist/team-ui.js',
+    '/dist/legacy-quarantine/team-bootstrap.js',
+    '/dist/legacy-quarantine/team-ui.js',
+  ]) {
+    assert.equal(index.includes(forbiddenEntrypoint), false,
+      `index.html no puede cargar ${forbiddenEntrypoint}.`);
+  }
+  assert.doesNotMatch(index, /\/dist\/legacy-quarantine\//,
+    'Ningún módulo quarantine puede publicarse como entrypoint browser.');
 
-      - name: Gate A regression - targeted tenant authority
-        run: node --test --test-concurrency=1 dist/tests/sec-fix-a3-3-recommendation-telemetry-tenant-authority.test.js
+  const main = source('src/mvp-main.ts');
+  assert.match(main, /import\s*\{\s*renderMvpUsers\s*\}\s*from\s*['"]\.\/mvp-users-ui\.js['"]/,
+    'mvp-main debe usar la superficie moderna mvp-users-ui.');
+  assert.match(main, /renderMvpUsers\s*\(/,
+    'mvp-main debe renderizar la superficie moderna de usuarios.');
+  assert.doesNotMatch(main, /team-bootstrap|team-ui|legacy-quarantine/,
+    'mvp-main no puede reactivar Team legacy ni quarantine.');
 
-      - name: Gate A regression - supervised recommendation instrumentation
-        run: node --test --test-concurrency=1 dist/tests/b1-4-2-supervised-recommendation-instrumentation.test.js
+  for (const path of runtimeSourcePaths()) {
+    if (path.startsWith(QUARANTINE_ROOT)) continue;
+    const parsed = parseSource(path);
+    assert.equal(importsModule(parsed, 'team-bootstrap.js'), false,
+      `${path}: no puede importar team-bootstrap legacy top-level.`);
+    assert.equal(importsModule(parsed, 'team-ui.js'), false,
+      `${path}: no puede importar team-ui legacy top-level/quarantine.`);
+    for (const quarantinedTeamModule of [
+      'legacy-quarantine/team-bootstrap.js',
+      'legacy-quarantine/team-ui.js',
+    ]) {
+      assert.equal(importsModule(parsed, quarantinedTeamModule), false,
+        `${path}: no puede importar ${quarantinedTeamModule}; Team legacy debe permanecer quarantined.`);
+    }
+  }
+});
+'''
+          text = text[:start] + replacement + text[end:]
 
-      - name: Gate A regression - R3 recommendation lifecycle
-        run: node --test --test-concurrency=1 dist/tests/b1-4-2-r3-recommendation-lifecycle.test.js
+          old = "'No puede aparecer un tercer módulo quarantine sin autorización explícita y actualización del set exacto.',"
+          new = "'No puede aparecer un quinto módulo quarantine sin autorización explícita y actualización del set exacto.',"
+          assert text.count(old) == 1
+          text = text.replace(old, new, 1)
 
-      - name: Gate A regression - R4 exactly-once coalescing
-        run: node --test --test-concurrency=1 dist/tests/b1-4-2-r4-exactly-once-coalescing.test.js
+          p.write_text(text)
+          PY
 
-      - name: Gate A regression - R5 canonical telemetry
-        run: node --test --test-concurrency=1 dist/tests/b1-4-2-r5-canonical-telemetry.test.js
-
-      - name: Final exact SHA evidence
-        shell: bash
-        run: |
-          set -euo pipefail
-          test "$(git rev-parse HEAD)" = "f4bbf63b179c575b9841532054beabc9b7f7598f"
-          echo "FINAL_A33_GATE_B_SHA=$(git rev-parse HEAD)"
+          test "$(git diff --name-only)" = "src/tests/sec-fix-a3-3-anti-bypass-static-guards.test.ts"
+          git diff --check
+          git config user.name "francoagustin324"
+          git config user.email "francoagustinsolis@gmail.com"
+          git add src/tests/sec-fix-a3-3-anti-bypass-static-guards.test.ts
+          git commit -m "TEST-ONLY: fence quarantined legacy team cluster"
+          test "$(git diff-tree --no-commit-id --name-only -r HEAD)" = "src/tests/sec-fix-a3-3-anti-bypass-static-guards.test.ts"
+          git push origin HEAD:agent/sec-fix-a3-3-gate-a-clean
+          echo "STATIC_ALIGN_SHA=$(git rev-parse HEAD)"
