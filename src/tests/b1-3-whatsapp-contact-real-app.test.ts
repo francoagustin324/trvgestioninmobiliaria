@@ -511,26 +511,46 @@ test('B1.3 completa contacto, confirmación, seguimiento, reprogramación y Agen
     await page.locator('[data-contact-whatsapp="1"]').click();
     await openAndReturn(page);
     await page.locator('[data-whatsapp-confirm-sent]').click();
-    const followUpForm = page.locator('[data-whatsapp-followup-form]');
+    const donePanel = page.locator('.whatsapp-contact-panel[data-zero-training-view="done"]');
+    await donePanel.waitFor({ state: 'visible' });
+
+    const autoScheduled = await crmFromStorage(page, 'Dueño');
+    assert.equal(autoScheduled.activityLog.filter((entry) => entry.action === 'Contacto por WhatsApp').length, 1);
+    assert.equal(autoScheduled.activityLog.filter((entry) => entry.action === 'Seguimiento por WhatsApp programado').length, 1);
+    assert.match(autoScheduled.clients[0]?.nextFollowUp || '', /^\d{4}-\d{2}-\d{2}$/);
+    assert.equal(autoScheduled.clients[0]?.nextAction, 'Volver a contactar por WhatsApp');
+    assert.equal(autoScheduled.reminders.length, 0, 'La auto-programación WhatsApp no crea Reminder paralelo.');
+
+    const changeFollowUp = page.locator('[data-whatsapp-change-followup]');
+    await changeFollowUp.waitFor({ state: 'visible' });
+    assert.equal(await changeFollowUp.isEnabled(), true, 'Cambiar debe estar habilitado después de confirmar el envío.');
+    assert.equal((await changeFollowUp.textContent())?.trim(), 'Cambiar');
+    await changeFollowUp.click();
+
+    const followUpForm = page.locator('[data-zero-followup-form]');
     await followUpForm.waitFor({ state: 'visible' });
     const choices = await followUpForm.locator('input[name="follow-up-choice"]').evaluateAll((nodes) => nodes.map((node) => (node as HTMLInputElement).value));
     assert.deepEqual(choices, ['1', '3', '7', '14', '30', 'custom', 'none']);
     await followUpForm.locator('input[name="follow-up-choice"][value="none"]').check();
     assert.equal(await followUpForm.locator('input[name="selected-date"]').inputValue(), '');
-    assert.equal(await followUpForm.locator('[data-whatsapp-followup-preview]').textContent(), 'No se programará un próximo seguimiento.');
+    assert.equal(await followUpForm.locator('[data-zero-followup-preview]').textContent(), 'No se programará un próximo seguimiento.');
     await followUpForm.locator('input[name="follow-up-choice"][value="3"]').check();
-    assert.match(await followUpForm.locator('input[name="selected-date"]').inputValue(), /^\d{4}-\d{2}-\d{2}$/);
+    const reprogrammedDate = await followUpForm.locator('input[name="selected-date"]').inputValue();
+    assert.match(reprogrammedDate, /^\d{4}-\d{2}-\d{2}$/);
+    assert.match((await followUpForm.locator('[data-zero-followup-preview]').textContent()) || '', /^Se programará para: /);
     await page.screenshot({ path: `${artifactDir}/03-mobile-proximo-seguimiento.png`, fullPage: true });
     await followUpForm.locator('button[type="submit"]').click();
-    await page.waitForFunction((key) => {
+    await page.waitForFunction(({ key, expectedDate }) => {
       const crm = JSON.parse(localStorage.getItem(key) || '{}') as CrmData;
-      return Boolean(crm.clients?.[0]?.nextFollowUp);
-    }, identity('Dueño').storageKey);
+      return crm.clients?.[0]?.nextFollowUp === expectedDate;
+    }, { key: identity('Dueño').storageKey, expectedDate: reprogrammedDate });
 
     const scheduled = await crmFromStorage(page, 'Dueño');
-    assert.equal(scheduled.activityLog.filter((entry) => entry.action === 'Contacto por WhatsApp').length, 1);
-    assert.equal(scheduled.activityLog.filter((entry) => entry.action === 'Seguimiento por WhatsApp programado').length, 1);
+    assert.equal(scheduled.clients[0]?.nextFollowUp, reprogrammedDate);
+    assert.match(scheduled.clients[0]?.nextFollowUp || '', /^\d{4}-\d{2}-\d{2}$/);
     assert.equal(scheduled.clients[0]?.nextAction, 'Volver a contactar por WhatsApp');
+    assert.equal(scheduled.activityLog.filter((entry) => entry.action === 'Contacto por WhatsApp').length, 1);
+    assert.equal(scheduled.activityLog.filter((entry) => entry.action === 'Seguimiento por WhatsApp programado').length, 1, 'Auto-programación + reprogramación del mismo attempt no duplica Activities.');
     assert.equal(scheduled.reminders.length, 0, 'WhatsApp follow-up no crea Reminder paralelo.');
 
     const reloadPull = initialTenantPull(page, 'Dueño');
