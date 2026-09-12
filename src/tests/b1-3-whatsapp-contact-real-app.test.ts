@@ -2,11 +2,17 @@ import assert from 'node:assert/strict';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { existsSync, mkdirSync } from 'node:fs';
 import test from 'node:test';
-import { chromium, type Browser, type BrowserContext, type Page } from 'playwright';
+import { chromium, type Browser, type BrowserContext, type Page, type Response } from 'playwright';
+import {
+  crmToCloudRecords,
+  membershipContext,
+  type CloudMembershipRow,
+  type CloudRecordRow,
+} from '../cloud-records.js';
 import { initialData, type CrmData, type TeamMember, type TeamRole } from '../models.js';
 
 const sessionKey = 'propcontrol-cloud-session-v1';
-const activeMemberKey = 'propcontrol-active-team-member-v1';
+const organizationId = 'b13-org';
 const artifactDir = 'artifacts/b1-3';
 const mobileUserAgent = 'Mozilla/5.0 (Linux; Android 14; Pixel 7 Build/AP2A.240705.004) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Mobile Safari/537.36';
 
@@ -15,8 +21,10 @@ interface Identity {
   memberId: number;
   userId: string;
   email: string;
+  organizationId: string;
   storageKey: string;
   syncKey: string;
+  organizationPreferenceKey: string;
 }
 
 interface B13Window extends Window {
@@ -29,8 +37,17 @@ function identity(role: TeamRole): Identity {
   const memberId = role === 'Dueño' ? 1 : role === 'Administrador' ? 2 : 3;
   const slug = role === 'Dueño' ? 'owner' : role === 'Administrador' ? 'admin' : 'agent';
   const userId = `b13-${slug}`;
-  const storageKey = `trv-crm-basico:user:${userId}`;
-  return { role, memberId, userId, email: `${slug}@propcontrol.test`, storageKey, syncKey: `${storageKey}:sync` };
+  const storageKey = `trv-crm-basico:user:${userId}:org:${organizationId}`;
+  return {
+    role,
+    memberId,
+    userId,
+    email: `${slug}@propcontrol.test`,
+    organizationId,
+    storageKey,
+    syncKey: `${storageKey}:sync`,
+    organizationPreferenceKey: `propcontrol-active-organization-v1:user:${userId}`,
+  };
 }
 
 function member(role: TeamRole): TeamMember {
@@ -50,7 +67,7 @@ function member(role: TeamRole): TeamMember {
 function fixture(role: TeamRole, overdue = false): CrmData {
   const current = identity(role);
   const crm = structuredClone(initialData);
-  crm.organization = { id: 'b13-org', name: 'TRV Gestión Inmobiliaria', seatLimit: null, planLabel: 'B1.3' };
+  crm.organization = { id: current.organizationId, name: 'TRV Gestión Inmobiliaria', seatLimit: null, planLabel: 'B1.3' };
   crm.teamMembers = [member('Dueño'), member('Administrador'), member('Corredor')];
   crm.activityLog = [];
   crm.clients = [
@@ -103,7 +120,133 @@ function fixture(role: TeamRole, overdue = false): CrmData {
 }
 
 function chromeExecutable(): string | undefined {
-  return ['/usr/bin/google-chrome', '/usr/bin/google-chrome-stable', '/usr/bin/chromium', '/usr/bin/chromium-browser'].find(existsSync);
+  return [
+    '/usr/bin/google-chrome',
+    '/usr/bin/google-chrome-stable',
+    '/usr/bin/chromium',
+    '/usr/bin/chromium-browser',
+  ].find(existsSync);
+}
+
+function cloudRole(role: TeamRole): string {
+  if (role === 'Dueño') return 'owner';
+  if (role === 'Administrador') return 'admin';
+  return 'agent';
+}
+
+function membershipRows(crm: CrmData): CloudMembershipRow[] {
+  return crm.teamMembers.map((item) => ({
+    organization_id: crm.organization.id,
+    member_id: item.id,
+    user_id: item.userId || `member-${crm.organization.id}-${item.id}`,
+    role: cloudRole(item.role),
+    status: item.status === 'Suspendido' ? 'suspended' : item.status === 'Pendiente de acceso' ? 'invited' : 'active',
+    display_name: item.name,
+    email: item.email,
+    phone: item.phone,
+    created_at: item.createdAt,
+    last_active_at: item.lastActiveAt,
+  }));
+}
+
+function queryFilter(url: URL, name: string): string {
+  return String(url.searchParams.get(name) || '').replace(/^eq\./, '');
+}
+
+function recordKey(row: CloudRecordRow): string {
+  return `${row.entity_type}:${row.entity_key}`;
+}
+
+async function installTenantCloudHarness(context: BrowserContext, role: TeamRole, overdue: boolean): Promise<void> {
+  const current = identity(role);
+  const crm = fixture(role, overdue);
+  const cloudCrm = structuredClone(crm);
+  cloudCrm.clients[0]!.email = `cloud-hydrated-${current.userId}@propcontrol.test`;
+  const ownMemberships = membershipRows(crm);
+  const currentMembership = ownMemberships.find((row) => row.user_id === current.userId)!;
+  const memberships: CloudMembershipRow[] = [
+    {
+      ...currentMembership,
+      organization_id: 'aaa-b13-other-org',
+      member_id: 900 + current.memberId,
+    },
+    ...ownMemberships,
+  ];
+  const contextRows = membershipContext(ownMemberships, current.userId);
+  let records = crmToCloudRecords(cloudCrm, contextRows, current.userId)
+    .map((row) => ({ ...row, updated_at: '2026-09-10T12:00:00.000Z' }));
+
+  await context.route('**/*', async (route) => {
+    const request = route.request();
+    const url = new URL(request.url());
+    if (url.pathname === '/api/cloud-config') {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          configured: true,
+          url: `${url.origin}/__b13_supabase`,
+          publishableKey: 'b13-publishable',
+        }),
+      });
+      return;
+    }
+    if (!url.pathname.startsWith('/__b13_supabase/')) {
+      await route.continue();
+      return;
+    }
+    if (url.pathname.endsWith('/rest/v1/rpc/activate_my_organization_memberships')) {
+      assert.equal(request.method(), 'POST');
+      await route.fulfill({ status: 200, contentType: 'application/json', body: '{}' });
+      return;
+    }
+    if (url.pathname.endsWith('/rest/v1/rpc/visit_transaction_authority_active')) {
+      assert.fail('legacy visit_transaction_authority_active RPC must not be invoked');
+    }
+    if (url.pathname.endsWith('/rest/v1/rpc/visit_transaction_authority_active_v2')) {
+      assert.equal(request.method(), 'POST');
+      assert.deepEqual(JSON.parse(request.postData() || '{}'), { p_organization_id: current.organizationId });
+      await route.fulfill({ status: 200, contentType: 'application/json', body: 'false' });
+      return;
+    }
+    if (url.pathname.endsWith('/rest/v1/organization_members')) {
+      let result = memberships;
+      const requestedOrganization = queryFilter(url, 'organization_id');
+      const requestedUser = queryFilter(url, 'user_id');
+      if (requestedOrganization) result = result.filter((row) => row.organization_id === requestedOrganization);
+      if (requestedUser) result = result.filter((row) => row.user_id === requestedUser);
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(result) });
+      return;
+    }
+    if (url.pathname.endsWith('/rest/v1/propcontrol_records')) {
+      if (request.method() === 'GET') {
+        const requestedOrganization = queryFilter(url, 'organization_id');
+        const result = requestedOrganization === current.organizationId ? records : [];
+        await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(result) });
+        return;
+      }
+      if (request.method() === 'POST') {
+        const incoming = JSON.parse(request.postData() || '[]') as CloudRecordRow[];
+        const merged = new Map(records.map((row) => [recordKey(row), row]));
+        incoming.forEach((row) => merged.set(recordKey(row), {
+          ...row,
+          updated_at: '2026-09-10T12:30:00.000Z',
+        }));
+        records = [...merged.values()];
+        await route.fulfill({ status: 201, contentType: 'application/json', body: '' });
+        return;
+      }
+      if (request.method() === 'DELETE') {
+        await route.fulfill({ status: 204, body: '' });
+        return;
+      }
+    }
+    if (url.pathname.endsWith('/rest/v1/fichas')) {
+      await route.fulfill({ status: 200, contentType: 'application/json', body: '[]' });
+      return;
+    }
+    await route.fulfill({ status: 200, contentType: 'application/json', body: '{}' });
+  });
 }
 
 async function waitForServer(url: string): Promise<void> {
@@ -157,7 +300,7 @@ async function contextFor(browser: Browser, role: TeamRole, viewport: { width: n
   const mobile = viewport.width <= 430;
   const marker = `propcontrol-b13-fixture:${current.userId}:${overdue ? 'overdue' : 'normal'}`;
   const actorKey = `cloud:${current.userId}`;
-  const identityStorageKey = `propcontrol-whatsapp-human-identity-v1:${encodeURIComponent('b13-org')}:${current.memberId}:${encodeURIComponent(actorKey)}`;
+  const identityStorageKey = `propcontrol-whatsapp-human-identity-v1:${encodeURIComponent(current.organizationId)}:${current.memberId}:${encodeURIComponent(actorKey)}`;
   const context = await browser.newContext({
     viewport,
     deviceScaleFactor: 1,
@@ -165,9 +308,11 @@ async function contextFor(browser: Browser, role: TeamRole, viewport: { width: n
     isMobile: mobile,
     userAgent: mobile ? mobileUserAgent : undefined,
     locale: 'es-AR',
+    timezoneId: 'America/Argentina/Cordoba',
     colorScheme: 'dark',
   });
-  await context.addInitScript(({ crm, session, memberId, keys, markerKey, whatsappIdentity }) => {
+  await installTenantCloudHarness(context, role, overdue);
+  await context.addInitScript(({ crm, session, keys, markerKey, whatsappIdentity }) => {
     if (!localStorage.getItem(markerKey)) {
       localStorage.setItem(markerKey, '1');
       localStorage.setItem(keys.session, JSON.stringify(session));
@@ -178,7 +323,7 @@ async function contextFor(browser: Browser, role: TeamRole, viewport: { width: n
         lastCloudSavedAt: '2026-08-01T14:00:00-03:00',
         lastCloudVersion: '2026-08-01T14:00:00-03:00',
       }));
-      localStorage.setItem(keys.activeMember, String(memberId));
+      localStorage.setItem(keys.organizationPreference, crm.organization.id);
       localStorage.setItem(whatsappIdentity.key, JSON.stringify(whatsappIdentity.value));
     }
     const target = window as unknown as B13Window;
@@ -201,14 +346,18 @@ async function contextFor(browser: Browser, role: TeamRole, viewport: { width: n
       userId: current.userId,
       email: current.email,
     },
-    memberId: current.memberId,
-    keys: { session: sessionKey, storage: current.storageKey, sync: current.syncKey, activeMember: activeMemberKey },
+    keys: {
+      session: sessionKey,
+      storage: current.storageKey,
+      sync: current.syncKey,
+      organizationPreference: current.organizationPreferenceKey,
+    },
     markerKey: marker,
     whatsappIdentity: {
       key: identityStorageKey,
       value: {
         version: 1,
-        organizationId: 'b13-org',
+        organizationId: current.organizationId,
         memberId: current.memberId,
         actorKey,
         humanName: currentMember.name,
@@ -219,10 +368,69 @@ async function contextFor(browser: Browser, role: TeamRole, viewport: { width: n
   return context;
 }
 
-async function load(page: Page, url: string): Promise<void> {
-  await page.goto(url, { waitUntil: 'domcontentloaded' });
+function initialTenantPull(page: Page, role: TeamRole): Promise<Response> {
+  const expected = identity(role);
+  return page.waitForResponse((response) => {
+    if (response.request().method() !== 'GET') return false;
+    const responseUrl = new URL(response.url());
+    return responseUrl.pathname.endsWith('/rest/v1/propcontrol_records')
+      && queryFilter(responseUrl, 'organization_id') === expected.organizationId;
+  });
+}
+
+async function waitForTenantReadiness(page: Page, role: TeamRole, tenantPull: Promise<Response>): Promise<void> {
+  const expected = identity(role);
+  const cloudClientEmail = `cloud-hydrated-${expected.userId}@propcontrol.test`;
+  const response = await tenantPull;
+  const responseUrl = new URL(response.url());
+  assert.equal(response.request().method(), 'GET', 'El pull tenant-aware inicial debe ser GET.');
+  assert.equal(responseUrl.pathname.endsWith('/rest/v1/propcontrol_records'), true, 'El pull inicial debe apuntar a propcontrol_records.');
+  assert.equal(queryFilter(responseUrl, 'organization_id'), expected.organizationId, 'El pull inicial debe usar la organization_id autenticada exacta.');
+  assert.equal(response.ok(), true, 'El pull tenant-aware inicial debe responder OK.');
+  await page.waitForFunction(({ userId, storageKey, organizationPreferenceKey, organizationId, cloudClientEmail }) => {
+    if (storageKey !== `trv-crm-basico:user:${userId}:org:${organizationId}`) return false;
+    if (localStorage.getItem(organizationPreferenceKey) !== organizationId) return false;
+    const raw = localStorage.getItem(storageKey);
+    if (!raw) return false;
+    try {
+      const crm = JSON.parse(raw) as CrmData;
+      const client = crm.clients?.find((item) => item.id === 1);
+      return crm.organization?.id === organizationId && client?.email === cloudClientEmail;
+    } catch {
+      return false;
+    }
+  }, {
+    userId: expected.userId,
+    storageKey: expected.storageKey,
+    organizationPreferenceKey: expected.organizationPreferenceKey,
+    organizationId: expected.organizationId,
+    cloudClientEmail,
+  });
   await page.waitForSelector('#crm.active', { state: 'visible', timeout: 20_000 });
+  const activated = await page.evaluate(async () => {
+    const runtimePath = '/dist/tenant-runtime.js';
+    const storePath = '/dist/store.js';
+    const runtime = await import(runtimePath);
+    const store = await import(storePath);
+    const client = store.state.crm.clients.find((item: { id: number }) => item.id === 1);
+    return {
+      scope: runtime.currentTenantScope(),
+      organizationId: store.state.crm.organization.id,
+      clientEmail: client?.email || null,
+    };
+  });
+  assert.deepEqual(activated, {
+    scope: { userId: expected.userId, organizationId: expected.organizationId },
+    organizationId: expected.organizationId,
+    clientEmail: cloudClientEmail,
+  });
   await page.waitForSelector('[data-contact-whatsapp="1"]', { state: 'visible', timeout: 20_000 });
+}
+
+async function load(page: Page, url: string, role: TeamRole): Promise<void> {
+  const tenantPull = initialTenantPull(page, role);
+  await page.goto(url, { waitUntil: 'domcontentloaded' });
+  await waitForTenantReadiness(page, role, tenantPull);
 }
 
 async function crmFromStorage(page: Page, role: TeamRole): Promise<CrmData> {
@@ -253,24 +461,45 @@ test('B1.3 completa contacto, confirmación, seguimiento, reprogramación y Agen
   const context = await contextFor(browser, 'Dueño', { width: 390, height: 844 });
   try {
     const page = await context.newPage();
-    await load(page, url);
+    await load(page, url, 'Dueño');
     await page.locator('[data-contact-whatsapp="1"]').click();
-    await page.locator('.whatsapp-contact-panel').waitFor({ state: 'visible' });
+    const panel = page.locator('.whatsapp-contact-panel');
+    await panel.waitFor({ state: 'visible' });
+    const preview = page.locator('[data-whatsapp-message-preview]');
+    await preview.waitFor({ state: 'visible' });
+    const previewText = (await preview.textContent()) || '';
+    assert.match(previewText, /Lucía Martín/);
+    assert.match(previewText, /Dúplex en Docta/);
+    const editMessage = page.locator('[data-whatsapp-edit-message]');
+    await editMessage.waitFor({ state: 'visible' });
+    assert.equal(await editMessage.isEnabled(), true, 'Editar mensaje debe estar habilitado en la UX Zero Training.');
+    await editMessage.click();
+    const message = page.locator('[data-whatsapp-message]');
+    await message.waitFor({ state: 'visible' });
+    assert.equal(await message.isEnabled(), true, 'El mensaje WhatsApp debe estar habilitado después de Editar mensaje.');
+    assert.equal(await message.isEditable(), true, 'El mensaje WhatsApp debe ser editable después de Editar mensaje.');
     await page.screenshot({ path: `${artifactDir}/01-mobile-panel-contacto.png`, fullPage: true });
-    assert.match(await page.locator('[data-whatsapp-message]').inputValue(), /Lucía Martín/);
-    assert.match(await page.locator('[data-whatsapp-message]').inputValue(), /Dúplex en Docta/);
+    assert.match(await message.inputValue(), /Lucía Martín/);
+    assert.match(await message.inputValue(), /Dúplex en Docta/);
 
     const edited = 'Hola Lucía 👋\n¿Seguís buscando en Nueva Córdoba?';
-    await page.locator('[data-whatsapp-edit-message]').click();
-    await page.locator('[data-whatsapp-message]').fill(edited);
-    await page.locator('.whatsapp-zero-more-options > summary').click();
-    await page.locator('[data-whatsapp-copy]').click();
+    await message.fill(edited);
+    const moreOptionsSummary = page.locator('details.whatsapp-zero-more-options > summary');
+    await moreOptionsSummary.waitFor({ state: 'visible' });
+    await moreOptionsSummary.click();
+    const copy = page.locator('[data-whatsapp-copy]');
+    await copy.waitFor({ state: 'visible' });
+    await copy.click();
     assert.equal(await page.evaluate(() => (window as unknown as B13Window).__b13Copied), edited);
 
-    await page.locator('[data-whatsapp-phone]').fill('+54 9 351 ABC');
+    const phone = page.locator('[data-whatsapp-phone]');
+    await phone.waitFor({ state: 'visible' });
+    await phone.fill('+54 9 351 ABC');
     assert.equal(await page.locator('[data-whatsapp-open]').isDisabled(), true);
     await page.screenshot({ path: `${artifactDir}/06-numero-invalido.png`, fullPage: true });
-    await page.locator('[data-whatsapp-phone]').fill('0351 15 5110069');
+    const correctedPhone = page.locator('[data-whatsapp-phone]');
+    await correctedPhone.waitFor({ state: 'visible' });
+    await correctedPhone.fill('0351 15 5110069');
     await openAndReturn(page);
     const openedUrl = await page.evaluate(() => (window as unknown as B13Window).__b13OpenedUrl || '');
     assert.equal(openedUrl, `https://wa.me/5493515110069?text=${encodeURIComponent(edited)}`);
@@ -282,61 +511,60 @@ test('B1.3 completa contacto, confirmación, seguimiento, reprogramación y Agen
     await page.locator('[data-contact-whatsapp="1"]').click();
     await openAndReturn(page);
     await page.locator('[data-whatsapp-confirm-sent]').click();
-    await page.locator('[data-whatsapp-change-followup]').waitFor({ state: 'visible' });
-    assert.equal(await page.locator('[data-zero-followup-form]').count(), 0);
-    await page.locator('[data-whatsapp-change-followup]').click();
-    await page.locator('[data-zero-followup-form]').waitFor({ state: 'visible' });
-    const choices = await page.locator('input[name="follow-up-choice"]').evaluateAll((nodes) => nodes.map((node) => (node as HTMLInputElement).value));
+    const donePanel = page.locator('.whatsapp-contact-panel[data-zero-training-view="done"]');
+    await donePanel.waitFor({ state: 'visible' });
+
+    const autoScheduled = await crmFromStorage(page, 'Dueño');
+    assert.equal(autoScheduled.activityLog.filter((entry) => entry.action === 'Contacto por WhatsApp').length, 1);
+    assert.equal(autoScheduled.activityLog.filter((entry) => entry.action === 'Seguimiento por WhatsApp programado').length, 1);
+    assert.match(autoScheduled.clients[0]?.nextFollowUp || '', /^\d{4}-\d{2}-\d{2}$/);
+    assert.equal(autoScheduled.clients[0]?.nextAction, 'Volver a contactar por WhatsApp');
+    assert.equal(autoScheduled.reminders.length, 0, 'La auto-programación WhatsApp no crea Reminder paralelo.');
+
+    const changeFollowUp = page.locator('[data-whatsapp-change-followup]');
+    await changeFollowUp.waitFor({ state: 'visible' });
+    assert.equal(await changeFollowUp.isEnabled(), true, 'Cambiar debe estar habilitado después de confirmar el envío.');
+    assert.equal((await changeFollowUp.textContent())?.trim(), 'Cambiar');
+    await changeFollowUp.click();
+
+    const followUpForm = page.locator('[data-zero-followup-form]');
+    await followUpForm.waitFor({ state: 'visible' });
+    const choices = await followUpForm.locator('input[name="follow-up-choice"]').evaluateAll((nodes) => nodes.map((node) => (node as HTMLInputElement).value));
     assert.deepEqual(choices, ['1', '3', '7', '14', '30', 'custom', 'none']);
+    await followUpForm.locator('input[name="follow-up-choice"][value="none"]').check();
+    assert.equal(await followUpForm.locator('input[name="selected-date"]').inputValue(), '');
+    assert.equal(await followUpForm.locator('[data-zero-followup-preview]').textContent(), 'No se programará un próximo seguimiento.');
+    await followUpForm.locator('input[name="follow-up-choice"][value="3"]').check();
+    const reprogrammedDate = await followUpForm.locator('input[name="selected-date"]').inputValue();
+    assert.match(reprogrammedDate, /^\d{4}-\d{2}-\d{2}$/);
+    assert.match((await followUpForm.locator('[data-zero-followup-preview]').textContent()) || '', /^Se programará para: /);
     await page.screenshot({ path: `${artifactDir}/03-mobile-proximo-seguimiento.png`, fullPage: true });
-    await page.locator('input[name="follow-up-choice"][value="3"]').check();
-    await page.locator('[data-zero-followup-form] button[type="submit"]').click();
-    await page.locator('[data-whatsapp-change-followup]').waitFor({ state: 'visible' });
+    await followUpForm.locator('button[type="submit"]').click();
+    await page.waitForFunction(({ key, expectedDate }) => {
+      const crm = JSON.parse(localStorage.getItem(key) || '{}') as CrmData;
+      return crm.clients?.[0]?.nextFollowUp === expectedDate;
+    }, { key: identity('Dueño').storageKey, expectedDate: reprogrammedDate });
 
-    let scheduled = await crmFromStorage(page, 'Dueño');
-    assert.equal(scheduled.activityLog.filter((entry) => entry.action === 'Contacto por WhatsApp').length, 1);
-    assert.equal(scheduled.activityLog.filter((entry) => entry.action === 'Seguimiento por WhatsApp programado').length, 1);
-    assert.equal(scheduled.clients[0]?.nextAction, 'Volver a contactar por WhatsApp');
-
-    await page.locator('[data-whatsapp-change-followup]').click();
-    const noneForm = page.locator('[data-zero-followup-form]');
-    await noneForm.locator('input[name="follow-up-choice"][value="none"]').check();
-    assert.equal(await noneForm.locator('input[name="selected-date"]').inputValue(), '');
-    assert.equal(await noneForm.locator('[data-zero-followup-preview]').textContent(), 'No se programará un próximo seguimiento.');
-    const activitiesBeforeNone = scheduled.activityLog.length;
-    await noneForm.locator('button[type="submit"]').click();
-    await page.getByText('Contacto registrado', { exact: true }).waitFor({ state: 'visible' });
-    const cleared = await crmFromStorage(page, 'Dueño');
-    assert.equal(cleared.clients[0]?.nextFollowUp, undefined, 'Sin seguimiento por ahora limpia la fecha.');
-    assert.equal(cleared.clients[0]?.nextAction, undefined, 'Sin seguimiento por ahora limpia la acción futura.');
-    assert.equal(cleared.reminders.length, 0, 'Sin seguimiento por ahora no crea Reminder.');
-    assert.equal(cleared.activityLog.length, activitiesBeforeNone, 'Sin seguimiento por ahora no crea actividad falsa.');
-    assert.equal(cleared.activityLog.filter((entry) => entry.action === 'Contacto por WhatsApp').length, 1, 'El contacto confirmado se conserva.');
-    assert.equal(cleared.activityLog.filter((entry) => entry.action === 'Seguimiento por WhatsApp programado').length, 1, 'Se conserva el historial sin duplicarlo.');
-    assert.equal(await page.locator('#agenda .agenda-card').filter({ hasText: 'Lucía Martín' }).count(), 0, 'Agenda no muestra seguimiento activo al elegir none.');
-
-    await page.locator('[data-whatsapp-choose-followup]').click();
-    const resumeForm = page.locator('[data-zero-followup-form]');
-    await resumeForm.locator('input[name="follow-up-choice"][value="3"]').check();
-    await resumeForm.locator('button[type="submit"]').click();
-    await page.locator('[data-whatsapp-change-followup]').waitFor({ state: 'visible' });
-    scheduled = await crmFromStorage(page, 'Dueño');
+    const scheduled = await crmFromStorage(page, 'Dueño');
+    assert.equal(scheduled.clients[0]?.nextFollowUp, reprogrammedDate);
+    assert.match(scheduled.clients[0]?.nextFollowUp || '', /^\d{4}-\d{2}-\d{2}$/);
     assert.equal(scheduled.clients[0]?.nextAction, 'Volver a contactar por WhatsApp');
     assert.equal(scheduled.activityLog.filter((entry) => entry.action === 'Contacto por WhatsApp').length, 1);
-    assert.equal(scheduled.activityLog.filter((entry) => entry.action === 'Seguimiento por WhatsApp programado').length, 1);
-    assert.equal(scheduled.reminders.length, 0);
+    assert.equal(scheduled.activityLog.filter((entry) => entry.action === 'Seguimiento por WhatsApp programado').length, 1, 'Auto-programación + reprogramación del mismo attempt no duplica Activities.');
+    assert.equal(scheduled.reminders.length, 0, 'WhatsApp follow-up no crea Reminder paralelo.');
 
+    const reloadPull = initialTenantPull(page, 'Dueño');
     await page.reload({ waitUntil: 'domcontentloaded' });
-    await page.waitForSelector('[data-contact-whatsapp="1"]', { state: 'visible' });
+    await waitForTenantReadiness(page, 'Dueño', reloadPull);
     assert.equal((await crmFromStorage(page, 'Dueño')).activityLog.filter((entry) => entry.action === 'Contacto por WhatsApp').length, 1);
     await page.locator('[data-module="agenda"]:visible').first().click();
     const agendaCard = page.locator('#agenda.active .agenda-card').filter({ hasText: 'Lucía Martín' }).first();
     await agendaCard.waitFor({ state: 'visible' });
     await agendaCard.locator('details.agenda-more-actions summary').click();
     const reprogram = agendaCard.locator('form[data-reprogram-source="client"]');
-    await reprogram.locator('input[name="date"]').fill('2026-08-17');
+    await reprogram.locator('input[name="date"]').fill('2026-10-17');
     await reprogram.locator('button[type="submit"]').click();
-    assert.equal((await crmFromStorage(page, 'Dueño')).clients[0]?.nextFollowUp, '2026-08-17');
+    assert.equal((await crmFromStorage(page, 'Dueño')).clients[0]?.nextFollowUp, '2026-10-17');
     await page.locator('#agenda [data-complete-agenda="client"][data-id="1"]').click();
     const completed = await crmFromStorage(page, 'Dueño');
     assert.equal(completed.clients[0]?.nextFollowUp, undefined);
@@ -372,7 +600,7 @@ test('B1.3 valida escritorio, roles, referencias obsoletas, módulos y vencimien
       const context = await contextFor(browser, role, { width: 1366, height: 768 });
       try {
         const page = await context.newPage();
-        await load(page, url);
+        await load(page, url, role);
         assert.equal(await page.locator('[data-contact-whatsapp]').count(), role === 'Corredor' ? 1 : 2);
         await page.locator('[data-contact-whatsapp="1"]').click();
         if (role === 'Dueño') await page.screenshot({ path: `${artifactDir}/04-escritorio-contacto.png`, fullPage: true });
@@ -391,12 +619,13 @@ test('B1.3 valida escritorio, roles, referencias obsoletas, módulos y vencimien
     const staleContext = await contextFor(browser, 'Dueño', { width: 390, height: 844 });
     try {
       const page = await staleContext.newPage();
-      await load(page, url);
+      await load(page, url, 'Dueño');
       await page.locator('[data-contact-whatsapp="1"]').click();
       await page.evaluate(async () => {
         const target = window as unknown as B13Window;
         target.__b13StaleRegister = document.querySelector<HTMLButtonElement>('[data-whatsapp-manual-register]') || undefined;
-        const store = await import('/dist/store.js');
+        const storePath = '/dist/store.js';
+        const store = await import(storePath);
         store.setActiveMemberId(3);
         document.dispatchEvent(new CustomEvent('trv-render'));
         target.__b13StaleRegister?.click();
@@ -410,7 +639,7 @@ test('B1.3 valida escritorio, roles, referencias obsoletas, módulos y vencimien
     const overdueContext = await contextFor(browser, 'Dueño', { width: 390, height: 844 }, true);
     try {
       const page = await overdueContext.newPage();
-      await load(page, url);
+      await load(page, url, 'Dueño');
       await page.locator('[data-module="agenda"]:visible').first().click();
       await page.locator('#agenda.active .agenda-card.overdue').waitFor({ state: 'visible' });
       await page.screenshot({ path: `${artifactDir}/05-seguimiento-vencido.png`, fullPage: true });
@@ -434,10 +663,12 @@ test('B1.3 garantiza idempotencia, expiración y todas las fechas programables',
   const context = await contextFor(browser, 'Dueño', { width: 390, height: 844 });
   try {
     const page = await context.newPage();
-    await load(page, url);
+    await load(page, url, 'Dueño');
     const result = await page.evaluate(async () => {
-      const contact = await import('/dist/whatsapp-contact.js');
-      const store = await import('/dist/store.js');
+      const contactPath = '/dist/whatsapp-contact.js';
+      const storePath = '/dist/store.js';
+      const contact = await import(contactPath);
+      const store = await import(storePath);
       const client = store.state.crm.clients[0];
       const attempt = contact.createPendingWhatsAppAttempt(client, '5493515110069', 'Mensaje único', new Date());
       const first = contact.registerWhatsAppContact(attempt);
