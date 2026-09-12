@@ -1,4 +1,4 @@
-name: A3.2 B1.3 Candidate Control
+name: A3.3-A Static Anti-Bypass Validation
 
 on:
   push:
@@ -11,32 +11,30 @@ permissions:
 jobs:
   validate:
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 30
     steps:
-      - name: Checkout exact A3.2 candidate
+      - name: Checkout exact A3.3-A candidate
         uses: actions/checkout@v4
         with:
-          ref: 349e9ba9e456ef79c3c740a9458290f408c651e6
+          ref: 6856b4de16bc210b69fb748de29cc843932e5846
           fetch-depth: 0
 
-      - name: Assert exact candidate identity and TEST-ONLY scope
+      - name: Assert exact candidate identity and static-only scope
         shell: bash
         run: |
           set -euo pipefail
-          CANDIDATE=349e9ba9e456ef79c3c740a9458290f408c651e6
-          PARENT=7ded1ab3f43577853b6178a1edcee93361655a40
-          EXPECTED_BLOB=7a94fa46e43761d7d96c5eb7258632762eb65a67
-          FILE=src/tests/b1-3-whatsapp-contact-real-app.test.ts
+          CANDIDATE=6856b4de16bc210b69fb748de29cc843932e5846
+          PARENT=349e9ba9e456ef79c3c740a9458290f408c651e6
+          FILE=src/tests/sec-fix-a3-3-anti-bypass-static-guards.test.ts
           test "$(git rev-parse HEAD)" = "$CANDIDATE"
           test "$(git rev-parse HEAD^)" = "$PARENT"
+          test "$(git merge-base "$PARENT" HEAD)" = "$PARENT"
           test "$(git diff --name-only "$PARENT"..HEAD)" = "$FILE"
-          test "$(git rev-parse "HEAD:$FILE")" = "$EXPECTED_BLOB"
-          forbidden="$(git diff --name-only "$PARENT"..HEAD -- 'src/**/*.css' 'supabase/**' '*.sql' 'docs/SEC_FIX_A2_5_BASELINE.md' 'docs/SUPABASE_PRODUCTION_BASELINE.md' '.github/workflows/**')"
+          forbidden="$(git diff --name-only "$PARENT"..HEAD -- 'src/*.ts' 'src/server/**' 'src/**/*.css' 'supabase/**' '*.sql' '.github/workflows/**' 'docs/**')"
           test -z "$forbidden"
-          echo "B13_CANDIDATE_SHA=$(git rev-parse HEAD)"
-          echo "B13_PARENT_SHA=$(git rev-parse HEAD^)"
-          echo "B13_FILE_BLOB=$(git rev-parse "HEAD:$FILE")"
-          echo "B13_SCOPE=$FILE"
+          echo "A33_CANDIDATE_SHA=$(git rev-parse HEAD)"
+          echo "A33_PARENT_SHA=$(git rev-parse HEAD^)"
+          echo "A33_SCOPE=$FILE"
 
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -47,10 +45,68 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Build exact candidate
+      - name: Browser prerequisite
+        shell: bash
+        run: |
+          set -euo pipefail
+          if command -v google-chrome >/dev/null 2>&1; then google-chrome --version; exit 0; fi
+          if command -v google-chrome-stable >/dev/null 2>&1; then google-chrome-stable --version; exit 0; fi
+          if command -v chromium >/dev/null 2>&1; then chromium --version; exit 0; fi
+          if command -v chromium-browser >/dev/null 2>&1; then chromium-browser --version; exit 0; fi
+          echo "No supported browser executable available for real-app gates."
+          exit 1
+
+      - name: Gate 1 - Build
         run: npm run build
 
-      - name: Run complete B1.3 control
+      - name: Gate 2 - A3.3 static anti-bypass guard
+        run: node --test --test-concurrency=1 dist/tests/sec-fix-a3-3-anti-bypass-static-guards.test.js
+
+      - name: Gate 3 - A3.2 specific
+        run: >-
+          node --test --test-concurrency=1
+          dist/tests/sec-fix-a3-2-authenticated-write-identity.test.js
+          dist/tests/sec-fix-a3-2-runtime-wiring.test.js
+          dist/tests/sec-fix-a3-2-whatsapp-bootstrap-regression.test.js
+
+      - name: Gate 4 - A3.1 complete
+        run: >-
+          node --test --test-concurrency=1
+          dist/tests/sec-fix-a3-1-lead-explicit-tenant-write-identity.test.js
+          dist/tests/sec-fix-a3-1-lead-real-app.test.js
+
+      - name: Gate 5 - Tenant runtime storage and multi-org
+        run: >-
+          node --test --test-concurrency=1
+          dist/tests/sec-fix-a1-2-a-active-organization.test.js
+          dist/tests/sec-fix-a1-2-b-tenant-storage.test.js
+          dist/tests/sec-fix-a1-2-b-2-tenant-storage-boundary.test.js
+          dist/tests/sec-fix-a1-2-c2-tenant-async.test.js
+          dist/tests/sec-fix-a1-2-c3-stale-async.test.js
+
+      - name: Gate 6 - Cloud save generation and lease
+        run: >-
+          node --test --test-concurrency=1
+          dist/tests/cloud-save-serial.test.js
+          dist/tests/sec-fix-a1-2-c2-job-freeze.test.js
+          dist/tests/sec-fix-a1-dr02-cloud-writer-lease.test.js
+          dist/tests/sec-fix-a1-dr03-stale-sync-metadata.test.js
+
+      - name: Gate 7 - Visit cutover
+        run: >-
+          node --test --test-concurrency=1
+          dist/tests/p1-1-a2-visit-workflow.test.js
+          dist/tests/p1-1-a7-r2-2c-visit-transaction-cutover.test.js
+          dist/tests/sec-fix-a1-2-d-org-aware-visit-cutover.test.js
+
+      - name: Gate 8 - Team
+        run: >-
+          node --test --test-concurrency=1
+          dist/tests/team-management.test.js
+          dist/tests/team-policy.test.js
+          dist/tests/sec-fix-a1-2-e-team-tenant-authority.test.js
+
+      - name: Gate 9 - WhatsApp identity and contact
         run: >-
           node --test --test-concurrency=1
           dist/tests/b1-3-whatsapp-architecture.test.js
@@ -61,5 +117,5 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test "$(git rev-parse HEAD)" = "349e9ba9e456ef79c3c740a9458290f408c651e6"
-          echo "FINAL_B13_EXACT_SHA=$(git rev-parse HEAD)"
+          test "$(git rev-parse HEAD)" = "6856b4de16bc210b69fb748de29cc843932e5846"
+          echo "FINAL_A33_EXACT_SHA=$(git rev-parse HEAD)"
