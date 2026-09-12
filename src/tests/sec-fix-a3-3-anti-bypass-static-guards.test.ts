@@ -7,11 +7,14 @@ import * as ts from 'typescript';
 const SRC_ROOT = 'src';
 const LEGACY_CLOUD_API = 'src/cloud-api.ts';
 const LEGACY_VISIT_MODULE = 'src/visit-transaction-cloud.ts';
-const LEGACY_TEAM_UI = 'src/team-ui.ts';
+const LEGACY_TEAM_BOOTSTRAP = 'src/legacy-quarantine/team-bootstrap.ts';
+const LEGACY_TEAM_UI = 'src/legacy-quarantine/team-ui.ts';
 const QUARANTINE_ROOT = 'src/legacy-quarantine/';
 const QUARANTINED_LEGACY_MODULES = new Set([
-  'src/legacy-quarantine/visit-authority-sync-version.ts',
+  'src/legacy-quarantine/team-bootstrap.ts',
   'src/legacy-quarantine/team-scope.ts',
+  'src/legacy-quarantine/team-ui.ts',
+  'src/legacy-quarantine/visit-authority-sync-version.ts',
 ]);
 const VISUAL_COMPATIBILITY = new Set([
   'src/store.ts',
@@ -509,7 +512,9 @@ test('A3.3 Guard 0: quarantine existe y ningún source productivo puede alcanzar
   assert.deepEqual(
     [...QUARANTINED_LEGACY_MODULES].sort(),
     [
+      'src/legacy-quarantine/team-bootstrap.ts',
       'src/legacy-quarantine/team-scope.ts',
+      'src/legacy-quarantine/team-ui.ts',
       'src/legacy-quarantine/visit-authority-sync-version.ts',
     ],
     'El quarantine es un set exacto; no puede crecer implícitamente por carpeta.',
@@ -545,6 +550,18 @@ test('A3.3 Guard 0: quarantine existe y ningún source productivo puede alcanzar
       fixture,
     );
   }
+
+  const internalFixture = parseText(
+    "import { renderTeam } from './team-ui.js';",
+    LEGACY_TEAM_BOOTSTRAP,
+  );
+  assert.deepEqual(
+    quarantineModuleEdges(LEGACY_TEAM_BOOTSTRAP, internalFixture),
+    [LEGACY_TEAM_UI],
+    'La relación quarantine → quarantine se preserva como evidencia histórica interna.',
+  );
+  assert.equal(LEGACY_TEAM_BOOTSTRAP.startsWith(QUARANTINE_ROOT), true,
+    'Sólo un source dentro del quarantine exacto puede conservar esta relación histórica interna.');
 
   const index = source('index.html');
   assert.doesNotMatch(index, /\/dist\/legacy-quarantine\//,
@@ -725,8 +742,10 @@ test('A3.3 Guard 5: identidad visual no puede alimentar write actor ni Activity 
   const store = source('src/store.ts');
   assert.match(store, /activeMemberId \/ TEAM_VIEW_KEY remain a visual preference only and never[\s\S]*authenticatedTenantMember/);
   const legacyTeam = source(LEGACY_TEAM_UI);
+  assert.match(legacyTeam, /\bactiveMember\(\)/,
+    'team-ui.ts preserva activeMember únicamente dentro del quarantine exacto y unreachable.');
   assert.match(legacyTeam, /\baddActivity\s*\(/,
-    'team-ui.ts se mantiene explícitamente identificado como UI legacy antes de quarantine.');
+    'team-ui.ts preserva addActivity únicamente dentro del quarantine exacto y unreachable.');
 });
 
 test('A3.3 Guard 6: tenant de escritura no se deriva de CRM/record/payload mutable', () => {
@@ -818,7 +837,7 @@ test('A3.3 Guard 7: raw tenant writers sólo existen en adapters/compatibility e
     `${telemetryPath}: debe usar el writer append-only canónico importado.`);
 });
 
-test('A3.3 Guard 8: UI/comercial no importa raw cloud adapters y legacy UI permanece unreachable', () => {
+test('A3.3 Guard 8: UI/comercial no importa raw cloud adapters y Team legacy permanece quarantined', () => {
   const unsafeRawModules = [
     'tenant-cloud-data.js',
     'tenant-visit-v2.js',
@@ -827,7 +846,7 @@ test('A3.3 Guard 8: UI/comercial no importa raw cloud adapters y legacy UI perma
   for (const path of runtimeSourcePaths()) {
     if (QUARANTINED_LEGACY_MODULES.has(path)) continue;
     const isUiOrCommercial = /(?:-ui|^src\/mvp-|commercial-(?:close|mutation))/.test(path);
-    if (!isUiOrCommercial || path === LEGACY_TEAM_UI) continue;
+    if (!isUiOrCommercial) continue;
     const parsed = parseSource(path);
     for (const moduleName of unsafeRawModules) {
       assert.equal(
@@ -850,19 +869,59 @@ test('A3.3 Guard 8: UI/comercial no importa raw cloud adapters y legacy UI perma
     }
   }
 
+  assert.equal(existsSync('src/team-bootstrap.ts'), false,
+    'src/team-bootstrap.ts top-level no puede reaparecer fuera del quarantine.');
+  assert.equal(existsSync('src/team-ui.ts'), false,
+    'src/team-ui.ts top-level no puede reaparecer fuera del quarantine.');
+  assert.equal(existsSync(LEGACY_TEAM_BOOTSTRAP), true,
+    'team-bootstrap histórico debe permanecer preservado dentro del quarantine exacto.');
+  assert.equal(existsSync(LEGACY_TEAM_UI), true,
+    'team-ui histórico debe permanecer preservado dentro del quarantine exacto.');
+
   const index = source('index.html');
-  assert.doesNotMatch(index, /(?:\/dist\/team-ui\.js|\/dist\/visit-transaction-cloud\.js|\/dist\/legacy-quarantine\/)/,
-    'Los módulos legacy/quarantine no pueden volver a publicarse como entrypoints browser.');
+  for (const forbiddenEntrypoint of [
+    '/dist/team-bootstrap.js',
+    '/dist/team-ui.js',
+    '/dist/legacy-quarantine/team-bootstrap.js',
+    '/dist/legacy-quarantine/team-ui.js',
+  ]) {
+    assert.equal(index.includes(forbiddenEntrypoint), false,
+      `index.html no puede cargar ${forbiddenEntrypoint}.`);
+  }
+  assert.doesNotMatch(index, /\/dist\/legacy-quarantine\//,
+    'Ningún módulo quarantine puede publicarse como entrypoint browser.');
+
   const main = source('src/mvp-main.ts');
-  assert.doesNotMatch(main, /team-ui|visit-transaction-cloud|legacy-quarantine/,
-    'mvp-main no puede reactivar UI/Visit legacy ni quarantine.');
+  assert.match(main, /import\s*\{\s*renderMvpUsers\s*\}\s*from\s*['"]\.\/mvp-users-ui\.js['"]/,
+    'mvp-main debe usar la superficie moderna mvp-users-ui.');
+  assert.match(main, /renderMvpUsers\s*\(/,
+    'mvp-main debe renderizar la superficie moderna de usuarios.');
+  assert.doesNotMatch(main, /team-bootstrap|team-ui|legacy-quarantine/,
+    'mvp-main no puede reactivar Team legacy ni quarantine.');
+
   for (const path of runtimeSourcePaths()) {
-    if (path === LEGACY_TEAM_UI || QUARANTINED_LEGACY_MODULES.has(path)) continue;
+    if (path.startsWith(QUARANTINE_ROOT)) continue;
+    const parsed = parseSource(path);
     assert.equal(
-      importsModule(parseSource(path), 'team-ui.js'),
+      importsModule(parsed, 'team-bootstrap.js'),
       false,
-      `${path}: team-ui.ts legacy volvió a ser reachable. Migrá al mvp-users-ui autenticado.`,
+      `${path}: no puede importar team-bootstrap legacy top-level.`,
     );
+    assert.equal(
+      importsModule(parsed, 'team-ui.js'),
+      false,
+      `${path}: no puede importar team-ui legacy top-level/quarantine.`,
+    );
+    for (const quarantinedTeamModule of [
+      'legacy-quarantine/team-bootstrap.js',
+      'legacy-quarantine/team-ui.js',
+    ]) {
+      assert.equal(
+        importsModule(parsed, quarantinedTeamModule),
+        false,
+        `${path}: no puede importar ${quarantinedTeamModule}; Team legacy debe permanecer quarantined.`,
+      );
+    }
   }
 });
 
@@ -876,6 +935,6 @@ test('A3.3 static inventory scans source paths, not dist/tests', () => {
   assert.deepEqual(
     paths.filter((path) => path.startsWith(QUARANTINE_ROOT)).sort(),
     [...QUARANTINED_LEGACY_MODULES].sort(),
-    'No puede aparecer un tercer módulo quarantine sin autorización explícita y actualización del set exacto.',
+    'No puede aparecer un quinto módulo quarantine sin autorización explícita y actualización del set exacto.',
   );
 });
