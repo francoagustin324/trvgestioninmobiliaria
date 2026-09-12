@@ -1,5 +1,5 @@
-import { state } from './store.js';
-import { activeMember, canAccessModule, visibleConversations } from './team-access.js';
+import { state } from '../store.js';
+import { activeMember, canAccessModule, visibleConversations } from '../team-access.js';
 import { renderTeam, renderTeamAccount } from './team-ui.js';
 
 let initialized = false;

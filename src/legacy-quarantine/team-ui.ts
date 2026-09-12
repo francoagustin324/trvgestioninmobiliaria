@@ -1,17 +1,17 @@
-import type { AssignmentEntity, TeamMember, TeamRole } from './models.js';
+import type { AssignmentEntity, TeamMember, TeamRole } from '../models.js';
 import {
   getCloudSession,
   inviteTeamMember,
   updateTeamMemberAccess,
-} from './cloud-api.js';
+} from '../cloud-api.js';
 import {
   assertTenantRuntimeLeaseCurrent,
   captureTenantRuntimeLease,
   requireCurrentTenantScope,
   tenantRuntimeLeaseIsCurrent,
   type TenantRuntimeLease,
-} from './tenant-runtime.js';
-import { saveData, state } from './store.js';
+} from '../tenant-runtime.js';
+import { saveData, state } from '../store.js';
 import {
   activeMember,
   activeSeatCount,
@@ -20,8 +20,8 @@ import {
   hasSeatAvailable,
   memberName,
   workload,
-} from './team-access.js';
-import { escapeHtml, field, formValues } from './utils.js';
+} from '../team-access.js';
+import { escapeHtml, field, formValues } from '../utils.js';
 
 const roles: TeamRole[] = ['Dueño', 'Administrador', 'Corredor'];
 

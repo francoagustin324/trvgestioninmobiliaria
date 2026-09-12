@@ -520,7 +520,7 @@ test('E17 A→B completion Team tardía queda stale antes de alcanzar efectos UI
   release.resolve();
   await assert.rejects(pending, /TENANT_RUNTIME_STALE/);
 
-  const ui = readFileSync('src/team-ui.ts', 'utf8');
+  const ui = readFileSync('src/legacy-quarantine/team-ui.ts', 'utf8');
   assert.match(ui, /\.then\(\(member\) => \{\s*assertTenantRuntimeLeaseCurrent\(runtimeLease\);\s*replaceMember\(member\)/);
   assert.match(ui, /if \(!tenantRuntimeLeaseIsCurrent\(runtimeLease\)\) return;/);
 });
