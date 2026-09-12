@@ -3,16 +3,24 @@ import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import type { TenantScope } from '../active-organization.js';
 import type { CloudMembershipRow, CloudRecordRow } from '../cloud-records.js';
+import type {
+  RecommendationInstrumentationContext,
+  SupervisedRecommendationRecord,
+} from '../lead-recommendation-instrumentation-core.js';
+import type { RecommendationLifecycleMutation } from '../lead-recommendation-lifecycle.js';
 import {
+  RECOMMENDATION_TELEMETRY_TENANT_CONTEXT_REQUIRED,
   appendUniqueRecommendationEvents,
   flushRecommendationEventBatch,
   flushRecommendationOutbox,
+  persistSupervisedRecommendationLifecycle,
   readSupervisedRecommendationOutbox,
   scheduleRecommendationOutboxFlush,
   type RecommendationTelemetryAuthorization,
   type RecommendationTelemetryTenantContext,
   type SupervisedRecommendationEvent,
 } from '../lead-recommendation-telemetry.js';
+import { STORAGE_KEY } from '../models.js';
 import { tenantStorageNamespace } from '../tenant-storage.js';
 import {
   captureTenantRuntimeLease,
@@ -444,16 +452,80 @@ test('A3.3 success ACKea sólo IDs realmente enviados', async () => {
   assert.deepEqual(rawOutbox(storage, scopeA, ACTOR_A).map((item) => item.eventId), ['hidden-event']);
 });
 
+test('A3.3 contexto débil falla cerrado antes de persistir, POST o ACK', () => {
+  resetRuntime();
+  const storage = installStorage();
+  const weakContext: RecommendationInstrumentationContext = {
+    organizationId: ORG_A,
+    actorId: ACTOR_A,
+    visibleClientIds: new Set([1]),
+  };
+  const emptyState = { version: 3 as const, cycles: [] };
+  const snapshot = { state: emptyState, migratedFromR2: false };
+  const noopMutation: RecommendationLifecycleMutation = {
+    state: emptyState,
+    shownRecords: [],
+    decisionRecords: [],
+    changed: 0,
+  };
+  const changedMutation: RecommendationLifecycleMutation = { ...noopMutation, changed: 1 };
+  const shownRecord: SupervisedRecommendationRecord = {
+    id: 'weak-cycle',
+    organizationId: ORG_A,
+    actorId: ACTOR_A,
+    clientId: 1,
+    shownAt: '2026-09-11T12:00:00.000Z',
+    reason: 'weak context must fail closed',
+    alertKind: 'ready',
+    recommendedAction: 'Contactar',
+    stage: 'Calificado',
+    humanDecision: 'pending',
+  };
+  const eventMutation: RecommendationLifecycleMutation = {
+    ...noopMutation,
+    shownRecords: [shownRecord],
+  };
+  let fetchCalls = 0;
+  Object.defineProperty(globalThis, 'fetch', {
+    configurable: true,
+    writable: true,
+    value: async (): Promise<Response> => {
+      fetchCalls += 1;
+      return json([]);
+    },
+  });
+
+  assert.throws(
+    () => persistSupervisedRecommendationLifecycle(weakContext, snapshot, changedMutation),
+    new RegExp(RECOMMENDATION_TELEMETRY_TENANT_CONTEXT_REQUIRED),
+  );
+  assert.throws(
+    () => persistSupervisedRecommendationLifecycle(weakContext, snapshot, eventMutation),
+    new RegExp(RECOMMENDATION_TELEMETRY_TENANT_CONTEXT_REQUIRED),
+  );
+
+  const historicalOutboxKey = `${STORAGE_KEY}:${OUTBOX_SUFFIX}:${encodeURIComponent(ORG_A)}:${ACTOR_A}`;
+  const pending = recommendationEvent(ORG_A, ACTOR_A, 1, 'weak-pending');
+  storage.setItem(historicalOutboxKey, JSON.stringify([pending]));
+  const pendingBefore = storage.getItem(historicalOutboxKey);
+  assert.throws(
+    () => persistSupervisedRecommendationLifecycle(weakContext, snapshot, noopMutation),
+    new RegExp(RECOMMENDATION_TELEMETRY_TENANT_CONTEXT_REQUIRED),
+  );
+
+  assert.equal(fetchCalls, 0);
+  assert.equal(storage.getItem(historicalOutboxKey), pendingBefore);
+  assert.equal(storage.getItem(storageKey(tenantScope(), OUTBOX_SUFFIX, ACTOR_A)), null);
+  assert.equal(storage.getItem(storageKey(tenantScope(), LIFECYCLE_SUFFIX, ACTOR_A)), null);
+});
+
 test('A3.3 telemetry source no reintroduce membership legacy, scoped session storage ni raw writer', () => {
   const source = readFileSync('src/lead-recommendation-telemetry.ts', 'utf8');
-  for (const forbidden of [
-    'getCloudMembershipContext',
-    'fetchMembershipRows',
-    'scopedStorageKey',
-    '/rest/v1/propcontrol_records',
-  ]) {
-    assert.equal(source.includes(forbidden), false, forbidden);
-  }
+  assert.doesNotMatch(source, /\bgetCloudMembershipContext\b/);
+  assert.doesNotMatch(source, /\bfetchMembershipRows\b/);
+  assert.doesNotMatch(source, /import\s*\{[^}]*\bscopedStorageKey\b[^}]*\}\s*from\s*['"][^'"]+['"]/);
+  assert.doesNotMatch(source, /\bscopedStorageKey\s*\(/);
+  assert.equal(source.includes('/rest/v1/propcontrol_records'), false);
   assert.doesNotMatch(source, /method\s*:\s*['"]POST['"]/);
   assert.match(source, /tenantStorageNamespace\(context\.scope\)/);
   assert.match(source, /tenantCloudTransport\(tenant\.scope\)/);

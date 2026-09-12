@@ -288,8 +288,8 @@ test('R3.15 rerender no-op no genera SHOWN/DECISION', () => {
 test('R3.16 no-op no reescribe lifecycle local', () => {
   const source = readFileSync('src/lead-recommendation-telemetry.ts', 'utf8');
   assert.match(source, /if \(mutation\.changed > 0 \|\| snapshot\.migratedFromR2\)/);
-  assert.equal((source.match(/writeLifecycleState\(context, mutation\.state\)/g) || []).length, 1);
-  assert.match(source, /No-op render: cero write local/);
+  assert.equal((source.match(/writeLifecycleState\(tenant,\s*mutation\.state\)/g) || []).length, 1);
+  assert.equal((source.match(/writeLifecycleState\(context,\s*mutation\.state\)/g) || []).length, 0);
 });
 
 test('R3.17 tres recomendaciones nuevas => un batch de tres rows', async () => {
@@ -368,9 +368,21 @@ test('R3.24 organization/actor/visibleClients siguen aislados', async () => {
   assert.equal(calls, 0);
   assert.equal(result.remaining.length, 1);
   const runtime = readFileSync('src/lead-recommendation-instrumentation.ts', 'utf8');
-  assert.match(runtime, /visibleClients\(\)/);
-  assert.match(runtime, /organizationId: state\.crm\.organization\.id/);
-  assert.match(runtime, /actorId: activeMember\(\)\.id/);
+  const start = runtime.indexOf('function runtimeContext()');
+  const end = runtime.indexOf('function actuallyDisplayedRecommendations', start);
+  assert.ok(start >= 0 && end > start);
+  const runtimeContext = runtime.slice(start, end);
+  assert.match(runtimeContext, /const scope = requireCurrentTenantScope\(\)/);
+  assert.match(runtimeContext, /const runtimeLease = captureTenantRuntimeLease\(scope\)/);
+  assert.match(runtimeContext, /const member = authenticatedTenantMember\(scope\)/);
+  assert.match(runtimeContext, /visibleClients\(\)/);
+  assert.match(runtimeContext, /organizationId: scope\.organizationId/);
+  assert.match(runtimeContext, /actorId: member\.id/);
+  assert.match(runtimeContext, /\bscope,/);
+  assert.match(runtimeContext, /\bruntimeLease,/);
+  assert.doesNotMatch(runtimeContext, /state\.crm\.organization\.id/);
+  assert.doesNotMatch(runtimeContext, /\bactiveMember\s*\(/);
+  assert.doesNotMatch(runtimeContext, /state\.activeMemberId/);
 });
 
 test('R3.25 payload minimizado sin PII ni Client completo', () => {
