@@ -1,0 +1,111 @@
+name: A3.3 Gate 19 Artifact Producer Isolation
+
+on:
+  push:
+    branches:
+      - validation/a33-gate19-artifact-isolation
+
+permissions:
+  contents: read
+
+jobs:
+  isolate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    env:
+      CANDIDATE: 6fbea368b5d0e80d36c0f8171f26be495798f904
+
+    steps:
+      - name: Checkout exact detached candidate
+        uses: actions/checkout@v4
+        with:
+          ref: 6fbea368b5d0e80d36c0f8171f26be495798f904
+          fetch-depth: 0
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Prepare canonical generated baseline
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$CANDIDATE"
+          npm ci
+          npm run build
+          STATUS="$(git status --porcelain=v1 --untracked-files=normal)"
+          echo 'GATE19_ISOLATION_BASELINE_BEGIN'
+          printf '%s\n' "$STATUS"
+          echo 'GATE19_ISOLATION_BASELINE_END'
+          printf '%s\n' \
+            '?? dist/' \
+            '?? extension/trv-fichas-chrome.zip' \
+            '?? node_modules/' > /tmp/expected-baseline
+          printf '%s\n' "$STATUS" > /tmp/actual-baseline
+          diff -u /tmp/expected-baseline /tmp/actual-baseline
+          git diff --quiet
+          git diff --cached --quiet
+          echo 'GATE19_ISOLATION_BASELINE=PASS'
+
+      - name: Run Gate 19 files individually and stop at first artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          check_status() {
+            local label="$1"
+            local producer="$2"
+            local status
+            status="$(git status --porcelain=v1 --untracked-files=normal)"
+            echo "STATUS_AFTER_${label}_BEGIN"
+            printf '%s\n' "$status"
+            echo 'GIT_DIFF_NAME_ONLY_BEGIN'
+            git diff --name-only
+            echo 'GIT_DIFF_NAME_ONLY_END'
+            echo 'GIT_DIFF_CACHED_NAME_ONLY_BEGIN'
+            git diff --cached --name-only
+            echo 'GIT_DIFF_CACHED_NAME_ONLY_END'
+            echo "STATUS_AFTER_${label}_END"
+
+            local unexpected
+            unexpected="$(printf '%s\n' "$status" | grep -Fvx '?? dist/' | grep -Fvx '?? extension/trv-fichas-chrome.zip' | grep -Fvx '?? node_modules/' || true)"
+            if [ -n "$unexpected" ]; then
+              local first path type
+              first="$(printf '%s\n' "$unexpected" | head -n 1)"
+              path="${first#???}"
+              if [ -d "$path" ]; then type=directory; elif [ -f "$path" ]; then type=file; elif [ -L "$path" ]; then type=symlink; else type=other-or-missing; fi
+              echo "UNEXPECTED_OUTPUT=$path"
+              echo "FIRST_APPEARED_AFTER_TEST=$label"
+              echo "PRODUCER_COMMAND=$producer"
+              if [[ "$first" == '?? '* ]]; then echo 'TRACKED_OR_UNTRACKED=untracked'; else echo 'TRACKED_OR_UNTRACKED=tracked'; fi
+              echo "CONTENT/TYPE=$type"
+              if [ -d "$path" ]; then
+                echo 'UNEXPECTED_OUTPUT_SHALLOW_CONTENTS_BEGIN'
+                find "$path" -maxdepth 2 -mindepth 1 -printf '%y %p\n' | sort | head -n 100
+                echo 'UNEXPECTED_OUTPUT_SHALLOW_CONTENTS_END'
+              fi
+              echo 'ISOLATION_STOP=PRESERVE_UNEXPECTED_OUTPUT'
+              exit 86
+            fi
+            git diff --quiet
+            git diff --cached --quiet
+          }
+
+          cmd1='node --test --test-concurrency=1 dist/tests/b1-3-whatsapp-architecture.test.js'
+          echo "RUNNING_TEST=b1-3-whatsapp-architecture.test.js"
+          eval "$cmd1"
+          check_status 'B1_3_WHATSAPP_ARCHITECTURE' "$cmd1"
+
+          cmd2='node --test --test-concurrency=1 dist/tests/b1-3-whatsapp-contact.test.js'
+          echo "RUNNING_TEST=b1-3-whatsapp-contact.test.js"
+          eval "$cmd2"
+          check_status 'B1_3_WHATSAPP_CONTACT' "$cmd2"
+
+          cmd3='node --test --test-concurrency=1 dist/tests/b1-3-whatsapp-contact-real-app.test.js'
+          echo "RUNNING_TEST=b1-3-whatsapp-contact-real-app.test.js"
+          eval "$cmd3"
+          check_status 'B1_3_WHATSAPP_CONTACT_REAL_APP' "$cmd3"
+
+          echo 'GATE19_ARTIFACT_DRIFT=NOT_REPRODUCED_IN_INDIVIDUAL_FILES'
