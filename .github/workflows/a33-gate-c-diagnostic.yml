@@ -1,0 +1,328 @@
+name: SEC-FIX A3.3 Gate C Diagnostic Provenance
+
+on:
+  push:
+    branches:
+      - validation/a33-gate-c-diagnostic
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sec-fix-a3-3-gate-c-diagnostic
+  cancel-in-progress: false
+
+jobs:
+  diagnostic:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    env:
+      CANDIDATE: 6fbea368b5d0e80d36c0f8171f26be495798f904
+      A31_FINAL: 23f428a87fcc9382ec6ab8489ae8132776bb6d85
+      A32_FINAL: 349e9ba9e456ef79c3c740a9458290f408c651e6
+      A33_RUNTIME: f2ed74d622aa873822a704c6fe3cc28d194d7691
+      A33_GATE_A_ALIGNMENT: 68baba54ec5db00f14445336b436e3b484c6c0a6
+      ACCIDENTAL: fa5ff40c41996bf56ee89b5dca964f4b6bcdf426
+      VALIDATION_SOURCE: 7ecbc8cb50513ea79cd4913ee2a6f821b756c009
+
+    steps:
+      - name: Capture immutable Gate C source workflow
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          url="https://api.github.com/repos/${GITHUB_REPOSITORY}/contents/.github/workflows/a33-gate-c-final.yml?ref=${VALIDATION_SOURCE}"
+          curl -fsSL \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H "Accept: application/vnd.github.raw+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "$url" > "$RUNNER_TEMP/a33-gate-c-final.yml"
+          grep -F 'name: SEC-FIX A3.3 Gate C Final Validation' "$RUNNER_TEMP/a33-gate-c-final.yml"
+          echo "VALIDATION_SOURCE_SHA=${VALIDATION_SOURCE}"
+          echo "VALIDATION_SOURCE_WORKFLOW=.github/workflows/a33-gate-c-final.yml"
+
+      - name: Checkout exact detached candidate
+        uses: actions/checkout@v4
+        with:
+          ref: 6fbea368b5d0e80d36c0f8171f26be495798f904
+          fetch-depth: 0
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Create validation-only diagnostic harness
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > "$RUNNER_TEMP/a33_gate_c_diagnostic.py" <<'PY'
+          import os
+          import re
+          import subprocess
+          import sys
+          from pathlib import Path
+
+          ROOT = Path.cwd()
+          SOURCE = Path(os.environ['RUNNER_TEMP']) / 'a33-gate-c-final.yml'
+          CANDIDATE = os.environ['CANDIDATE']
+          KNOWN = {
+              '?? dist/',
+              '?? extension/trv-fichas-chrome.zip',
+              '?? node_modules/',
+          }
+
+          def sh(command, check=True, capture=False):
+              return subprocess.run(
+                  ['bash', '-c', 'set -euo pipefail\n' + command],
+                  cwd=ROOT,
+                  env=os.environ.copy(),
+                  text=True,
+                  check=check,
+                  capture_output=capture,
+              )
+
+          def capture(command):
+              p = sh(command, capture=True)
+              return p.stdout.rstrip('\n')
+
+          def extract_gates(text):
+              lines = text.splitlines()
+              gates = {}
+              i = 0
+              while i < len(lines):
+                  m = re.match(r'^\s{6}- name: Gate (\d+) -', lines[i])
+                  if not m:
+                      i += 1
+                      continue
+                  n = int(m.group(1))
+                  j = i + 1
+                  run_idx = None
+                  while j < len(lines):
+                      if re.match(r'^\s{6}- name:', lines[j]):
+                          break
+                      if re.match(r'^\s{8}run:', lines[j]):
+                          run_idx = j
+                          break
+                      j += 1
+                  if run_idx is None:
+                      raise RuntimeError(f'Gate {n} has no run block')
+                  raw = lines[run_idx].strip()[4:].strip()
+                  if raw == '|':
+                      body = []
+                      k = run_idx + 1
+                      while k < len(lines):
+                          line = lines[k]
+                          if line and not line.startswith('          '):
+                              break
+                          if line.startswith('          '):
+                              body.append(line[10:])
+                          else:
+                              body.append('')
+                          k += 1
+                      gates[n] = '\n'.join(body).rstrip() + '\n'
+                  else:
+                      gates[n] = raw + '\n'
+                  i = run_idx + 1
+              missing = [n for n in range(1, 28) if n not in gates]
+              if missing:
+                  raise RuntimeError(f'Missing gates in canonical workflow: {missing}')
+              return gates
+
+          def status_payload():
+              status = capture('git status --porcelain=v1 --untracked-files=normal')
+              diff = capture('git diff --name-only')
+              cached = capture('git diff --cached --name-only')
+              return status, diff, cached
+
+          def print_snapshot(kind, gate, producer):
+              status, diff, cached = status_payload()
+              label = f'STATUS_{kind}_GATE_{gate}'
+              print(f'{label}_BEGIN', flush=True)
+              print(status, flush=True)
+              print('GIT_DIFF_NAME_ONLY_BEGIN', flush=True)
+              print(diff, flush=True)
+              print('GIT_DIFF_NAME_ONLY_END', flush=True)
+              print('GIT_DIFF_CACHED_NAME_ONLY_BEGIN', flush=True)
+              print(cached, flush=True)
+              print('GIT_DIFF_CACHED_NAME_ONLY_END', flush=True)
+              print(f'{label}_END', flush=True)
+              unexpected = []
+              for line in status.splitlines():
+                  if line and line not in KNOWN:
+                      unexpected.append(line)
+              if diff:
+                  for p in diff.splitlines():
+                      marker = f'TRACKED_DIFF::{p}'
+                      if marker not in unexpected:
+                          unexpected.append(marker)
+              if cached:
+                  for p in cached.splitlines():
+                      marker = f'CACHED_DIFF::{p}'
+                      if marker not in unexpected:
+                          unexpected.append(marker)
+              if unexpected:
+                  raw = unexpected[0]
+                  if raw.startswith('TRACKED_DIFF::'):
+                      path = raw.split('::', 1)[1]
+                      tracked = 'tracked'
+                  elif raw.startswith('CACHED_DIFF::'):
+                      path = raw.split('::', 1)[1]
+                      tracked = 'tracked-staged'
+                  else:
+                      path = raw[3:] if len(raw) >= 4 else raw
+                      tracked = 'untracked' if raw.startswith('?? ') else 'tracked'
+                  p = ROOT / path.rstrip('/')
+                  if p.is_symlink():
+                      ctype = 'symlink'
+                  elif p.is_dir():
+                      ctype = 'directory'
+                  elif p.is_file():
+                      ctype = 'file'
+                  else:
+                      ctype = 'other-or-missing'
+                  print(f'UNEXPECTED_OUTPUT={path}', flush=True)
+                  print(f'FIRST_APPEARED_AFTER_GATE={gate if kind == "AFTER" else "BEFORE_" + str(gate)}', flush=True)
+                  print(f'PRODUCER_COMMAND={producer}', flush=True)
+                  print(f'TRACKED_OR_UNTRACKED={tracked}', flush=True)
+                  print(f'CONTENT/TYPE={ctype}', flush=True)
+                  print('DIAGNOSTIC_STOP=PRESERVE_UNEXPECTED_OUTPUT', flush=True)
+                  raise SystemExit(86)
+
+          def print_command_snapshot(kind, label, producer):
+              status, diff, cached = status_payload()
+              block = f'STATUS_{kind}_{label}'
+              print(f'{block}_BEGIN', flush=True)
+              print(status, flush=True)
+              print('GIT_DIFF_NAME_ONLY_BEGIN', flush=True)
+              print(diff, flush=True)
+              print('GIT_DIFF_NAME_ONLY_END', flush=True)
+              print('GIT_DIFF_CACHED_NAME_ONLY_BEGIN', flush=True)
+              print(cached, flush=True)
+              print('GIT_DIFF_CACHED_NAME_ONLY_END', flush=True)
+              print(f'{block}_END', flush=True)
+              unexpected = [line for line in status.splitlines() if line and line not in KNOWN]
+              if diff:
+                  unexpected.extend(f'TRACKED_DIFF::{p}' for p in diff.splitlines())
+              if cached:
+                  unexpected.extend(f'CACHED_DIFF::{p}' for p in cached.splitlines())
+              if unexpected:
+                  raw = unexpected[0]
+                  if raw.startswith('TRACKED_DIFF::') or raw.startswith('CACHED_DIFF::'):
+                      path = raw.split('::', 1)[1]
+                      tracked = 'tracked'
+                  else:
+                      path = raw[3:] if len(raw) >= 4 else raw
+                      tracked = 'untracked' if raw.startswith('?? ') else 'tracked'
+                  p = ROOT / path.rstrip('/')
+                  ctype = 'directory' if p.is_dir() else ('file' if p.is_file() else ('symlink' if p.is_symlink() else 'other-or-missing'))
+                  print(f'UNEXPECTED_OUTPUT={path}', flush=True)
+                  print(f'FIRST_APPEARED_AFTER_GATE={label}', flush=True)
+                  print(f'PRODUCER_COMMAND={producer}', flush=True)
+                  print(f'TRACKED_OR_UNTRACKED={tracked}', flush=True)
+                  print(f'CONTENT/TYPE={ctype}', flush=True)
+                  print('DIAGNOSTIC_STOP=PRESERVE_UNEXPECTED_OUTPUT', flush=True)
+                  raise SystemExit(86)
+
+          def producer_for_gate(n, script):
+              if n in (7, 26):
+                  return 'npm run build'
+              if n == 8:
+                  return 'node --test --test-concurrency=1 dist/tests/mvp-property-sharing.test.js (candidate command; base npm/build run only in /tmp/a33-base-control)'
+              if 9 <= n <= 25:
+                  lines = script.splitlines()
+                  acc = []
+                  collecting = False
+                  for line in lines:
+                      stripped = line.strip()
+                      if stripped.startswith('node --test'):
+                          collecting = True
+                      if collecting:
+                          acc.append(stripped.rstrip('\\').strip())
+                          if '| tee ' in stripped:
+                              break
+                  if acc:
+                      return ' '.join(x for x in acc if x)
+              first = next((x.strip() for x in script.splitlines() if x.strip() and not x.strip().startswith('set ')), f'Gate {n} run block')
+              return first
+
+          def tap_totals(n):
+              path = Path('/tmp') / f'g{n:02d}.log'
+              if not path.exists():
+                  raise RuntimeError(f'Gate {n} log missing: {path}')
+              text = path.read_text(encoding='utf-8', errors='replace')
+              fields = {}
+              for key, tag in [('TOTAL', 'tests'), ('PASS', 'pass'), ('FAIL', 'fail'), ('SKIP', 'skipped')]:
+                  vals = re.findall(rf'^# {tag} (\d+)\s*$', text, flags=re.MULTILINE)
+                  if not vals:
+                      raise RuntimeError(f'Gate {n} missing TAP total for {tag}')
+                  fields[key] = int(vals[-1])
+              for key in ('TOTAL', 'PASS', 'FAIL', 'SKIP'):
+                  print(f'GATE{n}_{key}={fields[key]}', flush=True)
+
+          gates = extract_gates(SOURCE.read_text(encoding='utf-8'))
+          print('CANONICAL_GATE_COUNT=27', flush=True)
+          print(f'CANONICAL_VALIDATION_SOURCE={os.environ["VALIDATION_SOURCE"]}', flush=True)
+          print(f'EXACT_CANDIDATE={CANDIDATE}', flush=True)
+
+          for n in (1, 2, 3):
+              producer = producer_for_gate(n, gates[n])
+              print_snapshot('BEFORE', n, producer)
+              rc = subprocess.run(['bash', '-c', 'set -euo pipefail\n' + gates[n]], cwd=ROOT, env=os.environ.copy()).returncode
+              print_snapshot('AFTER', n, producer)
+              if rc != 0:
+                  print(f'GATE_{n:02d}=FAIL_RC_{rc}', flush=True)
+                  raise SystemExit(rc)
+
+          print_command_snapshot('BEFORE', 'POST_GATE_3_NPM_CI', 'npm ci')
+          rc = subprocess.run(['npm', 'ci'], cwd=ROOT, env=os.environ.copy()).returncode
+          print_command_snapshot('AFTER', 'POST_GATE_3_NPM_CI', 'npm ci')
+          if rc != 0:
+              raise SystemExit(rc)
+
+          for n in range(4, 28):
+              if n == 8:
+                  browser = r'''
+          if command -v google-chrome >/dev/null 2>&1; then google-chrome --version; exit 0; fi
+          if command -v google-chrome-stable >/dev/null 2>&1; then google-chrome-stable --version; exit 0; fi
+          if command -v chromium >/dev/null 2>&1; then chromium --version; exit 0; fi
+          if command -v chromium-browser >/dev/null 2>&1; then chromium-browser --version; exit 0; fi
+          echo "No supported browser executable available for real-app gates."
+          exit 1
+          '''
+                  print_command_snapshot('BEFORE', 'BROWSER_PREREQUISITE', 'browser executable probe')
+                  brc = subprocess.run(['bash', '-c', 'set -euo pipefail\n' + browser], cwd=ROOT, env=os.environ.copy()).returncode
+                  print_command_snapshot('AFTER', 'BROWSER_PREREQUISITE', 'browser executable probe')
+                  if brc != 0:
+                      raise SystemExit(brc)
+              producer = producer_for_gate(n, gates[n])
+              print_snapshot('BEFORE', n, producer)
+              rc = subprocess.run(['bash', '-c', 'set -euo pipefail\n' + gates[n]], cwd=ROOT, env=os.environ.copy()).returncode
+              print_snapshot('AFTER', n, producer)
+              if n in (21, 22, 23) and rc == 0:
+                  tap_totals(n)
+              if rc != 0:
+                  print(f'GATE_{n:02d}=FAIL_RC_{rc}', flush=True)
+                  raise SystemExit(rc)
+
+          final_sha = capture('git rev-parse HEAD')
+          final_status = capture('git status --porcelain=v1 --untracked-files=normal')
+          print(f'DIAGNOSTIC_FINAL_SHA={final_sha}', flush=True)
+          print('DIAGNOSTIC_FINAL_STATUS_BEGIN', flush=True)
+          print(final_status, flush=True)
+          print('DIAGNOSTIC_FINAL_STATUS_END', flush=True)
+          if final_sha != CANDIDATE:
+              raise SystemExit('candidate SHA changed')
+          if final_status:
+              raise SystemExit('final status not clean')
+          print('PRIOR_GATE_27_DRIFT=NOT_REPRODUCED', flush=True)
+          print('DIAGNOSTIC_SEQUENCE=1-27_COMPLETE', flush=True)
+          PY
+
+      - name: Diagnostic replay Gate C 1-27 with provenance checkpoints
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 "$RUNNER_TEMP/a33_gate_c_diagnostic.py"
