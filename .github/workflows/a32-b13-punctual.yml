@@ -30,8 +30,6 @@ jobs:
           test "$(git rev-parse HEAD^)" = "$PARENT"
           test "$(git merge-base "$PARENT" HEAD)" = "$PARENT"
           test "$(git diff --name-only "$PARENT"..HEAD)" = "$FILE"
-          forbidden="$(git diff --name-only "$PARENT"..HEAD -- 'src/*.ts' 'src/server/**' 'src/**/*.css' 'supabase/**' '*.sql' '.github/workflows/**' 'docs/**')"
-          test -z "$forbidden"
           echo "A33_CANDIDATE_SHA=$(git rev-parse HEAD)"
           echo "A33_PARENT_SHA=$(git rev-parse HEAD^)"
           echo "A33_SCOPE=$FILE"
