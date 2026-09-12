@@ -1,4 +1,4 @@
-name: A3.3 Team Quarantine Static Commit
+name: A3.3 Gate B Team Quarantine Validation
 
 on:
   push:
@@ -6,34 +6,93 @@ on:
       - validation/a32-b13-punctual-c143
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  patch:
+  validate:
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    timeout-minutes: 30
     steps:
-      - name: Checkout candidate branch
+      - name: Checkout exact Gate B candidate
         uses: actions/checkout@v4
         with:
-          ref: agent/sec-fix-a3-3-gate-a-clean
+          ref: 6fbea368b5d0e80d36c0f8171f26be495798f904
           fetch-depth: 0
-          persist-credentials: true
 
-      - name: Create exact static-only commit
+      - name: Assert exact candidate history and scope
         shell: bash
         run: |
           set -euo pipefail
-          test "$(git rev-parse HEAD)" = "389d164e2de199a25db820b473d9b2968722ebba"
-          git show origin/validation/a32-b13-punctual-c143:scripts/validation-a33-team-quarantine-static-align.py > /tmp/a33-static-align.py
-          python3 /tmp/a33-static-align.py
-          test "$(git diff --name-only)" = "src/tests/sec-fix-a3-3-anti-bypass-static-guards.test.ts"
-          git diff --check
-          git config user.name "francoagustin324"
-          git config user.email "francoagustinsolis@gmail.com"
-          git add src/tests/sec-fix-a3-3-anti-bypass-static-guards.test.ts
-          git commit -m "TEST-ONLY: fence quarantined legacy team cluster"
-          test "$(git rev-parse HEAD^)" = "389d164e2de199a25db820b473d9b2968722ebba"
-          test "$(git diff-tree --no-commit-id --name-only -r HEAD)" = "src/tests/sec-fix-a3-3-anti-bypass-static-guards.test.ts"
-          git push origin HEAD:agent/sec-fix-a3-3-gate-a-clean
-          echo "STATIC_ALIGN_SHA=$(git rev-parse HEAD)"
+          BASE=f4bbf63b179c575b9841532054beabc9b7f7598f
+          Q=389d164e2de199a25db820b473d9b2968722ebba
+          CANDIDATE=6fbea368b5d0e80d36c0f8171f26be495798f904
+          test "$(git rev-parse HEAD)" = "$CANDIDATE"
+          test "$(git rev-parse HEAD^)" = "$Q"
+          test "$(git rev-parse HEAD^^)" = "$BASE"
+          test -z "$(git status --porcelain)"
+          test "$(git diff --name-only "$Q".."$CANDIDATE")" = "src/tests/sec-fix-a3-3-anti-bypass-static-guards.test.ts"
+          test ! -e src/team-bootstrap.ts
+          test ! -e src/team-ui.ts
+          test -f src/legacy-quarantine/team-bootstrap.ts
+          test -f src/legacy-quarantine/team-ui.ts
+          echo "A33_GATE_B_BASE=$BASE"
+          echo "A33_GATE_B_TEAM_QUARANTINE=$Q"
+          echo "A33_GATE_B_CANDIDATE=$CANDIDATE"
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Verify exact quarantine and byte equivalence
+        shell: bash
+        run: |
+          set -euo pipefail
+          git show origin/validation/a32-b13-punctual-c143:scripts/validation-a33-team-quarantine-verify.mjs > /tmp/a33-team-quarantine-verify.mjs
+          node /tmp/a33-team-quarantine-verify.mjs
+
+      - name: Build
+        run: npm run build
+
+      - name: MVP scope
+        run: node --test --test-concurrency=1 dist/tests/mvp-scope.test.js
+
+      - name: A1.2-E Team tenant authority
+        run: node --test --test-concurrency=1 dist/tests/sec-fix-a1-2-e-team-tenant-authority.test.js
+
+      - name: Gate B static anti-bypass firewall
+        run: node --test --test-concurrency=1 dist/tests/sec-fix-a3-3-anti-bypass-static-guards.test.js
+
+      - name: Gate A tenant authority
+        run: node --test --test-concurrency=1 dist/tests/sec-fix-a3-3-recommendation-telemetry-tenant-authority.test.js
+
+      - name: Gate A supervised instrumentation
+        run: node --test --test-concurrency=1 dist/tests/b1-4-2-supervised-recommendation-instrumentation.test.js
+
+      - name: Gate A R3 lifecycle
+        run: node --test --test-concurrency=1 dist/tests/b1-4-2-r3-recommendation-lifecycle.test.js
+
+      - name: Gate A R4 exactly-once
+        run: node --test --test-concurrency=1 dist/tests/b1-4-2-r4-exactly-once-coalescing.test.js
+
+      - name: Gate A R5 telemetry
+        run: node --test --test-concurrency=1 dist/tests/b1-4-2-r5-canonical-telemetry.test.js
+
+      - name: Team regression
+        run: >-
+          node --test --test-concurrency=1
+          dist/tests/team-management.test.js
+          dist/tests/team-policy.test.js
+          dist/tests/sec-fix-a1-2-e-team-tenant-authority.test.js
+
+      - name: Final exact SHA evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "6fbea368b5d0e80d36c0f8171f26be495798f904"
+          test -z "$(git status --porcelain)"
+          echo "FINAL_A33_GATE_B_SHA=$(git rev-parse HEAD)"
