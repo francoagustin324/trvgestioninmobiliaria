@@ -1,4 +1,4 @@
-name: A3.3 Gate A Validation
+name: A3.3 Gate B Validation
 
 on:
   push:
@@ -13,39 +13,30 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
-      - name: Checkout exact Gate A candidate
+      - name: Checkout exact Gate B candidate
         uses: actions/checkout@v4
         with:
-          ref: 68baba54ec5db00f14445336b436e3b484c6c0a6
+          ref: c79a50e92bdfcfa1f85f4d2dd9e0995bb6cd50c8
           fetch-depth: 0
 
       - name: Assert exact candidate identity and TEST-ONLY scope
         shell: bash
         run: |
           set -euo pipefail
-          CANDIDATE=68baba54ec5db00f14445336b436e3b484c6c0a6
-          PARENT=f2ed74d622aa873822a704c6fe3cc28d194d7691
-          CONTAMINATED=fa5ff40c41996bf56ee89b5dca964f4b6bcdf426
+          CANDIDATE=c79a50e92bdfcfa1f85f4d2dd9e0995bb6cd50c8
+          PARENT=68baba54ec5db00f14445336b436e3b484c6c0a6
+          FILE=src/tests/sec-fix-a3-3-anti-bypass-static-guards.test.ts
           test "$(git rev-parse HEAD)" = "$CANDIDATE"
           test "$(git rev-parse HEAD^)" = "$PARENT"
           test "$(git merge-base "$PARENT" HEAD)" = "$PARENT"
-          if git merge-base --is-ancestor "$CONTAMINATED" HEAD; then
-            echo "contaminated commit is ancestor"
-            exit 1
-          fi
-          test ! -e __noop__
-          mapfile -t files < <(git diff --name-only "$PARENT"..HEAD)
-          test "${#files[@]}" -eq 3
-          test "${files[0]}" = "src/tests/b1-4-2-r3-recommendation-lifecycle.test.ts"
-          test "${files[1]}" = "src/tests/b1-4-2-supervised-recommendation-instrumentation.test.ts"
-          test "${files[2]}" = "src/tests/sec-fix-a3-3-recommendation-telemetry-tenant-authority.test.ts"
+          test "$(git diff --name-only "$PARENT"..HEAD)" = "$FILE"
           if git diff --name-only "$PARENT"..HEAD | grep -Ev '^src/tests/' >/dev/null; then
             echo "non-test file changed"
             exit 1
           fi
-          echo "A33_GATE_A_CANDIDATE=$CANDIDATE"
-          echo "A33_GATE_A_PARENT=$PARENT"
-          echo "A33_CONTAMINATED_NOT_ANCESTOR=$CONTAMINATED"
+          echo "A33_GATE_B_CANDIDATE=$CANDIDATE"
+          echo "A33_GATE_B_PARENT=$PARENT"
+          echo "A33_GATE_B_SCOPE=$FILE"
 
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -59,25 +50,27 @@ jobs:
       - name: Build
         run: npm run build
 
-      - name: Gate A - targeted tenant authority
+      - name: Gate B - static anti-bypass guard
+        run: node --test --test-concurrency=1 dist/tests/sec-fix-a3-3-anti-bypass-static-guards.test.js
+
+      - name: Gate A regression - targeted tenant authority
         run: node --test --test-concurrency=1 dist/tests/sec-fix-a3-3-recommendation-telemetry-tenant-authority.test.js
 
-      - name: Gate A - supervised recommendation instrumentation
+      - name: Gate A regression - supervised recommendation instrumentation
         run: node --test --test-concurrency=1 dist/tests/b1-4-2-supervised-recommendation-instrumentation.test.js
 
-      - name: Gate A - R3 recommendation lifecycle
+      - name: Gate A regression - R3 recommendation lifecycle
         run: node --test --test-concurrency=1 dist/tests/b1-4-2-r3-recommendation-lifecycle.test.js
 
-      - name: Gate A - R4 exactly-once coalescing
+      - name: Gate A regression - R4 exactly-once coalescing
         run: node --test --test-concurrency=1 dist/tests/b1-4-2-r4-exactly-once-coalescing.test.js
 
-      - name: Gate A - R5 canonical telemetry
+      - name: Gate A regression - R5 canonical telemetry
         run: node --test --test-concurrency=1 dist/tests/b1-4-2-r5-canonical-telemetry.test.js
 
       - name: Final exact SHA evidence
         shell: bash
         run: |
           set -euo pipefail
-          test "$(git rev-parse HEAD)" = "68baba54ec5db00f14445336b436e3b484c6c0a6"
-          test ! -e __noop__
-          echo "FINAL_A33_GATE_A_SHA=$(git rev-parse HEAD)"
+          test "$(git rev-parse HEAD)" = "c79a50e92bdfcfa1f85f4d2dd9e0995bb6cd50c8"
+          echo "FINAL_A33_GATE_B_SHA=$(git rev-parse HEAD)"
