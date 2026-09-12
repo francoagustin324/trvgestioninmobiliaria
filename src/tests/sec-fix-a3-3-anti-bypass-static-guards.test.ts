@@ -275,7 +275,7 @@ function nearestVariableInitializer(
   identifier: string,
   beforePosition: number,
 ): ts.Expression | null {
-  let best: { position: number; initializer: ts.Expression } | null = null;
+  const matches: Array<{ position: number; initializer: ts.Expression }> = [];
   const visit = (node: ts.Node): void => {
     if (
       ts.isVariableDeclaration(node)
@@ -284,13 +284,13 @@ function nearestVariableInitializer(
       && node.initializer
       && node.getStart(parsed) < beforePosition
     ) {
-      const position = node.getStart(parsed);
-      if (!best || position > best.position) best = { position, initializer: node.initializer };
+      matches.push({ position: node.getStart(parsed), initializer: node.initializer });
     }
     ts.forEachChild(node, visit);
   };
   visit(parsed);
-  return best?.initializer ?? null;
+  matches.sort((left, right) => right.position - left.position);
+  return matches[0]?.initializer ?? null;
 }
 
 function staticStringValue(
