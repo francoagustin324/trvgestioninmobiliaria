@@ -95,11 +95,18 @@ jobs:
           set -euo pipefail
           CANDIDATE=6fbea368b5d0e80d36c0f8171f26be495798f904
           test "$(git rev-parse HEAD)" = "$CANDIDATE"
-          STATUS="$(git status --porcelain)"
-          printf 'POST_BUILD_STATUS=%s\n' "$STATUS"
-          test "$STATUS" = " M extension/trv-fichas-chrome.zip"
-          git restore --source=HEAD -- extension/trv-fichas-chrome.zip
-          test -z "$(git status --porcelain)"
+          git diff --quiet
+          git diff --cached --quiet
+          STATUS="$(git status --porcelain --untracked-files=normal)"
+          printf 'POST_BUILD_STATUS<<EOF\n%s\nEOF\n' "$STATUS"
+          printf '%s\n' \
+            '?? dist/' \
+            '?? extension/trv-fichas-chrome.zip' \
+            '?? node_modules/' > /tmp/expected-generated
+          printf '%s\n' "$STATUS" > /tmp/actual-generated
+          diff -u /tmp/expected-generated /tmp/actual-generated
+          rm -rf dist node_modules extension/trv-fichas-chrome.zip
+          test -z "$(git status --porcelain --untracked-files=normal)"
           test "$(git rev-parse HEAD)" = "$CANDIDATE"
-          echo "GENERATED_EXTENSION_ARTIFACT_NORMALIZED=PASS"
+          echo "GENERATED_BUILD_OUTPUTS_NORMALIZED=PASS"
           echo "FINAL_A33_GATE_B_SHA=$(git rev-parse HEAD)"
