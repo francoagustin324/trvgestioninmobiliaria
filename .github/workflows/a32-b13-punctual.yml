@@ -93,6 +93,13 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test "$(git rev-parse HEAD)" = "6fbea368b5d0e80d36c0f8171f26be495798f904"
+          CANDIDATE=6fbea368b5d0e80d36c0f8171f26be495798f904
+          test "$(git rev-parse HEAD)" = "$CANDIDATE"
+          STATUS="$(git status --porcelain)"
+          printf 'POST_BUILD_STATUS=%s\n' "$STATUS"
+          test "$STATUS" = " M extension/trv-fichas-chrome.zip"
+          git restore --source=HEAD -- extension/trv-fichas-chrome.zip
           test -z "$(git status --porcelain)"
+          test "$(git rev-parse HEAD)" = "$CANDIDATE"
+          echo "GENERATED_EXTENSION_ARTIFACT_NORMALIZED=PASS"
           echo "FINAL_A33_GATE_B_SHA=$(git rev-parse HEAD)"
