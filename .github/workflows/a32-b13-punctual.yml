@@ -6,7 +6,7 @@ on:
       - validation/a32-b13-punctual-c143
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   validate:
@@ -20,18 +20,235 @@ jobs:
         with:
           node-version: 22
           cache: npm
-      - name: Exact mobile visibility diagnostic
+      - name: Build exact TEST-ONLY recovery commit and run full B1.3 gate
         shell: bash
         run: |
           set -euo pipefail
-          SHA=fcc4487782ac820473fda18aa48d3c7fc513e955
-          rm -rf /tmp/b13-candidate
-          git worktree add --detach /tmp/b13-candidate "$SHA"
-          cd /tmp/b13-candidate
-          test "$(git rev-parse HEAD)" = "$SHA"
-          echo "EXACT_SHA=$(git rev-parse HEAD)"
-          python3 "$GITHUB_WORKSPACE/.github/diagnostics/b13-mobile-visibility.py" /tmp/b13-candidate
+          BASE=fcc4487782ac820473fda18aa48d3c7fc513e955
+          TARGET_BRANCH=validation/a32-b13-recovery-zero-training
+          REMOTE="$(git rev-parse "origin/${TARGET_BRANCH}")"
+          test "$REMOTE" = "$BASE"
+
+          rm -rf /tmp/b13-recovery
+          git worktree add -b local-b13-recovery /tmp/b13-recovery "origin/${TARGET_BRANCH}"
+          cd /tmp/b13-recovery
+          test "$(git rev-parse HEAD)" = "$BASE"
+
+          python3 <<'PY'
+          from pathlib import Path
+
+          path = Path('src/tests/b1-3-whatsapp-contact-real-app.test.ts')
+          text = path.read_text()
+
+          def replace_once(old: str, new: str, label: str) -> None:
+              global text
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f'{label}: expected exactly 1 match, found {count}')
+              text = text.replace(old, new, 1)
+
+          replace_once(
+              "const cloudHydratedPlanLabel = 'B1.3 CLOUD HYDRATED';\n",
+              '',
+              'remove privileged organization marker constant',
+          )
+
+          replace_once(
+              "  cloudCrm.organization.planLabel = cloudHydratedPlanLabel;\n",
+              "  cloudCrm.clients[0]!.email = `cloud-hydrated-${current.userId}@propcontrol.test`;\n",
+              'replace cloud hydration marker with assigned client email',
+          )
+
+          old_readiness = r'''async function waitForTenantReadiness(page: Page, role: TeamRole, tenantPull: Promise<Response>): Promise<void> {
+            const expected = identity(role);
+            const response = await tenantPull;
+            assert.equal(response.ok(), true, 'El pull tenant-aware inicial debe responder OK.');
+            await page.waitForFunction(({ storageKey, organizationPreferenceKey, organizationId, planLabel }) => {
+              if (localStorage.getItem(organizationPreferenceKey) !== organizationId) return false;
+              const raw = localStorage.getItem(storageKey);
+              if (!raw) return false;
+              try {
+                const crm = JSON.parse(raw) as CrmData;
+                return crm.organization?.id === organizationId && crm.organization?.planLabel === planLabel;
+              } catch {
+                return false;
+              }
+            }, {
+              storageKey: expected.storageKey,
+              organizationPreferenceKey: expected.organizationPreferenceKey,
+              organizationId: expected.organizationId,
+              planLabel: cloudHydratedPlanLabel,
+            });
+            await page.waitForSelector('#crm.active', { state: 'visible', timeout: 20_000 });
+            const activated = await page.evaluate(async () => {
+              const runtimePath = '/dist/tenant-runtime.js';
+              const storePath = '/dist/store.js';
+              const runtime = await import(runtimePath);
+              const store = await import(storePath);
+              return {
+                scope: runtime.currentTenantScope(),
+                organizationId: store.state.crm.organization.id,
+                planLabel: store.state.crm.organization.planLabel,
+              };
+            });
+            assert.deepEqual(activated, {
+              scope: { userId: expected.userId, organizationId: expected.organizationId },
+              organizationId: expected.organizationId,
+              planLabel: cloudHydratedPlanLabel,
+            });
+            await page.waitForSelector('[data-contact-whatsapp="1"]', { state: 'visible', timeout: 20_000 });
+          }
+          '''
+          # Dedent the literal exactly as it exists in the source.
+          old_readiness = '\n'.join(line[10:] if line.startswith('          ') else line for line in old_readiness.splitlines()) + '\n'
+
+          new_readiness = r'''async function waitForTenantReadiness(page: Page, role: TeamRole, tenantPull: Promise<Response>): Promise<void> {
+            const expected = identity(role);
+            const cloudClientEmail = `cloud-hydrated-${expected.userId}@propcontrol.test`;
+            const response = await tenantPull;
+            const responseUrl = new URL(response.url());
+            assert.equal(response.request().method(), 'GET', 'El pull tenant-aware inicial debe ser GET.');
+            assert.equal(responseUrl.pathname.endsWith('/rest/v1/propcontrol_records'), true, 'El pull inicial debe apuntar a propcontrol_records.');
+            assert.equal(queryFilter(responseUrl, 'organization_id'), expected.organizationId, 'El pull inicial debe usar la organization_id autenticada exacta.');
+            assert.equal(response.ok(), true, 'El pull tenant-aware inicial debe responder OK.');
+            await page.waitForFunction(({ userId, storageKey, organizationPreferenceKey, organizationId, cloudClientEmail }) => {
+              if (storageKey !== `trv-crm-basico:user:${userId}:org:${organizationId}`) return false;
+              if (localStorage.getItem(organizationPreferenceKey) !== organizationId) return false;
+              const raw = localStorage.getItem(storageKey);
+              if (!raw) return false;
+              try {
+                const crm = JSON.parse(raw) as CrmData;
+                const client = crm.clients?.find((item) => item.id === 1);
+                return crm.organization?.id === organizationId && client?.email === cloudClientEmail;
+              } catch {
+                return false;
+              }
+            }, {
+              userId: expected.userId,
+              storageKey: expected.storageKey,
+              organizationPreferenceKey: expected.organizationPreferenceKey,
+              organizationId: expected.organizationId,
+              cloudClientEmail,
+            });
+            await page.waitForSelector('#crm.active', { state: 'visible', timeout: 20_000 });
+            const activated = await page.evaluate(async () => {
+              const runtimePath = '/dist/tenant-runtime.js';
+              const storePath = '/dist/store.js';
+              const runtime = await import(runtimePath);
+              const store = await import(storePath);
+              const client = store.state.crm.clients.find((item: { id: number }) => item.id === 1);
+              return {
+                scope: runtime.currentTenantScope(),
+                organizationId: store.state.crm.organization.id,
+                clientEmail: client?.email || null,
+              };
+            });
+            assert.deepEqual(activated, {
+              scope: { userId: expected.userId, organizationId: expected.organizationId },
+              organizationId: expected.organizationId,
+              clientEmail: cloudClientEmail,
+            });
+            await page.waitForSelector('[data-contact-whatsapp="1"]', { state: 'visible', timeout: 20_000 });
+          }
+          '''
+          new_readiness = '\n'.join(line[10:] if line.startswith('          ') else line for line in new_readiness.splitlines()) + '\n'
+          replace_once(old_readiness, new_readiness, 'tenant readiness universal cloud marker')
+
+          old_mobile = r'''    await page.locator('[data-contact-whatsapp="1"]').click();
+              const panel = page.locator('.whatsapp-contact-panel');
+              await panel.waitFor({ state: 'visible' });
+              const message = page.locator('[data-whatsapp-message]');
+              await message.waitFor({ state: 'visible' });
+              assert.equal(await message.isEnabled(), true, 'El mensaje WhatsApp debe estar habilitado tras readiness tenant-aware.');
+              assert.equal(await message.isEditable(), true, 'El mensaje WhatsApp debe ser editable tras readiness tenant-aware.');
+              await page.screenshot({ path: `${artifactDir}/01-mobile-panel-contacto.png`, fullPage: true });
+              assert.match(await message.inputValue(), /Lucía Martín/);
+              assert.match(await message.inputValue(), /Dúplex en Docta/);
+
+              const edited = 'Hola Lucía 👋\n¿Seguís buscando en Nueva Córdoba?';
+              await message.fill(edited);
+              await page.locator('[data-whatsapp-copy]').click();
+              assert.equal(await page.evaluate(() => (window as unknown as B13Window).__b13Copied), edited);
+
+              await page.locator('[data-whatsapp-phone]').fill('+54 9 351 ABC');
+              assert.equal(await page.locator('[data-whatsapp-open]').isDisabled(), true);
+              await page.screenshot({ path: `${artifactDir}/06-numero-invalido.png`, fullPage: true });
+              await page.locator('[data-whatsapp-phone]').fill('0351 15 5110069');
+          '''
+          old_mobile = '\n'.join(line[10:] if line.startswith('          ') else line for line in old_mobile.splitlines()) + '\n'
+
+          new_mobile = r'''    await page.locator('[data-contact-whatsapp="1"]').click();
+              const panel = page.locator('.whatsapp-contact-panel');
+              await panel.waitFor({ state: 'visible' });
+              const preview = page.locator('[data-whatsapp-message-preview]');
+              await preview.waitFor({ state: 'visible' });
+              const previewText = (await preview.textContent()) || '';
+              assert.match(previewText, /Lucía Martín/);
+              assert.match(previewText, /Dúplex en Docta/);
+              const editMessage = page.locator('[data-whatsapp-edit-message]');
+              await editMessage.waitFor({ state: 'visible' });
+              assert.equal(await editMessage.isEnabled(), true, 'Editar mensaje debe estar habilitado en la UX Zero Training.');
+              await editMessage.click();
+              const message = page.locator('[data-whatsapp-message]');
+              await message.waitFor({ state: 'visible' });
+              assert.equal(await message.isEnabled(), true, 'El mensaje WhatsApp debe estar habilitado después de Editar mensaje.');
+              assert.equal(await message.isEditable(), true, 'El mensaje WhatsApp debe ser editable después de Editar mensaje.');
+              await page.screenshot({ path: `${artifactDir}/01-mobile-panel-contacto.png`, fullPage: true });
+              assert.match(await message.inputValue(), /Lucía Martín/);
+              assert.match(await message.inputValue(), /Dúplex en Docta/);
+
+              const edited = 'Hola Lucía 👋\n¿Seguís buscando en Nueva Córdoba?';
+              await message.fill(edited);
+              const moreOptionsSummary = page.locator('details.whatsapp-zero-more-options > summary');
+              await moreOptionsSummary.waitFor({ state: 'visible' });
+              await moreOptionsSummary.click();
+              const copy = page.locator('[data-whatsapp-copy]');
+              await copy.waitFor({ state: 'visible' });
+              await copy.click();
+              assert.equal(await page.evaluate(() => (window as unknown as B13Window).__b13Copied), edited);
+
+              const phone = page.locator('[data-whatsapp-phone]');
+              await phone.waitFor({ state: 'visible' });
+              await phone.fill('+54 9 351 ABC');
+              assert.equal(await page.locator('[data-whatsapp-open]').isDisabled(), true);
+              await page.screenshot({ path: `${artifactDir}/06-numero-invalido.png`, fullPage: true });
+              const correctedPhone = page.locator('[data-whatsapp-phone]');
+              await correctedPhone.waitFor({ state: 'visible' });
+              await correctedPhone.fill('0351 15 5110069');
+          '''
+          new_mobile = '\n'.join(line[10:] if line.startswith('          ') else line for line in new_mobile.splitlines()) + '\n'
+          replace_once(old_mobile, new_mobile, 'Zero Training mobile WhatsApp UX')
+
+          if 'cloudHydratedPlanLabel' in text:
+              raise SystemExit('privileged organization hydration marker reference remains')
+
+          path.write_text(text)
+          PY
+
+          git diff --check
+          test "$(git diff --name-only | wc -l)" -eq 1
+          test "$(git diff --name-only)" = "src/tests/b1-3-whatsapp-contact-real-app.test.ts"
+          echo '--- TEST-ONLY DIFF ---'
+          git diff -- src/tests/b1-3-whatsapp-contact-real-app.test.ts
+
+          git config user.name 'PropControl Validation'
+          git config user.email 'validation@propcontrol.test'
+          git add src/tests/b1-3-whatsapp-contact-real-app.test.ts
+          git commit -m 'TEST-ONLY: align B1.3 harness with Zero Training UX'
+          RECOVERY_SHA="$(git rev-parse HEAD)"
+          test "$(git rev-parse HEAD^)" = "$BASE"
+          test "$(git diff --name-only "$BASE"..HEAD)" = "src/tests/b1-3-whatsapp-contact-real-app.test.ts"
+          echo "RECOVERY_SHA=$RECOVERY_SHA"
+          echo "RECOVERY_PARENT=$(git rev-parse HEAD^)"
+          git push origin "HEAD:refs/heads/${TARGET_BRANCH}"
+
           npm ci
           npm run build
-          node --test --test-concurrency=1 --test-name-pattern='B1.3 DIAGNOSTIC' \
+          node --test --test-concurrency=1 \
+            dist/tests/b1-3-whatsapp-architecture.test.js \
+            dist/tests/b1-3-whatsapp-contact.test.js \
             dist/tests/b1-3-whatsapp-contact-real-app.test.js
+
+          echo '--- RECOVERY SCOPE ---'
+          git diff --stat "$BASE"..HEAD
+          git diff --name-only "$BASE"..HEAD
