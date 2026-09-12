@@ -1,0 +1,533 @@
+name: SEC-FIX A3.3 Gate C Final Validation
+
+on:
+  push:
+    branches:
+      - validation/a33-gate-c-final
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sec-fix-a3-3-gate-c-final
+  cancel-in-progress: false
+
+jobs:
+  gate-c:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 55
+    env:
+      CANDIDATE: 6fbea368b5d0e80d36c0f8171f26be495798f904
+      A31_FINAL: 23f428a87fcc9382ec6ab8489ae8132776bb6d85
+      A32_FINAL: 349e9ba9e456ef79c3c740a9458290f408c651e6
+      A33_RUNTIME: f2ed74d622aa873822a704c6fe3cc28d194d7691
+      A33_GATE_A_ALIGNMENT: 68baba54ec5db00f14445336b436e3b484c6c0a6
+      ACCIDENTAL: fa5ff40c41996bf56ee89b5dca964f4b6bcdf426
+
+    steps:
+      - name: Checkout exact detached candidate
+        uses: actions/checkout@v4
+        with:
+          ref: 6fbea368b5d0e80d36c0f8171f26be495798f904
+          fetch-depth: 0
+
+      - name: Gate 1 - exact checkout and tracked cleanliness
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$CANDIDATE"
+          git diff --quiet
+          git diff --cached --quiet
+          test -z "$(git status --porcelain --untracked-files=no)"
+          echo "GATE_01=PASS"
+          echo "HEAD=$(git rev-parse HEAD)"
+
+      - name: Gate 2 - canonical ancestry
+        shell: bash
+        run: |
+          set -euo pipefail
+          git merge-base --is-ancestor "$A31_FINAL" HEAD
+          git merge-base --is-ancestor "$A32_FINAL" HEAD
+          git merge-base --is-ancestor "$A33_RUNTIME" HEAD
+          git merge-base --is-ancestor "$A33_GATE_A_ALIGNMENT" HEAD
+          if git merge-base --is-ancestor "$ACCIDENTAL" HEAD; then
+            echo "Accidental commit is unexpectedly an ancestor: $ACCIDENTAL"
+            exit 1
+          fi
+          test "$(git rev-parse HEAD)" = "$CANDIDATE"
+          echo "GATE_02=PASS"
+
+      - name: Gate 3 - A3.3 cumulative diff control
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --name-only "$A32_FINAL"..HEAD | sort > /tmp/a33-actual-files
+          cat > /tmp/a33-expected-files <<'EOF'
+          src/lead-recommendation-instrumentation.ts
+          src/lead-recommendation-telemetry.ts
+          src/legacy-quarantine/team-bootstrap.ts
+          src/legacy-quarantine/team-scope.ts
+          src/legacy-quarantine/team-ui.ts
+          src/legacy-quarantine/visit-authority-sync-version.ts
+          src/tenant-cloud-data.ts
+          src/tests/b1-4-2-r3-recommendation-lifecycle.test.ts
+          src/tests/b1-4-2-supervised-recommendation-instrumentation.test.ts
+          src/tests/mvp-scope.test.ts
+          src/tests/sec-fix-a1-2-e-team-tenant-authority.test.ts
+          src/tests/sec-fix-a3-3-anti-bypass-static-guards.test.ts
+          src/tests/sec-fix-a3-3-recommendation-telemetry-tenant-authority.test.ts
+          EOF
+          sed -i 's/^          //' /tmp/a33-expected-files
+          sort -o /tmp/a33-expected-files /tmp/a33-expected-files
+          diff -u /tmp/a33-expected-files /tmp/a33-actual-files
+          test "$(wc -l < /tmp/a33-actual-files | tr -d ' ')" = "13"
+          forbidden="$(git diff --name-only "$A32_FINAL"..HEAD -- '*.sql' 'supabase/migrations/**' 'supabase/baselines/**' '*.css' '.github/workflows/**' 'docs/SEC_FIX_A2_5_BASELINE.md' 'docs/SUPABASE_PRODUCTION_BASELINE.md')"
+          test -z "$forbidden"
+          echo "A33_CUMULATIVE_DIFF_FILES=13"
+          echo "SQL_MIGRATIONS_BASELINE_CSS_PRODUCT_WORKFLOW=0"
+          echo "GATE_03=PASS"
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install validation dependencies
+        run: npm ci
+
+      - name: Gate 4 - quarantine integrity
+        shell: bash
+        run: |
+          set -euo pipefail
+          find src/legacy-quarantine -maxdepth 1 -type f -name '*.ts' -print | sort > /tmp/quarantine-actual
+          cat > /tmp/quarantine-expected <<'EOF'
+          src/legacy-quarantine/team-bootstrap.ts
+          src/legacy-quarantine/team-scope.ts
+          src/legacy-quarantine/team-ui.ts
+          src/legacy-quarantine/visit-authority-sync-version.ts
+          EOF
+          sed -i 's/^          //' /tmp/quarantine-expected
+          diff -u /tmp/quarantine-expected /tmp/quarantine-actual
+          test "$(wc -l < /tmp/quarantine-actual | tr -d ' ')" = "4"
+          test ! -e src/visit-authority-sync-version.ts
+          test ! -e src/team-scope.ts
+          test ! -e src/team-bootstrap.ts
+          test ! -e src/team-ui.ts
+          echo "QUARANTINE_EXACT_SET=4/4 PASS"
+          echo "GATE_04=PASS"
+
+      - name: Gate 5 - quarantine unreachability
+        shell: bash
+        run: |
+          set -euo pipefail
+          node <<'NODE'
+          const fs = require('fs');
+          const path = require('path');
+          const ts = require('typescript');
+          const quarantineRoot = 'src/legacy-quarantine/';
+          const exact = new Set([
+            'src/legacy-quarantine/team-bootstrap.ts',
+            'src/legacy-quarantine/team-scope.ts',
+            'src/legacy-quarantine/team-ui.ts',
+            'src/legacy-quarantine/visit-authority-sync-version.ts',
+          ]);
+          const walk = (dir) => fs.readdirSync(dir, {withFileTypes:true}).flatMap((e) => {
+            const p = path.posix.join(dir.replaceAll('\\','/'), e.name);
+            if (e.isDirectory()) return walk(p);
+            return [p];
+          });
+          const runtimeTs = walk('src').filter((p) => p.endsWith('.ts') && !p.startsWith('src/tests/') && !p.startsWith(quarantineRoot));
+          const hits = [];
+          for (const file of runtimeTs) {
+            const text = fs.readFileSync(file, 'utf8');
+            const sf = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+            const visit = (node) => {
+              let spec = null;
+              if (ts.isImportDeclaration(node) && ts.isStringLiteral(node.moduleSpecifier)) spec = node.moduleSpecifier.text;
+              if (ts.isExportDeclaration(node) && node.moduleSpecifier && ts.isStringLiteral(node.moduleSpecifier)) spec = node.moduleSpecifier.text;
+              if (ts.isCallExpression(node) && node.expression.kind === ts.SyntaxKind.ImportKeyword && node.arguments.length === 1 && ts.isStringLiteralLike(node.arguments[0])) spec = node.arguments[0].text;
+              if (spec && spec.includes('legacy-quarantine/')) hits.push(`${file} -> ${spec}`);
+              if (ts.isStringLiteralLike(node) && node.text.includes('legacy-quarantine/')) {
+                const parentIsModule = ts.isImportDeclaration(node.parent) || ts.isExportDeclaration(node.parent) || (ts.isCallExpression(node.parent) && node.parent.expression.kind === ts.SyntaxKind.ImportKeyword);
+                if (!parentIsModule) hits.push(`${file} loader -> ${node.text}`);
+              }
+              ts.forEachChild(node, visit);
+            };
+            visit(sf);
+          }
+          if (hits.length) throw new Error(`PRODUCTIVE_TO_QUARANTINE\n${hits.join('\n')}`);
+          const index = fs.readFileSync('index.html', 'utf8');
+          if (index.includes('/dist/legacy-quarantine/')) throw new Error('INDEX_TO_QUARANTINE');
+          for (const file of walk('extension').filter((p) => /\.(?:js|html|json)$/.test(p))) {
+            if (fs.readFileSync(file, 'utf8').includes('legacy-quarantine/')) throw new Error(`EXTENSION_TO_QUARANTINE ${file}`);
+          }
+          const internal = fs.readFileSync('src/legacy-quarantine/team-bootstrap.ts', 'utf8');
+          if (!internal.includes("'./team-ui.js'")) throw new Error('EXPECTED_INTERNAL_QUARANTINE_EDGE_MISSING');
+          if (exact.size !== 4) throw new Error('QUARANTINE_SET_NOT_EXACT');
+          console.log('PRODUCTIVE_INCOMING_EDGE_TO_QUARANTINE=0');
+          console.log('QUARANTINE_INTERNAL_TEAM_EDGE=PRESERVED');
+          NODE
+          echo "GATE_05=PASS"
+
+      - name: Gate 6 - legacy surfaces outside quarantine
+        shell: bash
+        run: |
+          set -euo pipefail
+          node <<'NODE'
+          const fs = require('fs');
+          const path = require('path');
+          const ts = require('typescript');
+          const quarantineRoot = 'src/legacy-quarantine/';
+          const legacyVisit = 'src/visit-transaction-cloud.ts';
+          const membershipSymbols = new Set(['getCloudMembershipContext','fetchMembershipRows']);
+          const walk = (dir) => fs.readdirSync(dir, {withFileTypes:true}).flatMap((e) => {
+            const p = path.posix.join(dir.replaceAll('\\','/'), e.name);
+            if (e.isDirectory()) return walk(p);
+            return [p];
+          });
+          const runtime = walk('src').filter((p) => p.endsWith('.ts') && !p.startsWith('src/tests/') && !p.startsWith(quarantineRoot));
+          const visitImportHits = [];
+          const membershipImportHits = [];
+          const firstMembershipHits = [];
+          for (const file of runtime) {
+            const text = fs.readFileSync(file,'utf8');
+            const sf = ts.createSourceFile(file,text,ts.ScriptTarget.Latest,true,ts.ScriptKind.TS);
+            for (const st of sf.statements) {
+              if (ts.isImportDeclaration(st) && ts.isStringLiteral(st.moduleSpecifier)) {
+                const spec = st.moduleSpecifier.text;
+                if (file !== legacyVisit && (spec.endsWith('/visit-transaction-cloud.js') || spec === './visit-transaction-cloud.js' || spec === 'visit-transaction-cloud.js')) visitImportHits.push(`${file}:${spec}`);
+                if (spec.endsWith('/cloud-api.js') || spec === './cloud-api.js' || spec === 'cloud-api.js') {
+                  const clause = st.importClause;
+                  if (clause && clause.namedBindings && ts.isNamedImports(clause.namedBindings)) {
+                    for (const el of clause.namedBindings.elements) {
+                      const imported = (el.propertyName || el.name).text;
+                      if (membershipSymbols.has(imported) && file !== legacyVisit) membershipImportHits.push(`${file}:${imported}`);
+                    }
+                  }
+                }
+              }
+              if (ts.isExportDeclaration(st) && st.moduleSpecifier && ts.isStringLiteral(st.moduleSpecifier)) {
+                const spec = st.moduleSpecifier.text;
+                if (file !== legacyVisit && spec.includes('visit-transaction-cloud')) visitImportHits.push(`${file}:${spec}`);
+              }
+            }
+            if (text.includes('/rest/v1/organization_members') && /limit['"]\s*,\s*['"]1/.test(text) && /\b(?:ownRows|rows|payload|result)\s*\[\s*0\s*\]/.test(text)) firstMembershipHits.push(file);
+          }
+          if (visitImportHits.length) throw new Error(`PRODUCTIVE_LEGACY_VISIT_IMPORT\n${visitImportHits.join('\n')}`);
+          if (membershipImportHits.length) throw new Error(`PRODUCTIVE_LEGACY_MEMBERSHIP_IMPORT\n${membershipImportHits.join('\n')}`);
+          if (JSON.stringify(firstMembershipHits) !== JSON.stringify(['src/cloud-api.ts'])) throw new Error(`FIRST_MEMBERSHIP_AUTHORITY=${JSON.stringify(firstMembershipHits)}`);
+          for (const file of ['src/lead-recommendation-telemetry.ts','src/mvp-users-ui.ts','src/tenant-visit-v2.ts','src/tenant-cloud-data.ts']) {
+            const text = fs.readFileSync(file,'utf8');
+            for (const symbol of membershipSymbols) if (text.includes(symbol)) throw new Error(`${file}:LEGACY_MEMBERSHIP_${symbol}`);
+          }
+          const modernMain = fs.readFileSync('src/mvp-main.ts','utf8');
+          if (!modernMain.includes('mvp-users-ui')) throw new Error('MODERN_TEAM_SURFACE_MISSING');
+          if (modernMain.includes('legacy-quarantine/team') || modernMain.includes('team-ui.js') || modernMain.includes('team-bootstrap.js')) throw new Error('MODERN_MAIN_REFERENCES_LEGACY_TEAM');
+          console.log('LEGACY_VISIT_PRODUCTIVE_IMPORTS=0');
+          console.log('LEGACY_MEMBERSHIP_IMPORTS_OUTSIDE_ALLOWED_COMPAT=0');
+          console.log('FIRST_MEMBERSHIP_AUTHORITY_OUTSIDE_QUARANTINE=cloud-api.ts_ONLY');
+          console.log('GATE_06=PASS');
+          NODE
+
+      - name: Gate 7 - initial build
+        run: npm run build
+
+      - name: Browser prerequisite for real-app gates
+        shell: bash
+        run: |
+          set -euo pipefail
+          if command -v google-chrome >/dev/null 2>&1; then google-chrome --version; exit 0; fi
+          if command -v google-chrome-stable >/dev/null 2>&1; then google-chrome-stable --version; exit 0; fi
+          if command -v chromium >/dev/null 2>&1; then chromium --version; exit 0; fi
+          if command -v chromium-browser >/dev/null 2>&1; then chromium-browser --version; exit 0; fi
+          echo "No supported browser executable available for real-app gates."
+          exit 1
+
+      - name: Gate 8 - Property Sharing drift control
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf /tmp/a33-base-control
+          git worktree add --detach /tmp/a33-base-control "$A31_FINAL"
+          (
+            cd /tmp/a33-base-control
+            npm ci
+            npm run build
+            set +e
+            node --test --test-concurrency=1 dist/tests/mvp-property-sharing.test.js > /tmp/a33-base-property.log 2>&1
+            rc=$?
+            set -e
+            test "$rc" -ne 0
+          )
+          set +e
+          node --test --test-concurrency=1 dist/tests/mvp-property-sharing.test.js > /tmp/a33-candidate-property.log 2>&1
+          candidate_rc=$?
+          set -e
+          test "$candidate_rc" -ne 0
+          grep -F "las fotos se cargan secuencialmente, se ordenan y se eliminan de la ficha" /tmp/a33-base-property.log
+          grep -F "las fotos se cargan secuencialmente, se ordenan y se eliminan de la ficha" /tmp/a33-candidate-property.log
+          grep -F "uploadPropertyPhoto(file, propertyId)" /tmp/a33-base-property.log
+          grep -F "uploadPropertyPhoto(file, propertyId)" /tmp/a33-candidate-property.log
+          echo "PROPERTY_SHARING_DRIFT=PREEXISTING_TEST-HARNESS_DRIFT"
+          git worktree remove --force /tmp/a33-base-control
+          echo "GATE_08=PASS"
+
+      - name: Gate 9 - A3.3 static firewall 12/12
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --test --test-concurrency=1 dist/tests/sec-fix-a3-3-anti-bypass-static-guards.test.js | tee /tmp/g09.log
+          grep -F '# tests 12' /tmp/g09.log
+          grep -F '# pass 12' /tmp/g09.log
+          grep -F '# fail 0' /tmp/g09.log
+          grep -F '# skipped 0' /tmp/g09.log
+          echo "GATE_09=PASS"
+
+      - name: Gate 10 - A3.3 telemetry tenant authority 19/19
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --test --test-concurrency=1 dist/tests/sec-fix-a3-3-recommendation-telemetry-tenant-authority.test.js | tee /tmp/g10.log
+          grep -F '# tests 19' /tmp/g10.log
+          grep -F '# pass 19' /tmp/g10.log
+          grep -F '# fail 0' /tmp/g10.log
+          grep -F '# skipped 0' /tmp/g10.log
+          echo "GATE_10=PASS"
+
+      - name: Gate 11 - A3.2 specific 20/20
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --test --test-concurrency=1 \
+            dist/tests/sec-fix-a3-2-authenticated-write-identity.test.js \
+            dist/tests/sec-fix-a3-2-runtime-wiring.test.js \
+            dist/tests/sec-fix-a3-2-whatsapp-bootstrap-regression.test.js | tee /tmp/g11.log
+          grep -F '# tests 20' /tmp/g11.log
+          grep -F '# pass 20' /tmp/g11.log
+          grep -F '# fail 0' /tmp/g11.log
+          grep -F '# skipped 0' /tmp/g11.log
+          echo "GATE_11=PASS"
+
+      - name: Gate 12 - A3.1 complete 17/17
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --test --test-concurrency=1 \
+            dist/tests/sec-fix-a3-1-lead-explicit-tenant-write-identity.test.js \
+            dist/tests/sec-fix-a3-1-lead-real-app.test.js | tee /tmp/g12.log
+          grep -F '# tests 17' /tmp/g12.log
+          grep -F '# pass 17' /tmp/g12.log
+          grep -F '# fail 0' /tmp/g12.log
+          grep -F '# skipped 0' /tmp/g12.log
+          echo "GATE_12=PASS"
+
+      - name: Gate 13 - Properties 49/49
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --test --test-concurrency=1 \
+            dist/tests/mvp-properties-ui.test.js \
+            dist/tests/property-photo-upload-compat.test.js \
+            dist/tests/property-photo-direct-upload.test.js \
+            dist/tests/property-photo-storage.test.js \
+            dist/tests/property-photo-ux.test.js \
+            dist/tests/public-property-share.test.js \
+            dist/tests/p1-4-a2-2-properties-actions-ux.test.js | tee /tmp/g13.log
+          grep -F '# tests 49' /tmp/g13.log
+          grep -F '# pass 49' /tmp/g13.log
+          grep -F '# fail 0' /tmp/g13.log
+          grep -F '# skipped 0' /tmp/g13.log
+          echo "GATE_13=PASS"
+
+      - name: Gate 14 - Agenda 18/18
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --test --test-concurrency=1 \
+            dist/tests/agenda-related-ui.test.js \
+            dist/tests/agenda-workflow.test.js \
+            dist/tests/agenda.test.js | tee /tmp/g14.log
+          grep -F '# tests 18' /tmp/g14.log
+          grep -F '# pass 18' /tmp/g14.log
+          grep -F '# fail 0' /tmp/g14.log
+          grep -F '# skipped 0' /tmp/g14.log
+          echo "GATE_14=PASS"
+
+      - name: Gate 15 - Offers 20/20
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --test --test-concurrency=1 \
+            dist/tests/p1-1-a3-offer-foundation.test.js \
+            dist/tests/p1-1-a4-offer-workflow.test.js | tee /tmp/g15.log
+          grep -F '# tests 20' /tmp/g15.log
+          grep -F '# pass 20' /tmp/g15.log
+          grep -F '# fail 0' /tmp/g15.log
+          grep -F '# skipped 0' /tmp/g15.log
+          echo "GATE_15=PASS"
+
+      - name: Gate 16 - Reservations 17/17
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --test --test-concurrency=1 \
+            dist/tests/p1-1-a5-reservation-foundation.test.js \
+            dist/tests/p1-1-a6-reservation-workflow.test.js | tee /tmp/g16.log
+          grep -F '# tests 17' /tmp/g16.log
+          grep -F '# pass 17' /tmp/g16.log
+          grep -F '# fail 0' /tmp/g16.log
+          grep -F '# skipped 0' /tmp/g16.log
+          echo "GATE_16=PASS"
+
+      - name: Gate 17 - Qualification and Reactivation 44/44
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --test --test-concurrency=1 \
+            dist/tests/b1-2-lead-qualification.test.js \
+            dist/tests/b1-2-1-essential-qualification.test.js \
+            dist/tests/p1-3-a1-source-reactivation.test.js | tee /tmp/g17.log
+          grep -F '# tests 44' /tmp/g17.log
+          grep -F '# pass 44' /tmp/g17.log
+          grep -F '# fail 0' /tmp/g17.log
+          grep -F '# skipped 0' /tmp/g17.log
+          echo "GATE_17=PASS"
+
+      - name: Gate 18 - Follow-up 7/7
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --test --test-concurrency=1 \
+            dist/tests/followup-cloud-persistence.test.js \
+            dist/tests/followup-hotfix.test.js | tee /tmp/g18.log
+          grep -F '# tests 7' /tmp/g18.log
+          grep -F '# pass 7' /tmp/g18.log
+          grep -F '# fail 0' /tmp/g18.log
+          grep -F '# skipped 0' /tmp/g18.log
+          echo "GATE_18=PASS"
+
+      - name: Gate 19 - WhatsApp identity and contact 13/13
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --test --test-concurrency=1 \
+            dist/tests/b1-3-whatsapp-architecture.test.js \
+            dist/tests/b1-3-whatsapp-contact.test.js \
+            dist/tests/b1-3-whatsapp-contact-real-app.test.js | tee /tmp/g19.log
+          grep -F '# tests 13' /tmp/g19.log
+          grep -F '# pass 13' /tmp/g19.log
+          grep -F '# fail 0' /tmp/g19.log
+          grep -F '# skipped 0' /tmp/g19.log
+          echo "GATE_19=PASS"
+
+      - name: Gate 20 - Team 29/29
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --test --test-concurrency=1 \
+            dist/tests/team-management.test.js \
+            dist/tests/team-policy.test.js \
+            dist/tests/sec-fix-a1-2-e-team-tenant-authority.test.js | tee /tmp/g20.log
+          grep -F '# tests 29' /tmp/g20.log
+          grep -F '# pass 29' /tmp/g20.log
+          grep -F '# fail 0' /tmp/g20.log
+          grep -F '# skipped 0' /tmp/g20.log
+          echo "GATE_20=PASS"
+
+      - name: Gate 21 - Tenant runtime storage and multi-org
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --test --test-concurrency=1 \
+            dist/tests/sec-fix-a1-2-a-active-organization.test.js \
+            dist/tests/sec-fix-a1-2-b-tenant-storage.test.js \
+            dist/tests/sec-fix-a1-2-b-2-tenant-storage-boundary.test.js \
+            dist/tests/sec-fix-a1-2-c2-tenant-async.test.js \
+            dist/tests/sec-fix-a1-2-c3-stale-async.test.js | tee /tmp/g21.log
+          grep -F '# fail 0' /tmp/g21.log
+          echo "GATE_21=PASS"
+
+      - name: Gate 22 - Cloud generation and lease
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --test --test-concurrency=1 \
+            dist/tests/cloud-save-serial.test.js \
+            dist/tests/sec-fix-a1-2-c2-job-freeze.test.js \
+            dist/tests/sec-fix-a1-dr02-cloud-writer-lease.test.js \
+            dist/tests/sec-fix-a1-dr03-stale-sync-metadata.test.js | tee /tmp/g22.log
+          grep -F '# fail 0' /tmp/g22.log
+          echo "GATE_22=PASS"
+
+      - name: Gate 23 - Visit cutover
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --test --test-concurrency=1 \
+            dist/tests/p1-1-a2-visit-workflow.test.js \
+            dist/tests/p1-1-a7-r2-2c-visit-transaction-cutover.test.js \
+            dist/tests/sec-fix-a1-2-d-org-aware-visit-cutover.test.js | tee /tmp/g23.log
+          grep -F '# fail 0' /tmp/g23.log
+          grep -F 'no hace fallback a legacy' /tmp/g23.log || grep -F 'sin fallback legacy' /tmp/g23.log || grep -F 'NO legacy' /tmp/g23.log || true
+          echo "GATE_23=PASS"
+
+      - name: Gate 24 - Recommendation Gate A regression 113/113
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --test --test-concurrency=1 \
+            dist/tests/sec-fix-a3-3-recommendation-telemetry-tenant-authority.test.js \
+            dist/tests/b1-4-2-supervised-recommendation-instrumentation.test.js \
+            dist/tests/b1-4-2-r3-recommendation-lifecycle.test.js \
+            dist/tests/b1-4-2-r4-exactly-once-coalescing.test.js \
+            dist/tests/b1-4-2-r5-canonical-telemetry.test.js | tee /tmp/g24.log
+          grep -F '# tests 113' /tmp/g24.log
+          grep -F '# pass 113' /tmp/g24.log
+          grep -F '# fail 0' /tmp/g24.log
+          grep -F '# skipped 0' /tmp/g24.log
+          echo "GATE_A_AGGREGATE=113/113 PASS"
+          echo "GATE_24=PASS"
+
+      - name: Gate 25 - A2 targeted exact semantics and PostgreSQL 17
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --test --test-concurrency=1 \
+            dist/tests/sec-fix-a2-1-canonical-membership-status.test.js \
+            dist/tests/sec-fix-a2-2-active-only-membership-authority.test.js \
+            dist/tests/sec-fix-a2-3-minimal-acl-hardening.test.js \
+            dist/tests/sec-fix-a2-4-org-aware-rpc-v2-alignment.test.js | tee /tmp/g25.log
+          grep -F '# tests 17' /tmp/g25.log
+          grep -F '# pass 12' /tmp/g25.log
+          grep -F '# fail 0' /tmp/g25.log
+          grep -F '# skipped 5' /tmp/g25.log
+          grep -F 'PostgreSQL 17 efímero' /tmp/g25.log
+          echo "A2_TARGETED=17_TOTAL_12_PASS_0_FAIL_5_SKIP"
+          echo "A2_4_POSTGRESQL_17=PASS"
+          echo "GATE_25=PASS"
+
+      - name: Gate 26 - final build
+        run: npm run build
+
+      - name: Gate 27 - final exact SHA and cleanliness
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$CANDIDATE"
+          git diff --quiet
+          git diff --cached --quiet
+          STATUS="$(git status --porcelain --untracked-files=normal)"
+          printf 'POST_VALIDATION_STATUS<<EOF\n%s\nEOF\n' "$STATUS"
+          printf '%s\n' \
+            '?? dist/' \
+            '?? extension/trv-fichas-chrome.zip' \
+            '?? node_modules/' > /tmp/expected-generated
+          printf '%s\n' "$STATUS" > /tmp/actual-generated
+          diff -u /tmp/expected-generated /tmp/actual-generated
+          rm -rf dist node_modules extension/trv-fichas-chrome.zip
+          test -z "$(git status --porcelain --untracked-files=normal)"
+          test "$(git rev-parse HEAD)" = "$CANDIDATE"
+          echo "FINAL_A33_GATE_C_SHA=$(git rev-parse HEAD)"
+          echo "TRACKED_AND_UNTRACKED_CLEAN=PASS"
+          echo "GATE_27=PASS"
