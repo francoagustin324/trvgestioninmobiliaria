@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { readdirSync, readFileSync } from 'node:fs';
 import { join, relative, sep } from 'node:path';
 import test from 'node:test';
+import * as ts from 'typescript';
 
 const SRC_ROOT = 'src';
 const LEGACY_CLOUD_API = 'src/cloud-api.ts';
@@ -33,6 +34,22 @@ const SAFE_DIRECT_CLOUD_API_IMPORTS = new Set([
   'updateTeamMemberAccess',
 ]);
 
+const LEGACY_MEMBERSHIP_SYMBOLS = new Set([
+  'getCloudMembershipContext',
+  'fetchMembershipRows',
+]);
+
+const LEGACY_VISUAL_WRITER_HELPERS = new Set([
+  'addActivity',
+  'defaultAssigneeId',
+]);
+
+type NamedImportBinding = Readonly<{
+  imported: string;
+  local: string;
+  isTypeOnly: boolean;
+}>;
+
 function normalizedPath(path: string): string {
   return path.split(sep).join('/');
 }
@@ -61,29 +78,126 @@ function runtimeSources(): Array<readonly [string, string]> {
   return runtimeSourcePaths().map((path) => [path, source(path)] as const);
 }
 
-function directCloudApiValueImports(text: string): string[] {
-  const imports: string[] = [];
-  const pattern = /import\s*\{([\s\S]*?)\}\s*from\s*['"]\.\/cloud-api\.js['"]/g;
-  for (const match of text.matchAll(pattern)) {
-    const body = match[1] ?? '';
-    body.split(',').forEach((piece) => {
-      const name = piece.trim().split(/\s+as\s+/i)[0]?.trim();
-      if (name) imports.push(name);
-    });
-  }
-  return imports;
+function parseText(text: string, fileName = 'fixture.ts'): ts.SourceFile {
+  return ts.createSourceFile(fileName, text, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
 }
 
-function queueCloudSaveFirstArguments(text: string): Array<{ first: string; hasSecondArgument: boolean }> {
-  const calls: Array<{ first: string; hasSecondArgument: boolean }> = [];
-  const pattern = /\bqueueCloudSave\s*\(\s*([^,)]*?)(\s*[,)]?)/g;
-  for (const match of text.matchAll(pattern)) {
-    const first = String(match[1] ?? '').trim();
-    const delimiter = String(match[2] ?? '').trim();
-    if (!first) continue;
-    calls.push({ first, hasSecondArgument: delimiter.startsWith(',') });
+function parseSource(path: string): ts.SourceFile {
+  return parseText(source(path), path);
+}
+
+function moduleSpecifierMatches(actual: string, expected: string): boolean {
+  if (actual === expected) return true;
+  const leaf = expected.replace(/^(?:\.\.\/|\.\/)+/, '');
+  return actual === leaf || actual.endsWith(`/${leaf}`);
+}
+
+function namedImportBindings(
+  parsed: ts.SourceFile,
+  moduleSpecifier: string,
+): NamedImportBinding[] {
+  const bindings: NamedImportBinding[] = [];
+  for (const statement of parsed.statements) {
+    if (!ts.isImportDeclaration(statement) || !ts.isStringLiteral(statement.moduleSpecifier)) continue;
+    if (!moduleSpecifierMatches(statement.moduleSpecifier.text, moduleSpecifier)) continue;
+    const clause = statement.importClause;
+    if (!clause || !clause.namedBindings || !ts.isNamedImports(clause.namedBindings)) continue;
+    for (const element of clause.namedBindings.elements) {
+      bindings.push({
+        imported: (element.propertyName ?? element.name).text,
+        local: element.name.text,
+        isTypeOnly: clause.isTypeOnly || element.isTypeOnly,
+      });
+    }
   }
+  return bindings;
+}
+
+function namedImportsFrom(path: string, moduleSpecifier: string): string[] {
+  return namedImportBindings(parseSource(path), moduleSpecifier)
+    .filter((binding) => !binding.isTypeOnly)
+    .map((binding) => binding.imported);
+}
+
+function localImportBindingsFrom(path: string, moduleSpecifier: string): Map<string, string> {
+  return new Map(
+    namedImportBindings(parseSource(path), moduleSpecifier)
+      .filter((binding) => !binding.isTypeOnly)
+      .map((binding) => [binding.local, binding.imported] as const),
+  );
+}
+
+function callExpressionsByIdentifier(parsed: ts.SourceFile, identifier: string): ts.CallExpression[] {
+  const calls: ts.CallExpression[] = [];
+  const visit = (node: ts.Node): void => {
+    if (ts.isCallExpression(node) && ts.isIdentifier(node.expression) && node.expression.text === identifier) {
+      calls.push(node);
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(parsed);
   return calls;
+}
+
+function importsModule(parsed: ts.SourceFile, moduleSpecifier: string): boolean {
+  let hit = false;
+  const visit = (node: ts.Node): void => {
+    if (hit) return;
+    if (
+      ts.isImportDeclaration(node)
+      && ts.isStringLiteral(node.moduleSpecifier)
+      && moduleSpecifierMatches(node.moduleSpecifier.text, moduleSpecifier)
+    ) {
+      hit = true;
+      return;
+    }
+    if (
+      ts.isExportDeclaration(node)
+      && node.moduleSpecifier
+      && ts.isStringLiteral(node.moduleSpecifier)
+      && moduleSpecifierMatches(node.moduleSpecifier.text, moduleSpecifier)
+    ) {
+      hit = true;
+      return;
+    }
+    if (
+      ts.isCallExpression(node)
+      && node.expression.kind === ts.SyntaxKind.ImportKeyword
+      && node.arguments.length === 1
+      && ts.isStringLiteral(node.arguments[0]!)
+      && moduleSpecifierMatches(node.arguments[0]!.text, moduleSpecifier)
+    ) {
+      hit = true;
+      return;
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(parsed);
+  return hit;
+}
+
+function directCloudApiValueImports(path: string): string[] {
+  return namedImportsFrom(path, 'cloud-api.js');
+}
+
+function unwrapExpression(expression: ts.Expression): ts.Expression {
+  let current = expression;
+  while (
+    ts.isParenthesizedExpression(current)
+    || ts.isAsExpression(current)
+    || ts.isTypeAssertionExpression(current)
+    || ts.isNonNullExpression(current)
+  ) {
+    current = current.expression;
+  }
+  return current;
+}
+
+function isExplicitTenantScopeExpression(expression: ts.Expression): boolean {
+  const value = unwrapExpression(expression);
+  if (ts.isIdentifier(value)) return value.text === 'scope' || value.text.endsWith('Scope');
+  if (ts.isPropertyAccessExpression(value)) return value.name.text === 'scope';
+  return false;
 }
 
 function hasFirstMembershipAuthority(text: string): boolean {
@@ -108,15 +222,50 @@ function relativeRuntime(path: string): string {
   return normalizedPath(relative('.', path));
 }
 
+test('A3.3 AST helpers distinguen procedencia, aliases y símbolos homónimos', () => {
+  const legacyImport = parseText("import { addActivity } from './team-access.js';\naddActivity();");
+  assert.deepEqual(
+    namedImportBindings(legacyImport, 'team-access.js').map(({ imported, local }) => ({ imported, local })),
+    [{ imported: 'addActivity', local: 'addActivity' }],
+  );
+  assert.equal(callExpressionsByIdentifier(legacyImport, 'addActivity').length, 1);
+
+  const localHomonym = parseText('function addActivity() {}\naddActivity();');
+  assert.deepEqual(namedImportBindings(localHomonym, 'team-access.js'), []);
+  assert.equal(callExpressionsByIdentifier(localHomonym, 'addActivity').length, 1);
+
+  const scopedHomonym = parseText('historicalUnscopedStorageKey();');
+  assert.equal(callExpressionsByIdentifier(scopedHomonym, 'scopedStorageKey').length, 0);
+  assert.equal(callExpressionsByIdentifier(scopedHomonym, 'historicalUnscopedStorageKey').length, 1);
+
+  const multiline = parseText(`
+    import {
+      getCloudSession,
+      signInCloud,
+    } from './cloud-api.js';
+  `);
+  assert.deepEqual(
+    namedImportBindings(multiline, 'cloud-api.js')
+      .filter((binding) => !binding.isTypeOnly)
+      .map((binding) => binding.imported),
+    ['getCloudSession', 'signInCloud'],
+  );
+
+  const aliased = parseText("import { getCloudSession as session } from './cloud-api.js';\nsession();");
+  const [aliasBinding] = namedImportBindings(aliased, 'cloud-api.js');
+  assert.deepEqual(aliasBinding, { imported: 'getCloudSession', local: 'session', isTypeOnly: false });
+  assert.equal(callExpressionsByIdentifier(aliased, 'session').length, 1);
+});
+
 test('A3.3 Guard 1: visit-transaction-cloud permanece sin imports productivos', () => {
   const legacy = source(LEGACY_VISIT_MODULE);
   assert.match(legacy, /getCloudMembershipContext/,
     'El allowlist sólo es válido mientras visit-transaction-cloud siga siendo el módulo legacy identificado.');
 
-  for (const [path, text] of runtimeSources()) {
+  for (const path of runtimeSourcePaths()) {
     if (path === LEGACY_VISIT_MODULE) continue;
     assert.equal(
-      /(?:from\s*['"][^'"]*visit-transaction-cloud(?:\.js)?['"]|import\s*\([^)]*visit-transaction-cloud)/.test(text),
+      importsModule(parseSource(path), 'visit-transaction-cloud.js'),
       false,
       `${path}: no puede importar el módulo legacy visit-transaction-cloud. Usá tenant-visit-v2/cutover canónico.`,
     );
@@ -133,15 +282,32 @@ test('A3.3 Guard 2: first-membership authority queda confinada al compatibility 
     'organization_members + limit(1) + first-row sólo puede sobrevivir en cloud-api.ts legacy hasta quarantine; ningún runtime nuevo puede usarlo.',
   );
 
-  const contextAllowlist = new Set([LEGACY_CLOUD_API, LEGACY_VISIT_MODULE]);
-  for (const [path, text] of runtimeSources()) {
-    if (!text.includes('getCloudMembershipContext') && !text.includes('fetchMembershipRows')) continue;
+  const legacyImportAllowlist = new Set([LEGACY_VISIT_MODULE]);
+  for (const path of runtimeSourcePaths()) {
+    const importedLegacyMembership = namedImportsFrom(path, 'cloud-api.js')
+      .filter((name) => LEGACY_MEMBERSHIP_SYMBOLS.has(name));
+    if (importedLegacyMembership.length === 0) continue;
     assert.equal(
-      contextAllowlist.has(path),
+      legacyImportAllowlist.has(path),
       true,
-      `${path}: reintroduce discovery legacy por first-membership. Consumí TenantScope/membership catalog explícito.`,
+      `${path}: importa discovery legacy ${importedLegacyMembership.join(', ')} desde cloud-api.ts. Consumí TenantScope/membership catalog explícito.`,
     );
   }
+
+  const telemetryPath = 'src/lead-recommendation-telemetry.ts';
+  const telemetryAst = parseSource(telemetryPath);
+  const telemetryCloudImports = namedImportsFrom(telemetryPath, 'cloud-api.js');
+  for (const symbol of LEGACY_MEMBERSHIP_SYMBOLS) {
+    assert.equal(telemetryCloudImports.includes(symbol), false,
+      `${telemetryPath}: no puede importar ${symbol}; la autoridad debe venir de TenantScope/tenantCloudTransport.`);
+    assert.equal(callExpressionsByIdentifier(telemetryAst, symbol).length, 0,
+      `${telemetryPath}: no puede llamar ${symbol}; la autoridad legacy está prohibida en telemetry.`);
+  }
+  const telemetryStorageImports = namedImportsFrom(telemetryPath, 'tenant-storage.js');
+  assert.equal(telemetryStorageImports.includes('scopedStorageKey'), false,
+    `${telemetryPath}: no puede rederivar storage con scopedStorageKey global.`);
+  assert.equal(callExpressionsByIdentifier(telemetryAst, 'scopedStorageKey').length, 0,
+    `${telemetryPath}: no puede llamar scopedStorageKey; tenantStorageNamespace(scope) es el boundary canónico.`);
 
   const catalog = source('src/membership-catalog.ts');
   assert.doesNotMatch(catalog, /searchParams\.set\(\s*['"]limit['"]/,
@@ -189,18 +355,20 @@ test('A3.3 Guard 3: RPC comerciales canónicas son exclusivamente V2', () => {
 
 test('A3.3 Guard 4: callers productivos de queueCloudSave siempre pasan TenantScope explícito', () => {
   const definitionAllowlist = new Set([LEGACY_CLOUD_API, 'src/cloud-api-compatible.ts']);
-  for (const [path, text] of runtimeSources()) {
+  for (const path of runtimeSourcePaths()) {
     if (definitionAllowlist.has(path)) continue;
-    for (const call of queueCloudSaveFirstArguments(text)) {
-      assert.equal(
-        call.hasSecondArgument,
-        true,
-        `${path}: queueCloudSave(${call.first}) usa overload implícito. Pasá TenantScope como primer argumento.`,
+    const parsed = parseSource(path);
+    for (const call of callExpressionsByIdentifier(parsed, 'queueCloudSave')) {
+      assert.ok(
+        call.arguments.length >= 2,
+        `${path}: queueCloudSave(${call.arguments.map((argument) => argument.getText(parsed)).join(', ')}) usa overload implícito. Pasá TenantScope como primer argumento.`,
       );
-      assert.match(
-        call.first,
-        /scope/i,
-        `${path}: primer argumento de queueCloudSave debe ser scope/lease.scope explícito; recibido: ${call.first}`,
+      const first = call.arguments[0];
+      assert.ok(first, `${path}: queueCloudSave debe recibir TenantScope como primer argumento.`);
+      assert.equal(
+        isExplicitTenantScopeExpression(first),
+        true,
+        `${path}: primer argumento de queueCloudSave debe ser TenantScope explícito (scope/tenant.scope/runtimeLease.scope equivalente); recibido: ${first.getText(parsed)}`,
       );
     }
   }
@@ -231,10 +399,15 @@ test('A3.3 Guard 5: identidad visual no puede alimentar write actor ni Activity 
         assert.equal(pattern.test(text), false,
           `${path}: identidad visual activeMember/activeMemberId reapareció en un campo de escritura.`);
       }
-      assert.doesNotMatch(text, /\baddActivity\s*\(/,
-        `${path}: addActivity() usa actor visual; usá addActivityForAuthenticatedTenant(scope, ...).`);
-      assert.doesNotMatch(text, /\bdefaultAssigneeId\s*\(/,
-        `${path}: defaultAssigneeId() usa miembro visual; resolvé el miembro autenticado del TenantScope.`);
+
+      const teamBindings = localImportBindingsFrom(path, 'team-access.js');
+      for (const [local, imported] of teamBindings) {
+        if (!LEGACY_VISUAL_WRITER_HELPERS.has(imported)) continue;
+        const calls = callExpressionsByIdentifier(parseSource(path), local);
+        assert.fail(
+          `${path}: importa helper visual legacy ${imported} como ${local} desde team-access.ts (${calls.length} calls). Usá identidad autenticada del TenantScope.`,
+        );
+      }
     }
     if (text.includes('TEAM_VIEW_KEY')) {
       assert.equal(path, 'src/store.ts', `${path}: TEAM_VIEW_KEY sólo puede vivir como preferencia visual en store.ts.`);
@@ -300,29 +473,46 @@ test('A3.3 Guard 7: raw tenant writers sólo existen en adapters/compatibility e
   for (const expected of ['src/tenant-cloud-data.ts', 'src/tenant-visit-v2.ts', 'src/public-property-share.ts', 'src/server/team-management.ts']) {
     assert.equal(hits.includes(expected), true, `${expected}: adapter canónico esperado dejó de ser detectado; revisar precisión del guard.`);
   }
+
+  const telemetryPath = 'src/lead-recommendation-telemetry.ts';
+  const telemetry = source(telemetryPath);
+  assert.equal(hasTenantBoundRawMutation(telemetry), false,
+    `${telemetryPath}: telemetry no puede emitir raw tenant mutations.`);
+  assert.equal(telemetry.includes('/rest/v1/propcontrol_records'), false,
+    `${telemetryPath}: endpoint raw propcontrol_records está prohibido.`);
+  assert.doesNotMatch(telemetry, /method\s*:\s*['"](?:POST|PATCH|PUT|DELETE)['"]/,
+    `${telemetryPath}: raw mutation HTTP está prohibida.`);
+  const telemetryWriterBindings = localImportBindingsFrom(telemetryPath, 'tenant-cloud-data.js');
+  const writerLocal = [...telemetryWriterBindings.entries()]
+    .find(([, imported]) => imported === 'insertTenantCloudRecordsIgnoreDuplicates')?.[0];
+  assert.ok(writerLocal,
+    `${telemetryPath}: debe importar insertTenantCloudRecordsIgnoreDuplicates desde tenant-cloud-data.`);
+  assert.ok(callExpressionsByIdentifier(parseSource(telemetryPath), writerLocal).length >= 1,
+    `${telemetryPath}: debe usar el writer append-only canónico importado.`);
 });
 
 test('A3.3 Guard 8: UI/comercial no importa raw cloud adapters y legacy UI permanece unreachable', () => {
   const unsafeRawModules = [
-    'tenant-cloud-data',
-    'tenant-visit-v2',
-    'visit-transaction-cloud',
+    'tenant-cloud-data.js',
+    'tenant-visit-v2.js',
+    'visit-transaction-cloud.js',
   ];
-  for (const [path, text] of runtimeSources()) {
+  for (const path of runtimeSourcePaths()) {
     const isUiOrCommercial = /(?:-ui|^src\/mvp-|commercial-(?:close|mutation))/.test(path);
     if (!isUiOrCommercial || path === LEGACY_TEAM_UI) continue;
+    const parsed = parseSource(path);
     for (const moduleName of unsafeRawModules) {
       assert.equal(
-        text.includes(`./${moduleName}.js`) || text.includes(`../${moduleName}.js`),
+        importsModule(parsed, moduleName),
         false,
         `${path}: UI/comercial importa raw adapter ${moduleName}; debe atravesar el adapter/cutover autorizado.`,
       );
     }
   }
 
-  for (const [path, text] of runtimeSources()) {
+  for (const path of runtimeSourcePaths()) {
     if (path === LEGACY_CLOUD_API || path === LEGACY_VISIT_MODULE) continue;
-    const directImports = directCloudApiValueImports(text);
+    const directImports = directCloudApiValueImports(path);
     for (const imported of directImports) {
       assert.equal(
         SAFE_DIRECT_CLOUD_API_IMPORTS.has(imported),
@@ -338,10 +528,10 @@ test('A3.3 Guard 8: UI/comercial no importa raw cloud adapters y legacy UI perma
   const main = source('src/mvp-main.ts');
   assert.doesNotMatch(main, /team-ui|visit-transaction-cloud/,
     'mvp-main no puede reactivar UI/Visit legacy.');
-  for (const [path, text] of runtimeSources()) {
+  for (const path of runtimeSourcePaths()) {
     if (path === LEGACY_TEAM_UI) continue;
     assert.equal(
-      /from\s*['"][^'"]*team-ui(?:\.js)?['"]/.test(text),
+      importsModule(parseSource(path), 'team-ui.js'),
       false,
       `${path}: team-ui.ts legacy volvió a ser reachable. Migrá al mvp-users-ui autenticado.`,
     );
