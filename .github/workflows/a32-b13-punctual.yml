@@ -1,4 +1,4 @@
-name: A3.3 Gate B Validation
+name: A3.3 Reachability Audit
 
 on:
   push:
@@ -9,7 +9,7 @@ permissions:
   contents: read
 
 jobs:
-  validate:
+  audit:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
@@ -19,24 +19,14 @@ jobs:
           ref: c79a50e92bdfcfa1f85f4d2dd9e0995bb6cd50c8
           fetch-depth: 0
 
-      - name: Assert exact candidate identity and TEST-ONLY scope
+      - name: Assert exact read-only candidate
         shell: bash
         run: |
           set -euo pipefail
           CANDIDATE=c79a50e92bdfcfa1f85f4d2dd9e0995bb6cd50c8
-          PARENT=68baba54ec5db00f14445336b436e3b484c6c0a6
-          FILE=src/tests/sec-fix-a3-3-anti-bypass-static-guards.test.ts
           test "$(git rev-parse HEAD)" = "$CANDIDATE"
-          test "$(git rev-parse HEAD^)" = "$PARENT"
-          test "$(git merge-base "$PARENT" HEAD)" = "$PARENT"
-          test "$(git diff --name-only "$PARENT"..HEAD)" = "$FILE"
-          if git diff --name-only "$PARENT"..HEAD | grep -Ev '^src/tests/' >/dev/null; then
-            echo "non-test file changed"
-            exit 1
-          fi
-          echo "A33_GATE_B_CANDIDATE=$CANDIDATE"
-          echo "A33_GATE_B_PARENT=$PARENT"
-          echo "A33_GATE_B_SCOPE=$FILE"
+          test -z "$(git status --porcelain)"
+          echo "A33_REACHABILITY_CANDIDATE=$CANDIDATE"
 
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -44,33 +34,375 @@ jobs:
           node-version: 22
           cache: npm
 
-      - name: Install dependencies
+      - name: Install parser dependency from lockfile
         run: npm ci
 
-      - name: Build
-        run: npm run build
+      - name: Read-only production reachability audit
+        shell: bash
+        run: |
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          import path from 'node:path';
+          import ts from 'typescript';
 
-      - name: Gate B - static anti-bypass guard
-        run: node --test --test-concurrency=1 dist/tests/sec-fix-a3-3-anti-bypass-static-guards.test.js
+          const ROOT = process.cwd();
+          const TARGETS = [
+            'src/visit-authority-sync-version.ts',
+            'src/team-scope.ts',
+          ];
+          const TARGET_NAMES = new Set([
+            'visit-authority-sync-version',
+            'visit-authority-sync-version.js',
+            'dist/visit-authority-sync-version.js',
+            'team-scope',
+            'team-scope.js',
+            'dist/team-scope.js',
+          ]);
 
-      - name: Gate A regression - targeted tenant authority
-        run: node --test --test-concurrency=1 dist/tests/sec-fix-a3-3-recommendation-telemetry-tenant-authority.test.js
+          const norm = (p) => p.split(path.sep).join('/').replace(/^\.\//, '');
+          const exists = (p) => fs.existsSync(path.join(ROOT, p));
+          const read = (p) => fs.readFileSync(path.join(ROOT, p), 'utf8');
+          const walk = (dir, accept = () => true) => {
+            const out = [];
+            if (!fs.existsSync(path.join(ROOT, dir))) return out;
+            for (const entry of fs.readdirSync(path.join(ROOT, dir), { withFileTypes: true })) {
+              const rel = norm(path.join(dir, entry.name));
+              if (entry.isDirectory()) {
+                if (['node_modules', 'dist', '.git'].includes(entry.name)) continue;
+                out.push(...walk(rel, accept));
+              } else if (entry.isFile() && accept(rel)) out.push(rel);
+            }
+            return out;
+          };
 
-      - name: Gate A regression - supervised recommendation instrumentation
-        run: node --test --test-concurrency=1 dist/tests/b1-4-2-supervised-recommendation-instrumentation.test.js
+          const srcTs = walk('src', (p) => p.endsWith('.ts') && !p.endsWith('.d.ts'));
+          const prodTs = srcTs.filter((p) => !p.startsWith('src/tests/'));
 
-      - name: Gate A regression - R3 recommendation lifecycle
-        run: node --test --test-concurrency=1 dist/tests/b1-4-2-r3-recommendation-lifecycle.test.js
+          function parseFile(p) {
+            const text = read(p);
+            return ts.createSourceFile(p, text, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+          }
 
-      - name: Gate A regression - R4 exactly-once coalescing
-        run: node --test --test-concurrency=1 dist/tests/b1-4-2-r4-exactly-once-coalescing.test.js
+          function resolveRelative(from, spec) {
+            if (!spec.startsWith('.')) return null;
+            let raw = norm(path.join(path.dirname(from), spec));
+            const candidates = [];
+            if (/\.js$/.test(raw)) candidates.push(raw.replace(/\.js$/, '.ts'));
+            if (/\.mjs$/.test(raw)) candidates.push(raw.replace(/\.mjs$/, '.mts'));
+            if (/\.cjs$/.test(raw)) candidates.push(raw.replace(/\.cjs$/, '.cts'));
+            if (/\.ts$/.test(raw)) candidates.push(raw);
+            if (!path.extname(raw)) {
+              candidates.push(`${raw}.ts`, `${raw}.tsx`, `${raw}/index.ts`);
+            }
+            for (const candidate of candidates) if (exists(candidate)) return candidate;
+            return null;
+          }
 
-      - name: Gate A regression - R5 canonical telemetry
-        run: node --test --test-concurrency=1 dist/tests/b1-4-2-r5-canonical-telemetry.test.js
+          const graph = new Map();
+          const edgeMeta = [];
+          for (const file of prodTs) {
+            const sf = parseFile(file);
+            const edges = new Set();
+            const add = (spec, kind, node) => {
+              const resolved = resolveRelative(file, spec);
+              if (!resolved) return;
+              edges.add(resolved);
+              edgeMeta.push({ from: file, to: resolved, kind, spec, pos: sf.getLineAndCharacterOfPosition(node.getStart(sf)).line + 1 });
+            };
+            function visit(node) {
+              if (ts.isImportDeclaration(node) && ts.isStringLiteral(node.moduleSpecifier)) {
+                add(node.moduleSpecifier.text, 'import', node);
+              } else if (ts.isExportDeclaration(node) && node.moduleSpecifier && ts.isStringLiteral(node.moduleSpecifier)) {
+                add(node.moduleSpecifier.text, 'export-from', node);
+              } else if (
+                ts.isCallExpression(node)
+                && node.expression.kind === ts.SyntaxKind.ImportKeyword
+                && node.arguments.length === 1
+                && ts.isStringLiteralLike(node.arguments[0])
+              ) {
+                add(node.arguments[0].text, 'dynamic-import', node);
+              }
+              ts.forEachChild(node, visit);
+            }
+            visit(sf);
+            graph.set(file, edges);
+          }
 
-      - name: Final exact SHA evidence
+          const reverse = new Map();
+          for (const [from, tos] of graph) {
+            for (const to of tos) {
+              if (!reverse.has(to)) reverse.set(to, new Set());
+              reverse.get(to).add(from);
+            }
+          }
+
+          const allRepoFiles = walk('.', (p) => !p.startsWith('.git/') && !p.startsWith('node_modules/') && !p.startsWith('dist/'));
+          const htmlFiles = allRepoFiles.filter((p) => p.endsWith('.html'));
+          const jsonFiles = allRepoFiles.filter((p) => p.endsWith('.json'));
+
+          function scriptRefsFromHtml(file) {
+            const text = read(file);
+            const refs = [];
+            for (const tag of text.matchAll(/<script\b[^>]*>/gi)) {
+              const raw = tag[0];
+              const src = raw.match(/\bsrc\s*=\s*['"]([^'"]+)['"]/i)?.[1];
+              if (!src) continue;
+              const type = raw.match(/\btype\s*=\s*['"]([^'"]+)['"]/i)?.[1] || '';
+              refs.push({ src, type, raw });
+            }
+            return refs;
+          }
+
+          function distScriptToSource(src) {
+            const clean = src.split('?')[0].split('#')[0].replace(/^\//, '');
+            if (!clean.startsWith('dist/') || !clean.endsWith('.js')) return null;
+            const candidate = `src/${clean.slice('dist/'.length).replace(/\.js$/, '.ts')}`;
+            return exists(candidate) ? candidate : null;
+          }
+
+          const roots = [];
+          const appHtml = htmlFiles.filter((p) => !p.startsWith('extension/') && !p.startsWith('docs/') && !p.startsWith('src/tests/'));
+          for (const html of appHtml) {
+            for (const ref of scriptRefsFromHtml(html)) {
+              const sourceModule = distScriptToSource(ref.src);
+              if (sourceModule) roots.push({ kind: 'frontend-html', label: `${html} -> ${ref.src}`, module: sourceModule });
+            }
+          }
+
+          const pkg = JSON.parse(read('package.json'));
+          const start = String(pkg.scripts?.start || '');
+          const startMatch = start.match(/(?:^|\s)node\s+(?:\.\/)?dist\/([^\s]+\.js)(?:\s|$)/);
+          if (startMatch) {
+            const candidate = `src/${startMatch[1].replace(/\.js$/, '.ts')}`;
+            if (exists(candidate)) roots.push({ kind: 'server-npm-start', label: `package.json npm start = ${start}`, module: candidate });
+          }
+
+          const manifestFiles = jsonFiles.filter((p) => /(?:^|\/)manifest\.json$/.test(p));
+          const extensionRuntimeRefs = [];
+          for (const manifest of manifestFiles) {
+            let value;
+            try { value = JSON.parse(read(manifest)); } catch { continue; }
+            const base = path.dirname(manifest);
+            const pushExt = (kind, rel) => {
+              if (typeof rel !== 'string') return;
+              const resolved = norm(path.join(base, rel));
+              extensionRuntimeRefs.push({ manifest, kind, ref: rel, resolved, exists: exists(resolved) });
+            };
+            pushExt('background.service_worker', value?.background?.service_worker);
+            if (Array.isArray(value?.content_scripts)) {
+              value.content_scripts.forEach((entry, i) => (entry?.js || []).forEach((ref) => pushExt(`content_scripts[${i}].js`, ref)));
+            }
+            pushExt('action.default_popup', value?.action?.default_popup);
+            pushExt('browser_action.default_popup', value?.browser_action?.default_popup);
+          }
+          for (const ref of [...extensionRuntimeRefs]) {
+            if (!ref.resolved.endsWith('.html') || !ref.exists) continue;
+            for (const script of scriptRefsFromHtml(ref.resolved)) {
+              const resolved = norm(path.join(path.dirname(ref.resolved), script.src.split('?')[0]));
+              extensionRuntimeRefs.push({ manifest: ref.manifest, kind: `${ref.kind}:html-script`, ref: script.src, resolved, exists: exists(resolved) });
+            }
+          }
+
+          function shortestPath(root, target) {
+            if (root === target) return [root];
+            const q = [[root]];
+            const seen = new Set([root]);
+            while (q.length) {
+              const current = q.shift();
+              const last = current[current.length - 1];
+              for (const next of graph.get(last) || []) {
+                if (seen.has(next)) continue;
+                const pathNext = [...current, next];
+                if (next === target) return pathNext;
+                seen.add(next);
+                q.push(pathNext);
+              }
+            }
+            return null;
+          }
+
+          const productiveReachable = new Set();
+          const rootPathByNode = new Map();
+          for (const root of roots) {
+            const q = [[root.module]];
+            const local = new Set([root.module]);
+            while (q.length) {
+              const p = q.shift();
+              const last = p[p.length - 1];
+              productiveReachable.add(last);
+              if (!rootPathByNode.has(last)) rootPathByNode.set(last, { root, path: p });
+              for (const next of graph.get(last) || []) {
+                if (local.has(next)) continue;
+                local.add(next);
+                q.push([...p, next]);
+              }
+            }
+          }
+
+          function ancestors(target) {
+            const seen = new Set();
+            const q = [...(reverse.get(target) || [])];
+            while (q.length) {
+              const n = q.shift();
+              if (seen.has(n)) continue;
+              seen.add(n);
+              for (const prev of reverse.get(n) || []) q.push(prev);
+            }
+            return [...seen].sort();
+          }
+
+          function exactReferenceHits(target) {
+            const base = target.replace(/^src\//, '').replace(/\.ts$/, '');
+            const needles = [base, `${base}.js`, `dist/${base}.js`, `/dist/${base}.js`];
+            const hits = [];
+            for (const file of allRepoFiles) {
+              if (!/\.(?:ts|js|mjs|cjs|html|json|yml|yaml|md|txt)$/.test(file)) continue;
+              let text;
+              try { text = read(file); } catch { continue; }
+              const matched = needles.filter((needle) => text.includes(needle));
+              if (!matched.length) continue;
+              let category = 'other';
+              if (file.startsWith('src/tests/')) category = 'test';
+              else if (file.startsWith('docs/')) category = 'doc';
+              else if (file.startsWith('.github/')) category = 'workflow';
+              else if (file.startsWith('scripts/')) category = 'build-script';
+              else if (file.startsWith('extension/')) category = 'extension-runtime-or-source';
+              else if (file.endsWith('.html')) category = 'html';
+              else if (file.startsWith('src/')) category = 'runtime-source';
+              hits.push({ file, category, matched });
+            }
+            return hits;
+          }
+
+          function loaderLiteralHits(target) {
+            const base = target.replace(/^src\//, '').replace(/\.ts$/, '');
+            const hits = [];
+            for (const file of prodTs) {
+              const sf = parseFile(file);
+              function visit(node) {
+                if (ts.isStringLiteralLike(node) && node.text.includes(base)) {
+                  let kind = 'string-literal';
+                  const p = node.parent;
+                  if (ts.isCallExpression(p) && p.expression.kind === ts.SyntaxKind.ImportKeyword) kind = 'dynamic-import';
+                  else if (ts.isNewExpression(p) && ts.isIdentifier(p.expression) && p.expression.text === 'Worker') kind = 'new-Worker';
+                  else if (ts.isCallExpression(p) && ts.isPropertyAccessExpression(p.expression) && p.expression.getText(sf).includes('serviceWorker.register')) kind = 'service-worker-register';
+                  hits.push({ file, line: sf.getLineAndCharacterOfPosition(node.getStart(sf)).line + 1, kind, literal: node.text });
+                }
+                ts.forEachChild(node, visit);
+              }
+              visit(sf);
+            }
+            return hits;
+          }
+
+          function visitAuthoritySymbolRefs() {
+            const results = [];
+            for (const file of prodTs) {
+              const sf = parseFile(file);
+              const bindings = [];
+              for (const statement of sf.statements) {
+                if (ts.isImportDeclaration(statement) && ts.isStringLiteral(statement.moduleSpecifier)) {
+                  const resolved = resolveRelative(file, statement.moduleSpecifier.text);
+                  if (resolved !== 'src/visit-authority-sync-version.ts') continue;
+                  const clause = statement.importClause;
+                  if (clause?.namedBindings && ts.isNamedImports(clause.namedBindings)) {
+                    for (const el of clause.namedBindings.elements) {
+                      const imported = el.propertyName?.text || el.name.text;
+                      if (imported === 'visitAuthorityRemoteVersion') bindings.push(el.name.text);
+                    }
+                  }
+                }
+              }
+              for (const local of bindings) {
+                let calls = 0;
+                function visit(node) {
+                  if (ts.isCallExpression(node) && ts.isIdentifier(node.expression) && node.expression.text === local) calls += 1;
+                  ts.forEachChild(node, visit);
+                }
+                visit(sf);
+                results.push({ file, local, calls });
+              }
+            }
+            return results;
+          }
+
+          function nonTsDirectRuntimeRefs(target) {
+            const base = target.replace(/^src\//, '').replace(/\.ts$/, '');
+            const refs = [];
+            for (const html of htmlFiles) {
+              for (const s of scriptRefsFromHtml(html)) {
+                if (s.src.includes(base)) refs.push({ kind: 'html-script', file: html, ref: s.src });
+              }
+            }
+            for (const ext of extensionRuntimeRefs) {
+              if (ext.ref.includes(base) || ext.resolved.includes(base)) refs.push({ kind: `extension-${ext.kind}`, file: ext.manifest, ref: ext.ref });
+            }
+            return refs;
+          }
+
+          console.log('=== SOURCE IDENTITY ===');
+          console.log(`HEAD=${process.env.GITHUB_SHA || 'detached'} actual=${process.argv[1] || ''}`);
+          console.log(`git-candidate=c79a50e92bdfcfa1f85f4d2dd9e0995bb6cd50c8`);
+          console.log('');
+          console.log('=== PRODUCTIVE ROOT INVENTORY ===');
+          console.log(`npm_start=${start}`);
+          console.log(`app_html_files=${JSON.stringify(appHtml)}`);
+          for (const html of appHtml) console.log(`HTML_SCRIPTS ${html} ${JSON.stringify(scriptRefsFromHtml(html))}`);
+          console.log(`source_roots=${JSON.stringify(roots, null, 2)}`);
+          console.log(`manifest_files=${JSON.stringify(manifestFiles)}`);
+          console.log(`extension_runtime_refs=${JSON.stringify(extensionRuntimeRefs, null, 2)}`);
+          console.log(`tsconfig_include=${JSON.stringify(JSON.parse(read('tsconfig.json')).include || [])}`);
+          console.log(`build_script=${String(pkg.scripts?.build || '')}`);
+          console.log('');
+
+          for (const target of TARGETS) {
+            const directIncoming = [...(reverse.get(target) || [])].sort();
+            const productiveIncoming = directIncoming.filter((p) => productiveReachable.has(p));
+            const transitiveIncoming = ancestors(target);
+            const productiveAncestors = transitiveIncoming.filter((p) => productiveReachable.has(p));
+            const paths = roots.map((r) => ({ root: r, path: shortestPath(r.module, target) })).filter((x) => x.path);
+            const nonTs = nonTsDirectRuntimeRefs(target);
+            const literals = loaderLiteralHits(target);
+            const exactRefs = exactReferenceHits(target);
+            console.log(`=== TARGET ${target} ===`);
+            console.log(`DIRECT_INCOMING=${JSON.stringify(directIncoming)}`);
+            console.log(`PRODUCTIVE_DIRECT_INCOMING=${JSON.stringify(productiveIncoming)}`);
+            console.log(`TRANSITIVE_ANCESTORS=${JSON.stringify(transitiveIncoming)}`);
+            console.log(`PRODUCTIVE_ANCESTORS=${JSON.stringify(productiveAncestors)}`);
+            console.log(`PRODUCTIVE_ROOT_PATHS=${JSON.stringify(paths, null, 2)}`);
+            console.log(`NON_TS_DIRECT_RUNTIME_REFS=${JSON.stringify(nonTs, null, 2)}`);
+            console.log(`LOADER_LITERAL_REFS=${JSON.stringify(literals, null, 2)}`);
+            console.log(`EXACT_REPO_REFS=${JSON.stringify(exactRefs, null, 2)}`);
+            console.log(`TARGET_PRODUCTIVELY_REACHABLE=${productiveReachable.has(target)}`);
+            console.log('');
+          }
+
+          console.log('=== visitAuthorityRemoteVersion import/call audit ===');
+          console.log(JSON.stringify(visitAuthoritySymbolRefs(), null, 2));
+
+          console.log('=== TARGET EDGE METADATA ===');
+          console.log(JSON.stringify(edgeMeta.filter((e) => TARGETS.includes(e.to)), null, 2));
+
+          const forbiddenExtension = extensionRuntimeRefs.filter((r) => TARGETS.some((t) => r.ref.includes(t.replace(/^src\//, '').replace(/\.ts$/, '')) || r.resolved.includes(t.replace(/^src\//, '').replace(/\.ts$/, ''))));
+          console.log(`TARGET_EXTENSION_REFS=${JSON.stringify(forbiddenExtension, null, 2)}`);
+
+          const targetSummary = TARGETS.map((target) => ({
+            target,
+            productiveReachable: productiveReachable.has(target),
+            productiveRootPaths: roots.filter((r) => shortestPath(r.module, target)).map((r) => ({ root: r.label, path: shortestPath(r.module, target) })),
+            productiveDirectIncoming: [...(reverse.get(target) || [])].filter((p) => productiveReachable.has(p)),
+            nonTsDirectRefs: nonTsDirectRuntimeRefs(target),
+            loaderLiteralRefs: loaderLiteralHits(target),
+            extensionRefs: extensionRuntimeRefs.filter((r) => r.ref.includes(target.replace(/^src\//, '').replace(/\.ts$/, '')) || r.resolved.includes(target.replace(/^src\//, '').replace(/\.ts$/, ''))),
+          }));
+          console.log('=== MACHINE SUMMARY ===');
+          console.log(JSON.stringify(targetSummary, null, 2));
+          NODE
+
+      - name: Assert candidate remained untouched
         shell: bash
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "c79a50e92bdfcfa1f85f4d2dd9e0995bb6cd50c8"
-          echo "FINAL_A33_GATE_B_SHA=$(git rev-parse HEAD)"
+          test -z "$(git status --porcelain --untracked-files=no)"
+          echo "FINAL_READ_ONLY_SHA=$(git rev-parse HEAD)"
