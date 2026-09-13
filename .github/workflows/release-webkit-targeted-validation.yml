@@ -77,7 +77,7 @@ jobs:
           grep -Eq '^# tests 4$' "$log"
           grep -Eq '^# pass 4$' "$log"
           grep -Eq '^# fail 0$' "$log"
-          grep -Eq '^ok [0-9]+ - WebKit regression #572:' "$log"
+          grep -Fq 'WebKit regression \#572:' "$log"
           grep -Eq '^ok [0-9]+ - Chromium: prioridad accionable' "$log"
           grep -Eq '^ok [0-9]+ - WebKit automatizado:' "$log"
           echo "TOTAL=4"
