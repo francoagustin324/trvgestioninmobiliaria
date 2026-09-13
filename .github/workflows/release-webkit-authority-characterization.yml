@@ -1,0 +1,542 @@
+name: WebKit 572 A3.4 Authority Characterization
+
+on:
+  push:
+    branches: [validation/release-webkit-authority-characterization]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  HISTORICAL_HOTFIX: a96347733c856e13039939d407d83fa49b88cf64
+  RELEASE_SHA: a5bfaedc0a51f856c8dda08d74b1bab397bc9660
+  RELEASE_BRANCH: release/a34-webkit-572-reconciliation
+
+jobs:
+  control-a-historical:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    outputs:
+      total: ${{ steps.test.outputs.total }}
+      pass: ${{ steps.test.outputs.pass }}
+      fail: ${{ steps.test.outputs.fail }}
+      crm_active: ${{ steps.test.outputs.crm_active }}
+      rc: ${{ steps.test.outputs.rc }}
+    steps:
+      - name: Checkout historical hotfix exact SHA
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ env.HISTORICAL_HOTFIX }}
+          fetch-depth: 0
+      - name: Prove detached historical control
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$HISTORICAL_HOTFIX"
+          if git symbolic-ref -q HEAD >/dev/null 2>&1; then exit 1; fi
+          git diff --exit-code
+          git diff --cached --exit-code
+          test -z "$(git status --porcelain --untracked-files=normal)"
+          echo "CONTROL_A_EXACT_SHA=PASS"
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install dependencies
+        run: npm ci --silent
+      - name: Provision WebKit
+        run: npx playwright install --with-deps webkit
+      - name: Build historical hotfix
+        run: npm run build --silent
+      - name: Run unchanged historical WebKit contract now
+        id: test
+        shell: bash
+        run: |
+          set -uo pipefail
+          log="$RUNNER_TEMP/control-a.tap"
+          set +e
+          node --test --test-concurrency=1 dist/tests/leads-mobile-priority-webkit.test.js 2>&1 | tee "$log"
+          rc=${PIPESTATUS[0]}
+          set -e
+          total="$(grep -E '^# tests [0-9]+' "$log" | tail -1 | awk '{print $3}')"
+          pass="$(grep -E '^# pass [0-9]+' "$log" | tail -1 | awk '{print $3}')"
+          fail="$(grep -E '^# fail [0-9]+' "$log" | tail -1 | awk '{print $3}')"
+          total="${total:-0}"; pass="${pass:-0}"; fail="${fail:-0}"
+          if [ "$rc" -eq 0 ]; then
+            crm="PASS"
+          elif grep -Fq "#crm.active" "$log"; then
+            crm="FAIL"
+          else
+            crm="UNKNOWN"
+          fi
+          echo "HISTORICAL_HOTFIX_TOTAL=$total"
+          echo "HISTORICAL_HOTFIX_PASS=$pass"
+          echo "HISTORICAL_HOTFIX_FAIL=$fail"
+          echo "HISTORICAL_CRM_ACTIVE=$crm"
+          echo "CONTROL_A=$([ "$rc" -eq 0 ] && echo PASS || echo FAIL)"
+          echo "total=$total" >> "$GITHUB_OUTPUT"
+          echo "pass=$pass" >> "$GITHUB_OUTPUT"
+          echo "fail=$fail" >> "$GITHUB_OUTPUT"
+          echo "crm_active=$crm" >> "$GITHUB_OUTPUT"
+          echo "rc=$rc" >> "$GITHUB_OUTPUT"
+          exit 0
+
+  control-b-c-release:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    outputs:
+      old_crm_active: ${{ steps.results.outputs.old_crm_active }}
+      old_bootstrap_error: ${{ steps.results.outputs.old_bootstrap_error }}
+      modern_crm_active: ${{ steps.results.outputs.modern_crm_active }}
+      modern_bootstrap_error: ${{ steps.results.outputs.modern_bootstrap_error }}
+      modern_tenant_org: ${{ steps.results.outputs.modern_tenant_org }}
+      modern_premium_shell: ${{ steps.results.outputs.modern_premium_shell }}
+      unexpected_endpoints: ${{ steps.results.outputs.unexpected_endpoints }}
+    steps:
+      - name: Checkout exact release SHA
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ env.RELEASE_SHA }}
+          fetch-depth: 0
+      - name: Prove release immutable and detached
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$RELEASE_SHA"
+          if git symbolic-ref -q HEAD >/dev/null 2>&1; then exit 1; fi
+          test "$(git ls-remote origin "refs/heads/$RELEASE_BRANCH" | awk '{print $1}')" = "$RELEASE_SHA"
+          git diff --exit-code
+          git diff --cached --exit-code
+          test -z "$(git status --porcelain --untracked-files=normal)"
+          echo "RELEASE_BRANCH_SHA_UNCHANGED=$RELEASE_SHA"
+          echo "RELEASE_EXACT_CHECKOUT=PASS"
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install dependencies
+        run: npm ci --silent
+      - name: Provision WebKit
+        run: npx playwright install --with-deps webkit
+      - name: Build release
+        run: npm run build --silent
+      - name: Generate validation-only authority diagnostic in runner temp
+        shell: bash
+        run: |
+          cat > "$RUNNER_TEMP/authority-characterize.mjs" <<'EOF'
+          import { spawn } from 'node:child_process';
+          import { writeFileSync, existsSync } from 'node:fs';
+          import { resolve } from 'node:path';
+          import { pathToFileURL } from 'node:url';
+          import { createRequire } from 'node:module';
+
+          const require = createRequire(pathToFileURL(resolve('package.json')).href);
+          const { webkit } = require('playwright');
+          const { initialData } = await import(pathToFileURL(resolve('dist/models.js')).href);
+
+          const MODE = process.argv[2];
+          const OUTPUT = process.argv[3];
+          if (!['old', 'modern'].includes(MODE) || !OUTPUT) throw new Error('usage: authority-characterize.mjs old|modern output.json');
+
+          const USER_ID = 'priority-webkit-owner';
+          const ORG_ID = 'priority-webkit-org';
+          const MEMBER_ID = 1;
+          const STORAGE_KEY = `trv-crm-basico:user:${USER_ID}`;
+          const GENERATION = 'diagnostic-generation-a34-modern-1';
+          const startedAt = Date.now();
+          const chronology = [];
+          const serverOutput = [];
+          const unexpectedSyntheticEndpoints = [];
+
+          function sanitize(value) {
+            return String(value ?? '')
+              .replaceAll('access', '[SYNTHETIC_ACCESS]')
+              .replaceAll('refresh', '[SYNTHETIC_REFRESH]')
+              .replaceAll('fake-publishable-key', '[SYNTHETIC_KEY]')
+              .replaceAll('franco@propcontrol.test', '[SYNTHETIC_EMAIL]')
+              .replaceAll('5493515110069', '[SYNTHETIC_PHONE]')
+              .replace(/Bearer\s+[^\s"']+/gi, 'Bearer [REDACTED]')
+              .replace(/eyJ[A-Za-z0-9_.-]{20,}/g, '[JWT_REDACTED]');
+          }
+
+          function stamp(event, detail = {}) {
+            chronology.push({ tMs: Date.now() - startedAt, event, ...detail });
+          }
+
+          function owner() {
+            return {
+              id: 1,
+              userId: USER_ID,
+              name: 'Franco Solis',
+              email: 'franco@propcontrol.test',
+              phone: '5493515110069',
+              role: 'Dueño',
+              status: 'Activo',
+              createdAt: '2026-08-09T12:00:00.000Z',
+            };
+          }
+
+          function fixture() {
+            const crm = structuredClone(initialData);
+            crm.organization = { id: ORG_ID, name: 'TRV Gestión Inmobiliaria', seatLimit: null, planLabel: 'Priority/WebKit validation' };
+            crm.teamMembers = [owner()];
+            crm.activityLog = [];
+            crm.clients = [{
+              id: 1,
+              name: 'Lucía Martín',
+              phone: '+54 9 351 511-0069',
+              email: 'lucia@ejemplo.com',
+              interest: 'Dúplex en Docta',
+              budget: 'USD 120000',
+              currency: 'USD',
+              status: 'Lead',
+              temperature: 'Tibio',
+              pipeline: 'Nuevo',
+              assignedToId: 1,
+              createdById: 1,
+            }];
+            crm.reminders = [];
+            crm.conversations = [];
+            crm.properties = [];
+            crm.contacts = [];
+            crm.fichas = [];
+            crm.settings = {
+              ...crm.settings,
+              profileName: owner().name,
+              profileEmail: owner().email,
+              agencyName: 'TRV Gestión Inmobiliaria',
+            };
+            return crm;
+          }
+
+          const crmFixture = fixture();
+          const membership = {
+            organization_id: ORG_ID,
+            member_id: MEMBER_ID,
+            user_id: USER_ID,
+            role: 'owner',
+            status: 'active',
+            display_name: 'Franco Solis',
+            email: 'franco@propcontrol.test',
+            phone: '5493515110069',
+            created_at: '2026-08-09T12:00:00.000Z',
+            last_active_at: '2026-08-09T18:00:00.000Z',
+          };
+
+          async function waitForServer(url) {
+            for (let attempt = 0; attempt < 120; attempt += 1) {
+              try {
+                if ((await fetch(`${url}/health`)).ok) return;
+              } catch {}
+              await new Promise((resolvePromise) => setTimeout(resolvePromise, 250));
+            }
+            throw new Error('diagnostic server unavailable');
+          }
+
+          function startServer(port) {
+            const server = spawn(process.execPath, ['dist/server.js'], {
+              cwd: process.cwd(),
+              env: {
+                ...process.env,
+                PORT: String(port),
+                SUPABASE_URL: '',
+                SUPABASE_PUBLISHABLE_KEY: '',
+                SUPABASE_SECRET_KEY: '',
+                SUPABASE_SERVICE_ROLE_KEY: '',
+                LEAD_QUALIFICATION_AI_ENDPOINT: '',
+                LEAD_QUALIFICATION_AI_KEY: '',
+                LEAD_QUALIFICATION_AI_MODEL: '',
+              },
+              stdio: ['ignore', 'pipe', 'pipe'],
+            });
+            for (const stream of [server.stdout, server.stderr]) {
+              stream?.on('data', (chunk) => {
+                const text = sanitize(chunk.toString());
+                serverOutput.push(text.slice(0, 1200));
+              });
+            }
+            return server;
+          }
+
+          async function stopServer(server) {
+            if (server.exitCode !== null) return;
+            server.kill('SIGTERM');
+            await new Promise((resolvePromise) => {
+              const timer = setTimeout(() => {
+                if (server.exitCode === null) server.kill('SIGKILL');
+                resolvePromise();
+              }, 2000);
+              server.once('exit', () => {
+                clearTimeout(timer);
+                resolvePromise();
+              });
+            });
+          }
+
+          async function seedContext(context, modern) {
+            const actorKey = `cloud:${USER_ID}`;
+            const identityKey = `propcontrol-whatsapp-human-identity-v1:${encodeURIComponent(ORG_ID)}:1:${encodeURIComponent(actorKey)}`;
+            await context.addInitScript(({ crm, identityStorageKey, storageKey, useModernGeneration, generation }) => {
+              const session = {
+                accessToken: 'access',
+                refreshToken: 'refresh',
+                expiresAt: Date.now() + 3_600_000,
+                userId: 'priority-webkit-owner',
+                email: 'franco@propcontrol.test',
+              };
+              if (useModernGeneration) session.__propcontrolAuthGeneration = generation;
+              localStorage.setItem('propcontrol-cloud-session-v1', JSON.stringify(session));
+              if (useModernGeneration) localStorage.setItem('propcontrol-cloud-auth-generation-v1', generation);
+              localStorage.setItem(storageKey, JSON.stringify(crm));
+              localStorage.setItem(`${storageKey}:sync`, JSON.stringify({
+                dirty: false,
+                localUpdatedAt: '2026-08-09T18:00:00.000Z',
+                lastCloudSavedAt: '2026-08-09T18:00:00.000Z',
+                lastCloudVersion: '2026-08-09T18:00:00.000Z',
+              }));
+              localStorage.setItem('propcontrol-active-team-member-v1', '1');
+              localStorage.setItem(identityStorageKey, JSON.stringify({
+                version: 1,
+                organizationId: 'priority-webkit-org',
+                memberId: 1,
+                actorKey: 'cloud:priority-webkit-owner',
+                humanName: 'Franco Solis',
+                confirmedAt: '2026-08-09T18:00:00.000Z',
+              }));
+            }, {
+              crm: crmFixture,
+              identityStorageKey: identityKey,
+              storageKey: STORAGE_KEY,
+              useModernGeneration: modern,
+              generation: GENERATION,
+            });
+          }
+
+          function corsJson(body, status = 200) {
+            return {
+              status,
+              headers: {
+                'content-type': 'application/json',
+                'access-control-allow-origin': '*',
+                'access-control-allow-headers': '*',
+                'access-control-allow-methods': 'GET,POST,DELETE,OPTIONS',
+              },
+              body: JSON.stringify(body),
+            };
+          }
+
+          async function installModernAuthorityRoutes(context) {
+            await context.route('**/api/cloud-config', async (route) => {
+              stamp('mock-cloud-config', { url: sanitize(route.request().url()) });
+              await route.fulfill(corsJson({ configured: true, url: 'https://supabase.test', publishableKey: 'fake-publishable-key' }));
+            });
+            await context.route('https://supabase.test/**', async (route) => {
+              const request = route.request();
+              const url = new URL(request.url());
+              stamp('mock-supabase', { method: request.method(), path: `${url.pathname}${url.search}` });
+              if (request.method() === 'OPTIONS') {
+                await route.fulfill({ status: 204, headers: { 'access-control-allow-origin': '*', 'access-control-allow-headers': '*', 'access-control-allow-methods': 'GET,POST,DELETE,OPTIONS' }, body: '' });
+                return;
+              }
+              if (url.pathname.endsWith('/rest/v1/organization_members')) {
+                await route.fulfill(corsJson([membership]));
+                return;
+              }
+              if (url.pathname.endsWith('/rest/v1/propcontrol_records')) {
+                await route.fulfill(corsJson(request.method() === 'GET' ? [] : {}, request.method() === 'POST' ? 201 : 200));
+                return;
+              }
+              if (url.pathname.endsWith('/rest/v1/fichas')) {
+                await route.fulfill(corsJson([{
+                  id: 'diagnostic-snapshot',
+                  organization_id: ORG_ID,
+                  internal_data: { crm: crmFixture },
+                  updated_at: '2026-08-09T18:00:00.000Z',
+                }]));
+                return;
+              }
+              if (url.pathname.endsWith('/rest/v1/rpc/visit_transaction_authority_active_v2')) {
+                await route.fulfill(corsJson(false));
+                return;
+              }
+              unexpectedSyntheticEndpoints.push(`${request.method()} ${url.pathname}${url.search}`);
+              await route.fulfill(corsJson({ error: 'UNEXPECTED_SYNTHETIC_ENDPOINT' }, 500));
+            });
+          }
+
+          const port = 63000 + Math.floor(Math.random() * 400);
+          const baseUrl = `http://127.0.0.1:${port}`;
+          const server = startServer(port);
+          let browser;
+          let context;
+          let page;
+          let navigationError = '';
+          try {
+            await waitForServer(baseUrl);
+            stamp('server-ready', { baseUrl });
+            browser = await webkit.launch({ headless: true });
+            context = await browser.newContext({
+              viewport: { width: 375, height: 844 },
+              screen: { width: 375, height: 844 },
+              hasTouch: true,
+              locale: 'es-AR',
+              timezoneId: 'America/Argentina/Cordoba',
+              colorScheme: 'dark',
+            });
+            await seedContext(context, MODE === 'modern');
+            if (MODE === 'modern') await installModernAuthorityRoutes(context);
+            page = await context.newPage();
+            page.on('console', (msg) => {
+              if (msg.type() === 'error' || msg.type() === 'warning') stamp(`console-${msg.type()}`, { text: sanitize(msg.text()).slice(0, 1200) });
+            });
+            page.on('pageerror', (error) => stamp('page-error', { text: sanitize(error.message).slice(0, 1200) }));
+            page.on('request', (request) => {
+              const url = request.url();
+              if (url.includes('/api/cloud-config') || url.includes('organization_members') || url.includes('propcontrol_records') || url.includes('/fichas') || url.includes('/rpc/')) {
+                stamp('request', { method: request.method(), url: sanitize(url) });
+              }
+            });
+            page.on('requestfailed', (request) => stamp('request-failed', { method: request.method(), url: sanitize(request.url()), failure: sanitize(request.failure()?.errorText) }));
+            page.on('response', async (response) => {
+              const url = response.url();
+              if (!url.includes('/api/cloud-config') && !url.includes('organization_members') && !url.includes('propcontrol_records') && !url.includes('/fichas') && !url.includes('/rpc/')) return;
+              let body = '';
+              try { body = sanitize(await response.text()).slice(0, 1200); } catch {}
+              stamp('response', { status: response.status(), url: sanitize(url), body });
+            });
+
+            try {
+              await page.goto(baseUrl, { waitUntil: 'domcontentloaded', timeout: 20_000 });
+              stamp('domcontentloaded', { url: page.url() });
+            } catch (error) {
+              navigationError = sanitize(error instanceof Error ? error.message : error);
+              stamp('navigation-error', { text: navigationError.slice(0, 1200) });
+            }
+
+            let terminal = 'timeout';
+            for (let attempt = 0; attempt < 100; attempt += 1) {
+              const state = await page.evaluate(() => ({
+                crmActive: Boolean(document.querySelector('#crm.active')),
+                bootstrapError: Boolean(document.querySelector('[data-bootstrap-error]')),
+              }));
+              if (state.crmActive) { terminal = 'crm-active'; stamp('terminal-crm-active'); break; }
+              if (state.bootstrapError) { terminal = 'bootstrap-error'; stamp('terminal-bootstrap-error'); break; }
+              await page.waitForTimeout(100);
+            }
+            await page.waitForTimeout(400);
+
+            const snapshot = await page.evaluate(async () => {
+              const sessionRaw = localStorage.getItem('propcontrol-cloud-session-v1');
+              const generation = localStorage.getItem('propcontrol-cloud-auth-generation-v1') || '';
+              let tenantOrg = '';
+              try {
+                const store = await import('/dist/store.js');
+                tenantOrg = String(store.state?.crm?.organization?.id || '');
+              } catch {}
+              return {
+                url: location.href,
+                crmActive: Boolean(document.querySelector('#crm.active')),
+                bootstrapError: Boolean(document.querySelector('[data-bootstrap-error]')),
+                bootstrapErrorText: document.querySelector('[data-bootstrap-error]')?.textContent?.trim() || '',
+                premiumShell: Boolean(document.querySelector('.premium-shell')),
+                syntheticSessionPresent: Boolean(sessionRaw),
+                sharedAuthGenerationPresent: Boolean(generation),
+                sharedAuthGenerationValue: generation,
+                tenantOrg,
+                rootHtml: document.querySelector('#root')?.outerHTML || '',
+                bodyHtml: document.body?.outerHTML || '',
+              };
+            });
+
+            const authorityMatch = snapshot.bootstrapErrorText.match(/(AUTH_SHARED_GENERATION_STALE|TENANT_[A-Z0-9_]+)/);
+            const relevantRequests = chronology.filter((item) => item.event === 'request').map((item) => ({ method: item.method, url: item.url }));
+            const result = {
+              mode: MODE,
+              terminal,
+              navigationError,
+              crmActive: snapshot.crmActive,
+              bootstrapError: snapshot.bootstrapError,
+              bootstrapErrorText: sanitize(snapshot.bootstrapErrorText),
+              authorityFailureCode: authorityMatch?.[1] || '',
+              premiumShell: snapshot.premiumShell,
+              url: snapshot.url,
+              syntheticSessionPresent: snapshot.syntheticSessionPresent,
+              sharedAuthGenerationPresent: snapshot.sharedAuthGenerationPresent,
+              sharedAuthGenerationValue: sanitize(snapshot.sharedAuthGenerationValue),
+              tenantOrg: snapshot.tenantOrg,
+              cloudConfigRequests: relevantRequests.filter((item) => item.url.includes('/api/cloud-config')),
+              organizationMemberRequests: relevantRequests.filter((item) => item.url.includes('organization_members')),
+              propcontrolRecordRequests: relevantRequests.filter((item) => item.url.includes('propcontrol_records')),
+              fichaRequests: relevantRequests.filter((item) => item.url.includes('/fichas')),
+              rpcRequests: relevantRequests.filter((item) => item.url.includes('/rpc/')),
+              consoleErrors: chronology.filter((item) => item.event === 'console-error'),
+              pageErrors: chronology.filter((item) => item.event === 'page-error'),
+              failedRequests: chronology.filter((item) => item.event === 'request-failed'),
+              chronology,
+              unexpectedSyntheticEndpoints,
+              rootSanitized: sanitize(snapshot.rootHtml).slice(0, 2500),
+              bodySanitized: sanitize(snapshot.bodyHtml).slice(0, 2500),
+              serverOutput: serverOutput.map(sanitize).slice(-20),
+            };
+            writeFileSync(OUTPUT, JSON.stringify(result, null, 2));
+            console.log(`CONTROL_${MODE.toUpperCase()}_JSON=${JSON.stringify(result)}`);
+          } finally {
+            await context?.close().catch(() => {});
+            await browser?.close().catch(() => {});
+            await stopServer(server);
+          }
+          EOF
+      - name: Control B - release with exact historical fixture
+        shell: bash
+        run: |
+          set -euo pipefail
+          node "$RUNNER_TEMP/authority-characterize.mjs" old "$RUNNER_TEMP/control-b.json"
+          echo "CONTROL_B_JSON_BEGIN"
+          cat "$RUNNER_TEMP/control-b.json"
+          echo "CONTROL_B_JSON_END"
+      - name: Control C - release with modern authority fixture
+        shell: bash
+        run: |
+          set -euo pipefail
+          node "$RUNNER_TEMP/authority-characterize.mjs" modern "$RUNNER_TEMP/control-c.json"
+          echo "CONTROL_C_JSON_BEGIN"
+          cat "$RUNNER_TEMP/control-c.json"
+          echo "CONTROL_C_JSON_END"
+      - name: Emit characterization results
+        id: results
+        shell: bash
+        run: |
+          set -euo pipefail
+          value() { node -e "const x=JSON.parse(require('fs').readFileSync(process.argv[1],'utf8')); const v=x[process.argv[2]]; console.log(typeof v==='boolean'?(v?'YES':'NO'):String(v??''));" "$1" "$2"; }
+          old_crm="$(value "$RUNNER_TEMP/control-b.json" crmActive)"
+          old_boot="$(value "$RUNNER_TEMP/control-b.json" bootstrapError)"
+          modern_crm="$(value "$RUNNER_TEMP/control-c.json" crmActive)"
+          modern_boot="$(value "$RUNNER_TEMP/control-c.json" bootstrapError)"
+          modern_org="$(value "$RUNNER_TEMP/control-c.json" tenantOrg)"
+          modern_shell="$(value "$RUNNER_TEMP/control-c.json" premiumShell)"
+          unexpected="$(node -e "const x=JSON.parse(require('fs').readFileSync(process.argv[1],'utf8')); console.log(x.unexpectedSyntheticEndpoints.length)" "$RUNNER_TEMP/control-c.json")"
+          echo "OLD_FIXTURE_CRM_ACTIVE=$old_crm"
+          echo "OLD_FIXTURE_BOOTSTRAP_ERROR=$old_boot"
+          echo "MODERN_FIXTURE_CRM_ACTIVE=$modern_crm"
+          echo "MODERN_FIXTURE_BOOTSTRAP_ERROR=$modern_boot"
+          echo "TENANT_ORG=$modern_org"
+          echo "PREMIUM_SHELL=$modern_shell"
+          echo "UNEXPECTED_SYNTHETIC_ENDPOINTS=$unexpected"
+          echo "old_crm_active=$old_crm" >> "$GITHUB_OUTPUT"
+          echo "old_bootstrap_error=$old_boot" >> "$GITHUB_OUTPUT"
+          echo "modern_crm_active=$modern_crm" >> "$GITHUB_OUTPUT"
+          echo "modern_bootstrap_error=$modern_boot" >> "$GITHUB_OUTPUT"
+          echo "modern_tenant_org=$modern_org" >> "$GITHUB_OUTPUT"
+          echo "modern_premium_shell=$modern_shell" >> "$GITHUB_OUTPUT"
+          echo "unexpected_endpoints=$unexpected" >> "$GITHUB_OUTPUT"
+      - name: Prove no product mutation in checkout
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$RELEASE_SHA"
+          git diff --exit-code
+          git diff --cached --exit-code
+          echo "PRODUCT_FILES_MODIFIED=0"
+          echo "PRODUCT_TESTS_MODIFIED=0"
+          echo "RELEASE_BRANCH_SHA_UNCHANGED=$RELEASE_SHA"
