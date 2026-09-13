@@ -1,0 +1,391 @@
+name: A3.4 Integrated Gate C
+
+on:
+  push:
+    branches: [validation/a34-gate-c-integrated]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: a34-gate-c-integrated-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CANDIDATE: 7bb3bdadbe34717cdc8f4d9a6646f8a0b47db1cc
+  A33_BASE: 6fbea368b5d0e80d36c0f8171f26be495798f904
+  A34_REPRODUCER: 8fcf454f9ebbc600f205c4494a85fb73db73d1f8
+  VALIDATION_BASE: 7ecbc8cb50513ea79cd4913ee2a6f821b756c009
+  A31_FINAL: 23f428a87fcc9382ec6ab8489ae8132776bb6d85
+  A32_FINAL: 349e9ba9e456ef79c3c740a9458290f408c651e6
+  A33_RUNTIME: f2ed74d622aa873822a704c6fe3cc28d194d7691
+  A33_GATE_A_ALIGNMENT: 68baba54ec5db00f14445336b436e3b484c6c0a6
+  ACCIDENTAL: fa5ff40c41996bf56ee89b5dca964f4b6bcdf426
+
+jobs:
+  integrated-gate-c:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 70
+    steps:
+      - name: Checkout exact detached A3.4 candidate
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ env.CANDIDATE }}
+          fetch-depth: 0
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Fetch canonical historical Gate C
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          url="https://api.github.com/repos/${GITHUB_REPOSITORY}/contents/.github/workflows/a33-gate-c-final.yml?ref=${VALIDATION_BASE}"
+          curl -fsSL \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H "Accept: application/vnd.github.raw+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "$url" > "$RUNNER_TEMP/a33-gate-c-final-canonical.yml"
+          grep -F 'name: SEC-FIX A3.3 Gate C Final Validation' "$RUNNER_TEMP/a33-gate-c-final-canonical.yml"
+          echo "CANONICAL_VALIDATION_BASE=${VALIDATION_BASE}"
+
+      - name: Execute historical gates 1-27 plus A3.4 fail-closed
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > "$RUNNER_TEMP/a34_gate_c_integrated.py" <<'PY'
+          import os
+          import re
+          import shutil
+          import subprocess
+          import sys
+          from pathlib import Path
+
+          ROOT = Path.cwd()
+          CANONICAL = Path(os.environ['RUNNER_TEMP']) / 'a33-gate-c-final-canonical.yml'
+          CANDIDATE = os.environ['CANDIDATE']
+          A33_BASE = os.environ['A33_BASE']
+          A34_REPRODUCER = os.environ['A34_REPRODUCER']
+
+          EXPECTED_BASELINE = sorted([
+              '?? dist/',
+              '?? extension/trv-fichas-chrome.zip',
+              '?? node_modules/',
+          ])
+          EXPECTED_GATE19 = sorted([
+              '?? artifacts/',
+              '?? dist/',
+              '?? extension/trv-fichas-chrome.zip',
+              '?? node_modules/',
+          ])
+          EXPECTED_ARTIFACTS = [
+              '01-mobile-panel-contacto.png',
+              '02-mobile-confirmacion-regreso.png',
+              '03-mobile-proximo-seguimiento.png',
+              '04-escritorio-contacto.png',
+              '05-seguimiento-vencido.png',
+              '06-numero-invalido.png',
+          ]
+          EXPECTED_A34_FILES = sorted([
+              'src/membership-catalog.ts',
+              'src/mvp-main.ts',
+              'src/tenant-cloud-context.ts',
+              'src/tenant-hydration.ts',
+              'src/tests/sec-fix-a3-4-pre-runtime-hydration-authority.test.ts',
+          ])
+
+          def run(argv, *, check=True, capture=False, cwd=ROOT, env=None):
+              if isinstance(argv, str):
+                  result = subprocess.run(
+                      ['bash', '-c', 'set -euo pipefail\n' + argv],
+                      cwd=cwd,
+                      env=env or os.environ.copy(),
+                      text=True,
+                      capture_output=capture,
+                  )
+              else:
+                  result = subprocess.run(
+                      argv,
+                      cwd=cwd,
+                      env=env or os.environ.copy(),
+                      text=True,
+                      capture_output=capture,
+                  )
+              if check and result.returncode != 0:
+                  if capture:
+                      sys.stdout.write(result.stdout)
+                      sys.stderr.write(result.stderr)
+                  raise subprocess.CalledProcessError(result.returncode, argv)
+              return result
+
+          def capture(argv, *, cwd=ROOT):
+              return run(argv, capture=True, cwd=cwd).stdout.rstrip('\n')
+
+          def extract_gates(text):
+              lines = text.splitlines()
+              gates = {}
+              i = 0
+              while i < len(lines):
+                  match = re.match(r'^\s{6}- name: Gate (\d+) -', lines[i])
+                  if not match:
+                      i += 1
+                      continue
+                  number = int(match.group(1))
+                  j = i + 1
+                  run_idx = None
+                  while j < len(lines):
+                      if re.match(r'^\s{6}- name:', lines[j]):
+                          break
+                      if re.match(r'^\s{8}run:', lines[j]):
+                          run_idx = j
+                          break
+                      j += 1
+                  if run_idx is None:
+                      raise RuntimeError(f'Gate {number} has no run block')
+                  raw = lines[run_idx].strip()[4:].strip()
+                  if raw == '|':
+                      body = []
+                      k = run_idx + 1
+                      while k < len(lines):
+                          line = lines[k]
+                          if line and not line.startswith('          '):
+                              break
+                          body.append(line[10:] if line.startswith('          ') else '')
+                          k += 1
+                      gates[number] = '\n'.join(body).rstrip() + '\n'
+                  else:
+                      gates[number] = raw + '\n'
+                  i = run_idx + 1
+              missing = [n for n in range(1, 28) if n not in gates]
+              if missing:
+                  raise RuntimeError(f'Missing canonical gates: {missing}')
+              return gates
+
+          def git_status(cwd=ROOT):
+              return capture(['git', 'status', '--porcelain=v1', '--untracked-files=normal'], cwd=cwd)
+
+          def git_diff_names():
+              return capture(['git', 'diff', '--name-only'])
+
+          def git_cached_names():
+              return capture(['git', 'diff', '--cached', '--name-only'])
+
+          def assert_exact_sha():
+              actual = capture(['git', 'rev-parse', 'HEAD'])
+              if actual != CANDIDATE:
+                  raise RuntimeError(f'SHA_MISMATCH expected={CANDIDATE} actual={actual}')
+
+          def assert_no_tracked_mutation():
+              diff = git_diff_names()
+              cached = git_cached_names()
+              if diff:
+                  raise RuntimeError('TRACKED_DIFF_UNEXPECTED\n' + diff)
+              if cached:
+                  raise RuntimeError('CACHED_DIFF_UNEXPECTED\n' + cached)
+
+          def status_lines():
+              return sorted([line for line in git_status().splitlines() if line])
+
+          def run_gate(number, script, *, cwd=ROOT):
+              print(f'GATE_{number:02d}_BEGIN', flush=True)
+              rc = run(script, check=False, cwd=cwd).returncode
+              if rc != 0:
+                  print(f'GATE_{number:02d}=FAIL_RC_{rc}', flush=True)
+                  raise SystemExit(rc)
+              if number == 7:
+                  print('GATE_07=PASS', flush=True)
+              if number == 26:
+                  print('GATE_26=PASS', flush=True)
+              print(f'GATE_{number:02d}_END', flush=True)
+
+          def browser_prerequisite():
+              run(r'''
+          if command -v google-chrome >/dev/null 2>&1; then google-chrome --version; exit 0; fi
+          if command -v google-chrome-stable >/dev/null 2>&1; then google-chrome-stable --version; exit 0; fi
+          if command -v chromium >/dev/null 2>&1; then chromium --version; exit 0; fi
+          if command -v chromium-browser >/dev/null 2>&1; then chromium-browser --version; exit 0; fi
+          echo "No supported browser executable available for real-app gates."
+          exit 1
+          ''')
+
+          def validate_a34_scope_and_lineage():
+              assert_exact_sha()
+              assert_no_tracked_mutation()
+              parent = capture(['git', 'rev-parse', 'HEAD^'])
+              grandparent = capture(['git', 'rev-parse', 'HEAD^^'])
+              if parent != A34_REPRODUCER:
+                  raise RuntimeError(f'A34_PARENT_MISMATCH {parent}')
+              if grandparent != A33_BASE:
+                  raise RuntimeError(f'A34_GRANDPARENT_MISMATCH {grandparent}')
+              files = sorted(filter(None, capture(['git', 'diff', '--name-only', f'{A33_BASE}..{CANDIDATE}']).splitlines()))
+              if files != EXPECTED_A34_FILES:
+                  raise RuntimeError(f'A34_SCOPE_MISMATCH actual={files} expected={EXPECTED_A34_FILES}')
+              forbidden = capture(['git', 'diff', '--name-only', f'{A33_BASE}..{CANDIDATE}', '--', '*.sql', 'supabase/migrations/**', 'supabase/baselines/**', '.github/workflows/**', 'docs/SEC_FIX_A2_5_BASELINE.md', 'docs/SUPABASE_PRODUCTION_BASELINE.md'])
+              if forbidden:
+                  raise RuntimeError('A34_FORBIDDEN_SCOPE\n' + forbidden)
+              print('A34_LINEAGE_EXACT=PASS', flush=True)
+              print('A34_SCOPE_EXACT_5=PASS', flush=True)
+              print('A34_SQL_MIGRATIONS_BASELINE_PRODUCT_WORKFLOW=0', flush=True)
+
+          def run_a34_r1_r12():
+              log = Path('/tmp/a34-gate-c.tap')
+              result = run(['node', '--test', '--test-concurrency=1', 'dist/tests/sec-fix-a3-4-pre-runtime-hydration-authority.test.js'], check=False, capture=True)
+              log.write_text(result.stdout + result.stderr, encoding='utf-8')
+              sys.stdout.write(result.stdout)
+              sys.stderr.write(result.stderr)
+              if result.returncode != 0:
+                  raise SystemExit(result.returncode)
+              text = log.read_text(encoding='utf-8', errors='replace')
+              for field, expected in [('tests', 12), ('pass', 12), ('fail', 0), ('skipped', 0)]:
+                  values = re.findall(rf'^# {field} (\d+)\s*$', text, re.MULTILINE)
+                  if not values or int(values[-1]) != expected:
+                      raise RuntimeError(f'A34_R1_R12_{field.upper()} expected={expected} actual={values[-1] if values else "missing"}')
+              print('A34_R1_R12=12/12 PASS', flush=True)
+
+          def run_gate_b_additional():
+              cases = [
+                  ('MVP', 'dist/tests/mvp-scope.test.js', 13),
+                  ('A1_2_E', 'dist/tests/sec-fix-a1-2-e-team-tenant-authority.test.js', 20),
+              ]
+              for label, path, expected in cases:
+                  result = run(['node', '--test', '--test-concurrency=1', path], check=False, capture=True)
+                  sys.stdout.write(result.stdout)
+                  sys.stderr.write(result.stderr)
+                  if result.returncode != 0:
+                      raise SystemExit(result.returncode)
+                  text = result.stdout + result.stderr
+                  for field, value in [('tests', expected), ('pass', expected), ('fail', 0), ('skipped', 0)]:
+                      vals = re.findall(rf'^# {field} (\d+)\s*$', text, re.MULTILINE)
+                      if not vals or int(vals[-1]) != value:
+                          raise RuntimeError(f'GATE_B_{label}_{field.upper()} expected={value} actual={vals[-1] if vals else "missing"}')
+                  print(f'GATE_B_{label}={expected}/{expected} PASS', flush=True)
+              print('GATE_B_INTEGRATED=PASS', flush=True)
+
+          def validate_and_cleanup_gate19_artifacts():
+              assert_exact_sha()
+              assert_no_tracked_mutation()
+              actual = status_lines()
+              if actual != EXPECTED_GATE19:
+                  raise RuntimeError(f'GATE19_STATUS_MISMATCH actual={actual} expected={EXPECTED_GATE19}')
+              artifacts = ROOT / 'artifacts'
+              b13 = artifacts / 'b1-3'
+              if artifacts.is_symlink() or not artifacts.is_dir():
+                  raise RuntimeError('artifacts must be a normal directory')
+              if b13.is_symlink() or not b13.is_dir():
+                  raise RuntimeError('artifacts/b1-3 must be a normal directory')
+              if sorted(p.name for p in artifacts.iterdir()) != ['b1-3']:
+                  raise RuntimeError('unexpected subtree under artifacts')
+              children = sorted(p.name for p in b13.iterdir())
+              if children != sorted(EXPECTED_ARTIFACTS):
+                  raise RuntimeError(f'artifact inventory mismatch {children}')
+              for name in EXPECTED_ARTIFACTS:
+                  path = b13 / name
+                  if path.is_symlink() or not path.is_file():
+                      raise RuntimeError(f'{path} must be regular non-symlink')
+              for name in EXPECTED_ARTIFACTS:
+                  (b13 / name).unlink()
+              b13.rmdir()
+              artifacts.rmdir()
+              assert_exact_sha()
+              assert_no_tracked_mutation()
+              if status_lines() != EXPECTED_BASELINE:
+                  raise RuntimeError(f'POST_GATE19_BASELINE_MISMATCH {status_lines()}')
+              print('GATE19_GENERATED_ARTIFACT_PROVENANCE=CONFIRMED', flush=True)
+              print('PRODUCER=b1-3-whatsapp-contact-real-app.test.js', flush=True)
+              print('GENERATED_FILES=6', flush=True)
+              print('GATE19_GENERATED_ARTIFACT_CLEANUP=PASS', flush=True)
+              print('POST_GATE19_BASELINE_RESTORED=PASS', flush=True)
+
+          def tap_total(log_path, key):
+              text = Path(log_path).read_text(encoding='utf-8', errors='replace')
+              tag = {'TOTAL':'tests','PASS':'pass','FAIL':'fail','SKIP':'skipped','CANCELLED':'cancelled','TODO':'todo'}[key]
+              values = re.findall(rf'^# {tag} (\d+)\s*$', text, re.MULTILINE)
+              if not values:
+                  raise RuntimeError(f'{log_path}: missing TAP {tag}')
+              return int(values[-1])
+
+          def print_dynamic_totals(gate):
+              log = f'/tmp/g{gate:02d}.log'
+              vals = {key: tap_total(log, key) for key in ('TOTAL','PASS','FAIL','SKIP','CANCELLED','TODO')}
+              if vals['FAIL'] != 0 or vals['CANCELLED'] != 0 or vals['TODO'] != 0:
+                  raise RuntimeError(f'GATE{gate}_DYNAMIC_RED {vals}')
+              if vals['PASS'] + vals['FAIL'] + vals['SKIP'] != vals['TOTAL']:
+                  raise RuntimeError(f'GATE{gate}_TOTAL_MISMATCH {vals}')
+              for key, value in vals.items():
+                  print(f'GATE{gate}_{key}={value}', flush=True)
+
+          def final_gate_27():
+              print('GATE_27_BEGIN', flush=True)
+              assert_exact_sha()
+              assert_no_tracked_mutation()
+              if (ROOT / 'artifacts').exists() or (ROOT / 'artifacts').is_symlink():
+                  raise RuntimeError('artifacts/ must not exist at Gate 27')
+              actual = status_lines()
+              if actual != EXPECTED_BASELINE:
+                  raise RuntimeError(f'FINAL_GENERATED_STATUS_MISMATCH actual={actual} expected={EXPECTED_BASELINE}')
+              dist = ROOT / 'dist'
+              node_modules = ROOT / 'node_modules'
+              zip_path = ROOT / 'extension' / 'trv-fichas-chrome.zip'
+              if dist.is_symlink() or not dist.is_dir():
+                  raise RuntimeError('dist/ must be normal directory')
+              if node_modules.is_symlink() or not node_modules.is_dir():
+                  raise RuntimeError('node_modules/ must be normal directory')
+              if zip_path.is_symlink() or not zip_path.is_file():
+                  raise RuntimeError('extension zip must be regular file')
+              shutil.rmtree(dist)
+              shutil.rmtree(node_modules)
+              zip_path.unlink()
+              assert_exact_sha()
+              assert_no_tracked_mutation()
+              if git_status():
+                  raise RuntimeError('FINAL_WORKTREE_NOT_CLEAN\n' + git_status())
+              print(f'FINAL_EXACT_CHECKOUT_SHA={capture(["git","rev-parse","HEAD"])}', flush=True)
+              print('FINAL_WORKTREE_CLEAN=PASS', flush=True)
+              print('GATE_27=PASS', flush=True)
+              print('GATE_C_SEQUENCE=1-27_COMPLETE', flush=True)
+              print('GATE_27_END', flush=True)
+
+          gates = extract_gates(CANONICAL.read_text(encoding='utf-8'))
+          print('CANONICAL_GATE_COUNT=27', flush=True)
+          print(f'EXACT_CANDIDATE={CANDIDATE}', flush=True)
+          assert_exact_sha()
+          assert_no_tracked_mutation()
+
+          run_gate(1, gates[1])
+          run_gate(2, gates[2])
+
+          historical = Path('/tmp/a34-a33-gate3-boundary')
+          if historical.exists():
+              shutil.rmtree(historical)
+          run(['git', 'worktree', 'add', '--detach', str(historical), A33_BASE])
+          try:
+              run_gate(3, gates[3], cwd=historical)
+          finally:
+              run(['git', 'worktree', 'remove', '--force', str(historical)])
+          print('GATE_03_HISTORICAL_A33_BOUNDARY=PRESERVED', flush=True)
+          validate_a34_scope_and_lineage()
+
+          run(['npm', 'ci'])
+
+          for number in range(4, 27):
+              if number == 8:
+                  browser_prerequisite()
+              run_gate(number, gates[number])
+              if number == 7:
+                  run_a34_r1_r12()
+              if number == 19:
+                  validate_and_cleanup_gate19_artifacts()
+              if number in (21, 22, 23):
+                  print_dynamic_totals(number)
+              if number == 24:
+                  run_gate_b_additional()
+
+          final_gate_27()
+          print('A34_INTEGRATED_GATE_C=GREEN', flush=True)
+          PY
+          python3 "$RUNNER_TEMP/a34_gate_c_integrated.py"
