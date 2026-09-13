@@ -30,6 +30,7 @@ const organizationId = 'trvgestioninmobiliaria';
 const userId = 'leads-redesign-owner';
 const memberId = 1;
 const email = 'owner-leads-redesign@propcontrol.test';
+const generation = 'leads-redesign-generation-a34-1';
 const sessionKey = 'propcontrol-cloud-session-v1';
 const activeMemberKey = 'propcontrol-active-team-member-v1';
 const storageKey = `trv-crm-basico:user:${userId}`;
@@ -239,6 +240,101 @@ async function startServer(): Promise<{ server: ChildProcess; url: string }> {
   return { server, url };
 }
 
+
+function syntheticMembership() {
+  return {
+    organization_id: organizationId,
+    member_id: memberId,
+    user_id: userId,
+    role: 'owner',
+    status: 'active',
+    display_name: 'Franco Solís',
+    email,
+    phone: '5493515110001',
+    created_at: '2026-08-04T12:00:00.000Z',
+    last_active_at: '2026-09-13T18:00:00.000Z',
+  };
+}
+
+function syntheticJson(body: unknown, status = 200) {
+  return {
+    status,
+    contentType: 'application/json',
+    headers: { 'access-control-allow-origin': '*' },
+    body: JSON.stringify(body),
+  };
+}
+
+async function installSyntheticAuthority(context: BrowserContext, origin: string): Promise<void> {
+  let syntheticRecords: unknown[] = [];
+
+  await context.route('**/api/cloud-config', async (route) => {
+    await route.fulfill(syntheticJson({
+      configured: true,
+      url: origin,
+      publishableKey: 'leads-redesign-publishable-key',
+    }));
+  });
+
+  await context.route('**/rest/v1/**', async (route) => {
+    const request = route.request();
+    const url = new URL(request.url());
+
+    if (request.method() === 'OPTIONS') {
+      await route.fulfill({
+        status: 204,
+        headers: {
+          'access-control-allow-origin': '*',
+          'access-control-allow-headers': '*',
+          'access-control-allow-methods': 'GET,POST,DELETE,OPTIONS',
+        },
+        body: '',
+      });
+      return;
+    }
+
+    if (url.pathname.endsWith('/rest/v1/rpc/activate_my_organization_memberships')) {
+      await route.fulfill(syntheticJson({}));
+      return;
+    }
+
+    if (url.pathname.endsWith('/rest/v1/organization_members')) {
+      await route.fulfill(syntheticJson([syntheticMembership()]));
+      return;
+    }
+
+    if (url.pathname.endsWith('/rest/v1/rpc/visit_transaction_authority_active_v2')) {
+      await route.fulfill(syntheticJson(false));
+      return;
+    }
+
+    if (url.pathname.endsWith('/rest/v1/propcontrol_records')) {
+      if (request.method() === 'GET') {
+        await route.fulfill(syntheticJson(syntheticRecords));
+        return;
+      }
+      if (request.method() === 'POST') {
+        const body = request.postDataJSON();
+        syntheticRecords = Array.isArray(body) ? structuredClone(body) : [structuredClone(body)];
+        await route.fulfill(syntheticJson(syntheticRecords, 201));
+        return;
+      }
+      if (request.method() === 'DELETE') {
+        syntheticRecords = [];
+        await route.fulfill({ status: 204, headers: { 'access-control-allow-origin': '*' }, body: '' });
+        return;
+      }
+    }
+
+    if (url.pathname.endsWith('/rest/v1/fichas')) {
+      await route.fulfill(syntheticJson([]));
+      return;
+    }
+
+    await route.fulfill(syntheticJson({ error: 'UNEXPECTED_SYNTHETIC_ENDPOINT', path: url.pathname }, 500));
+  });
+}
+
 function contextOptions(viewport: { width: number; height: number }): BrowserContextOptions {
   const mobile = viewport.width <= 430;
   return {
@@ -257,12 +353,11 @@ async function contextFor(
   browser: Browser,
   viewport: { width: number; height: number },
   marker: string,
+  origin: string,
 ): Promise<BrowserContext> {
   const context = await browser.newContext(contextOptions(viewport));
-  await context.route('**/api/cloud-config', async (route) => {
-    await route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ message: 'Nube de prueba no disponible.' }) });
-  });
-  await context.addInitScript(({ data, keys, currentUserId, currentEmail, currentMemberId, initMarker }) => {
+  await installSyntheticAuthority(context, origin);
+  await context.addInitScript(({ data, generationValue, keys, currentUserId, currentEmail, currentMemberId, initMarker }) => {
     if (localStorage.getItem(initMarker)) return;
     localStorage.setItem(initMarker, '1');
     localStorage.setItem(keys.session, JSON.stringify({
@@ -271,12 +366,15 @@ async function contextFor(
       expiresAt: Date.now() + 3_600_000,
       userId: currentUserId,
       email: currentEmail,
+      __propcontrolAuthGeneration: generationValue,
     }));
+    localStorage.setItem('propcontrol-cloud-auth-generation-v1', generationValue);
     localStorage.setItem(keys.storage, JSON.stringify(data));
     localStorage.setItem(keys.sync, JSON.stringify({ dirty: false, localUpdatedAt: new Date().toISOString() }));
     localStorage.setItem(keys.activeMember, String(currentMemberId));
   }, {
     data: fixture(),
+    generationValue: generation,
     keys: { session: sessionKey, storage: storageKey, sync: syncKey, activeMember: activeMemberKey },
     currentUserId: userId,
     currentEmail: email,
@@ -437,7 +535,7 @@ async function validateStageContrastMatrix(browser: Browser, url: string): Promi
     { width: 1366, height: 768 },
   ];
   for (const viewport of viewports) {
-    const context = await contextFor(browser, viewport, `pc-stage-contrast-${viewport.width}-${viewport.height}`);
+    const context = await contextFor(browser, viewport, `pc-stage-contrast-${viewport.width}-${viewport.height}`, url);
     try {
       const page = await context.newPage();
       await load(page, url);
@@ -644,14 +742,14 @@ test('rediseño profesional valida desktop, laptop, tablet, Motorola y teclado r
 
     await validateStageContrastMatrix(browser, started.url);
 
-    const desktop = await contextFor(browser, { width: 1366, height: 768 }, 'pc-leads-redesign-desktop');
+    const desktop = await contextFor(browser, { width: 1366, height: 768 }, 'pc-leads-redesign-desktop', started.url);
     try {
       await verifyDesktop(await desktop.newPage(), started.url);
     } finally {
       await desktop.close();
     }
 
-    const laptop = await contextFor(browser, { width: 1280, height: 720 }, 'pc-leads-redesign-laptop');
+    const laptop = await contextFor(browser, { width: 1280, height: 720 }, 'pc-leads-redesign-laptop', started.url);
     try {
       const page = await laptop.newPage();
       await load(page, started.url);
@@ -665,7 +763,7 @@ test('rediseño profesional valida desktop, laptop, tablet, Motorola y teclado r
       await laptop.close();
     }
 
-    const tablet = await contextFor(browser, { width: 768, height: 1024 }, 'pc-leads-redesign-tablet');
+    const tablet = await contextFor(browser, { width: 768, height: 1024 }, 'pc-leads-redesign-tablet', started.url);
     try {
       const page = await tablet.newPage();
       await load(page, started.url);
@@ -675,7 +773,7 @@ test('rediseño profesional valida desktop, laptop, tablet, Motorola y teclado r
       await tablet.close();
     }
 
-    const mobile = await contextFor(browser, { width: 390, height: 844 }, 'pc-leads-redesign-mobile');
+    const mobile = await contextFor(browser, { width: 390, height: 844 }, 'pc-leads-redesign-mobile', started.url);
     try {
       await verifyMobile(await mobile.newPage(), started.url);
     } finally {

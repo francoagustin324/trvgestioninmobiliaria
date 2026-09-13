@@ -7,6 +7,7 @@ import { initialData, type CrmData, type TeamMember } from '../models.js';
 
 const USER_ID = 'desktop-zero-training-owner';
 const ORG_ID = 'desktop-zero-training-org';
+const GENERATION = 'desktop-zero-training-generation-a34-1';
 const STORAGE_KEY = `trv-crm-basico:user:${USER_ID}`;
 const BASELINE_DISTANCE = 504.13;
 const TARGET_1366_DISTANCE = BASELINE_DISTANCE * 0.8;
@@ -155,17 +156,113 @@ async function stopServer(server: ChildProcess): Promise<void> {
   });
 }
 
+function syntheticMembership() {
+  return {
+    organization_id: ORG_ID,
+    member_id: 1,
+    user_id: USER_ID,
+    role: 'owner',
+    status: 'active',
+    display_name: owner().name,
+    email: owner().email,
+    phone: owner().phone,
+    created_at: '2026-08-11T12:00:00.000Z',
+    last_active_at: '2026-09-13T18:00:00.000Z',
+  };
+}
+
+function syntheticJson(body: unknown, status = 200) {
+  return {
+    status,
+    contentType: 'application/json',
+    headers: { 'access-control-allow-origin': '*' },
+    body: JSON.stringify(body),
+  };
+}
+
+async function installSyntheticAuthority(context: BrowserContext, origin: string): Promise<void> {
+  let syntheticRecords: unknown[] = [];
+
+  await context.route('**/api/cloud-config', async (route) => {
+    await route.fulfill(syntheticJson({
+      configured: true,
+      url: origin,
+      publishableKey: 'desktop-zero-training-publishable-key',
+    }));
+  });
+
+  await context.route('**/rest/v1/**', async (route) => {
+    const request = route.request();
+    const url = new URL(request.url());
+
+    if (request.method() === 'OPTIONS') {
+      await route.fulfill({
+        status: 204,
+        headers: {
+          'access-control-allow-origin': '*',
+          'access-control-allow-headers': '*',
+          'access-control-allow-methods': 'GET,POST,DELETE,OPTIONS',
+        },
+        body: '',
+      });
+      return;
+    }
+
+    if (url.pathname.endsWith('/rest/v1/rpc/activate_my_organization_memberships')) {
+      await route.fulfill(syntheticJson({}));
+      return;
+    }
+
+    if (url.pathname.endsWith('/rest/v1/organization_members')) {
+      await route.fulfill(syntheticJson([syntheticMembership()]));
+      return;
+    }
+
+    if (url.pathname.endsWith('/rest/v1/rpc/visit_transaction_authority_active_v2')) {
+      await route.fulfill(syntheticJson(false));
+      return;
+    }
+
+    if (url.pathname.endsWith('/rest/v1/propcontrol_records')) {
+      if (request.method() === 'GET') {
+        await route.fulfill(syntheticJson(syntheticRecords));
+        return;
+      }
+      if (request.method() === 'POST') {
+        const body = request.postDataJSON();
+        syntheticRecords = Array.isArray(body) ? structuredClone(body) : [structuredClone(body)];
+        await route.fulfill(syntheticJson(syntheticRecords, 201));
+        return;
+      }
+      if (request.method() === 'DELETE') {
+        syntheticRecords = [];
+        await route.fulfill({ status: 204, headers: { 'access-control-allow-origin': '*' }, body: '' });
+        return;
+      }
+    }
+
+    if (url.pathname.endsWith('/rest/v1/fichas')) {
+      await route.fulfill(syntheticJson([]));
+      return;
+    }
+
+    await route.fulfill(syntheticJson({ error: 'UNEXPECTED_SYNTHETIC_ENDPOINT', path: url.pathname }, 500));
+  });
+}
+
 async function seedContext(context: BrowserContext): Promise<void> {
   const actorKey = `cloud:${USER_ID}`;
   const identityKey = `propcontrol-whatsapp-human-identity-v1:${encodeURIComponent(ORG_ID)}:1:${encodeURIComponent(actorKey)}`;
-  await context.addInitScript(({ crm, identityStorageKey, storageKey }) => {
+  await context.addInitScript(({ crm, generation, identityStorageKey, storageKey }) => {
     localStorage.setItem('propcontrol-cloud-session-v1', JSON.stringify({
       accessToken: 'access',
       refreshToken: 'refresh',
       expiresAt: Date.now() + 3_600_000,
       userId: 'desktop-zero-training-owner',
       email: 'franco@propcontrol.test',
+      __propcontrolAuthGeneration: generation,
     }));
+    localStorage.setItem('propcontrol-cloud-auth-generation-v1', generation);
     localStorage.setItem(storageKey, JSON.stringify(crm));
     localStorage.setItem(`${storageKey}:sync`, JSON.stringify({
       dirty: false,
@@ -182,7 +279,7 @@ async function seedContext(context: BrowserContext): Promise<void> {
       humanName: 'Franco Solis',
       confirmedAt: '2026-08-11T18:00:00.000Z',
     }));
-  }, { crm: fixture(), identityStorageKey: identityKey, storageKey: STORAGE_KEY });
+  }, { crm: fixture(), generation: GENERATION, identityStorageKey: identityKey, storageKey: STORAGE_KEY });
 }
 
 async function load(page: Page, url: string): Promise<void> {
@@ -305,6 +402,7 @@ test('PR143 desktop cero capacitación Chromium + regresión móvil', { timeout:
     timezoneId: 'America/Argentina/Cordoba',
     colorScheme: 'dark',
   });
+  await installSyntheticAuthority(context, `http://127.0.0.1:${port}`);
   await seedContext(context);
 
   try {
@@ -564,6 +662,7 @@ test('PR143 WebKit desktop 1280/1440', { timeout: 120_000 }, async () => {
     timezoneId: 'America/Argentina/Cordoba',
     colorScheme: 'dark',
   });
+  await installSyntheticAuthority(context, `http://127.0.0.1:${port}`);
   await seedContext(context);
 
   try {
