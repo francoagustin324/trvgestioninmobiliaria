@@ -20,7 +20,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          gh api "/repos/$REPO/actions/jobs/$SOURCE_JOB_ID/logs" > "$RUNNER_TEMP/control-c-job.log"
+          gh api --allow-escape-sequences "/repos/$REPO/actions/jobs/$SOURCE_JOB_ID/logs" > "$RUNNER_TEMP/control-c-job.log"
           awk '/CONTROL_C_CORRECTED_JSON_BEGIN/{capture=1; next} /CONTROL_C_CORRECTED_JSON_END/{capture=0} capture' "$RUNNER_TEMP/control-c-job.log" > "$RUNNER_TEMP/control-c-corrected.json"
           grep -E 'MODERN_FIXTURE_CRM_ACTIVE=|BOOTSTRAP_ERROR=|BOOTSTRAP_ERROR_TEXT=|TENANT_ORG=|PREMIUM_SHELL=|SYNTHETIC_SESSION_PRESENT=|SHARED_AUTH_GENERATION_PRESENT=|CLOUD_CONFIG_REQUESTS=|ORGANIZATION_MEMBER_REQUESTS=|PROPCONTROL_RECORD_REQUESTS=|FICHA_REQUESTS=|RPC_REQUESTS=|UNEXPECTED_SYNTHETIC_ENDPOINTS=|PAGE_ERRORS=|FAILED_REQUESTS=|PRODUCT_FILES_MODIFIED=|PRODUCT_TESTS_MODIFIED=|RELEASE_BRANCH_SHA_UNCHANGED=' "$RUNNER_TEMP/control-c-job.log" > "$RUNNER_TEMP/control-c-scalars.txt"
           test -s "$RUNNER_TEMP/control-c-corrected.json"
