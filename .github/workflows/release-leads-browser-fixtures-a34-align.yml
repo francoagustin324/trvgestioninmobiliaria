@@ -1,0 +1,466 @@
+name: Release Leads Browser Fixtures A3.4 Align
+
+on:
+  push:
+    branches:
+      - validation/release-webkit-authority-characterization
+    paths:
+      - .github/workflows/release-leads-browser-fixtures-a34-align.yml
+
+permissions:
+  contents: write
+
+env:
+  RELEASE_BRANCH: release/a34-webkit-572-reconciliation
+  BASE_SHA: 452a17276f663353f57a54312533c675a178c599
+
+jobs:
+  align-and-targeted-validate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - name: Checkout exact release detached
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ env.BASE_SHA }}
+          fetch-depth: 0
+
+      - name: Prove exact base
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$BASE_SHA"
+          test "$(git ls-remote origin "refs/heads/$RELEASE_BRANCH" | awk '{print $1}')" = "$BASE_SHA"
+          if git symbolic-ref -q HEAD >/dev/null 2>&1; then exit 1; fi
+          git diff --exit-code
+          git diff --cached --exit-code
+          test -z "$(git status --porcelain --untracked-files=normal)"
+          echo "BASE_RELEASE_SHA=$BASE_SHA"
+
+      - name: Align exactly two stale browser harnesses
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+
+          def replace_once(text: str, old: str, new: str, label: str) -> str:
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f'{label}: expected exactly 1 anchor, found {count}')
+              return text.replace(old, new, 1)
+
+          desktop_path = Path('src/tests/leads-desktop-zero-training.test.ts')
+          desktop = desktop_path.read_text()
+          desktop = replace_once(
+              desktop,
+              "const ORG_ID = 'desktop-zero-training-org';\nconst STORAGE_KEY = `trv-crm-basico:user:${USER_ID}`;",
+              "const ORG_ID = 'desktop-zero-training-org';\nconst GENERATION = 'desktop-zero-training-generation-a34-1';\nconst STORAGE_KEY = `trv-crm-basico:user:${USER_ID}`;",
+              'desktop generation',
+          )
+          desktop_authority = r'''
+function syntheticMembership() {
+  return {
+    organization_id: ORG_ID,
+    member_id: 1,
+    user_id: USER_ID,
+    role: 'owner',
+    status: 'active',
+    display_name: owner().name,
+    email: owner().email,
+    phone: owner().phone,
+    created_at: '2026-08-11T12:00:00.000Z',
+    last_active_at: '2026-09-13T18:00:00.000Z',
+  };
+}
+
+function syntheticJson(body: unknown, status = 200) {
+  return {
+    status,
+    contentType: 'application/json',
+    headers: { 'access-control-allow-origin': '*' },
+    body: JSON.stringify(body),
+  };
+}
+
+async function installSyntheticAuthority(context: BrowserContext, origin: string): Promise<void> {
+  let syntheticRecords: unknown[] = [];
+
+  await context.route('**/api/cloud-config', async (route) => {
+    await route.fulfill(syntheticJson({
+      configured: true,
+      url: origin,
+      publishableKey: 'desktop-zero-training-publishable-key',
+    }));
+  });
+
+  await context.route('**/rest/v1/**', async (route) => {
+    const request = route.request();
+    const url = new URL(request.url());
+
+    if (request.method() === 'OPTIONS') {
+      await route.fulfill({
+        status: 204,
+        headers: {
+          'access-control-allow-origin': '*',
+          'access-control-allow-headers': '*',
+          'access-control-allow-methods': 'GET,POST,DELETE,OPTIONS',
+        },
+        body: '',
+      });
+      return;
+    }
+
+    if (url.pathname.endsWith('/rest/v1/rpc/activate_my_organization_memberships')) {
+      await route.fulfill(syntheticJson({}));
+      return;
+    }
+
+    if (url.pathname.endsWith('/rest/v1/organization_members')) {
+      await route.fulfill(syntheticJson([syntheticMembership()]));
+      return;
+    }
+
+    if (url.pathname.endsWith('/rest/v1/rpc/visit_transaction_authority_active_v2')) {
+      await route.fulfill(syntheticJson(false));
+      return;
+    }
+
+    if (url.pathname.endsWith('/rest/v1/propcontrol_records')) {
+      if (request.method() === 'GET') {
+        await route.fulfill(syntheticJson(syntheticRecords));
+        return;
+      }
+      if (request.method() === 'POST') {
+        const body = request.postDataJSON();
+        syntheticRecords = Array.isArray(body) ? structuredClone(body) : [structuredClone(body)];
+        await route.fulfill(syntheticJson(syntheticRecords, 201));
+        return;
+      }
+      if (request.method() === 'DELETE') {
+        syntheticRecords = [];
+        await route.fulfill({ status: 204, headers: { 'access-control-allow-origin': '*' }, body: '' });
+        return;
+      }
+    }
+
+    if (url.pathname.endsWith('/rest/v1/fichas')) {
+      await route.fulfill(syntheticJson([]));
+      return;
+    }
+
+    await route.fulfill(syntheticJson({ error: 'UNEXPECTED_SYNTHETIC_ENDPOINT', path: url.pathname }, 500));
+  });
+}
+'''
+          desktop = replace_once(
+              desktop,
+              '\nasync function seedContext(context: BrowserContext): Promise<void> {',
+              desktop_authority + '\nasync function seedContext(context: BrowserContext): Promise<void> {',
+              'desktop authority insertion',
+          )
+          desktop = replace_once(
+              desktop,
+              "  await context.addInitScript(({ crm, identityStorageKey, storageKey }) => {",
+              "  await context.addInitScript(({ crm, generation, identityStorageKey, storageKey }) => {",
+              'desktop init signature',
+          )
+          desktop = replace_once(
+              desktop,
+              "      email: 'franco@propcontrol.test',\n    }));\n    localStorage.setItem(storageKey, JSON.stringify(crm));",
+              "      email: 'franco@propcontrol.test',\n      __propcontrolAuthGeneration: generation,\n    }));\n    localStorage.setItem('propcontrol-cloud-auth-generation-v1', generation);\n    localStorage.setItem(storageKey, JSON.stringify(crm));",
+              'desktop generation storage',
+          )
+          desktop = replace_once(
+              desktop,
+              "  }, { crm: fixture(), identityStorageKey: identityKey, storageKey: STORAGE_KEY });",
+              "  }, { crm: fixture(), generation: GENERATION, identityStorageKey: identityKey, storageKey: STORAGE_KEY });",
+              'desktop init args',
+          )
+          desktop_context_anchor = "  });\n  await seedContext(context);"
+          if desktop.count(desktop_context_anchor) != 2:
+              raise SystemExit(f'desktop context authority: expected exactly 2 anchors, found {desktop.count(desktop_context_anchor)}')
+          desktop = desktop.replace(
+              desktop_context_anchor,
+              "  });\n  await installSyntheticAuthority(context, `http://127.0.0.1:${port}`);\n  await seedContext(context);",
+          )
+          desktop_path.write_text(desktop)
+
+          redesign_path = Path('src/tests/leads-professional-redesign.test.ts')
+          redesign = redesign_path.read_text()
+          redesign = replace_once(
+              redesign,
+              "const email = 'owner-leads-redesign@propcontrol.test';\nconst sessionKey = 'propcontrol-cloud-session-v1';",
+              "const email = 'owner-leads-redesign@propcontrol.test';\nconst generation = 'leads-redesign-generation-a34-1';\nconst sessionKey = 'propcontrol-cloud-session-v1';",
+              'redesign generation',
+          )
+          redesign_authority = r'''
+function syntheticMembership() {
+  return {
+    organization_id: organizationId,
+    member_id: memberId,
+    user_id: userId,
+    role: 'owner',
+    status: 'active',
+    display_name: 'Franco Solís',
+    email,
+    phone: '5493515110001',
+    created_at: '2026-08-04T12:00:00.000Z',
+    last_active_at: '2026-09-13T18:00:00.000Z',
+  };
+}
+
+function syntheticJson(body: unknown, status = 200) {
+  return {
+    status,
+    contentType: 'application/json',
+    headers: { 'access-control-allow-origin': '*' },
+    body: JSON.stringify(body),
+  };
+}
+
+async function installSyntheticAuthority(context: BrowserContext, origin: string): Promise<void> {
+  let syntheticRecords: unknown[] = [];
+
+  await context.route('**/api/cloud-config', async (route) => {
+    await route.fulfill(syntheticJson({
+      configured: true,
+      url: origin,
+      publishableKey: 'leads-redesign-publishable-key',
+    }));
+  });
+
+  await context.route('**/rest/v1/**', async (route) => {
+    const request = route.request();
+    const url = new URL(request.url());
+
+    if (request.method() === 'OPTIONS') {
+      await route.fulfill({
+        status: 204,
+        headers: {
+          'access-control-allow-origin': '*',
+          'access-control-allow-headers': '*',
+          'access-control-allow-methods': 'GET,POST,DELETE,OPTIONS',
+        },
+        body: '',
+      });
+      return;
+    }
+
+    if (url.pathname.endsWith('/rest/v1/rpc/activate_my_organization_memberships')) {
+      await route.fulfill(syntheticJson({}));
+      return;
+    }
+
+    if (url.pathname.endsWith('/rest/v1/organization_members')) {
+      await route.fulfill(syntheticJson([syntheticMembership()]));
+      return;
+    }
+
+    if (url.pathname.endsWith('/rest/v1/rpc/visit_transaction_authority_active_v2')) {
+      await route.fulfill(syntheticJson(false));
+      return;
+    }
+
+    if (url.pathname.endsWith('/rest/v1/propcontrol_records')) {
+      if (request.method() === 'GET') {
+        await route.fulfill(syntheticJson(syntheticRecords));
+        return;
+      }
+      if (request.method() === 'POST') {
+        const body = request.postDataJSON();
+        syntheticRecords = Array.isArray(body) ? structuredClone(body) : [structuredClone(body)];
+        await route.fulfill(syntheticJson(syntheticRecords, 201));
+        return;
+      }
+      if (request.method() === 'DELETE') {
+        syntheticRecords = [];
+        await route.fulfill({ status: 204, headers: { 'access-control-allow-origin': '*' }, body: '' });
+        return;
+      }
+    }
+
+    if (url.pathname.endsWith('/rest/v1/fichas')) {
+      await route.fulfill(syntheticJson([]));
+      return;
+    }
+
+    await route.fulfill(syntheticJson({ error: 'UNEXPECTED_SYNTHETIC_ENDPOINT', path: url.pathname }, 500));
+  });
+}
+
+'''
+          redesign = replace_once(
+              redesign,
+              'function contextOptions(viewport: { width: number; height: number }): BrowserContextOptions {',
+              redesign_authority + 'function contextOptions(viewport: { width: number; height: number }): BrowserContextOptions {',
+              'redesign authority insertion',
+          )
+          redesign = replace_once(
+              redesign,
+              "  marker: string,\n): Promise<BrowserContext> {\n  const context = await browser.newContext(contextOptions(viewport));\n  await context.route('**/api/cloud-config', async (route) => {\n    await route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ message: 'Nube de prueba no disponible.' }) });\n  });",
+              "  marker: string,\n  origin: string,\n): Promise<BrowserContext> {\n  const context = await browser.newContext(contextOptions(viewport));\n  await installSyntheticAuthority(context, origin);",
+              'redesign context authority',
+          )
+          redesign = replace_once(
+              redesign,
+              "  await context.addInitScript(({ data, keys, currentUserId, currentEmail, currentMemberId, initMarker }) => {",
+              "  await context.addInitScript(({ data, generationValue, keys, currentUserId, currentEmail, currentMemberId, initMarker }) => {",
+              'redesign init signature',
+          )
+          redesign = replace_once(
+              redesign,
+              "      email: currentEmail,\n    }));\n    localStorage.setItem(keys.storage, JSON.stringify(data));",
+              "      email: currentEmail,\n      __propcontrolAuthGeneration: generationValue,\n    }));\n    localStorage.setItem('propcontrol-cloud-auth-generation-v1', generationValue);\n    localStorage.setItem(keys.storage, JSON.stringify(data));",
+              'redesign generation storage',
+          )
+          redesign = replace_once(
+              redesign,
+              "    data: fixture(),\n    keys: { session: sessionKey, storage: storageKey, sync: syncKey, activeMember: activeMemberKey },",
+              "    data: fixture(),\n    generationValue: generation,\n    keys: { session: sessionKey, storage: storageKey, sync: syncKey, activeMember: activeMemberKey },",
+              'redesign init args',
+          )
+          redesign = replace_once(
+              redesign,
+              "    const context = await contextFor(browser, viewport, `pc-stage-contrast-${viewport.width}-${viewport.height}`);",
+              "    const context = await contextFor(browser, viewport, `pc-stage-contrast-${viewport.width}-${viewport.height}`, url);",
+              'redesign contrast context',
+          )
+          for label, old, new in [
+              ('redesign desktop context', "    const desktop = await contextFor(browser, { width: 1366, height: 768 }, 'pc-leads-redesign-desktop');", "    const desktop = await contextFor(browser, { width: 1366, height: 768 }, 'pc-leads-redesign-desktop', started.url);"),
+              ('redesign laptop context', "    const laptop = await contextFor(browser, { width: 1280, height: 720 }, 'pc-leads-redesign-laptop');", "    const laptop = await contextFor(browser, { width: 1280, height: 720 }, 'pc-leads-redesign-laptop', started.url);"),
+              ('redesign tablet context', "    const tablet = await contextFor(browser, { width: 768, height: 1024 }, 'pc-leads-redesign-tablet');", "    const tablet = await contextFor(browser, { width: 768, height: 1024 }, 'pc-leads-redesign-tablet', started.url);"),
+              ('redesign mobile context', "    const mobile = await contextFor(browser, { width: 390, height: 844 }, 'pc-leads-redesign-mobile');", "    const mobile = await contextFor(browser, { width: 390, height: 844 }, 'pc-leads-redesign-mobile', started.url);"),
+          ]:
+              redesign = replace_once(redesign, old, new, label)
+          redesign_path.write_text(redesign)
+          PY
+
+          mapfile -t paths < <(git diff --name-only)
+          printf 'CHANGED_PATH=%s\n' "${paths[@]}"
+          test "${#paths[@]}" -eq 2
+          test "${paths[0]}" = "src/tests/leads-desktop-zero-training.test.ts"
+          test "${paths[1]}" = "src/tests/leads-professional-redesign.test.ts"
+          test -z "$(git diff --name-only | grep -Ev '^src/tests/(leads-desktop-zero-training|leads-professional-redesign)\.test\.ts$' || true)"
+          echo "HARNESS_ALIGNMENT_PATHS=2"
+          echo "RUNTIME_PATHS=0"
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Precommit compile guard
+        run: |
+          npm ci --silent
+          npm run build --silent
+
+      - name: Create exactly one TEST-ONLY release commit
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git ls-remote origin "refs/heads/$RELEASE_BRANCH" | awk '{print $1}')" = "$BASE_SHA"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/tests/leads-desktop-zero-training.test.ts src/tests/leads-professional-redesign.test.ts
+          git diff --cached --name-only > "$RUNNER_TEMP/staged-paths.txt"
+          test "$(wc -l < "$RUNNER_TEMP/staged-paths.txt")" -eq 2
+          grep -Fxq 'src/tests/leads-desktop-zero-training.test.ts' "$RUNNER_TEMP/staged-paths.txt"
+          grep -Fxq 'src/tests/leads-professional-redesign.test.ts' "$RUNNER_TEMP/staged-paths.txt"
+          git commit -m 'TEST-ONLY: align Leads browser fixtures with A3.4 authority'
+          NEW_SHA="$(git rev-parse HEAD)"
+          test "$(git rev-parse HEAD^)" = "$BASE_SHA"
+          mapfile -t committed < <(git diff-tree --no-commit-id --name-only -r HEAD)
+          test "${#committed[@]}" -eq 2
+          test "${committed[0]}" = 'src/tests/leads-desktop-zero-training.test.ts'
+          test "${committed[1]}" = 'src/tests/leads-professional-redesign.test.ts'
+          git push origin "HEAD:refs/heads/$RELEASE_BRANCH"
+          test "$(git ls-remote origin "refs/heads/$RELEASE_BRANCH" | awk '{print $1}')" = "$NEW_SHA"
+          echo "FINAL_RELEASE_SHA=$NEW_SHA" | tee -a "$GITHUB_ENV"
+          echo "HARNESS_ALIGNMENT_PATHS=2"
+          echo "RUNTIME_PATHS=0"
+
+      - name: Checkout new exact release detached
+        shell: bash
+        run: |
+          set -euo pipefail
+          git checkout --detach "$FINAL_RELEASE_SHA"
+          test "$(git rev-parse HEAD)" = "$FINAL_RELEASE_SHA"
+          test "$(git rev-parse HEAD^)" = "$BASE_SHA"
+          test "$(git ls-remote origin "refs/heads/$RELEASE_BRANCH" | awk '{print $1}')" = "$FINAL_RELEASE_SHA"
+          git diff --exit-code
+          git diff --cached --exit-code
+          echo "EXECUTION_SHA=$FINAL_RELEASE_SHA"
+
+      - name: Provision Playwright WebKit
+        run: npx playwright install --with-deps webkit
+
+      - name: Browser prerequisite for Chromium contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          if command -v google-chrome >/dev/null 2>&1; then google-chrome --version; exit 0; fi
+          if command -v google-chrome-stable >/dev/null 2>&1; then google-chrome-stable --version; exit 0; fi
+          if command -v chromium >/dev/null 2>&1; then chromium --version; exit 0; fi
+          if command -v chromium-browser >/dev/null 2>&1; then chromium-browser --version; exit 0; fi
+          exit 1
+
+      - name: Fresh build new exact release
+        run: npm run build --silent
+
+      - name: WebKit 572 regression remains 4 of 4
+        shell: bash
+        run: |
+          set -euo pipefail
+          log="$RUNNER_TEMP/webkit-572.tap"
+          node --test --test-concurrency=1 dist/tests/leads-mobile-priority-webkit.test.js | tee "$log"
+          grep -Eq '^# tests 4$' "$log"
+          grep -Eq '^# pass 4$' "$log"
+          grep -Eq '^# fail 0$' "$log"
+          grep -Fq 'WebKit regression \#572:' "$log"
+          grep -Eq '^ok [0-9]+ - Chromium: prioridad accionable' "$log"
+          grep -Eq '^ok [0-9]+ - WebKit automatizado:' "$log"
+          echo "WEBKIT_572=4/4 PASS"
+
+      - name: Desktop zero-training and professional redesign 5 of 5
+        shell: bash
+        run: |
+          set -euo pipefail
+          log="$RUNNER_TEMP/leads-browser-fixtures.tap"
+          node --test --test-concurrency=1 \
+            dist/tests/leads-desktop-zero-training.test.js \
+            dist/tests/leads-professional-redesign.test.js | tee "$log"
+          grep -Eq '^# tests 5$' "$log"
+          grep -Eq '^# pass 5$' "$log"
+          grep -Eq '^# fail 0$' "$log"
+          grep -Eq '^ok [0-9]+ - PR143 desktop cero capacitación Chromium \+ regresión móvil$' "$log"
+          grep -Eq '^ok [0-9]+ - PR143 WebKit desktop 1280/1440$' "$log"
+          grep -Eq '^ok [0-9]+ - PR143 cache bust: todo runtime modificado cambia URL servida$' "$log"
+          grep -Eq '^ok [0-9]+ - rediseño de Leads permanece aislado de la lógica comercial aprobada$' "$log"
+          grep -Eq '^ok [0-9]+ - rediseño profesional valida desktop, laptop, tablet, Motorola y teclado reducido$' "$log"
+          echo "CACHE_BUST_SPECIFIC_ASSERTION=PASS"
+          echo "DESKTOP_ZERO_TRAINING_CHROMIUM=PASS"
+          echo "DESKTOP_ZERO_TRAINING_WEBKIT=PASS"
+          echo "PROFESSIONAL_REDESIGN_ISOLATION=PASS"
+          echo "PROFESSIONAL_REDESIGN_RESPONSIVE=PASS"
+          echo "LEADS_DESKTOP_AND_REDESIGN=5/5 PASS"
+
+      - name: Targeted exact-scope integrity
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$FINAL_RELEASE_SHA"
+          test "$(git ls-remote origin "refs/heads/$RELEASE_BRANCH" | awk '{print $1}')" = "$FINAL_RELEASE_SHA"
+          test "$(git rev-parse HEAD^)" = "$BASE_SHA"
+          mapfile -t paths < <(git diff-tree --no-commit-id --name-only -r HEAD)
+          test "${#paths[@]}" -eq 2
+          test "${paths[0]}" = 'src/tests/leads-desktop-zero-training.test.ts'
+          test "${paths[1]}" = 'src/tests/leads-professional-redesign.test.ts'
+          git diff --quiet
+          git diff --cached --quiet
+          echo "TARGETED_HARNESS_ALIGNMENT=GREEN"
+          echo "FINAL_RELEASE_SHA=$FINAL_RELEASE_SHA"
+          echo "HARNESS_ALIGNMENT_PATHS=2"
+          echo "RUNTIME_PATHS=0"
+          echo "TRACKED_DIFF=EMPTY"
+          echo "CACHED_DIFF=EMPTY"
