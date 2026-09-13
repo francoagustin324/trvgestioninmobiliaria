@@ -156,7 +156,7 @@ async function stopServer(server: ChildProcess): Promise<void> {
   });
 }
 
-function syntheticMembership() {
+function syntheticOwnerMembership() {
   return {
     organization_id: ORG_ID,
     member_id: 1,
@@ -167,6 +167,22 @@ function syntheticMembership() {
     email: owner().email,
     phone: owner().phone,
     created_at: '2026-08-11T12:00:00.000Z',
+    last_active_at: '2026-09-13T18:00:00.000Z',
+  };
+}
+
+function syntheticSecondMembership() {
+  const member = secondMember();
+  return {
+    organization_id: ORG_ID,
+    member_id: member.id,
+    user_id: member.userId,
+    role: 'owner',
+    status: 'active',
+    display_name: member.name,
+    email: member.email,
+    phone: member.phone,
+    created_at: member.createdAt,
     last_active_at: '2026-09-13T18:00:00.000Z',
   };
 }
@@ -214,7 +230,17 @@ async function installSyntheticAuthority(context: BrowserContext, origin: string
     }
 
     if (url.pathname.endsWith('/rest/v1/organization_members')) {
-      await route.fulfill(syntheticJson([syntheticMembership()]));
+      const userFilter = url.searchParams.get('user_id');
+      const organizationFilter = url.searchParams.get('organization_id');
+      if (userFilter === `eq.${USER_ID}`) {
+        await route.fulfill(syntheticJson([syntheticOwnerMembership()]));
+        return;
+      }
+      if (organizationFilter === `eq.${ORG_ID}`) {
+        await route.fulfill(syntheticJson([syntheticOwnerMembership(), syntheticSecondMembership()]));
+        return;
+      }
+      await route.fulfill(syntheticJson({ error: 'UNEXPECTED_ORGANIZATION_MEMBERS_QUERY', search: url.search }, 500));
       return;
     }
 
@@ -434,6 +460,13 @@ test('PR143 desktop cero capacitación Chromium + regresión móvil', { timeout:
 
     await filterSummary.click();
     await waitForFilterPanelVisible(page);
+    const assigneeOptions = await page.locator('#mvp-lead-assignee-filter option').evaluateAll((options) => options.map((option) => ({
+      value: (option as HTMLOptionElement).value,
+      label: option.textContent?.trim() ?? '',
+    })));
+    assert.ok(assigneeOptions.some((option) => option.value === '1'), `Falta member 1 en asignados: ${JSON.stringify(assigneeOptions)}`);
+    assert.ok(assigneeOptions.some((option) => option.value === '2'), `Falta member 2 en asignados: ${JSON.stringify(assigneeOptions)}`);
+    console.log(`PR143_ASSIGNEE_OPTIONS=${JSON.stringify(assigneeOptions)}`);
     for (const selector of ['#mvp-lead-stage-filter', '#mvp-lead-temperature-filter', '#mvp-lead-assignee-filter', '#mvp-lead-order']) {
       const control = page.locator(selector);
       assert.equal(await control.isVisible(), true, `${selector} debe estar accesible.`);
