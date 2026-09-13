@@ -4,6 +4,12 @@ import {
   normalizeMembershipCatalogStatus,
   type MembershipCatalogEntry,
 } from './active-organization.js';
+import {
+  assertSharedAuthGenerationCurrent,
+  assertSharedCloudSessionCurrent,
+  captureSharedAuthGeneration,
+  type SharedCloudSession,
+} from './auth-session-generation.js';
 
 interface PublicCloudConfig {
   configured?: boolean;
@@ -30,11 +36,23 @@ async function parseJson(response: Response): Promise<unknown> {
   return payload;
 }
 
-async function publicConfig(): Promise<Required<Pick<PublicCloudConfig, 'url' | 'publishableKey'>>> {
-  const payload = await parseJson(await fetch('/api/cloud-config', {
+function assertCatalogAuthority(generation: string, session: SharedCloudSession): void {
+  assertSharedAuthGenerationCurrent(generation);
+  assertSharedCloudSessionCurrent(generation, session);
+}
+
+async function publicConfig(
+  generation: string,
+  session: SharedCloudSession,
+): Promise<Required<Pick<PublicCloudConfig, 'url' | 'publishableKey'>>> {
+  assertCatalogAuthority(generation, session);
+  const response = await fetch('/api/cloud-config', {
     headers: { Accept: 'application/json' },
     cache: 'no-store',
-  })) as PublicCloudConfig;
+  });
+  assertCatalogAuthority(generation, session);
+  const payload = await parseJson(response) as PublicCloudConfig;
+  assertCatalogAuthority(generation, session);
   if (!payload.configured || !payload.url || !payload.publishableKey) {
     throw new Error('La conexión con Supabase todavía no está configurada.');
   }
@@ -72,12 +90,20 @@ export function membershipCatalogEntryFromRow(row: CloudMembershipRow): Membersh
  *
  * Read-only by contract: it reads the authenticated user's complete membership
  * catalog and never activates invitations or chooses an organization.
+ *
+ * A3.4: every material async boundary is fenced by the same shared auth
+ * generation and exact session (user + access token + refresh token) that
+ * initiated discovery. A catalog result can therefore never survive A->B->A or
+ * a same-user token/session replacement.
  */
 export async function fetchMembershipCatalog(): Promise<readonly MembershipCatalogEntry[]> {
   const session = getCloudSession();
   if (!session) throw new Error('Ingresá a tu cuenta para consultar tus inmobiliarias.');
+  const authGeneration = captureSharedAuthGeneration();
+  assertCatalogAuthority(authGeneration, session);
 
-  const config = await publicConfig();
+  const config = await publicConfig(authGeneration, session);
+  assertCatalogAuthority(authGeneration, session);
   const query = new URL(`${config.url}/rest/v1/organization_members`);
   query.searchParams.set(
     'select',
@@ -86,14 +112,19 @@ export async function fetchMembershipCatalog(): Promise<readonly MembershipCatal
   query.searchParams.set('user_id', `eq.${session.userId}`);
   query.searchParams.set('order', 'organization_id.asc,member_id.asc');
 
-  const payload = await parseJson(await fetch(query, {
+  const response = await fetch(query, {
     method: 'GET',
     headers: authenticatedHeaders(config.publishableKey, session.accessToken),
     cache: 'no-store',
-  }));
+  });
+  assertCatalogAuthority(authGeneration, session);
+  const payload = await parseJson(response);
+  assertCatalogAuthority(authGeneration, session);
   if (!Array.isArray(payload)) throw new Error('Supabase devolvió un catálogo de membresías inválido.');
 
-  return Object.freeze(payload
+  const memberships = Object.freeze(payload
     .map((row) => membershipCatalogEntryFromRow(row as CloudMembershipRow))
     .filter((membership) => membership.userId === session.userId));
+  assertCatalogAuthority(authGeneration, session);
+  return memberships;
 }

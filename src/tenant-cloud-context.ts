@@ -1,11 +1,58 @@
 import type { TenantScope } from './active-organization.js';
 import { membershipContext, type CloudMembershipContext, type CloudMembershipRow } from './cloud-records.js';
 import { getCloudSession } from './cloud-api.js';
+import {
+  AUTH_SHARED_GENERATION_STALE,
+  assertSharedAuthGenerationCurrent,
+  assertSharedCloudSessionCurrent,
+  captureSharedAuthGeneration,
+  type SharedCloudSession,
+} from './auth-session-generation.js';
 
 export const TENANT_CLOUD_SESSION_REQUIRED = 'TENANT_CLOUD_SESSION_REQUIRED';
 export const TENANT_CLOUD_SESSION_MISMATCH = 'TENANT_CLOUD_SESSION_MISMATCH';
 export const TENANT_CLOUD_MEMBERSHIP_REQUIRED = 'TENANT_CLOUD_MEMBERSHIP_REQUIRED';
 export const TENANT_CLOUD_RESPONSE_MISMATCH = 'TENANT_CLOUD_RESPONSE_MISMATCH';
+
+export type TenantCloudAuthorityCode =
+  | typeof AUTH_SHARED_GENERATION_STALE
+  | typeof TENANT_CLOUD_SESSION_REQUIRED
+  | typeof TENANT_CLOUD_SESSION_MISMATCH
+  | typeof TENANT_CLOUD_MEMBERSHIP_REQUIRED
+  | typeof TENANT_CLOUD_RESPONSE_MISMATCH;
+
+export class TenantCloudAuthorityError extends Error {
+  readonly code: TenantCloudAuthorityCode;
+
+  constructor(code: TenantCloudAuthorityCode, options: { cause?: unknown } = {}) {
+    super(code, options);
+    this.name = 'TenantCloudAuthorityError';
+    this.code = code;
+  }
+}
+
+export function isTenantCloudAuthorityFailure(error: unknown): error is TenantCloudAuthorityError {
+  return error instanceof TenantCloudAuthorityError;
+}
+
+function failTenantCloudAuthority(code: TenantCloudAuthorityCode, cause?: unknown): never {
+  throw new TenantCloudAuthorityError(code, cause === undefined ? {} : { cause });
+}
+
+function assertTransportAuthorityCurrent(
+  generation: string,
+  session: SharedCloudSession,
+): void {
+  try {
+    assertSharedAuthGenerationCurrent(generation);
+    assertSharedCloudSessionCurrent(generation, session);
+  } catch (error) {
+    if (error instanceof Error && error.message === AUTH_SHARED_GENERATION_STALE) {
+      failTenantCloudAuthority(AUTH_SHARED_GENERATION_STALE, error);
+    }
+    throw error;
+  }
+}
 
 export interface TenantCloudConfig {
   url: string;
@@ -75,12 +122,22 @@ function activeStatus(value: unknown): boolean {
   return String(value ?? '').trim().toLowerCase() === 'active';
 }
 
+/**
+ * Canonical exact tenant membership boundary.
+ *
+ * A3.4 makes the transport capability self-fenced: the shared auth generation
+ * and exact session that start the check must remain current across every
+ * material async boundary and immediately before the capability is returned.
+ */
 export async function tenantCloudTransport(scope: TenantScope): Promise<TenantCloudTransport> {
   const session = getCloudSession();
-  if (!session) throw new Error(TENANT_CLOUD_SESSION_REQUIRED);
-  if (session.userId !== scope.userId) throw new Error(TENANT_CLOUD_SESSION_MISMATCH);
+  if (!session) failTenantCloudAuthority(TENANT_CLOUD_SESSION_REQUIRED);
+  const authGeneration = captureSharedAuthGeneration();
+  assertTransportAuthorityCurrent(authGeneration, session);
+  if (session.userId !== scope.userId) failTenantCloudAuthority(TENANT_CLOUD_SESSION_MISMATCH);
 
   const config = await tenantCloudConfig();
+  assertTransportAuthorityCurrent(authGeneration, session);
   const query = new URL(`${config.url}/rest/v1/organization_members`);
   query.searchParams.set(
     'select',
@@ -89,27 +146,31 @@ export async function tenantCloudTransport(scope: TenantScope): Promise<TenantCl
   query.searchParams.set('organization_id', `eq.${scope.organizationId}`);
   query.searchParams.set('order', 'member_id.asc');
 
-  const payload = await parseTenantCloudJson(await fetch(query, {
+  const response = await fetch(query, {
     method: 'GET',
     headers: tenantCloudHeaders(config.publishableKey, session.accessToken),
     cache: 'no-store',
-  }));
-  if (!Array.isArray(payload)) throw new Error(TENANT_CLOUD_RESPONSE_MISMATCH);
+  });
+  assertTransportAuthorityCurrent(authGeneration, session);
+  const payload = await parseTenantCloudJson(response);
+  assertTransportAuthorityCurrent(authGeneration, session);
+  if (!Array.isArray(payload)) failTenantCloudAuthority(TENANT_CLOUD_RESPONSE_MISMATCH);
 
   const rows = payload as CloudMembershipRow[];
   if (rows.some((row) => row.organization_id !== scope.organizationId)) {
-    throw new Error(TENANT_CLOUD_RESPONSE_MISMATCH);
+    failTenantCloudAuthority(TENANT_CLOUD_RESPONSE_MISMATCH);
   }
   const own = rows.find((row) => row.user_id === scope.userId && row.organization_id === scope.organizationId);
   if (!own || !Number.isFinite(own.member_id) || !activeStatus(own.status)) {
-    throw new Error(TENANT_CLOUD_MEMBERSHIP_REQUIRED);
+    failTenantCloudAuthority(TENANT_CLOUD_MEMBERSHIP_REQUIRED);
   }
 
   const context = membershipContext(rows, scope.userId);
   if (context.organizationId !== scope.organizationId) {
-    throw new Error(TENANT_CLOUD_RESPONSE_MISMATCH);
+    failTenantCloudAuthority(TENANT_CLOUD_RESPONSE_MISMATCH);
   }
 
+  assertTransportAuthorityCurrent(authGeneration, session);
   return Object.freeze({
     scope: Object.freeze({ userId: scope.userId, organizationId: scope.organizationId }),
     context,

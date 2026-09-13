@@ -25,6 +25,7 @@ import {
 } from './mvp-auth.js';
 import { canAccessModule } from './team-access.js';
 import { saveData, state } from './store.js';
+import { invalidateTenantRuntimeScope } from './tenant-runtime.js';
 import { qs } from './utils.js';
 
 const root = qs<HTMLElement>('#root');
@@ -180,6 +181,12 @@ function showNotice(message: string): void {
   window.setTimeout(() => { notice.hidden = true; }, 4500);
 }
 
+function renderSafeBootstrapFailure(message: string): void {
+  root.innerHTML = '<main class="public-page"><div class="public-error"><h1>No se pudo cargar la cuenta</h1><p data-bootstrap-error></p><a href="/login">Volver a ingresar</a></div></main>';
+  const detail = root.querySelector<HTMLElement>('[data-bootstrap-error]');
+  if (detail) detail.textContent = message;
+}
+
 function allowedModules(): ModuleId[] {
   return modules.map(([id]) => id).filter((id) => canAccessModule(id));
 }
@@ -300,10 +307,8 @@ async function bootstrap(): Promise<void> {
     bindEvents();
     render();
   } catch (error) {
-    renderShell();
-    bindEvents();
-    render();
-    showNotice(error instanceof Error ? error.message : 'No se pudo cargar la cuenta.');
+    invalidateTenantRuntimeScope();
+    renderSafeBootstrapFailure(error instanceof Error ? error.message : 'No se pudo cargar la cuenta.');
   }
 }
 
