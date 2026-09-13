@@ -1,0 +1,233 @@
+name: Release WebKit Harness Modernization
+
+on:
+  push:
+    branches:
+      - validation/release-webkit-authority-characterization
+    paths:
+      - .github/workflows/release-webkit-harness-modernization.yml
+
+permissions:
+  contents: write
+
+jobs:
+  test-only-harness-fix:
+    runs-on: ubuntu-24.04
+    env:
+      RELEASE_BRANCH: release/a34-webkit-572-reconciliation
+      EXPECTED_PARENT: a5bfaedc0a51f856c8dda08d74b1bab397bc9660
+      TARGET: src/tests/leads-mobile-priority-webkit.test.ts
+    steps:
+      - name: Checkout exact release branch
+        uses: actions/checkout@v7
+        with:
+          ref: release/a34-webkit-572-reconciliation
+          fetch-depth: 0
+
+      - name: Preflight exact immutable base
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_PARENT"
+          test "$(git rev-parse origin/$RELEASE_BRANCH)" = "$EXPECTED_PARENT"
+          test -z "$(git status --porcelain --untracked-files=normal)"
+          echo "RELEASE_BASE_SHA=$EXPECTED_PARENT"
+
+      - name: Apply test-only A3.4 authority fixture modernization
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path('src/tests/leads-mobile-priority-webkit.test.ts')
+          text = path.read_text()
+
+          def replace_once(old: str, new: str) -> None:
+              global text
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f'expected exactly one match, got {count}: {old[:100]!r}')
+              text = text.replace(old, new, 1)
+
+          replace_once(
+              "const ORG_ID = 'priority-webkit-org';\nconst STORAGE_KEY = `trv-crm-basico:user:${USER_ID}`;",
+              "const ORG_ID = 'priority-webkit-org';\nconst GENERATION = 'priority-webkit-generation-a34-1';\nconst STORAGE_KEY = `trv-crm-basico:user:${USER_ID}`;",
+          )
+
+          marker = "async function seedContext(context: BrowserContext): Promise<void> {"
+          authority = r'''function syntheticMembership() {
+            return {
+              organization_id: ORG_ID,
+              member_id: 1,
+              user_id: USER_ID,
+              role: 'owner',
+              status: 'active',
+              display_name: owner().name,
+              email: owner().email,
+              phone: owner().phone,
+              created_at: '2026-08-09T12:00:00.000Z',
+              last_active_at: '2026-09-13T18:00:00.000Z',
+            };
+          }
+
+          function syntheticJson(body: unknown, status = 200) {
+            return {
+              status,
+              contentType: 'application/json',
+              headers: { 'access-control-allow-origin': '*' },
+              body: JSON.stringify(body),
+            };
+          }
+
+          async function installSyntheticAuthority(context: BrowserContext, origin: string): Promise<void> {
+            let syntheticRecords: unknown[] = [];
+
+            await context.route('**/api/cloud-config', async (route) => {
+              await route.fulfill(syntheticJson({
+                configured: true,
+                url: origin,
+                publishableKey: 'priority-webkit-publishable-key',
+              }));
+            });
+
+            await context.route('**/rest/v1/**', async (route) => {
+              const request = route.request();
+              const url = new URL(request.url());
+
+              if (request.method() === 'OPTIONS') {
+                await route.fulfill({
+                  status: 204,
+                  headers: {
+                    'access-control-allow-origin': '*',
+                    'access-control-allow-headers': '*',
+                    'access-control-allow-methods': 'GET,POST,DELETE,OPTIONS',
+                  },
+                  body: '',
+                });
+                return;
+              }
+
+              if (url.pathname.endsWith('/rest/v1/rpc/activate_my_organization_memberships')) {
+                await route.fulfill(syntheticJson({}));
+                return;
+              }
+
+              if (url.pathname.endsWith('/rest/v1/organization_members')) {
+                await route.fulfill(syntheticJson([syntheticMembership()]));
+                return;
+              }
+
+              if (url.pathname.endsWith('/rest/v1/rpc/visit_transaction_authority_active_v2')) {
+                await route.fulfill(syntheticJson(false));
+                return;
+              }
+
+              if (url.pathname.endsWith('/rest/v1/propcontrol_records')) {
+                if (request.method() === 'GET') {
+                  await route.fulfill(syntheticJson(syntheticRecords));
+                  return;
+                }
+                if (request.method() === 'POST') {
+                  const body = request.postDataJSON();
+                  syntheticRecords = Array.isArray(body) ? structuredClone(body) : [structuredClone(body)];
+                  await route.fulfill(syntheticJson(syntheticRecords, 201));
+                  return;
+                }
+                if (request.method() === 'DELETE') {
+                  syntheticRecords = [];
+                  await route.fulfill({ status: 204, headers: { 'access-control-allow-origin': '*' }, body: '' });
+                  return;
+                }
+              }
+
+              if (url.pathname.endsWith('/rest/v1/fichas')) {
+                await route.fulfill(syntheticJson([]));
+                return;
+              }
+
+              await route.fulfill(syntheticJson({ error: 'UNEXPECTED_SYNTHETIC_ENDPOINT', path: url.pathname }, 500));
+            });
+          }
+
+          '''
+          replace_once(marker, authority + marker)
+
+          replace_once(
+              "  await context.addInitScript(({ crm, identityStorageKey, storageKey }) => {",
+              "  await context.addInitScript(({ crm, generation, identityStorageKey, storageKey }) => {",
+          )
+          replace_once(
+              "      email: 'franco@propcontrol.test',\n    }));\n    localStorage.setItem(storageKey, JSON.stringify(crm));",
+              "      email: 'franco@propcontrol.test',\n      __propcontrolAuthGeneration: generation,\n    }));\n    localStorage.setItem('propcontrol-cloud-auth-generation-v1', generation);\n    localStorage.setItem(storageKey, JSON.stringify(crm));",
+          )
+          replace_once(
+              "  }, { crm: fixture(), identityStorageKey: identityKey, storageKey: STORAGE_KEY });",
+              "  }, { crm: fixture(), generation: GENERATION, identityStorageKey: identityKey, storageKey: STORAGE_KEY });",
+          )
+
+          replace_once(
+              "async function chromiumAndroidContext(browser: Browser, width: number): Promise<BrowserContext> {",
+              "async function chromiumAndroidContext(browser: Browser, width: number, origin: string): Promise<BrowserContext> {",
+          )
+          replace_once(
+              "  });\n  await seedContext(context);\n  return context;\n}\n\nasync function webkitContext(browser: Browser, width: number): Promise<BrowserContext> {",
+              "  });\n  await installSyntheticAuthority(context, origin);\n  await seedContext(context);\n  return context;\n}\n\nasync function webkitContext(browser: Browser, width: number, origin: string): Promise<BrowserContext> {",
+          )
+          replace_once(
+              "  });\n  await seedContext(context);\n  return context;\n}\n\nasync function load(page: Page, url: string): Promise<void> {",
+              "  });\n  await installSyntheticAuthority(context, origin);\n  await seedContext(context);\n  return context;\n}\n\nasync function load(page: Page, url: string): Promise<void> {",
+          )
+
+          replace_once(
+              "  const context = await webkitContext(browser, 375);",
+              "  const context = await webkitContext(browser, 375, `http://127.0.0.1:${port}`);",
+          )
+          replace_once(
+              "  const context = await chromiumAndroidContext(browser, 390);",
+              "  const context = await chromiumAndroidContext(browser, 390, `http://127.0.0.1:${port}`);",
+          )
+          replace_once(
+              "      const context = await webkitContext(browser, width);",
+              "      const context = await webkitContext(browser, width, `http://127.0.0.1:${port}`);",
+          )
+
+          path.write_text(text)
+          PY
+
+      - name: Prove one-path test-only scope before commit
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t paths < <(git diff --name-only)
+          test "${#paths[@]}" -eq 1
+          test "${paths[0]}" = "$TARGET"
+          test -z "$(git diff --name-only --cached)"
+          test -z "$(git ls-files --others --exclude-standard)"
+          echo "HARNESS_FIX_PATHS=1"
+          echo "HARNESS_FIX_ONLY_PATH=${paths[0]}"
+
+      - name: Commit exactly one test-only change
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -- "$TARGET"
+          git commit -m "TEST-ONLY: align WebKit fixture with A3.4 authority"
+          test "$(git rev-parse HEAD^)" = "$EXPECTED_PARENT"
+          mapfile -t paths < <(git diff-tree --no-commit-id --name-only -r HEAD)
+          test "${#paths[@]}" -eq 1
+          test "${paths[0]}" = "$TARGET"
+          echo "HARNESS_FIX_SHA=$(git rev-parse HEAD)"
+          echo "HARNESS_FIX_PARENT=$(git rev-parse HEAD^)"
+          echo "HARNESS_FIX_PATHS=1"
+
+      - name: Push only fast-forward harness commit to release branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git ls-remote origin "refs/heads/$RELEASE_BRANCH" | awk '{print $1}')" = "$EXPECTED_PARENT"
+          git push origin HEAD:"refs/heads/$RELEASE_BRANCH"
+          test "$(git ls-remote origin "refs/heads/$RELEASE_BRANCH" | awk '{print $1}')" = "$(git rev-parse HEAD)"
+          echo "FINAL_PUSHED_HARNESS_FIX_SHA=$(git rev-parse HEAD)"
