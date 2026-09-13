@@ -1,0 +1,151 @@
+name: Release A3.4 + WebKit-572 Reconcile
+
+on:
+  push:
+    branches: [validation/release-a34-webkit-572-actions]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  A34_BASE: 7bb3bdadbe34717cdc8f4d9a6646f8a0b47db1cc
+  HOTFIX_1: 90d07123d743eb390318b1998786417efebae0ef
+  HOTFIX_2: 2aa927f0f6ecde65cfcebba3deeb54b801b68de9
+  HOTFIX_3: a96347733c856e13039939d407d83fa49b88cf64
+  RELEASE_BRANCH: release/a34-webkit-572-reconciliation
+  A34_BRANCH: agent/sec-fix-a3-4-hydration-auth-fence
+
+jobs:
+  reconcile:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Checkout validation infrastructure
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Prove immutable base and branch preconditions
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD^)" = "$A34_BASE"
+          test "$(git ls-remote origin "refs/heads/$A34_BRANCH" | awk '{print $1}')" = "$A34_BASE"
+          test -z "$(git ls-remote origin "refs/heads/$RELEASE_BRANCH")"
+          git cat-file -e "$A34_BASE^{commit}"
+          git cat-file -e "$HOTFIX_1^{commit}"
+          git cat-file -e "$HOTFIX_2^{commit}"
+          git cat-file -e "$HOTFIX_3^{commit}"
+          echo "RELEASE_BASE_EXACT=PASS"
+          echo "A34_ORIGINAL_BRANCH_IMMUTABLE=PASS"
+
+      - name: Cherry-pick exact hotfix chain with provenance
+        id: reconcile
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout --detach "$A34_BASE"
+          test "$(git rev-parse HEAD)" = "$A34_BASE"
+          git switch -c "$RELEASE_BRANCH"
+          test "$(git rev-parse HEAD)" = "$A34_BASE"
+
+          pick() {
+            local source="$1"
+            set +e
+            git cherry-pick -x "$source"
+            local rc=$?
+            set -e
+            if [ "$rc" -ne 0 ]; then
+              echo "CHERRY_PICK_CONFLICT=YES"
+              echo "SOURCE_COMMIT=$source"
+              git status --short || true
+              git diff --name-only --diff-filter=U || true
+              exit "$rc"
+            fi
+          }
+
+          pick "$HOTFIX_1"
+          c1="$(git rev-parse HEAD)"
+          echo "RELEASE_COMMIT_1=$c1"
+          pick "$HOTFIX_2"
+          c2="$(git rev-parse HEAD)"
+          echo "RELEASE_COMMIT_2=$c2"
+          pick "$HOTFIX_3"
+          c3="$(git rev-parse HEAD)"
+          echo "RELEASE_COMMIT_3=$c3"
+          echo "RELEASE_CANDIDATE_SHA=$c3"
+
+          test "$(git rev-list --count "$A34_BASE..HEAD")" = "3"
+          test "$(git rev-parse HEAD^^^)" = "$A34_BASE"
+          git log -3 --format='%B' > "$RUNNER_TEMP/release-messages.txt"
+          grep -F "(cherry picked from commit $HOTFIX_1)" "$RUNNER_TEMP/release-messages.txt"
+          grep -F "(cherry picked from commit $HOTFIX_2)" "$RUNNER_TEMP/release-messages.txt"
+          grep -F "(cherry picked from commit $HOTFIX_3)" "$RUNNER_TEMP/release-messages.txt"
+          echo "PROVENANCE_X=PASS"
+
+          echo "commit1=$c1" >> "$GITHUB_OUTPUT"
+          echo "commit2=$c2" >> "$GITHUB_OUTPUT"
+          echo "commit3=$c3" >> "$GITHUB_OUTPUT"
+          echo "release_sha=$c3" >> "$GITHUB_OUTPUT"
+
+      - name: Exact six-path reconciliation delta gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          expected="$RUNNER_TEMP/expected.txt"
+          actual="$RUNNER_TEMP/actual.txt"
+          cat > "$expected" <<'EOF'
+          index.html
+          src/leads-mobile-priority-ux.ts
+          src/leads-professional-redesign.ts
+          src/tests/leads-desktop-zero-training.test.ts
+          src/tests/leads-mobile-priority-webkit.test.ts
+          src/tests/leads-professional-redesign.test.ts
+          EOF
+          sed -i 's/^          //' "$expected"
+          sort -o "$expected" "$expected"
+          git diff --name-only "$A34_BASE..HEAD" | sort > "$actual"
+          diff -u "$expected" "$actual"
+          test "$(wc -l < "$actual" | tr -d ' ')" = "6"
+
+          numstat="$RUNNER_TEMP/numstat.txt"
+          git diff --numstat "$A34_BASE..HEAD" > "$numstat"
+          grep -Fx $'2\t2\tindex.html' "$numstat"
+          grep -Fx $'2\t0\tsrc/leads-mobile-priority-ux.ts' "$numstat"
+          grep -Fx $'3\t1\tsrc/leads-professional-redesign.ts' "$numstat"
+          grep -Fx $'1\t1\tsrc/tests/leads-desktop-zero-training.test.ts' "$numstat"
+          grep -Fx $'65\t1\tsrc/tests/leads-mobile-priority-webkit.test.ts' "$numstat"
+          grep -Fx $'1\t1\tsrc/tests/leads-professional-redesign.test.ts' "$numstat"
+
+          test -z "$(git diff --name-only "$A34_BASE..HEAD" -- src/membership-catalog.ts src/mvp-main.ts src/tenant-cloud-context.ts src/tenant-hydration.ts src/tests/sec-fix-a3-4-pre-runtime-hydration-authority.test.ts)"
+          test -z "$(git diff --name-only "$A34_BASE..HEAD" -- '*.sql')"
+          test -z "$(git diff --name-only "$A34_BASE..HEAD" -- 'supabase/migrations/**')"
+          test -z "$(git diff --name-only "$A34_BASE..HEAD" -- 'supabase/baselines/**')"
+          test -z "$(git diff --name-only "$A34_BASE..HEAD" -- '.github/workflows/**')"
+
+          echo "EXPECTED_FINAL_DELTA=6 PATHS"
+          echo "A3.4_PATH_DELTA_FROM_RECONCILIATION=0"
+          echo "SQL_DELTA=0"
+          echo "MIGRATIONS_DELTA=0"
+          echo "BASELINE_DELTA=0"
+          echo "PRODUCTIVE_WORKFLOW_DELTA=0"
+          echo "UNRELATED_DELTA=0"
+
+      - name: Push release branch only
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -z "$(git ls-remote origin "refs/heads/$RELEASE_BRANCH")"
+          git push origin "HEAD:refs/heads/$RELEASE_BRANCH"
+          test "$(git ls-remote origin "refs/heads/$RELEASE_BRANCH" | awk '{print $1}')" = "$(git rev-parse HEAD)"
+          test "$(git ls-remote origin "refs/heads/$A34_BRANCH" | awk '{print $1}')" = "$A34_BASE"
+          echo "RELEASE_BRANCH_CREATED=PASS"
+          echo "A34_ORIGINAL_BRANCH_UNMOVED=PASS"
+          echo "MERGE=NO"
+          echo "MAIN=UNTOUCHED_BY_THIS_WORKFLOW"
+          echo "DEPLOY=NO"
+          echo "SUPABASE=UNTOUCHED"
+          echo "RAILWAY=UNTOUCHED"
