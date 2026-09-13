@@ -1,0 +1,30 @@
+name: A3.4 Runtime Targeted Validation
+
+on:
+  push:
+    branches: [validation/a34-runtime-targeted]
+
+jobs:
+  targeted:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - name: Install dependencies
+        run: npm ci --silent
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+      - name: Build
+        run: npm run build --silent
+      - name: A3.4 R1-R12
+        run: node --test --test-concurrency=1 dist/tests/sec-fix-a3-4-pre-runtime-hydration-authority.test.js
+      - name: Auth generation regressions
+        run: node --test --test-concurrency=1 dist/tests/sec-fix-a1-fdr02-cross-tab-auth-generation.test.js dist/tests/sec-fix-a1-dr04-auth-refresh-epoch.test.js
+      - name: Tenant hydration and storage regressions
+        run: node --test --test-concurrency=1 dist/tests/sec-fix-a1-2-c1-tenant-hydration.test.js dist/tests/sec-fix-a1-2-b-tenant-storage.test.js dist/tests/sec-fix-a1-2-b-2-tenant-storage-boundary.test.js dist/tests/sec-fix-a1-2-c2-tenant-async.test.js dist/tests/sec-fix-a1-2-c3-stale-async.test.js
+      - name: Membership and active organization regressions
+        run: node --test --test-concurrency=1 dist/tests/sec-fix-a1-2-a-active-organization.test.js dist/tests/sec-fix-a2-1-canonical-membership-status.test.js dist/tests/sec-fix-a2-2-active-only-membership-authority.test.js
