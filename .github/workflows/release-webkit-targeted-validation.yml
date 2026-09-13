@@ -13,10 +13,10 @@ permissions:
 env:
   RELEASE_BRANCH: release/a34-webkit-572-reconciliation
   VALIDATION_BRANCH: validation/release-webkit-authority-characterization
-  BASE_SHA: 452a17276f663353f57a54312533c675a178c599
+  BASE_SHA: 159a5146edfb295b74a674c922cc1bac91c242e7
 
 jobs:
-  align-and-targeted-validate:
+  roster-fix-targeted-validate:
     runs-on: ubuntu-24.04
     timeout-minutes: 90
     steps:
@@ -38,18 +38,16 @@ jobs:
           test -z "$(git status --porcelain --untracked-files=normal)"
           echo "BASE_RELEASE_SHA=$BASE_SHA"
 
-      - name: Apply auditable two-path harness alignment
+      - name: Apply one-path Desktop roster alignment
         shell: bash
         run: |
           set -euo pipefail
-          git show "origin/$VALIDATION_BRANCH:.github/validation/align-leads-browser-a34.py" > "$RUNNER_TEMP/align-leads-browser-a34.py"
-          python "$RUNNER_TEMP/align-leads-browser-a34.py"
+          git show "origin/$VALIDATION_BRANCH:.github/validation/align-leads-browser-a34.py" > "$RUNNER_TEMP/fix-desktop-roster-a34.py"
+          python "$RUNNER_TEMP/fix-desktop-roster-a34.py"
           mapfile -t paths < <(git diff --name-only)
-          test "${#paths[@]}" -eq 2
+          test "${#paths[@]}" -eq 1
           test "${paths[0]}" = "src/tests/leads-desktop-zero-training.test.ts"
-          test "${paths[1]}" = "src/tests/leads-professional-redesign.test.ts"
-          test -z "$(git diff --name-only | grep -Ev '^src/tests/(leads-desktop-zero-training|leads-professional-redesign)\.test\.ts$' || true)"
-          echo "HARNESS_ALIGNMENT_PATHS=2"
+          echo "FIX_PATHS=1"
           echo "RUNTIME_PATHS=0"
 
       - uses: actions/setup-node@v7
@@ -64,46 +62,43 @@ jobs:
           npm ci --silent
           npm run build --silent
           mapfile -t paths < <(git diff --name-only)
-          test "${#paths[@]}" -eq 2
+          test "${#paths[@]}" -eq 1
           test "${paths[0]}" = "src/tests/leads-desktop-zero-training.test.ts"
-          test "${paths[1]}" = "src/tests/leads-professional-redesign.test.ts"
 
-      - name: Create exactly one TEST-ONLY release commit
+      - name: Create exactly one TEST-ONLY roster commit
         shell: bash
         run: |
           set -euo pipefail
           test "$(git ls-remote origin "refs/heads/$RELEASE_BRANCH" | awk '{print $1}')" = "$BASE_SHA"
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add src/tests/leads-desktop-zero-training.test.ts src/tests/leads-professional-redesign.test.ts
+          git add src/tests/leads-desktop-zero-training.test.ts
           mapfile -t staged < <(git diff --cached --name-only)
-          test "${#staged[@]}" -eq 2
+          test "${#staged[@]}" -eq 1
           test "${staged[0]}" = "src/tests/leads-desktop-zero-training.test.ts"
-          test "${staged[1]}" = "src/tests/leads-professional-redesign.test.ts"
-          git commit -m 'TEST-ONLY: align Leads browser fixtures with A3.4 authority'
+          git commit -m 'TEST-ONLY: preserve multi-member roster in Desktop authority fixture'
           NEW_SHA="$(git rev-parse HEAD)"
           test "$(git rev-parse HEAD^)" = "$BASE_SHA"
           mapfile -t committed < <(git diff-tree --no-commit-id --name-only -r HEAD)
-          test "${#committed[@]}" -eq 2
+          test "${#committed[@]}" -eq 1
           test "${committed[0]}" = "src/tests/leads-desktop-zero-training.test.ts"
-          test "${committed[1]}" = "src/tests/leads-professional-redesign.test.ts"
           git push origin "HEAD:refs/heads/$RELEASE_BRANCH"
           test "$(git ls-remote origin "refs/heads/$RELEASE_BRANCH" | awk '{print $1}')" = "$NEW_SHA"
-          echo "FINAL_RELEASE_SHA=$NEW_SHA" | tee -a "$GITHUB_ENV"
-          echo "HARNESS_ALIGNMENT_PATHS=2"
+          echo "NEW_RELEASE_SHA=$NEW_SHA" | tee -a "$GITHUB_ENV"
+          echo "FIX_PATHS=1"
           echo "RUNTIME_PATHS=0"
 
       - name: Checkout new exact release detached
         shell: bash
         run: |
           set -euo pipefail
-          git checkout --detach "$FINAL_RELEASE_SHA"
-          test "$(git rev-parse HEAD)" = "$FINAL_RELEASE_SHA"
+          git checkout --detach "$NEW_RELEASE_SHA"
+          test "$(git rev-parse HEAD)" = "$NEW_RELEASE_SHA"
           test "$(git rev-parse HEAD^)" = "$BASE_SHA"
-          test "$(git ls-remote origin "refs/heads/$RELEASE_BRANCH" | awk '{print $1}')" = "$FINAL_RELEASE_SHA"
+          test "$(git ls-remote origin "refs/heads/$RELEASE_BRANCH" | awk '{print $1}')" = "$NEW_RELEASE_SHA"
           git diff --exit-code
           git diff --cached --exit-code
-          echo "EXECUTION_SHA=$FINAL_RELEASE_SHA"
+          echo "EXECUTION_SHA=$NEW_RELEASE_SHA"
 
       - name: Provision Playwright WebKit
         run: npx playwright install --with-deps webkit
@@ -151,9 +146,14 @@ jobs:
           grep -Eq '^ok [0-9]+ - PR143 cache bust: todo runtime modificado cambia URL servida$' "$log"
           grep -Eq '^ok [0-9]+ - rediseño de Leads permanece aislado de la lógica comercial aprobada$' "$log"
           grep -Eq '^ok [0-9]+ - rediseño profesional valida desktop, laptop, tablet, Motorola y teclado reducido$' "$log"
-          echo "CACHE_BUST_SPECIFIC_ASSERTION=PASS"
+          grep -Fq 'PR143_ASSIGNEE_OPTIONS=' "$log"
+          grep -F 'PR143_ASSIGNEE_OPTIONS=' "$log" | grep -Fq '"value":"1"'
+          grep -F 'PR143_ASSIGNEE_OPTIONS=' "$log" | grep -Fq '"value":"2"'
           echo "DESKTOP_ZERO_TRAINING_CHROMIUM=PASS"
           echo "DESKTOP_ZERO_TRAINING_WEBKIT=PASS"
+          echo "ASSIGNEE_FILTER_PRESENT=PASS"
+          echo "ASSIGNEE_OPTIONS_INCLUDE_MEMBER_1_AND_2=PASS"
+          echo "CACHE_BUST_SPECIFIC_ASSERTION=PASS"
           echo "PROFESSIONAL_REDESIGN_ISOLATION=PASS"
           echo "PROFESSIONAL_REDESIGN_RESPONSIVE=PASS"
           echo "LEADS_DESKTOP_AND_REDESIGN=5/5 PASS"
@@ -162,18 +162,17 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test "$(git rev-parse HEAD)" = "$FINAL_RELEASE_SHA"
-          test "$(git ls-remote origin "refs/heads/$RELEASE_BRANCH" | awk '{print $1}')" = "$FINAL_RELEASE_SHA"
+          test "$(git rev-parse HEAD)" = "$NEW_RELEASE_SHA"
+          test "$(git ls-remote origin "refs/heads/$RELEASE_BRANCH" | awk '{print $1}')" = "$NEW_RELEASE_SHA"
           test "$(git rev-parse HEAD^)" = "$BASE_SHA"
           mapfile -t paths < <(git diff-tree --no-commit-id --name-only -r HEAD)
-          test "${#paths[@]}" -eq 2
+          test "${#paths[@]}" -eq 1
           test "${paths[0]}" = "src/tests/leads-desktop-zero-training.test.ts"
-          test "${paths[1]}" = "src/tests/leads-professional-redesign.test.ts"
           git diff --quiet
           git diff --cached --quiet
-          echo "TARGETED_HARNESS_ALIGNMENT=GREEN"
-          echo "FINAL_RELEASE_SHA=$FINAL_RELEASE_SHA"
-          echo "HARNESS_ALIGNMENT_PATHS=2"
+          echo "TARGETED_ROSTER_ALIGNMENT=GREEN"
+          echo "NEW_RELEASE_SHA=$NEW_RELEASE_SHA"
+          echo "FIX_PATHS=1"
           echo "RUNTIME_PATHS=0"
           echo "TRACKED_DIFF=EMPTY"
           echo "CACHED_DIFF=EMPTY"
