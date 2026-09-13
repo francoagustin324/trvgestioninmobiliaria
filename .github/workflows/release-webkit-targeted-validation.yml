@@ -1,0 +1,137 @@
+name: Release WebKit Targeted Validation
+
+on:
+  push:
+    branches:
+      - validation/release-webkit-authority-characterization
+    paths:
+      - .github/workflows/release-webkit-targeted-validation.yml
+
+permissions:
+  contents: read
+
+env:
+  RELEASE_BRANCH: release/a34-webkit-572-reconciliation
+  RELEASE_SHA: 452a17276f663353f57a54312533c675a178c599
+  HARNESS_PARENT: a5bfaedc0a51f856c8dda08d74b1bab397bc9660
+
+jobs:
+  targeted-causal-validation:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - name: Checkout exact release detached
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ env.RELEASE_SHA }}
+          fetch-depth: 0
+
+      - name: Prove exact release and one-path harness commit
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$RELEASE_SHA"
+          test "$(git rev-parse HEAD^)" = "$HARNESS_PARENT"
+          test "$(git ls-remote origin "refs/heads/$RELEASE_BRANCH" | awk '{print $1}')" = "$RELEASE_SHA"
+          if git symbolic-ref -q HEAD >/dev/null 2>&1; then exit 1; fi
+          mapfile -t paths < <(git diff-tree --no-commit-id --name-only -r HEAD)
+          test "${#paths[@]}" -eq 1
+          test "${paths[0]}" = "src/tests/leads-mobile-priority-webkit.test.ts"
+          git diff --exit-code
+          git diff --cached --exit-code
+          test -z "$(git status --porcelain --untracked-files=normal)"
+          echo "HARNESS_FIX_PATHS=1"
+          echo "HARNESS_FIX_PARENT=$HARNESS_PARENT"
+          echo "EXECUTION_SHA=$RELEASE_SHA"
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: npm ci
+        run: npm ci --silent
+
+      - name: Provision Playwright WebKit
+        run: npx playwright install --with-deps webkit
+
+      - name: Browser prerequisite for Chromium contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          if command -v google-chrome >/dev/null 2>&1; then google-chrome --version; exit 0; fi
+          if command -v google-chrome-stable >/dev/null 2>&1; then google-chrome-stable --version; exit 0; fi
+          if command -v chromium >/dev/null 2>&1; then chromium --version; exit 0; fi
+          if command -v chromium-browser >/dev/null 2>&1; then chromium-browser --version; exit 0; fi
+          exit 1
+
+      - name: Build exact release
+        run: npm run build --silent
+
+      - name: WebKit 572 full historical contract 4 of 4
+        shell: bash
+        run: |
+          set -euo pipefail
+          log="$RUNNER_TEMP/webkit-572.tap"
+          node --test --test-concurrency=1 dist/tests/leads-mobile-priority-webkit.test.js | tee "$log"
+          grep -Eq '^# tests 4$' "$log"
+          grep -Eq '^# pass 4$' "$log"
+          grep -Eq '^# fail 0$' "$log"
+          grep -Eq '^ok [0-9]+ - WebKit regression #572:' "$log"
+          grep -Eq '^ok [0-9]+ - Chromium: prioridad accionable' "$log"
+          grep -Eq '^ok [0-9]+ - WebKit automatizado:' "$log"
+          echo "TOTAL=4"
+          echo "PASS=4"
+          echo "FAIL=0"
+          echo "WEBKIT_572_ASSERTIONS_REACHED=YES"
+          echo "WEBKIT_572=PASS"
+          echo "CHROMIUM=PASS"
+          echo "WEBKIT_RESPONSIVE=PASS"
+
+      - name: Cache-bust contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --test --test-concurrency=1 \
+            dist/tests/leads-desktop-zero-training.test.js \
+            dist/tests/leads-professional-redesign.test.js
+          echo "CACHE_BUST=PASS"
+
+      - name: A3.4 R1-R12 exact contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          log="$RUNNER_TEMP/a34.tap"
+          node --test --test-concurrency=1 dist/tests/sec-fix-a3-4-pre-runtime-hydration-authority.test.js | tee "$log"
+          grep -Eq '^# tests 12$' "$log"
+          grep -Eq '^# pass 12$' "$log"
+          grep -Eq '^# fail 0$' "$log"
+          echo "A34_R1_R12=12/12 PASS"
+
+      - name: R11 release stability in 10 fresh independent Node processes
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/r11-release"
+          for n in $(seq 1 10); do
+            log="$RUNNER_TEMP/r11-release/replay-${n}.tap"
+            node --test --test-concurrency=1 dist/tests/sec-fix-a3-4-pre-runtime-hydration-authority.test.js >"$log" 2>&1
+            grep -Eq '^# tests 12$' "$log"
+            grep -Eq '^# pass 12$' "$log"
+            grep -Eq '^# fail 0$' "$log"
+            grep -Eq '^ok [0-9]+ - A3\.4 R11:' "$log"
+            echo "R11_RELEASE_REPLAY_${n}=PASS"
+          done
+          echo "R11_RELEASE_STABILITY=10/10 PASS"
+
+      - name: Final targeted integrity
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$RELEASE_SHA"
+          test "$(git ls-remote origin "refs/heads/$RELEASE_BRANCH" | awk '{print $1}')" = "$RELEASE_SHA"
+          git diff --quiet
+          git diff --cached --quiet
+          echo "TARGETED_CAUSAL_VALIDATION=GREEN"
+          echo "TRACKED_DIFF=EMPTY"
+          echo "CACHED_DIFF=EMPTY"
