@@ -1,0 +1,370 @@
+name: A3.4 Final Acceptance Phases 1-2
+
+on:
+  push:
+    branches: [validation/a34-final-acceptance]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: a34-final-acceptance-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CANDIDATE: 7bb3bdadbe34717cdc8f4d9a6646f8a0b47db1cc
+  REPRODUCER: 8fcf454f9ebbc600f205c4494a85fb73db73d1f8
+  BASE: 6fbea368b5d0e80d36c0f8171f26be495798f904
+
+jobs:
+  phase1-r11-original-contract-stability:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - name: Checkout validation-only infrastructure
+        uses: actions/checkout@v7
+        with:
+          path: infra
+          fetch-depth: 0
+
+      - name: Checkout exact candidate detached
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ env.CANDIDATE }}
+          path: candidate
+          fetch-depth: 0
+
+      - name: Assert exact candidate and initial cleanliness
+        working-directory: candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$CANDIDATE"
+          test "$(git rev-parse HEAD^)" = "$REPRODUCER"
+          test "$(git rev-parse HEAD^^)" = "$BASE"
+          git diff --quiet
+          git diff --cached --quiet
+          test -z "$(git status --porcelain --untracked-files=normal)"
+          echo "HEAD=$(git rev-parse HEAD)"
+          echo "TRACKED_DIFF=EMPTY"
+          echo "CACHED_DIFF=EMPTY"
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: candidate/package-lock.json
+
+      - name: Install dependencies
+        working-directory: candidate
+        run: npm ci --silent
+
+      - name: Browser prerequisite
+        shell: bash
+        run: |
+          set -euo pipefail
+          if command -v google-chrome >/dev/null 2>&1; then google-chrome --version; exit 0; fi
+          if command -v google-chrome-stable >/dev/null 2>&1; then google-chrome-stable --version; exit 0; fi
+          if command -v chromium >/dev/null 2>&1; then chromium --version; exit 0; fi
+          if command -v chromium-browser >/dev/null 2>&1; then chromium-browser --version; exit 0; fi
+          echo "No supported browser executable available."
+          exit 1
+
+      - name: Build exact candidate
+        working-directory: candidate
+        run: npm run build --silent
+
+      - name: Replay original A3.4 contract in 10 fresh Node processes
+        working-directory: candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/a34-r11-replays"
+          for n in $(seq 1 10); do
+            log="$RUNNER_TEMP/a34-r11-replays/replay-${n}.tap"
+            set +e
+            node --test --test-concurrency=1 dist/tests/sec-fix-a3-4-pre-runtime-hydration-authority.test.js >"$log" 2>&1
+            rc=$?
+            set -e
+
+            total="$(grep -E '^# tests [0-9]+' "$log" | tail -1 | awk '{print $3}')"
+            pass="$(grep -E '^# pass [0-9]+' "$log" | tail -1 | awk '{print $3}')"
+            fail="$(grep -E '^# fail [0-9]+' "$log" | tail -1 | awk '{print $3}')"
+            total="${total:-unknown}"
+            pass="${pass:-unknown}"
+            fail="${fail:-unknown}"
+            if grep -Eq '^ok [0-9]+ - A3\.4 R11:' "$log"; then
+              r11=PASS
+            elif grep -Eq '^not ok [0-9]+ - A3\.4 R11:' "$log"; then
+              r11=FAIL
+            else
+              r11=UNKNOWN
+            fi
+            echo "REPLAY=$n TOTAL=$total PASS=$pass FAIL=$fail R11=$r11"
+
+            if [ "$rc" -ne 0 ] || [ "$fail" != "0" ] || [ "$r11" != "PASS" ]; then
+              echo "R11_ORIGINAL_CONTRACT_STABILITY=FAIL"
+              echo "FIRST_RED_REPLAY=$n"
+              echo "----- ORIGINAL CONTRACT TAP -----"
+              cat "$log"
+              echo "----- VALIDATION-ONLY R11 DIAGNOSTIC -----"
+              mkdir -p node_modules/.cache
+              sed 's/const ITERATIONS = 10;/const ITERATIONS = 1;/' ../infra/.github/validation/a34-r11-characterization.mjs > node_modules/.cache/a34-r11-single-diagnostic.mjs
+              set +e
+              node node_modules/.cache/a34-r11-single-diagnostic.mjs 2>&1 | tee "$RUNNER_TEMP/a34-r11-replays/diagnostic.log"
+              diagnostic_rc=${PIPESTATUS[0]}
+              set -e
+              echo "DIAGNOSTIC_RC=$diagnostic_rc"
+              exit 1
+            fi
+          done
+          echo "R11_ORIGINAL_CONTRACT_STABILITY=10/10 PASS"
+          echo "R11_HISTORICAL_RED=NON-REPRODUCED VALIDATION ANOMALY / CAUSE UNRESOLVED"
+
+      - name: Upload Phase 1 evidence on red
+        if: failure()
+        uses: actions/upload-artifact@v6
+        with:
+          name: a34-phase1-r11-red-evidence
+          path: |
+            ${{ runner.temp }}/a34-r11-replays
+            candidate/artifacts/a34-r11-characterization.json
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Assert candidate tracked state unchanged after Phase 1
+        if: success()
+        working-directory: candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$CANDIDATE"
+          git diff --quiet
+          git diff --cached --quiet
+          echo "PHASE1_FINAL_SHA=$(git rev-parse HEAD)"
+          echo "PHASE1_TRACKED_DIFF=EMPTY"
+          echo "PHASE1_CACHED_DIFF=EMPTY"
+
+  phase2-full-a34-acceptance-regression:
+    needs: phase1-r11-original-contract-stability
+    runs-on: ubuntu-24.04
+    timeout-minutes: 70
+    steps:
+      - name: Checkout exact candidate detached fresh
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ env.CANDIDATE }}
+          fetch-depth: 0
+
+      - name: Assert exact candidate lineage and clean checkout
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$CANDIDATE"
+          test "$(git rev-parse HEAD^)" = "$REPRODUCER"
+          test "$(git rev-parse HEAD^^)" = "$BASE"
+          git diff --quiet
+          git diff --cached --quiet
+          test -z "$(git status --porcelain --untracked-files=normal)"
+          echo "PHASE2_INITIAL_CLEAN=PASS"
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci --silent
+
+      - name: Browser prerequisite
+        shell: bash
+        run: |
+          set -euo pipefail
+          if command -v google-chrome >/dev/null 2>&1; then google-chrome --version; exit 0; fi
+          if command -v google-chrome-stable >/dev/null 2>&1; then google-chrome-stable --version; exit 0; fi
+          if command -v chromium >/dev/null 2>&1; then chromium --version; exit 0; fi
+          if command -v chromium-browser >/dev/null 2>&1; then chromium-browser --version; exit 0; fi
+          exit 1
+
+      - name: 1 Build exact candidate
+        run: npm run build --silent
+
+      - name: 2 A3.4 R1-R12
+        run: node --test --test-concurrency=1 dist/tests/sec-fix-a3-4-pre-runtime-hydration-authority.test.js
+
+      - name: 3 Auth session generation regressions
+        run: >-
+          node --test --test-concurrency=1
+          dist/tests/sec-fix-a1-fdr02-cross-tab-auth-generation.test.js
+          dist/tests/sec-fix-a1-dr04-auth-refresh-epoch.test.js
+
+      - name: 4 Tenant hydration storage regressions
+        run: >-
+          node --test --test-concurrency=1
+          dist/tests/sec-fix-a1-2-c1-tenant-hydration.test.js
+          dist/tests/sec-fix-a1-2-b-tenant-storage.test.js
+          dist/tests/sec-fix-a1-2-b-2-tenant-storage-boundary.test.js
+          dist/tests/sec-fix-a1-2-c2-tenant-async.test.js
+          dist/tests/sec-fix-a1-2-c3-stale-async.test.js
+
+      - name: 5 Membership catalog active organization regressions
+        run: >-
+          node --test --test-concurrency=1
+          dist/tests/sec-fix-a1-2-a-active-organization.test.js
+          dist/tests/sec-fix-a2-1-canonical-membership-status.test.js
+          dist/tests/sec-fix-a2-2-active-only-membership-authority.test.js
+
+      - name: 6 Tenant cloud context data regressions
+        run: >-
+          node --test --test-concurrency=1
+          dist/tests/cloud-api-compatible.test.js
+          dist/tests/cloud-records.test.js
+          dist/tests/cloud-save-serial.test.js
+          dist/tests/sec-fix-a1-dr02-cloud-writer-lease.test.js
+          dist/tests/sec-fix-a1-dr03-stale-sync-metadata.test.js
+
+      - name: 7 A3.1 complete regression
+        run: >-
+          node --test --test-concurrency=1
+          dist/tests/sec-fix-a3-1-lead-explicit-tenant-write-identity.test.js
+          dist/tests/sec-fix-a3-1-lead-real-app.test.js
+
+      - name: 8a A3.2 specific regression
+        run: >-
+          node --test --test-concurrency=1
+          dist/tests/sec-fix-a3-2-authenticated-write-identity.test.js
+          dist/tests/sec-fix-a3-2-runtime-wiring.test.js
+          dist/tests/sec-fix-a3-2-whatsapp-bootstrap-regression.test.js
+
+      - name: 8b A3.2 Properties regression
+        run: >-
+          node --test --test-concurrency=1
+          dist/tests/mvp-properties-ui.test.js
+          dist/tests/property-photo-upload-compat.test.js
+          dist/tests/property-photo-direct-upload.test.js
+          dist/tests/property-photo-storage.test.js
+          dist/tests/property-photo-ux.test.js
+          dist/tests/public-property-share.test.js
+          dist/tests/p1-4-a2-2-properties-actions-ux.test.js
+
+      - name: 8c A3.2 Agenda regression
+        run: >-
+          node --test --test-concurrency=1
+          dist/tests/agenda-related-ui.test.js
+          dist/tests/agenda-workflow.test.js
+          dist/tests/agenda.test.js
+
+      - name: 8d A3.2 Offers regression
+        run: >-
+          node --test --test-concurrency=1
+          dist/tests/p1-1-a3-offer-foundation.test.js
+          dist/tests/p1-1-a4-offer-workflow.test.js
+
+      - name: 8e A3.2 Reservations regression
+        run: >-
+          node --test --test-concurrency=1
+          dist/tests/p1-1-a5-reservation-foundation.test.js
+          dist/tests/p1-1-a6-reservation-workflow.test.js
+
+      - name: 8f A3.2 Qualification Reactivation regression
+        run: >-
+          node --test --test-concurrency=1
+          dist/tests/b1-2-lead-qualification.test.js
+          dist/tests/b1-2-1-essential-qualification.test.js
+          dist/tests/p1-3-a1-source-reactivation.test.js
+
+      - name: 8g A3.2 Follow-up regression
+        run: >-
+          node --test --test-concurrency=1
+          dist/tests/followup-cloud-persistence.test.js
+          dist/tests/followup-hotfix.test.js
+
+      - name: 8h A3.2 WhatsApp identity contact regression
+        run: >-
+          node --test --test-concurrency=1
+          dist/tests/b1-3-whatsapp-architecture.test.js
+          dist/tests/b1-3-whatsapp-contact.test.js
+          dist/tests/b1-3-whatsapp-contact-real-app.test.js
+
+      - name: 8i A3.2 Team regression
+        run: >-
+          node --test --test-concurrency=1
+          dist/tests/team-management.test.js
+          dist/tests/team-policy.test.js
+          dist/tests/sec-fix-a1-2-e-team-tenant-authority.test.js
+
+      - name: 8j A3.2 Tenant runtime storage regression
+        run: >-
+          node --test --test-concurrency=1
+          dist/tests/sec-fix-a1-2-a-active-organization.test.js
+          dist/tests/sec-fix-a1-2-b-tenant-storage.test.js
+          dist/tests/sec-fix-a1-2-b-2-tenant-storage-boundary.test.js
+          dist/tests/sec-fix-a1-2-c2-tenant-async.test.js
+          dist/tests/sec-fix-a1-2-c3-stale-async.test.js
+
+      - name: 8k A3.2 Cloud save generation lease regression
+        run: >-
+          node --test --test-concurrency=1
+          dist/tests/cloud-save-serial.test.js
+          dist/tests/sec-fix-a1-2-c2-job-freeze.test.js
+          dist/tests/sec-fix-a1-dr02-cloud-writer-lease.test.js
+          dist/tests/sec-fix-a1-dr03-stale-sync-metadata.test.js
+
+      - name: 8l A3.2 Visit cutover regression
+        run: >-
+          node --test --test-concurrency=1
+          dist/tests/p1-1-a2-visit-workflow.test.js
+          dist/tests/p1-1-a7-r2-2c-visit-transaction-cutover.test.js
+          dist/tests/sec-fix-a1-2-d-org-aware-visit-cutover.test.js
+
+      - name: 8m A3.2 A2 targeted regression
+        run: >-
+          node --test --test-concurrency=1
+          dist/tests/sec-fix-a2-1-canonical-membership-status.test.js
+          dist/tests/sec-fix-a2-2-active-only-membership-authority.test.js
+          dist/tests/sec-fix-a2-3-minimal-acl-hardening.test.js
+          dist/tests/sec-fix-a2-4-org-aware-rpc-v2-alignment.test.js
+
+      - name: 9 A3.3 Gate A exact 113
+        shell: bash
+        run: |
+          set -euo pipefail
+          log="$RUNNER_TEMP/a33-gate-a.tap"
+          node --test --test-concurrency=1 \
+            dist/tests/sec-fix-a3-3-recommendation-telemetry-tenant-authority.test.js \
+            dist/tests/b1-4-2-supervised-recommendation-instrumentation.test.js \
+            dist/tests/b1-4-2-r3-recommendation-lifecycle.test.js \
+            dist/tests/b1-4-2-r4-exactly-once-coalescing.test.js \
+            dist/tests/b1-4-2-r5-canonical-telemetry.test.js | tee "$log"
+          grep -Eq '^# tests 113$' "$log"
+          grep -Eq '^# pass 113$' "$log"
+          grep -Eq '^# fail 0$' "$log"
+          echo "A33_GATE_A=113/113 PASS"
+
+      - name: 10 A3.3 static firewall
+        run: node --test --test-concurrency=1 dist/tests/sec-fix-a3-3-anti-bypass-static-guards.test.js
+
+      - name: 11a Gate B MVP
+        run: node --test --test-concurrency=1 dist/tests/mvp-scope.test.js
+
+      - name: 11b Gate B A1.2-E
+        run: node --test --test-concurrency=1 dist/tests/sec-fix-a1-2-e-team-tenant-authority.test.js
+
+      - name: 11c Gate B Team regression
+        run: >-
+          node --test --test-concurrency=1
+          dist/tests/team-management.test.js
+          dist/tests/team-policy.test.js
+          dist/tests/sec-fix-a1-2-e-team-tenant-authority.test.js
+
+      - name: Final Phase 2 exact SHA and tracked cleanliness
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$CANDIDATE"
+          git diff --quiet
+          git diff --cached --quiet
+          echo "FULL_A34_ACCEPTANCE_REGRESSION=GREEN"
+          echo "PHASE2_FINAL_SHA=$(git rev-parse HEAD)"
+          echo "PHASE2_TRACKED_DIFF=EMPTY"
+          echo "PHASE2_CACHED_DIFF=EMPTY"
