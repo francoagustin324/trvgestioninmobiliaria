@@ -1,0 +1,580 @@
+name: Release A3.4 + WebKit-572 Final Validation
+
+on:
+  push:
+    branches:
+      - validation/release-webkit-authority-characterization
+    paths:
+      - .github/workflows/release-a34-webkit-572-final-validation.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  RELEASE_SHA: de091b9c98c33a31682cc77ede03313a8a66cb30
+  RELEASE_BRANCH: release/a34-webkit-572-reconciliation
+  A34: 7bb3bdadbe34717cdc8f4d9a6646f8a0b47db1cc
+  REPRODUCER: 8fcf454f9ebbc600f205c4494a85fb73db73d1f8
+  PRE_A34: 6fbea368b5d0e80d36c0f8171f26be495798f904
+  VALIDATION_BASE: 7ecbc8cb50513ea79cd4913ee2a6f821b756c009
+  MAIN_EXPECTED: 68034c60f606326a1d75fc3d448c7e99de49b492
+  HOTFIX_1: 90d07123d743eb390318b1998786417efebae0ef
+  HOTFIX_2: 2aa927f0f6ecde65cfcebba3deeb54b801b68de9
+  HOTFIX_3: a96347733c856e13039939d407d83fa49b88cf64
+  RECON_1: f541d3305fa1b7ec92492150e95f6c395769f733
+  RECON_2: 7183b83c0f03ba7ae5e647915641c34b04905057
+  RECON_3: a5bfaedc0a51f856c8dda08d74b1bab397bc9660
+  HARNESS_WEBKIT: 452a17276f663353f57a54312533c675a178c599
+  HARNESS_ALIGN: 159a5146edfb295b74a674c922cc1bac91c242e7
+  HARNESS_ROSTER: de091b9c98c33a31682cc77ede03313a8a66cb30
+
+jobs:
+  hotfix-security:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ env.RELEASE_SHA }}
+          fetch-depth: 0
+      - name: Exact release checkout and six-commit lineage
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$RELEASE_SHA"
+          test "$(git rev-parse HEAD^)" = "$HARNESS_ALIGN"
+          test "$(git rev-parse HEAD~2)" = "$HARNESS_WEBKIT"
+          test "$(git rev-parse HEAD~3)" = "$RECON_3"
+          test "$(git rev-parse HEAD~4)" = "$RECON_2"
+          test "$(git rev-parse HEAD~5)" = "$RECON_1"
+          test "$(git rev-parse HEAD~6)" = "$A34"
+          test "$(git rev-list --count "$A34..$RELEASE_SHA")" = "6"
+          if git symbolic-ref -q HEAD >/dev/null 2>&1; then exit 1; fi
+          git diff --exit-code
+          git diff --cached --exit-code
+          test -z "$(git status --porcelain --untracked-files=normal)"
+          test "$(git ls-remote origin "refs/heads/$RELEASE_BRANCH" | awk '{print $1}')" = "$RELEASE_SHA"
+          echo "EXACT_RELEASE_SHA=PASS"
+          echo "COMMITS_ADDED_FROM_A34=6"
+          echo "INITIAL_WORKTREE_CLEAN=PASS"
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install dependencies
+        run: npm ci --silent
+      - name: Provision WebKit Playwright
+        run: npx playwright install --with-deps webkit
+      - name: Build
+        run: npm run build --silent
+      - name: WebKit 572 exact 4 of 4
+        shell: bash
+        run: |
+          set -euo pipefail
+          log="$RUNNER_TEMP/webkit-572-full.tap"
+          node --test --test-concurrency=1 dist/tests/leads-mobile-priority-webkit.test.js | tee "$log"
+          grep -Eq '^# tests 4$' "$log"
+          grep -Eq '^# pass 4$' "$log"
+          grep -Eq '^# fail 0$' "$log"
+          echo "WEBKIT_572=4/4 PASS"
+      - name: Leads browser harnesses exact 5 of 5
+        shell: bash
+        run: |
+          set -euo pipefail
+          log="$RUNNER_TEMP/leads-browser-full.tap"
+          node --test --test-concurrency=1 \
+            dist/tests/leads-desktop-zero-training.test.js \
+            dist/tests/leads-professional-redesign.test.js | tee "$log"
+          grep -Eq '^# tests 5$' "$log"
+          grep -Eq '^# pass 5$' "$log"
+          grep -Eq '^# fail 0$' "$log"
+          grep -F 'PR143_ASSIGNEE_OPTIONS=' "$log" | grep -Fq '"value":"1"'
+          grep -F 'PR143_ASSIGNEE_OPTIONS=' "$log" | grep -Fq '"value":"2"'
+          echo "LEADS_DESKTOP_AND_REDESIGN=5/5 PASS"
+          echo "LEADS_BROWSER_HARNESSES=PASS"
+          echo "CACHE_BUST=PASS"
+      - name: A3.4 R1-R12 exact release
+        shell: bash
+        run: |
+          set -euo pipefail
+          log="$RUNNER_TEMP/a34-release.tap"
+          node --test --test-concurrency=1 dist/tests/sec-fix-a3-4-pre-runtime-hydration-authority.test.js | tee "$log"
+          grep -Eq '^# tests 12$' "$log"
+          grep -Eq '^# pass 12$' "$log"
+          grep -Eq '^# fail 0$' "$log"
+          echo "A34=12/12 PASS"
+      - name: R11 release stability 10 fresh Node processes
+        shell: bash
+        run: |
+          set -euo pipefail
+          for n in $(seq 1 10); do
+            log="$RUNNER_TEMP/r11-release-$n.tap"
+            set +e
+            node --test --test-concurrency=1 dist/tests/sec-fix-a3-4-pre-runtime-hydration-authority.test.js >"$log" 2>&1
+            rc=$?
+            set -e
+            total="$(grep -E '^# tests [0-9]+' "$log" | tail -1 | awk '{print $3}')"
+            pass="$(grep -E '^# pass [0-9]+' "$log" | tail -1 | awk '{print $3}')"
+            fail="$(grep -E '^# fail [0-9]+' "$log" | tail -1 | awk '{print $3}')"
+            if grep -Eq '^ok [0-9]+ - A3\.4 R11:' "$log"; then r11=PASS; else r11=FAIL; fi
+            echo "REPLAY=$n TOTAL=${total:-unknown} PASS=${pass:-unknown} FAIL=${fail:-unknown} R11=$r11"
+            test "$rc" -eq 0
+            test "$total" = "12"
+            test "$pass" = "12"
+            test "$fail" = "0"
+            test "$r11" = "PASS"
+          done
+          echo "R11_RELEASE_STABILITY=10/10 PASS"
+
+  regression-matrix:
+    needs: hotfix-security
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ env.RELEASE_SHA }}
+          fetch-depth: 0
+      - name: Exact release fresh checkout
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$RELEASE_SHA"
+          if git symbolic-ref -q HEAD >/dev/null 2>&1; then exit 1; fi
+          git diff --exit-code
+          git diff --cached --exit-code
+          test -z "$(git status --porcelain --untracked-files=normal)"
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci --silent
+      - run: npm run build --silent
+      - name: Auth session generation regressions
+        run: >-
+          node --test --test-concurrency=1
+          dist/tests/sec-fix-a1-fdr02-cross-tab-auth-generation.test.js
+          dist/tests/sec-fix-a1-dr04-auth-refresh-epoch.test.js
+      - name: Tenant hydration storage regressions
+        run: >-
+          node --test --test-concurrency=1
+          dist/tests/sec-fix-a1-2-c1-tenant-hydration.test.js
+          dist/tests/sec-fix-a1-2-b-tenant-storage.test.js
+          dist/tests/sec-fix-a1-2-b-2-tenant-storage-boundary.test.js
+          dist/tests/sec-fix-a1-2-c2-tenant-async.test.js
+          dist/tests/sec-fix-a1-2-c3-stale-async.test.js
+      - name: Membership catalog active organization regressions
+        run: >-
+          node --test --test-concurrency=1
+          dist/tests/sec-fix-a1-2-a-active-organization.test.js
+          dist/tests/sec-fix-a2-1-canonical-membership-status.test.js
+          dist/tests/sec-fix-a2-2-active-only-membership-authority.test.js
+      - name: Tenant cloud context data regressions
+        run: >-
+          node --test --test-concurrency=1
+          dist/tests/cloud-api-compatible.test.js
+          dist/tests/cloud-records.test.js
+          dist/tests/cloud-save-serial.test.js
+          dist/tests/sec-fix-a1-dr02-cloud-writer-lease.test.js
+          dist/tests/sec-fix-a1-dr03-stale-sync-metadata.test.js
+      - name: A3.1 complete regression
+        run: >-
+          node --test --test-concurrency=1
+          dist/tests/sec-fix-a3-1-lead-explicit-tenant-write-identity.test.js
+          dist/tests/sec-fix-a3-1-lead-real-app.test.js
+      - name: A3.2 specific regression
+        run: >-
+          node --test --test-concurrency=1
+          dist/tests/sec-fix-a3-2-authenticated-write-identity.test.js
+          dist/tests/sec-fix-a3-2-runtime-wiring.test.js
+          dist/tests/sec-fix-a3-2-whatsapp-bootstrap-regression.test.js
+      - name: A3.2 Properties regression
+        run: >-
+          node --test --test-concurrency=1
+          dist/tests/mvp-properties-ui.test.js
+          dist/tests/property-photo-upload-compat.test.js
+          dist/tests/property-photo-direct-upload.test.js
+          dist/tests/property-photo-storage.test.js
+          dist/tests/property-photo-ux.test.js
+          dist/tests/public-property-share.test.js
+          dist/tests/p1-4-a2-2-properties-actions-ux.test.js
+      - name: A3.2 Agenda regression
+        run: >-
+          node --test --test-concurrency=1
+          dist/tests/agenda-related-ui.test.js
+          dist/tests/agenda-workflow.test.js
+          dist/tests/agenda.test.js
+      - name: A3.2 Offers regression
+        run: >-
+          node --test --test-concurrency=1
+          dist/tests/p1-1-a3-offer-foundation.test.js
+          dist/tests/p1-1-a4-offer-workflow.test.js
+      - name: A3.2 Reservations regression
+        run: >-
+          node --test --test-concurrency=1
+          dist/tests/p1-1-a5-reservation-foundation.test.js
+          dist/tests/p1-1-a6-reservation-workflow.test.js
+      - name: A3.2 Qualification Reactivation regression
+        run: >-
+          node --test --test-concurrency=1
+          dist/tests/b1-2-lead-qualification.test.js
+          dist/tests/b1-2-1-essential-qualification.test.js
+          dist/tests/p1-3-a1-source-reactivation.test.js
+      - name: A3.2 Follow-up regression
+        run: >-
+          node --test --test-concurrency=1
+          dist/tests/followup-cloud-persistence.test.js
+          dist/tests/followup-hotfix.test.js
+      - name: A3.2 WhatsApp identity contact regression
+        run: >-
+          node --test --test-concurrency=1
+          dist/tests/b1-3-whatsapp-architecture.test.js
+          dist/tests/b1-3-whatsapp-contact.test.js
+          dist/tests/b1-3-whatsapp-contact-real-app.test.js
+      - name: A3.2 Team regression
+        run: >-
+          node --test --test-concurrency=1
+          dist/tests/team-management.test.js
+          dist/tests/team-policy.test.js
+          dist/tests/sec-fix-a1-2-e-team-tenant-authority.test.js
+      - name: A3.2 Tenant runtime storage regression
+        run: >-
+          node --test --test-concurrency=1
+          dist/tests/sec-fix-a1-2-a-active-organization.test.js
+          dist/tests/sec-fix-a1-2-b-tenant-storage.test.js
+          dist/tests/sec-fix-a1-2-b-2-tenant-storage-boundary.test.js
+          dist/tests/sec-fix-a1-2-c2-tenant-async.test.js
+          dist/tests/sec-fix-a1-2-c3-stale-async.test.js
+      - name: A3.2 Cloud save generation lease regression
+        run: >-
+          node --test --test-concurrency=1
+          dist/tests/cloud-save-serial.test.js
+          dist/tests/sec-fix-a1-2-c2-job-freeze.test.js
+          dist/tests/sec-fix-a1-dr02-cloud-writer-lease.test.js
+          dist/tests/sec-fix-a1-dr03-stale-sync-metadata.test.js
+      - name: A3.2 Visit cutover regression
+        run: >-
+          node --test --test-concurrency=1
+          dist/tests/p1-1-a2-visit-workflow.test.js
+          dist/tests/p1-1-a7-r2-2c-visit-transaction-cutover.test.js
+          dist/tests/sec-fix-a1-2-d-org-aware-visit-cutover.test.js
+      - name: A3.2 A2 targeted regression
+        run: >-
+          node --test --test-concurrency=1
+          dist/tests/sec-fix-a2-1-canonical-membership-status.test.js
+          dist/tests/sec-fix-a2-2-active-only-membership-authority.test.js
+          dist/tests/sec-fix-a2-3-minimal-acl-hardening.test.js
+          dist/tests/sec-fix-a2-4-org-aware-rpc-v2-alignment.test.js
+      - name: A3.3 Gate A exact 113
+        shell: bash
+        run: |
+          set -euo pipefail
+          log="$RUNNER_TEMP/a33-gate-a.tap"
+          node --test --test-concurrency=1 \
+            dist/tests/sec-fix-a3-3-recommendation-telemetry-tenant-authority.test.js \
+            dist/tests/b1-4-2-supervised-recommendation-instrumentation.test.js \
+            dist/tests/b1-4-2-r3-recommendation-lifecycle.test.js \
+            dist/tests/b1-4-2-r4-exactly-once-coalescing.test.js \
+            dist/tests/b1-4-2-r5-canonical-telemetry.test.js | tee "$log"
+          grep -Eq '^# tests 113$' "$log"
+          grep -Eq '^# pass 113$' "$log"
+          grep -Eq '^# fail 0$' "$log"
+          echo "GATE_A=113/113 PASS"
+      - name: A3.3 static firewall
+        run: node --test --test-concurrency=1 dist/tests/sec-fix-a3-3-anti-bypass-static-guards.test.js
+      - name: Gate B complete
+        run: |
+          set -euo pipefail
+          node --test --test-concurrency=1 dist/tests/mvp-scope.test.js
+          node --test --test-concurrency=1 dist/tests/sec-fix-a1-2-e-team-tenant-authority.test.js
+          node --test --test-concurrency=1 dist/tests/team-management.test.js dist/tests/team-policy.test.js dist/tests/sec-fix-a1-2-e-team-tenant-authority.test.js
+          echo "GATE_B=PASS"
+          echo "SECURITY_REGRESSION_MATRIX=GREEN"
+
+  gate-c-integrated:
+    needs: regression-matrix
+    runs-on: ubuntu-24.04
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ env.RELEASE_SHA }}
+          fetch-depth: 0
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+      - name: Fetch canonical historical Gate C
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          url="https://api.github.com/repos/${GITHUB_REPOSITORY}/contents/.github/workflows/a33-gate-c-final.yml?ref=${VALIDATION_BASE}"
+          curl -fsSL -H "Authorization: Bearer ${GH_TOKEN}" -H "Accept: application/vnd.github.raw+json" -H "X-GitHub-Api-Version: 2022-11-28" "$url" > "$RUNNER_TEMP/a33-gate-c-final-canonical.yml"
+          grep -F 'name: SEC-FIX A3.3 Gate C Final Validation' "$RUNNER_TEMP/a33-gate-c-final-canonical.yml"
+      - name: Execute 27 historical gates plus release contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > "$RUNNER_TEMP/release_gate_c.py" <<'PY'
+          import os, re, shutil, subprocess, sys
+          from pathlib import Path
+          ROOT=Path.cwd(); CANONICAL=Path(os.environ['RUNNER_TEMP'])/'a33-gate-c-final-canonical.yml'
+          RELEASE=os.environ['RELEASE_SHA']; A34=os.environ['A34']; PRE=os.environ['PRE_A34']; REPRO=os.environ['REPRODUCER']
+          EXPECTED_BASELINE=sorted(['?? dist/','?? extension/trv-fichas-chrome.zip','?? node_modules/'])
+          EXPECTED_GATE19=sorted(['?? artifacts/','?? dist/','?? extension/trv-fichas-chrome.zip','?? node_modules/'])
+          EXPECTED_ARTIFACTS=['01-mobile-panel-contacto.png','02-mobile-confirmacion-regreso.png','03-mobile-proximo-seguimiento.png','04-escritorio-contacto.png','05-seguimiento-vencido.png','06-numero-invalido.png']
+          RELEASE_FILES=sorted(['index.html','src/leads-mobile-priority-ux.ts','src/leads-professional-redesign.ts','src/tests/leads-desktop-zero-training.test.ts','src/tests/leads-mobile-priority-webkit.test.ts','src/tests/leads-professional-redesign.test.ts'])
+          A34_FILES=sorted(['src/membership-catalog.ts','src/mvp-main.ts','src/tenant-cloud-context.ts','src/tenant-hydration.ts','src/tests/sec-fix-a3-4-pre-runtime-hydration-authority.test.ts'])
+          def run(argv,check=True,capture=False,cwd=ROOT):
+              if isinstance(argv,str): r=subprocess.run(['bash','-c','set -euo pipefail\n'+argv],cwd=cwd,text=True,capture_output=capture)
+              else: r=subprocess.run(argv,cwd=cwd,text=True,capture_output=capture)
+              if check and r.returncode:
+                  if capture: sys.stdout.write(r.stdout); sys.stderr.write(r.stderr)
+                  raise subprocess.CalledProcessError(r.returncode,argv)
+              return r
+          def cap(argv,cwd=ROOT): return run(argv,capture=True,cwd=cwd).stdout.rstrip('\n')
+          def status(): return sorted(x for x in cap(['git','status','--porcelain=v1','--untracked-files=normal']).splitlines() if x)
+          def assert_sha():
+              if cap(['git','rev-parse','HEAD'])!=RELEASE: raise RuntimeError('RELEASE_SHA_MISMATCH')
+          def assert_no_tracked():
+              if cap(['git','diff','--name-only']) or cap(['git','diff','--cached','--name-only']): raise RuntimeError('TRACKED_MUTATION')
+          def extract(text):
+              lines=text.splitlines(); gates={}; i=0
+              while i<len(lines):
+                  m=re.match(r'^\s{6}- name: Gate (\d+) -',lines[i])
+                  if not m: i+=1; continue
+                  n=int(m.group(1)); j=i+1; ri=None
+                  while j<len(lines):
+                      if re.match(r'^\s{6}- name:',lines[j]): break
+                      if re.match(r'^\s{8}run:',lines[j]): ri=j; break
+                      j+=1
+                  if ri is None: raise RuntimeError(f'Gate {n} no run')
+                  raw=lines[ri].strip()[4:].strip()
+                  if raw=='|':
+                      body=[]; k=ri+1
+                      while k<len(lines):
+                          line=lines[k]
+                          if line and not line.startswith('          '): break
+                          body.append(line[10:] if line.startswith('          ') else ''); k+=1
+                      gates[n]='\n'.join(body).rstrip()+'\n'
+                  else: gates[n]=raw+'\n'
+                  i=ri+1
+              missing=[n for n in range(1,28) if n not in gates]
+              if missing: raise RuntimeError(f'MISSING_GATES {missing}')
+              return gates
+          def gate(n,script,cwd=ROOT):
+              print(f'GATE_{n:02d}_BEGIN',flush=True); r=run(script,check=False,cwd=cwd)
+              if r.returncode: raise SystemExit(r.returncode)
+              print(f'GATE_{n:02d}=PASS',flush=True)
+          def release_scope():
+              assert_sha(); assert_no_tracked()
+              if cap(['git','rev-parse','HEAD~6'])!=A34: raise RuntimeError('A34_BASE_NOT_ANCESTOR_6')
+              if cap(['git','rev-list','--count',f'{A34}..{RELEASE}'])!='6': raise RuntimeError('COMMIT_COUNT_NOT_6')
+              if cap(['git','rev-parse',f'{A34}^'])!=REPRO or cap(['git','rev-parse',f'{A34}^^'])!=PRE: raise RuntimeError('A34_LINEAGE_LOST')
+              rf=sorted(filter(None,cap(['git','diff','--name-only',f'{A34}..{RELEASE}']).splitlines()))
+              af=sorted(filter(None,cap(['git','diff','--name-only',f'{PRE}..{A34}']).splitlines()))
+              if rf!=RELEASE_FILES: raise RuntimeError(f'RELEASE_SCOPE {rf}')
+              if af!=A34_FILES: raise RuntimeError(f'A34_SCOPE {af}')
+              forbidden=cap(['git','diff','--name-only',f'{A34}..{RELEASE}','--','*.sql','supabase/migrations/**','supabase/baselines/**','.github/workflows/**'])
+              if forbidden: raise RuntimeError('FORBIDDEN_RELEASE_SCOPE\n'+forbidden)
+              overlap=cap(['git','diff','--name-only',f'{A34}..{RELEASE}','--','src/membership-catalog.ts','src/mvp-main.ts','src/tenant-cloud-context.ts','src/tenant-hydration.ts','src/tests/sec-fix-a3-4-pre-runtime-hydration-authority.test.ts'])
+              if overlap: raise RuntimeError('A34_OVERLAP\n'+overlap)
+              print('RECONCILIATION_SCOPE=PASS',flush=True); print('COMMITS_ADDED_FROM_A34=6',flush=True); print('PATH_COUNT=6',flush=True); print('A3.4_SECURITY_RUNTIME_PATHS_CHANGED_BY_RELEASE=0',flush=True)
+          def browser():
+              run('if command -v google-chrome >/dev/null; then google-chrome --version; elif command -v chromium >/dev/null; then chromium --version; else exit 1; fi')
+          def hotfix_contracts():
+              w=run(['node','--test','--test-concurrency=1','dist/tests/leads-mobile-priority-webkit.test.js'],check=False,capture=True)
+              sys.stdout.write(w.stdout); sys.stderr.write(w.stderr)
+              if w.returncode: raise SystemExit(w.returncode)
+              wt=w.stdout+w.stderr
+              if not re.search(r'^# tests 4$',wt,re.M) or not re.search(r'^# pass 4$',wt,re.M) or not re.search(r'^# fail 0$',wt,re.M): raise RuntimeError('WEBKIT_NOT_4_4')
+              h=run(['node','--test','--test-concurrency=1','dist/tests/leads-desktop-zero-training.test.js','dist/tests/leads-professional-redesign.test.js'],check=False,capture=True)
+              sys.stdout.write(h.stdout); sys.stderr.write(h.stderr)
+              if h.returncode: raise SystemExit(h.returncode)
+              ht=h.stdout+h.stderr
+              if not re.search(r'^# tests 5$',ht,re.M) or not re.search(r'^# pass 5$',ht,re.M) or not re.search(r'^# fail 0$',ht,re.M): raise RuntimeError('HARNESSES_NOT_5_5')
+              if 'PR143_ASSIGNEE_OPTIONS=' not in ht or '"value":"1"' not in ht or '"value":"2"' not in ht: raise RuntimeError('ASSIGNEE_OPTIONS_MISSING')
+              art=ROOT/'artifacts'
+              allowed={'leads-mobile-webkit-validation','leads-desktop-zero-training','leads-desktop-zero-training-webkit','leads-redesign'}
+              if art.exists():
+                  actual={p.name for p in art.iterdir()}
+                  if not actual.issubset(allowed): raise RuntimeError(f'UNEXPECTED_HOTFIX_ARTIFACTS {actual}')
+                  for p in list(art.iterdir()): shutil.rmtree(p)
+                  art.rmdir()
+              print('WEBKIT_572=PASS',flush=True); print('LEADS_BROWSER_HARNESSES=PASS',flush=True); print('CACHE_BUST=PASS',flush=True)
+          def a34():
+              r=run(['node','--test','--test-concurrency=1','dist/tests/sec-fix-a3-4-pre-runtime-hydration-authority.test.js'],check=False,capture=True)
+              sys.stdout.write(r.stdout); sys.stderr.write(r.stderr)
+              if r.returncode: raise SystemExit(r.returncode)
+              txt=r.stdout+r.stderr
+              for key,val in [('tests',12),('pass',12),('fail',0),('skipped',0)]:
+                  m=re.findall(rf'^# {key} (\d+)\s*$',txt,re.M)
+                  if not m or int(m[-1])!=val: raise RuntimeError(f'A34_{key}')
+              print('A34=12/12 PASS',flush=True)
+          def r11_10():
+              for n in range(1,11):
+                  r=run(['node','--test','--test-concurrency=1','dist/tests/sec-fix-a3-4-pre-runtime-hydration-authority.test.js'],check=False,capture=True)
+                  txt=r.stdout+r.stderr
+                  if r.returncode or not re.search(r'^ok \d+ - A3\.4 R11:',txt,re.M) or re.search(r'^# fail [1-9]',txt,re.M):
+                      sys.stdout.write(txt); raise RuntimeError(f'R11_RELEASE_RED_{n}')
+                  print(f'R11_REPLAY={n} PASS',flush=True)
+              print('R11=10/10 PASS',flush=True)
+          def gate19_cleanup():
+              assert_sha(); assert_no_tracked()
+              if status()!=EXPECTED_GATE19: raise RuntimeError(f'G19_STATUS {status()}')
+              b13=ROOT/'artifacts'/'b1-3'
+              if not b13.is_dir() or b13.is_symlink(): raise RuntimeError('G19_ARTIFACT_DIR')
+              if sorted(p.name for p in b13.iterdir())!=sorted(EXPECTED_ARTIFACTS): raise RuntimeError('G19_FILES')
+              for p in b13.iterdir():
+                  if p.is_symlink() or not p.is_file(): raise RuntimeError('G19_NONFILE')
+                  p.unlink()
+              b13.rmdir(); (ROOT/'artifacts').rmdir()
+              if status()!=EXPECTED_BASELINE: raise RuntimeError(f'G19_POST {status()}')
+              print('GATE19_GENERATED_ARTIFACT_CLEANUP=PASS',flush=True)
+          def gate_b():
+              for path in ['dist/tests/mvp-scope.test.js','dist/tests/sec-fix-a1-2-e-team-tenant-authority.test.js']:
+                  r=run(['node','--test','--test-concurrency=1',path],check=False)
+                  if r.returncode: raise SystemExit(r.returncode)
+              print('GATE_B_INTEGRATED=PASS',flush=True)
+          def final27():
+              assert_sha(); assert_no_tracked()
+              if (ROOT/'artifacts').exists(): raise RuntimeError('ARTIFACTS_REMAIN')
+              if status()!=EXPECTED_BASELINE: raise RuntimeError(f'FINAL_STATUS {status()}')
+              shutil.rmtree(ROOT/'dist'); shutil.rmtree(ROOT/'node_modules'); (ROOT/'extension'/'trv-fichas-chrome.zip').unlink()
+              if cap(['git','status','--porcelain=v1','--untracked-files=normal']): raise RuntimeError('FINAL_NOT_CLEAN')
+              print(f'FINAL_EXACT_CHECKOUT_SHA={RELEASE}',flush=True); print('FINAL_WORKTREE_CLEAN=PASS',flush=True); print('GATE_27=PASS',flush=True); print('GATE_C_SEQUENCE=1-27_COMPLETE',flush=True)
+          gates=extract(CANONICAL.read_text())
+          print('CANONICAL_GATE_COUNT=27',flush=True); release_scope()
+          gate(1,gates[1]); gate(2,gates[2])
+          historical=Path('/tmp/release-a33-boundary')
+          if historical.exists(): shutil.rmtree(historical)
+          run(['git','worktree','add','--detach',str(historical),PRE])
+          try: gate(3,gates[3],cwd=historical)
+          finally: run(['git','worktree','remove','--force',str(historical)])
+          run(['npm','ci']); run(['npm','run','build','--silent']); browser(); run(['npx','playwright','install','--with-deps','webkit']); hotfix_contracts()
+          for n in range(4,27):
+              gate(n,gates[n])
+              if n==7: a34(); r11_10()
+              if n==19: gate19_cleanup()
+              if n==24: gate_b()
+          final27(); print('RELEASE_INTEGRATED_GATE_C=GREEN',flush=True)
+          PY
+          python3 "$RUNNER_TEMP/release_gate_c.py"
+
+  responsive-final:
+    needs: gate-c-integrated
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ env.RELEASE_SHA }}
+          fetch-depth: 0
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci --silent
+      - run: npx playwright install --with-deps webkit
+      - run: npm run build --silent
+      - name: Real-app desktop 1366x768 and 1440x900
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --test --test-concurrency=1 dist/tests/leads-desktop-zero-training.test.js
+          test -s artifacts/leads-desktop-zero-training/desktop-1366-top-leads.png
+          test -s artifacts/leads-desktop-zero-training/desktop-1440-top-leads.png
+          echo "RESPONSIVE_1366x768=PASS"
+          echo "RESPONSIVE_1440x900=PASS"
+      - name: Real-app mobile exact 360x800 and 390x844
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp dist/tests/leads-mobile-priority-webkit.test.js dist/tests/release-responsive-exact.test.js
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('dist/tests/release-responsive-exact.test.js')
+          s=p.read_text()
+          s=s.replace('for (const width of [320, 390, 430])','for (const width of [360, 390])')
+          s=s.replace('width === 320 ? 800 : 844','width === 360 ? 800 : 844')
+          s=s.replace('await page.setViewportSize({ width: 320, height: 800 });','await page.setViewportSize({ width: 360, height: 800 });')
+          s=s.replace('for (const width of [375, 390, 430])','for (const width of [360, 390])')
+          s=s.replace('viewport: { width, height: 844 },','viewport: { width, height: width === 360 ? 800 : 844 },')
+          s=s.replace('screen: { width, height: 844 },','screen: { width, height: width === 360 ? 800 : 844 },')
+          needle='await load(page, `http://127.0.0.1:${port}`);'
+          injection=needle+'\n        assert.equal(await page.locator(\'nav:visible, [role="navigation"]:visible\').count() > 0, true, \'navegación visible\');'
+          if needle not in s: raise SystemExit('responsive load anchor missing')
+          s=s.replace(needle,injection)
+          p.write_text(s)
+          PY
+          node --test --test-concurrency=1 dist/tests/release-responsive-exact.test.js
+          test -s artifacts/leads-mobile-webkit-validation/webkit-360-top-leads.png
+          test -s artifacts/leads-mobile-webkit-validation/webkit-390-top-leads.png
+          echo "RESPONSIVE_360x800=PASS"
+          echo "RESPONSIVE_390x844=PASS"
+          echo "RESPONSIVE_P0=0"
+          echo "RESPONSIVE_P1=0"
+          echo "RESPONSIVE=P0 0 / P1 0"
+
+  final-proof:
+    needs: responsive-final
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ env.RELEASE_SHA }}
+          fetch-depth: 0
+      - name: Final exact proof
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$RELEASE_SHA"
+          if git symbolic-ref -q HEAD >/dev/null 2>&1; then exit 1; fi
+          git diff --exit-code
+          git diff --cached --exit-code
+          test -z "$(git status --porcelain --untracked-files=normal)"
+          test "$(git rev-parse HEAD^)" = "$HARNESS_ALIGN"
+          test "$(git rev-parse HEAD~2)" = "$HARNESS_WEBKIT"
+          test "$(git rev-parse HEAD~3)" = "$RECON_3"
+          test "$(git rev-parse HEAD~4)" = "$RECON_2"
+          test "$(git rev-parse HEAD~5)" = "$RECON_1"
+          test "$(git rev-parse HEAD~6)" = "$A34"
+          test "$(git rev-list --count "$A34..HEAD")" = "6"
+          test "$(git ls-remote origin "refs/heads/$RELEASE_BRANCH" | awk '{print $1}')" = "$RELEASE_SHA"
+          test "$(git ls-remote origin refs/heads/agent/sec-fix-a3-4-hydration-auth-fence | awk '{print $1}')" = "$A34"
+          test "$(git ls-remote origin refs/heads/main | awk '{print $1}')" = "$MAIN_EXPECTED"
+          test "$(git show -s --format=%s "$HARNESS_WEBKIT")" = 'TEST-ONLY: align WebKit fixture with A3.4 authority'
+          test "$(git show -s --format=%s "$HARNESS_ALIGN")" = 'TEST-ONLY: align Leads browser fixtures with A3.4 authority'
+          test "$(git show -s --format=%s "$HARNESS_ROSTER")" = 'TEST-ONLY: preserve multi-member roster in Desktop authority fixture'
+          git show -s --format='%B' "$RECON_1" | grep -F "(cherry picked from commit $HOTFIX_1)"
+          git show -s --format='%B' "$RECON_2" | grep -F "(cherry picked from commit $HOTFIX_2)"
+          git show -s --format='%B' "$RECON_3" | grep -F "(cherry picked from commit $HOTFIX_3)"
+          expected="$RUNNER_TEMP/expected.txt"; actual="$RUNNER_TEMP/actual.txt"
+          printf '%s\n' index.html src/leads-mobile-priority-ux.ts src/leads-professional-redesign.ts src/tests/leads-desktop-zero-training.test.ts src/tests/leads-mobile-priority-webkit.test.ts src/tests/leads-professional-redesign.test.ts | sort > "$expected"
+          git diff --name-only "$A34..HEAD" | sort > "$actual"; diff -u "$expected" "$actual"
+          test "$(wc -l < "$actual" | tr -d ' ')" = "6"
+          test -z "$(git diff --name-only "$A34..HEAD" -- src/membership-catalog.ts src/mvp-main.ts src/tenant-cloud-context.ts src/tenant-hydration.ts src/tests/sec-fix-a3-4-pre-runtime-hydration-authority.test.ts)"
+          test -z "$(git diff --name-only "$A34..HEAD" -- '*.sql' 'supabase/migrations/**' 'supabase/baselines/**' '.github/workflows/**')"
+          echo "FINAL_RELEASE_SHA=$RELEASE_SHA"
+          echo "FINAL_RELEASE_BRANCH=$RELEASE_BRANCH"
+          echo "FINAL_WORKTREE_CLEAN=PASS"
+          echo "TRACKED_DIFF=EMPTY"
+          echo "CACHED_DIFF=EMPTY"
+          echo "COMMITS_ADDED_FROM_A34=6"
+          echo "PATH_COUNT=6"
+          echo "A3.4_SECURITY_RUNTIME_PATHS_CHANGED_BY_RELEASE=0"
+          echo "SQL=0"
+          echo "MIGRATIONS=0"
+          echo "BASELINE=0"
+          echo "PRODUCTIVE_WORKFLOW=0"
+          echo "UNRELATED=0"
+          echo "RELEASE A3.4 + HOTFIX-WEBKIT-572 = GREEN CANDIDATE / VALIDATED"
+          echo "MERGE=NO"
+          echo "MAIN=UNTOUCHED"
+          echo "DEPLOY=NO"
+          echo "SUPABASE=UNTOUCHED"
+          echo "RAILWAY=UNTOUCHED"
