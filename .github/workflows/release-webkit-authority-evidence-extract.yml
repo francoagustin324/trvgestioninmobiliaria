@@ -1,0 +1,39 @@
+name: WebKit Authority Evidence Extract
+
+on:
+  push:
+    branches: [validation/release-webkit-authority-characterization]
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  extract:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Extract corrected Control C evidence from successful job log
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          SOURCE_JOB_ID: '103798097801'
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh api "/repos/$REPO/actions/jobs/$SOURCE_JOB_ID/logs" > "$RUNNER_TEMP/control-c-job.log"
+          awk '/CONTROL_C_CORRECTED_JSON_BEGIN/{capture=1; next} /CONTROL_C_CORRECTED_JSON_END/{capture=0} capture' "$RUNNER_TEMP/control-c-job.log" > "$RUNNER_TEMP/control-c-corrected.json"
+          grep -E 'MODERN_FIXTURE_CRM_ACTIVE=|BOOTSTRAP_ERROR=|BOOTSTRAP_ERROR_TEXT=|TENANT_ORG=|PREMIUM_SHELL=|SYNTHETIC_SESSION_PRESENT=|SHARED_AUTH_GENERATION_PRESENT=|CLOUD_CONFIG_REQUESTS=|ORGANIZATION_MEMBER_REQUESTS=|PROPCONTROL_RECORD_REQUESTS=|FICHA_REQUESTS=|RPC_REQUESTS=|UNEXPECTED_SYNTHETIC_ENDPOINTS=|PAGE_ERRORS=|FAILED_REQUESTS=|PRODUCT_FILES_MODIFIED=|PRODUCT_TESTS_MODIFIED=|RELEASE_BRANCH_SHA_UNCHANGED=' "$RUNNER_TEMP/control-c-job.log" > "$RUNNER_TEMP/control-c-scalars.txt"
+          test -s "$RUNNER_TEMP/control-c-corrected.json"
+          test -s "$RUNNER_TEMP/control-c-scalars.txt"
+          node -e "JSON.parse(require('fs').readFileSync(process.argv[1], 'utf8')); console.log('CONTROL_C_JSON_PARSE=PASS')" "$RUNNER_TEMP/control-c-corrected.json"
+          cat "$RUNNER_TEMP/control-c-scalars.txt"
+
+      - name: Upload extracted evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: control-c-corrected-evidence
+          path: |
+            ${{ runner.temp }}/control-c-corrected.json
+            ${{ runner.temp }}/control-c-scalars.txt
+          if-no-files-found: error
+          retention-days: 7
