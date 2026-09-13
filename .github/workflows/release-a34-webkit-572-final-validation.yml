@@ -28,6 +28,12 @@ env:
   HARNESS_WEBKIT: 452a17276f663353f57a54312533c675a178c599
   HARNESS_ALIGN: 159a5146edfb295b74a674c922cc1bac91c242e7
   HARNESS_ROSTER: de091b9c98c33a31682cc77ede03313a8a66cb30
+  CANDIDATE: de091b9c98c33a31682cc77ede03313a8a66cb30
+  A31_FINAL: 23f428a87fcc9382ec6ab8489ae8132776bb6d85
+  A32_FINAL: 349e9ba9e456ef79c3c740a9458290f408c651e6
+  A33_RUNTIME: f2ed74d622aa873822a704c6fe3cc28d194d7691
+  A33_GATE_A_ALIGNMENT: 68baba54ec5db00f14445336b436e3b484c6c0a6
+  ACCIDENTAL: fa5ff40c41996bf56ee89b5dca964f4b6bcdf426
 
 jobs:
   hotfix-security:
@@ -447,6 +453,12 @@ jobs:
               if cap(['git','status','--porcelain=v1','--untracked-files=normal']): raise RuntimeError('FINAL_NOT_CLEAN')
               print(f'FINAL_EXACT_CHECKOUT_SHA={RELEASE}',flush=True); print('FINAL_WORKTREE_CLEAN=PASS',flush=True); print('GATE_27=PASS',flush=True); print('GATE_C_SEQUENCE=1-27_COMPLETE',flush=True)
           gates=extract(CANONICAL.read_text())
+          print(f"CANDIDATE_ENV={os.environ['CANDIDATE']}",flush=True)
+          print(f"A31_FINAL_ENV={os.environ['A31_FINAL']}",flush=True)
+          print(f"A32_FINAL_ENV={os.environ['A32_FINAL']}",flush=True)
+          print(f"A33_RUNTIME_ENV={os.environ['A33_RUNTIME']}",flush=True)
+          print(f"A33_GATE_A_ALIGNMENT_ENV={os.environ['A33_GATE_A_ALIGNMENT']}",flush=True)
+          print(f"ACCIDENTAL_ENV={os.environ['ACCIDENTAL']}",flush=True)
           print('CANONICAL_GATE_COUNT=27',flush=True); release_scope()
           gate(1,gates[1]); gate(2,gates[2])
           historical=Path('/tmp/release-a33-boundary')
