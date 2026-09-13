@@ -74,7 +74,11 @@ jobs:
         working-directory: product
         env:
           A34_RESULTS_PATH: ${{ runner.temp }}/a34-r11-characterization-results.json
-        run: node ../_validation/.github/validation/a34-r11-characterization.mjs
+        shell: bash
+        run: |
+          set -euo pipefail
+          ln -s "$GITHUB_WORKSPACE/product/node_modules" "$GITHUB_WORKSPACE/_validation/node_modules"
+          node ../_validation/.github/validation/a34-r11-characterization.mjs
 
       - name: Upload characterization evidence
         if: always()
