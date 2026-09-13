@@ -1,0 +1,113 @@
+name: A3.4 R11 Characterization
+
+on:
+  push:
+    branches: [validation/a34-r11-characterization]
+
+permissions:
+  contents: read
+
+jobs:
+  characterize:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      CANDIDATE: 7bb3bdadbe34717cdc8f4d9a6646f8a0b47db1cc
+      CANDIDATE_BRANCH: agent/sec-fix-a3-4-hydration-auth-fence
+    steps:
+      - name: Checkout validation-only instrumentation
+        uses: actions/checkout@v7
+        with:
+          ref: validation/a34-r11-characterization
+          path: _validation
+          fetch-depth: 1
+
+      - name: Checkout exact A3.4 candidate detached
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ env.CANDIDATE }}
+          path: product
+          fetch-depth: 0
+
+      - name: Assert exact detached candidate and lineage
+        working-directory: product
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$CANDIDATE"
+          test "$(git rev-parse HEAD^)" = "8fcf454f9ebbc600f205c4494a85fb73db73d1f8"
+          test "$(git rev-parse HEAD^^)" = "6fbea368b5d0e80d36c0f8171f26be495798f904"
+          if git symbolic-ref -q HEAD >/dev/null 2>&1; then
+            echo "Candidate checkout is not detached" >&2
+            exit 1
+          fi
+          test -z "$(git status --porcelain --untracked-files=normal)"
+          echo "DETACHED_CANDIDATE_SHA=$(git rev-parse HEAD)"
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: product/package-lock.json
+
+      - name: Install dependencies
+        working-directory: product
+        run: npm ci --silent
+
+      - name: Browser prerequisite
+        shell: bash
+        run: |
+          set -euo pipefail
+          if command -v google-chrome >/dev/null 2>&1; then google-chrome --version; exit 0; fi
+          if command -v google-chrome-stable >/dev/null 2>&1; then google-chrome-stable --version; exit 0; fi
+          if command -v chromium >/dev/null 2>&1; then chromium --version; exit 0; fi
+          if command -v chromium-browser >/dev/null 2>&1; then chromium-browser --version; exit 0; fi
+          exit 1
+
+      - name: Build exact candidate
+        working-directory: product
+        run: npm run build --silent
+
+      - name: Characterize R11 for 10 independent iterations
+        id: characterize
+        continue-on-error: true
+        working-directory: product
+        env:
+          A34_RESULTS_PATH: ${{ runner.temp }}/a34-r11-characterization-results.json
+        run: node ../_validation/.github/validation/a34-r11-characterization.mjs
+
+      - name: Upload characterization evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: a34-r11-characterization-evidence
+          path: ${{ runner.temp }}/a34-r11-characterization-results.json
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Assert candidate unchanged after characterization
+        if: always()
+        working-directory: product
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$CANDIDATE"
+          git diff --quiet
+          git diff --cached --quiet
+          rm -rf dist node_modules extension/trv-fichas-chrome.zip artifacts
+          test -z "$(git status --porcelain --untracked-files=normal)"
+          remote_sha="$(git ls-remote origin "refs/heads/$CANDIDATE_BRANCH" | awk '{print $1}')"
+          test "$remote_sha" = "$CANDIDATE"
+          echo "CANDIDATE_UNCHANGED=PASS"
+          echo "FINAL_EXACT_CANDIDATE_SHA=$(git rev-parse HEAD)"
+          echo "REMOTE_CANDIDATE_BRANCH_SHA=$remote_sha"
+
+      - name: Propagate characterization outcome
+        if: always()
+        shell: bash
+        env:
+          CHARACTERIZATION_OUTCOME: ${{ steps.characterize.outcome }}
+        run: |
+          set -euo pipefail
+          echo "CHARACTERIZATION_STEP_OUTCOME=$CHARACTERIZATION_OUTCOME"
+          test "$CHARACTERIZATION_OUTCOME" = "success"
