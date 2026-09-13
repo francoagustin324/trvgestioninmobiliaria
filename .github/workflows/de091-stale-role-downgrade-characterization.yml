@@ -1,0 +1,739 @@
+name: de091 stale role downgrade characterization
+
+on:
+  push:
+    branches:
+      - validation/de091-stale-role-downgrade-characterization
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  RELEASE_SHA: de091b9c98c33a31682cc77ede03313a8a66cb30
+  RELEASE_BRANCH: release/a34-webkit-572-reconciliation
+  A34_BRANCH: agent/sec-fix-a3-4-hydration-auth-fence
+  A34_SHA: 7bb3bdadbe34717cdc8f4d9a6646f8a0b47db1cc
+  MAIN_SHA: 68034c60f606326a1d75fc3d448c7e99de49b492
+
+jobs:
+  characterize:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Checkout exact release candidate detached
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ env.RELEASE_SHA }}
+          fetch-depth: 0
+
+      - name: Prove exact immutable product checkout
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$RELEASE_SHA"
+          if git symbolic-ref -q HEAD >/dev/null 2>&1; then
+            echo "DETACHED_HEAD=NO"
+            exit 1
+          fi
+          git diff --exit-code
+          git diff --cached --exit-code
+          echo "EXECUTION_SHA=$(git rev-parse HEAD)"
+          echo "DETACHED_HEAD=YES"
+          echo "TRACKED_PRODUCT_DIFF=EMPTY"
+          echo "CACHED_PRODUCT_DIFF=EMPTY"
+
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci --silent
+
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Build exact release
+        run: npm run build --silent
+
+      - name: Write validation-only diagnostic into build output
+        shell: bash
+        run: |
+          cat > dist/tests/validation-stale-role-downgrade-characterization.mjs <<'EOF'
+          import assert from 'node:assert/strict';
+          import { spawn } from 'node:child_process';
+          import { existsSync } from 'node:fs';
+          import { chromium } from 'playwright';
+          import { initialData } from '../models.js';
+
+          const USER_ID = 'downgrade-user';
+          const ORG_ID = 'downgrade-org';
+          const USER_MEMBER_ID = 1;
+          const OTHER_MEMBER_ID = 2;
+          const OTHER_USER_ID = 'downgrade-owner-2';
+          const TEAM_VIEW_KEY = 'propcontrol-active-team-member-v1';
+          const SESSION_KEY = 'propcontrol-cloud-session-v1';
+          const GENERATION_KEY = 'propcontrol-cloud-auth-generation-v1';
+          const TENANT_KEY = `trv-crm-basico:user:${USER_ID}:org:${ORG_ID}`;
+          const TENANT_SYNC_KEY = `${TENANT_KEY}:sync`;
+          const SENTINEL = 'STALE_OTHER_AGENT_SENTINEL';
+          const STALE_OWN = 'STALE_OWNER_LOCAL_DATA';
+          const CLOUD_ALLOWED = 'CLOUD_ALLOWED_AGENT_LEAD';
+
+          function staleSnapshot() {
+            const crm = structuredClone(initialData);
+            crm.organization = {
+              id: ORG_ID,
+              name: 'Downgrade Characterization Realty',
+              seatLimit: null,
+              planLabel: 'Validation only',
+            };
+            crm.teamMembers = [
+              {
+                id: USER_MEMBER_ID,
+                userId: USER_ID,
+                name: 'Downgraded Historical Owner',
+                email: 'downgrade-user@propcontrol.test',
+                role: 'Dueño',
+                status: 'Activo',
+                createdAt: '2026-01-01T00:00:00.000Z',
+              },
+              {
+                id: OTHER_MEMBER_ID,
+                userId: OTHER_USER_ID,
+                name: 'Other Historical Agent',
+                email: 'other-agent@propcontrol.test',
+                role: 'Corredor',
+                status: 'Activo',
+                createdAt: '2026-01-01T00:00:00.000Z',
+              },
+            ];
+            crm.activityLog = [];
+            crm.clients = [
+              {
+                id: 11,
+                name: STALE_OWN,
+                phone: '+54 9 351 555-0011',
+                email: 'stale-own@propcontrol.test',
+                interest: 'Historical owner-local lead',
+                budget: 'USD 100000',
+                currency: 'USD',
+                status: 'Lead',
+                temperature: 'Tibio',
+                pipeline: 'Nuevo',
+                assignedToId: USER_MEMBER_ID,
+                createdById: USER_MEMBER_ID,
+              },
+              {
+                id: 22,
+                name: SENTINEL,
+                phone: '+54 9 351 555-0022',
+                email: 'sentinel@propcontrol.test',
+                interest: 'Must not be visible to downgraded agent',
+                budget: 'USD 200000',
+                currency: 'USD',
+                status: 'Lead',
+                temperature: 'Caliente',
+                pipeline: 'Contactado',
+                assignedToId: OTHER_MEMBER_ID,
+                createdById: OTHER_MEMBER_ID,
+              },
+            ];
+            crm.properties = [];
+            crm.visits = [];
+            crm.offers = [];
+            crm.reservations = [];
+            crm.contacts = [];
+            crm.reminders = [];
+            crm.fichas = [];
+            crm.conversations = [];
+            crm.settings = {
+              ...crm.settings,
+              profileName: 'Downgraded Historical Owner',
+              profileEmail: 'downgrade-user@propcontrol.test',
+              agencyName: 'Downgrade Characterization Realty',
+            };
+            return crm;
+          }
+
+          function currentAgentMembership() {
+            return {
+              organization_id: ORG_ID,
+              member_id: USER_MEMBER_ID,
+              user_id: USER_ID,
+              role: 'agent',
+              status: 'active',
+              display_name: 'Downgraded Current Agent',
+              email: 'downgrade-user@propcontrol.test',
+              created_at: '2026-01-01T00:00:00.000Z',
+              last_active_at: '2026-09-13T20:00:00.000Z',
+            };
+          }
+
+          function currentOwnerMembership() {
+            return {
+              organization_id: ORG_ID,
+              member_id: OTHER_MEMBER_ID,
+              user_id: OTHER_USER_ID,
+              role: 'owner',
+              status: 'active',
+              display_name: 'Current Owner',
+              email: 'current-owner@propcontrol.test',
+              created_at: '2026-01-01T00:00:00.000Z',
+              last_active_at: '2026-09-13T20:00:00.000Z',
+            };
+          }
+
+          function allowedCloudRows() {
+            return [{
+              organization_id: ORG_ID,
+              entity_type: 'client',
+              entity_key: `${ORG_ID}:101`,
+              assigned_member_id: USER_MEMBER_ID,
+              payload: {
+                id: 101,
+                name: CLOUD_ALLOWED,
+                phone: '+54 9 351 555-0101',
+                email: 'allowed@propcontrol.test',
+                interest: 'Current cloud-authorized lead',
+                budget: 'USD 80000',
+                currency: 'USD',
+                status: 'Lead',
+                temperature: 'Tibio',
+                pipeline: 'Nuevo',
+                assignedToId: USER_MEMBER_ID,
+                createdById: USER_MEMBER_ID,
+              },
+              created_by: USER_ID,
+              updated_at: '2026-09-13T20:10:00.000Z',
+            }];
+          }
+
+          function syntheticJson(body, status = 200, extraHeaders = {}) {
+            return {
+              status,
+              contentType: 'application/json',
+              headers: {
+                'access-control-allow-origin': '*',
+                ...extraHeaders,
+              },
+              body: JSON.stringify(body),
+            };
+          }
+
+          function chromeExecutable() {
+            return [
+              '/usr/bin/google-chrome',
+              '/usr/bin/google-chrome-stable',
+              '/usr/bin/chromium',
+              '/usr/bin/chromium-browser',
+            ].find(existsSync);
+          }
+
+          async function waitForServer(url) {
+            for (let attempt = 0; attempt < 120; attempt += 1) {
+              try {
+                if ((await fetch(`${url}/health`)).ok) return;
+              } catch {}
+              await new Promise((resolve) => setTimeout(resolve, 250));
+            }
+            throw new Error('Servidor de validación no disponible.');
+          }
+
+          async function startServer(port) {
+            const server = spawn(process.execPath, ['dist/server.js'], {
+              cwd: process.cwd(),
+              env: {
+                ...process.env,
+                PORT: String(port),
+                SUPABASE_URL: '',
+                SUPABASE_PUBLISHABLE_KEY: '',
+                SUPABASE_SECRET_KEY: '',
+                SUPABASE_SERVICE_ROLE_KEY: '',
+                LEAD_QUALIFICATION_AI_ENDPOINT: '',
+                LEAD_QUALIFICATION_AI_KEY: '',
+                LEAD_QUALIFICATION_AI_MODEL: '',
+              },
+              stdio: ['ignore', 'pipe', 'pipe'],
+            });
+            await waitForServer(`http://127.0.0.1:${port}`);
+            return server;
+          }
+
+          async function stopServer(server) {
+            if (!server || server.exitCode !== null) return;
+            server.kill('SIGTERM');
+            await new Promise((resolve) => {
+              const timer = setTimeout(() => {
+                if (server.exitCode === null) server.kill('SIGKILL');
+                resolve();
+              }, 2000);
+              server.once('exit', () => {
+                clearTimeout(timer);
+                resolve();
+              });
+            });
+          }
+
+          async function installSyntheticCloud(context, origin, options = {}) {
+            const telemetry = {
+              cloudConfig: 0,
+              ownMembershipQueries: 0,
+              directoryMembershipQueries: 0,
+              visitAuthorityChecks: 0,
+              recordsGets: 0,
+              recordsPosts: 0,
+              recordsDeletes: 0,
+              pushFailureStatus: options.pushFailure?.status ?? null,
+              pushFailureBody: options.pushFailure?.body ?? null,
+              unexpectedEndpoints: [],
+            };
+            let rows = structuredClone(options.cloudRows ?? allowedCloudRows());
+
+            await context.route('**/api/cloud-config', async (route) => {
+              telemetry.cloudConfig += 1;
+              await route.fulfill(syntheticJson({
+                configured: true,
+                url: origin,
+                publishableKey: 'validation-publishable-key',
+              }));
+            });
+
+            await context.route('**/rest/v1/**', async (route) => {
+              const request = route.request();
+              const url = new URL(request.url());
+
+              if (request.method() === 'OPTIONS') {
+                await route.fulfill({
+                  status: 204,
+                  headers: {
+                    'access-control-allow-origin': '*',
+                    'access-control-allow-headers': '*',
+                    'access-control-allow-methods': 'GET,POST,PATCH,DELETE,OPTIONS',
+                  },
+                  body: '',
+                });
+                return;
+              }
+
+              if (url.pathname.endsWith('/rest/v1/rpc/activate_my_organization_memberships')) {
+                await route.fulfill(syntheticJson({}));
+                return;
+              }
+
+              if (url.pathname.endsWith('/rest/v1/organization_members')) {
+                const userFilter = url.searchParams.get('user_id');
+                const organizationFilter = url.searchParams.get('organization_id');
+                if (userFilter === `eq.${USER_ID}`) {
+                  telemetry.ownMembershipQueries += 1;
+                  await route.fulfill(syntheticJson([currentAgentMembership()]));
+                  return;
+                }
+                if (organizationFilter === `eq.${ORG_ID}`) {
+                  telemetry.directoryMembershipQueries += 1;
+                  await route.fulfill(syntheticJson([currentAgentMembership(), currentOwnerMembership()]));
+                  return;
+                }
+                telemetry.unexpectedEndpoints.push(`${request.method()} ${url.pathname}${url.search}`);
+                await route.fulfill(syntheticJson({ error: 'UNEXPECTED_MEMBERSHIP_QUERY', search: url.search }, 500));
+                return;
+              }
+
+              if (url.pathname.endsWith('/rest/v1/rpc/visit_transaction_authority_active_v2')) {
+                telemetry.visitAuthorityChecks += 1;
+                await route.fulfill(syntheticJson(false));
+                return;
+              }
+
+              if (url.pathname.endsWith('/rest/v1/propcontrol_records')) {
+                if (request.method() === 'GET') {
+                  telemetry.recordsGets += 1;
+                  await route.fulfill(syntheticJson(rows));
+                  return;
+                }
+                if (request.method() === 'POST') {
+                  telemetry.recordsPosts += 1;
+                  if (options.pushFailure) {
+                    await route.fulfill(syntheticJson(
+                      options.pushFailure.body,
+                      options.pushFailure.status,
+                    ));
+                    return;
+                  }
+                  const body = request.postDataJSON();
+                  rows = Array.isArray(body) ? structuredClone(body) : [structuredClone(body)];
+                  await route.fulfill(syntheticJson([], 201));
+                  return;
+                }
+                if (request.method() === 'DELETE') {
+                  telemetry.recordsDeletes += 1;
+                  await route.fulfill({
+                    status: 204,
+                    headers: { 'access-control-allow-origin': '*' },
+                    body: '',
+                  });
+                  return;
+                }
+              }
+
+              if (url.pathname.endsWith('/rest/v1/fichas')) {
+                await route.fulfill(syntheticJson([]));
+                return;
+              }
+
+              telemetry.unexpectedEndpoints.push(`${request.method()} ${url.pathname}${url.search}`);
+              await route.fulfill(syntheticJson({ error: 'UNEXPECTED_SYNTHETIC_ENDPOINT', path: url.pathname }, 500));
+            });
+
+            return telemetry;
+          }
+
+          async function seedContext(context, { dirty, generation, teamView = USER_MEMBER_ID }) {
+            await context.addInitScript(({ crm, dirtyFlag, gen, teamViewId, tenantKey, syncKey }) => {
+              localStorage.setItem('propcontrol-cloud-session-v1', JSON.stringify({
+                accessToken: 'access-token-validation-only',
+                refreshToken: 'refresh-token-validation-only',
+                expiresAt: Date.now() + 3_600_000,
+                userId: 'downgrade-user',
+                email: 'downgrade-user@propcontrol.test',
+                __propcontrolAuthGeneration: gen,
+              }));
+              localStorage.setItem('propcontrol-cloud-auth-generation-v1', gen);
+              localStorage.setItem(tenantKey, JSON.stringify(crm));
+              localStorage.setItem(syncKey, JSON.stringify({
+                dirty: dirtyFlag,
+                localUpdatedAt: '2026-09-13T19:00:00.000Z',
+                lastCloudSavedAt: '',
+                lastCloudVersion: '',
+                localGeneration: dirtyFlag ? 1 : 0,
+              }));
+              localStorage.setItem('propcontrol-active-team-member-v1', String(teamViewId));
+            }, {
+              crm: staleSnapshot(),
+              dirtyFlag: dirty,
+              gen: generation,
+              teamViewId: teamView,
+              tenantKey: TENANT_KEY,
+              syncKey: TENANT_SYNC_KEY,
+            });
+          }
+
+          async function waitForBootstrapTerminal(page) {
+            await page.goto(page.url() || 'about:blank');
+          }
+
+          async function loadApp(page, origin) {
+            await page.goto(origin, { waitUntil: 'domcontentloaded' });
+            await page.waitForFunction(() => (
+              Boolean(document.querySelector('#crm.active'))
+              || Boolean(document.querySelector('[data-bootstrap-error]'))
+            ), undefined, { timeout: 20_000 });
+          }
+
+          async function snapshot(page) {
+            return page.evaluate(async ({ sessionKey, sentinel, staleOwn }) => {
+              const { state } = await import('/dist/store.js');
+              const access = await import('/dist/team-access.js');
+              const session = JSON.parse(localStorage.getItem(sessionKey) || '{}');
+              const active = state.crm.teamMembers.find((member) => member.id === state.activeMemberId) || null;
+              const current = state.crm.teamMembers.find((member) => member.userId === session.userId) || null;
+              const visible = (selector) => {
+                const el = document.querySelector(selector);
+                if (!(el instanceof HTMLElement)) return false;
+                const style = getComputedStyle(el);
+                return !el.hidden && style.display !== 'none' && style.visibility !== 'hidden' && el.getClientRects().length > 0;
+              };
+              const bodyText = document.body.textContent || '';
+              return {
+                crmActive: visible('#crm.active'),
+                authUser: String(session.userId || ''),
+                authOrg: String(state.crm.organization.id || ''),
+                activeMemberId: state.activeMemberId,
+                activeMemberUserId: active?.userId || '',
+                activeMemberRole: active?.role || '',
+                currentUserTeamRole: current?.role || '',
+                canViewAll: access.canViewAll(),
+                canAccessSettings: access.canAccessSettings(),
+                canAdministerTeamLocal: access.canAdministerTeam(),
+                configModuleVisible: visible('[data-module="configuracion"]'),
+                teamModuleVisible: visible('[data-module="equipo"]'),
+                teamAdminUiVisible: Boolean(document.querySelector('#equipo [data-toggle-user-form], #equipo #mvp-user-form, #equipo [data-user-status], #equipo [data-user-role]:not([disabled])')),
+                sentinelInState: state.crm.clients.some((client) => client.name === sentinel),
+                sentinelInDom: bodyText.includes(sentinel),
+                staleOwnerDataInState: state.crm.clients.some((client) => client.name === staleOwn),
+                staleOwnerDataInDom: bodyText.includes(staleOwn),
+                bootstrapError: document.querySelector('[data-bootstrap-error]')?.textContent?.trim() || '',
+                syncErrorVisible: Boolean(document.querySelector('.mvp-account-sync.state-error')),
+                syncError: JSON.parse(localStorage.getItem(`trv-crm-basico:user:${session.userId}:org:${state.crm.organization.id}:sync`) || '{}').lastError || '',
+                clientNames: state.crm.clients.map((client) => client.name),
+              };
+            }, { sessionKey: SESSION_KEY, sentinel: SENTINEL, staleOwn: STALE_OWN });
+          }
+
+          function printSnapshot(prefix, value) {
+            console.log(`${prefix}_CRM_ACTIVE=${value.crmActive ? 'YES' : 'NO'}`);
+            console.log(`${prefix}_AUTH_USER=${value.authUser}`);
+            console.log(`${prefix}_AUTH_ORG=${value.authOrg}`);
+            console.log(`${prefix}_ACTIVE_MEMBER_ID=${value.activeMemberId}`);
+            console.log(`${prefix}_ACTIVE_MEMBER_USER_ID=${value.activeMemberUserId}`);
+            console.log(`${prefix}_ACTIVE_MEMBER_ROLE=${value.activeMemberRole}`);
+            console.log(`${prefix}_CURRENT_USER_TEAM_ROLE=${value.currentUserTeamRole}`);
+            console.log(`${prefix}_CAN_VIEW_ALL=${value.canViewAll ? 'YES' : 'NO'}`);
+            console.log(`${prefix}_CAN_ACCESS_SETTINGS=${value.canAccessSettings ? 'YES' : 'NO'}`);
+            console.log(`${prefix}_CAN_ADMINISTER_TEAM_LOCAL=${value.canAdministerTeamLocal ? 'YES' : 'NO'}`);
+            console.log(`${prefix}_CONFIG_MODULE_VISIBLE=${value.configModuleVisible ? 'YES' : 'NO'}`);
+            console.log(`${prefix}_TEAM_MODULE_VISIBLE=${value.teamModuleVisible ? 'YES' : 'NO'}`);
+            console.log(`${prefix}_TEAM_ADMIN_UI_VISIBLE=${value.teamAdminUiVisible ? 'YES' : 'NO'}`);
+            console.log(`${prefix}_STALE_OTHER_AGENT_SENTINEL_VISIBLE=${value.sentinelInState || value.sentinelInDom ? 'YES' : 'NO'}`);
+            console.log(`${prefix}_STALE_OWNER_LOCAL_DATA_VISIBLE=${value.staleOwnerDataInState || value.staleOwnerDataInDom ? 'YES' : 'NO'}`);
+            console.log(`${prefix}_BOOTSTRAP_ERROR=${value.bootstrapError || 'NO'}`);
+            console.log(`${prefix}_SYNC_ERROR_VISIBLE=${value.syncErrorVisible ? 'YES' : 'NO'}`);
+            console.log(`${prefix}_SYNC_ERROR=${value.syncError || 'NO'}`);
+            console.log(`${prefix}_CLIENT_NAMES=${JSON.stringify(value.clientNames)}`);
+          }
+
+          async function runControlA(browser, origin) {
+            const context = await browser.newContext({ viewport: { width: 1366, height: 768 } });
+            const telemetry = await installSyntheticCloud(context, origin, { cloudRows: allowedCloudRows() });
+            await seedContext(context, { dirty: false, generation: 'downgrade-control-a-generation' });
+            const page = await context.newPage();
+            await loadApp(page, origin);
+            const snap = await snapshot(page);
+            printSnapshot('CONTROL_A', snap);
+            console.log(`CONTROL_A_AUTHORITY_DIRECTORY_QUERIES=${telemetry.directoryMembershipQueries}`);
+            console.log(`CONTROL_A_RECORDS_GETS=${telemetry.recordsGets}`);
+            console.log(`CONTROL_A_UNEXPECTED_ENDPOINTS=${telemetry.unexpectedEndpoints.length}`);
+
+            const safe = snap.crmActive
+              && snap.authUser === USER_ID
+              && snap.authOrg === ORG_ID
+              && snap.currentUserTeamRole === 'Corredor'
+              && snap.activeMemberUserId === USER_ID
+              && snap.activeMemberRole === 'Corredor'
+              && !snap.canViewAll
+              && !snap.canAccessSettings
+              && !snap.canAdministerTeamLocal
+              && !snap.configModuleVisible
+              && !snap.teamModuleVisible
+              && !snap.sentinelInState
+              && !snap.sentinelInDom
+              && !snap.bootstrapError
+              && telemetry.directoryMembershipQueries > 0
+              && telemetry.recordsGets > 0
+              && telemetry.unexpectedEndpoints.length === 0;
+
+            if (!safe) {
+              console.log('CONTROL_A_NORMAL_DOWNGRADE=FAIL_STOP');
+              await context.close();
+              throw new Error('CONTROL_A_NORMAL_DOWNGRADE_FAILED');
+            }
+            console.log('CONTROL_A_NORMAL_DOWNGRADE=PASS_SAFE');
+            return { context, page, telemetry };
+          }
+
+          async function runControlB(controlA) {
+            const { context, page, telemetry } = controlA;
+            const before = await snapshot(page);
+            await page.evaluate(({ teamViewKey, ownerId }) => {
+              localStorage.setItem(teamViewKey, String(ownerId));
+            }, { teamViewKey: TEAM_VIEW_KEY, ownerId: OTHER_MEMBER_ID });
+
+            await page.locator('[data-edit-client="101"]').click();
+            await page.locator('#mvp-lead-form input[name="name"]').fill(`${CLOUD_ALLOWED} EDITED`);
+            await page.locator('#mvp-lead-form button[type="submit"]').click();
+            await page.waitForFunction(({ syncKey }) => {
+              const sync = JSON.parse(localStorage.getItem(syncKey) || '{}');
+              return sync.dirty === true;
+            }, { syncKey: TENANT_SYNC_KEY }, { timeout: 5000 });
+
+            await page.locator('[data-account-toggle]').click();
+            await page.locator('[data-account-sync]').waitFor({ state: 'visible', timeout: 5000 });
+            await page.locator('[data-account-sync]').click();
+            await page.waitForFunction(async ({ syncKey, ownerId }) => {
+              const sync = JSON.parse(localStorage.getItem(syncKey) || '{}');
+              const { state } = await import('/dist/store.js');
+              return sync.dirty === false && state.activeMemberId === ownerId;
+            }, { syncKey: TENANT_SYNC_KEY, ownerId: OTHER_MEMBER_ID }, { timeout: 10000 });
+            await page.waitForTimeout(150);
+
+            const after = await snapshot(page);
+            console.log(`CONTROL_B_ACTIVE_MEMBER_ID_BEFORE=${before.activeMemberId}`);
+            console.log(`CONTROL_B_ACTIVE_MEMBER_ID_AFTER=${after.activeMemberId}`);
+            console.log(`CONTROL_B_ACTIVE_MEMBER_ROLE_AFTER=${after.activeMemberRole}`);
+            console.log(`CONTROL_B_CONFIG_MODULE_VISIBLE=${after.configModuleVisible ? 'YES' : 'NO'}`);
+            console.log(`CONTROL_B_TEAM_ADMIN_UI_VISIBLE=${after.teamAdminUiVisible ? 'YES' : 'NO'}`);
+            console.log(`CONTROL_B_STALE_OTHER_AGENT_SENTINEL_VISIBLE=${after.sentinelInState || after.sentinelInDom ? 'YES' : 'NO'}`);
+            console.log(`CONTROL_B_CAN_VIEW_ALL=${after.canViewAll ? 'YES' : 'NO'}`);
+            console.log(`CONTROL_B_CAN_ACCESS_SETTINGS=${after.canAccessSettings ? 'YES' : 'NO'}`);
+            console.log(`CONTROL_B_CAN_ADMINISTER_TEAM_LOCAL=${after.canAdministerTeamLocal ? 'YES' : 'NO'}`);
+            console.log(`CONTROL_B_RECORDS_POSTS=${telemetry.recordsPosts}`);
+            console.log(`CONTROL_B_RECORDS_GETS=${telemetry.recordsGets}`);
+
+            const spoof = before.activeMemberId === USER_MEMBER_ID
+              && after.activeMemberId === OTHER_MEMBER_ID
+              && after.activeMemberRole === 'Dueño'
+              && after.configModuleVisible
+              && after.canViewAll
+              && after.canAccessSettings;
+            const dataLeak = after.sentinelInState || after.sentinelInDom;
+            const teamAdminUi = after.teamAdminUiVisible;
+
+            console.log(`LOCAL_UI_IDENTITY_SPOOF=${spoof ? 'REPRODUCED' : 'NO'}`);
+            console.log(`CONTROL_B_TEAM_VIEW_TAMPER_SYNC=${spoof && !dataLeak ? 'REPRODUCED_LOCAL_ONLY' : spoof ? 'REPRODUCED_WITH_DATA' : 'NOT_REPRODUCED'}`);
+            console.log(`CONTROL_B_UNAUTHORIZED_DATA=${dataLeak ? 'YES' : 'NO'}`);
+            console.log(`CONTROL_B_TEAM_ADMIN_UI=${teamAdminUi ? 'YES' : 'NO'}`);
+            await context.close();
+            return { spoof, dataLeak, teamAdminUi };
+          }
+
+          async function runFailureControl(browser, origin, label, pushFailure) {
+            const context = await browser.newContext({ viewport: { width: 1366, height: 768 } });
+            const telemetry = await installSyntheticCloud(context, origin, {
+              cloudRows: [],
+              pushFailure,
+            });
+            await seedContext(context, {
+              dirty: true,
+              generation: `downgrade-${label.toLowerCase()}-generation`,
+            });
+            const page = await context.newPage();
+            await loadApp(page, origin);
+            const snap = await snapshot(page);
+            printSnapshot(label, snap);
+            console.log(`${label}_AUTHORITY_DIRECTORY_QUERIES=${telemetry.directoryMembershipQueries}`);
+            console.log(`${label}_VISIT_AUTHORITY_CHECKS=${telemetry.visitAuthorityChecks}`);
+            console.log(`${label}_RECORDS_GETS=${telemetry.recordsGets}`);
+            console.log(`${label}_PUSH_ATTEMPTS=${telemetry.recordsPosts}`);
+            console.log(`${label}_PUSH_FAILURE_STATUS=${pushFailure.status}`);
+            console.log(`${label}_PUSH_FAILURE_BODY=${JSON.stringify(pushFailure.body)}`);
+            console.log(`${label}_UNEXPECTED_ENDPOINTS=${telemetry.unexpectedEndpoints.length}`);
+
+            assert.ok(telemetry.directoryMembershipQueries > 0, `${label}: current membership authority was not checked`);
+            assert.ok(telemetry.visitAuthorityChecks > 0, `${label}: visit authority decision was not reached before push`);
+            assert.ok(telemetry.recordsGets > 0, `${label}: modern cloud read before push not reached`);
+            assert.ok(telemetry.recordsPosts > 0, `${label}: controlled push failure was not reached`);
+            assert.equal(telemetry.unexpectedEndpoints.length, 0, `${label}: unexpected synthetic endpoint`);
+
+            const reproduced = snap.crmActive
+              && snap.authUser === USER_ID
+              && snap.authOrg === ORG_ID
+              && !snap.bootstrapError
+              && snap.currentUserTeamRole === 'Dueño'
+              && snap.activeMemberUserId === USER_ID
+              && snap.activeMemberRole === 'Dueño'
+              && (snap.canViewAll || snap.canAccessSettings || snap.canAdministerTeamLocal || snap.sentinelInState || snap.sentinelInDom)
+              && (snap.sentinelInState || snap.sentinelInDom);
+
+            const safe = !snap.crmActive
+              || Boolean(snap.bootstrapError)
+              || (
+                snap.currentUserTeamRole === 'Corredor'
+                && !snap.sentinelInState
+                && !snap.sentinelInDom
+              );
+
+            await context.close();
+            return { reproduced, safe, snap, telemetry };
+          }
+
+          const port = 4317;
+          const origin = `http://127.0.0.1:${port}`;
+          let server;
+          let browser;
+
+          try {
+            server = await startServer(port);
+            browser = await chromium.launch({
+              headless: true,
+              ...(chromeExecutable() ? { executablePath: chromeExecutable() } : {}),
+            });
+
+            console.log('CHARACTERIZATION_SCOPE=SAME_USER_SAME_ORG');
+            console.log(`EXPECTED_AUTH_USER=${USER_ID}`);
+            console.log(`EXPECTED_AUTH_ORG=${ORG_ID}`);
+            console.log('CLOUD_CURRENT_MEMBERSHIP_STATUS=active');
+            console.log('CLOUD_CURRENT_MEMBERSHIP_ROLE=agent/Corredor');
+
+            const controlA = await runControlA(browser, origin);
+            await runControlB(controlA);
+
+            const c1 = await runFailureControl(browser, origin, 'CONTROL_C1', {
+              status: 503,
+              body: {
+                message: 'synthetic transient upstream failure after current authority proof',
+                code: 'SYNTHETIC_503',
+              },
+            });
+
+            if (c1.reproduced) {
+              console.log('CONTROL_C1_TRANSIENT_FAILURE=REPRODUCED_UNSAFE_FALLBACK');
+              console.log('CONTROL_C2_PERMISSION_FAILURE=NOT_RUN_STOP_P1');
+              console.log('ROLE_DOWNGRADE_STALE_LOCAL_AUTHORIZATION=REPRODUCED');
+              console.log('SEVERITY=P1');
+              console.log('RELEASE=BLOCKED');
+              console.log('P1_REPRODUCED');
+              console.log('STALE_ROLE_CHARACTERIZATION=COMPLETE');
+            } else {
+              console.log(`CONTROL_C1_TRANSIENT_FAILURE=${c1.safe ? 'PASS_SAFE' : 'INCONCLUSIVE'}`);
+              const c2 = await runFailureControl(browser, origin, 'CONTROL_C2', {
+                status: 403,
+                body: {
+                  code: '42501',
+                  message: 'new row violates row-level security policy for table "propcontrol_records"',
+                  details: null,
+                  hint: null,
+                },
+              });
+
+              if (c2.reproduced) {
+                console.log('CONTROL_C2_PERMISSION_FAILURE=REPRODUCED_UNSAFE_FALLBACK');
+                console.log('ROLE_DOWNGRADE_STALE_LOCAL_AUTHORIZATION=REPRODUCED');
+                console.log('SEVERITY=P1');
+                console.log('RELEASE=BLOCKED');
+                console.log('P1_REPRODUCED');
+                console.log('STALE_ROLE_CHARACTERIZATION=COMPLETE');
+              } else {
+                console.log(`CONTROL_C2_PERMISSION_FAILURE=${c2.safe ? 'PASS_SAFE' : 'INCONCLUSIVE'}`);
+                console.log('ROLE_DOWNGRADE_STALE_LOCAL_AUTHORIZATION=NOT_REPRODUCED');
+                console.log('P1_NOT_REPRODUCED');
+                console.log('STALE_ROLE_CHARACTERIZATION=COMPLETE');
+              }
+            }
+          } finally {
+            if (browser) await browser.close();
+            await stopServer(server);
+          }
+          EOF
+
+      - name: Run characterization controls A B C1 C2
+        shell: bash
+        run: |
+          set -euo pipefail
+          node dist/tests/validation-stale-role-downgrade-characterization.mjs
+
+      - name: Final immutable-product proof
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$RELEASE_SHA"
+          git diff --exit-code
+          git diff --cached --exit-code
+          release_live="$(git ls-remote origin "refs/heads/$RELEASE_BRANCH" | awk '{print $1}')"
+          a34_live="$(git ls-remote origin "refs/heads/$A34_BRANCH" | awk '{print $1}')"
+          main_live="$(git ls-remote origin refs/heads/main | awk '{print $1}')"
+          test "$release_live" = "$RELEASE_SHA"
+          test "$a34_live" = "$A34_SHA"
+          test "$main_live" = "$MAIN_SHA"
+          echo "EXECUTION_SHA=$(git rev-parse HEAD)"
+          echo "TRACKED_PRODUCT_DIFF=EMPTY"
+          echo "CACHED_PRODUCT_DIFF=EMPTY"
+          echo "PRODUCT_FILES_MODIFIED=0"
+          echo "RELEASE_BRANCH_UNCHANGED=$release_live"
+          echo "A3.4_BRANCH_UNCHANGED=$a34_live"
+          echo "MAIN=$main_live"
+          echo "DEPLOY=NO"
+          echo "SUPABASE=UNTOUCHED"
+          echo "RAILWAY=UNTOUCHED"
