@@ -1,0 +1,128 @@
+name: de091 stale role downgrade characterization R2
+
+on:
+  push:
+    branches:
+      - validation/de091-stale-role-downgrade-characterization
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  RELEASE_SHA: de091b9c98c33a31682cc77ede03313a8a66cb30
+  RELEASE_BRANCH: release/a34-webkit-572-reconciliation
+  VALIDATION_BRANCH: validation/de091-stale-role-downgrade-characterization
+  A34_BRANCH: agent/sec-fix-a3-4-hydration-auth-fence
+  A34_SHA: 7bb3bdadbe34717cdc8f4d9a6646f8a0b47db1cc
+  MAIN_SHA: 68034c60f606326a1d75fc3d448c7e99de49b492
+
+jobs:
+  characterize-r2:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Checkout exact release candidate detached
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ env.RELEASE_SHA }}
+          fetch-depth: 0
+
+      - name: Prove exact immutable product checkout
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$RELEASE_SHA"
+          if git symbolic-ref -q HEAD >/dev/null 2>&1; then
+            echo "DETACHED_HEAD=NO"
+            exit 1
+          fi
+          git diff --exit-code
+          git diff --cached --exit-code
+          echo "EXECUTION_SHA=$(git rev-parse HEAD)"
+          echo "DETACHED_HEAD=YES"
+          echo "TRACKED_PRODUCT_DIFF=EMPTY"
+          echo "CACHED_PRODUCT_DIFF=EMPTY"
+
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci --silent
+
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Build exact release
+        run: npm run build --silent
+
+      - name: Recover diagnostic and apply validation-only selector disambiguation
+        shell: bash
+        run: |
+          set -euo pipefail
+          source_workflow="$RUNNER_TEMP/source-characterization.yml"
+          git show "origin/$VALIDATION_BRANCH:.github/workflows/de091-stale-role-downgrade-characterization.yml" > "$source_workflow"
+          python3 - "$source_workflow" <<'PY'
+          from pathlib import Path
+          import sys
+
+          source = Path(sys.argv[1]).read_text()
+          start_marker = "          cat > dist/tests/validation-stale-role-downgrade-characterization.mjs <<'EOF'\n"
+          end_marker = "\n          EOF\n"
+          if start_marker not in source:
+              raise SystemExit('DIAGNOSTIC_START_MARKER_MISSING')
+          body = source.split(start_marker, 1)[1]
+          if end_marker not in body:
+              raise SystemExit('DIAGNOSTIC_END_MARKER_MISSING')
+          body = body.split(end_marker, 1)[0]
+          lines = []
+          for line in body.splitlines():
+              lines.append(line[10:] if line.startswith('          ') else line)
+          diagnostic = '\n'.join(lines) + '\n'
+          old = "await page.locator('[data-edit-client=\"101\"]').click();"
+          new = "await page.locator('[data-edit-client=\"101\"]').first().click();"
+          if diagnostic.count(old) != 1:
+              raise SystemExit(f'EXPECTED_ONE_SELECTOR_MATCH_GOT_{diagnostic.count(old)}')
+          diagnostic = diagnostic.replace(old, new)
+          target = Path('dist/tests/validation-stale-role-downgrade-characterization.mjs')
+          target.write_text(diagnostic)
+          print('VALIDATION_SELECTOR_PATCH_COUNT=1')
+          print('VALIDATION_SELECTOR_PATCH=FIRST_MATCH_ONLY')
+          PY
+          git diff --exit-code
+          git diff --cached --exit-code
+          echo "PRODUCT_PATHS_MODIFIED_BY_SELECTOR_PATCH=0"
+
+      - name: Run characterization controls A B C1 C2
+        shell: bash
+        run: |
+          set -euo pipefail
+          node dist/tests/validation-stale-role-downgrade-characterization.mjs
+
+      - name: Final immutable-product proof
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$RELEASE_SHA"
+          git diff --exit-code
+          git diff --cached --exit-code
+          release_live="$(git ls-remote origin "refs/heads/$RELEASE_BRANCH" | awk '{print $1}')"
+          a34_live="$(git ls-remote origin "refs/heads/$A34_BRANCH" | awk '{print $1}')"
+          main_live="$(git ls-remote origin refs/heads/main | awk '{print $1}')"
+          test "$release_live" = "$RELEASE_SHA"
+          test "$a34_live" = "$A34_SHA"
+          test "$main_live" = "$MAIN_SHA"
+          echo "EXECUTION_SHA=$(git rev-parse HEAD)"
+          echo "TRACKED_PRODUCT_DIFF=EMPTY"
+          echo "CACHED_PRODUCT_DIFF=EMPTY"
+          echo "PRODUCT_FILES_MODIFIED=0"
+          echo "RELEASE_BRANCH_UNCHANGED=$release_live"
+          echo "A3.4_BRANCH_UNCHANGED=$a34_live"
+          echo "MAIN=$main_live"
+          echo "DEPLOY=NO"
+          echo "SUPABASE=UNTOUCHED"
+          echo "RAILWAY=UNTOUCHED"
