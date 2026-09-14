@@ -1,4 +1,4 @@
-name: SEC-FIX A3.5 Legacy Fixture Alignment Focused
+name: SEC-FIX A3.5 Legacy Fixture Alignment Focused R2
 
 on:
   push:
@@ -47,7 +47,59 @@ jobs:
       - name: Build unmodified base
         run: npm run build --silent
 
-      - name: Negative control - historical fixtures fail on missing authenticated local member
+      - name: Causal control DR03 BEFORE alignment
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > dist/tests/a35-dr03-before-control.mjs <<'EOF'
+          import assert from 'node:assert/strict';
+          import { initialData } from '../models.js';
+          import { queueCloudSave } from '../cloud-api-compatible.js';
+          import { readTenantSyncState, writeTenantSnapshot } from '../tenant-storage.js';
+          import { installTenantRuntimeScope } from '../tenant-runtime.js';
+
+          const USER='user-dr03';
+          const ORG='00000000-0000-0000-0000-00000000d301';
+          const scope=Object.freeze({userId:USER,organizationId:ORG});
+          class MemoryStorage { values=new Map(); get length(){return this.values.size;} clear(){this.values.clear();} getItem(k){return this.values.get(k)??null;} key(i){return [...this.values.keys()][i]??null;} removeItem(k){this.values.delete(k);} setItem(k,v){this.values.set(k,v);} }
+          class ManualTimers { nextId=1; callbacks=new Map(); setTimeout=(handler)=>{const id=this.nextId++;this.callbacks.set(id,handler);return id;}; clearTimeout=(id)=>{if(typeof id==='number')this.callbacks.delete(id);}; runNext(){const next=this.callbacks.entries().next();assert.equal(next.done,false);const [id,cb]=next.value;this.callbacks.delete(id);cb();} }
+          const storage=new MemoryStorage();
+          const timers=new ManualTimers();
+          storage.setItem('propcontrol-cloud-session-v1',JSON.stringify({accessToken:'access-dr03',refreshToken:'refresh-dr03',expiresAt:Date.now()+60000,userId:USER,email:'dr03@example.com'}));
+          Object.defineProperty(globalThis,'localStorage',{configurable:true,writable:true,value:storage});
+          Object.defineProperty(globalThis,'window',{configurable:true,writable:true,value:{setTimeout:timers.setTimeout,clearTimeout:timers.clearTimeout}});
+          Object.defineProperty(globalThis,'document',{configurable:true,writable:true,value:new EventTarget()});
+          installTenantRuntimeScope(scope,USER);
+          const crm=structuredClone(initialData);
+          crm.organization.id=ORG;
+          crm.organization.name='DR03 BEFORE';
+          crm.clients[0].nextAction='DR03 BEFORE';
+          const localMember=crm.teamMembers.find((m)=>m.id===1);
+          assert.ok(localMember);
+          assert.equal(localMember.userId,undefined);
+          let recordsGets=0;
+          let requestStarted=false;
+          const membership={organization_id:ORG,member_id:1,user_id:USER,role:'owner',status:'active',display_name:'DR03 User',email:'dr03@example.com',created_at:'2026-09-09T00:00:00.000Z'};
+          const json=(value,status=200)=>new Response(JSON.stringify(value),{status,headers:{'Content-Type':'application/json'}});
+          Object.defineProperty(globalThis,'fetch',{configurable:true,writable:true,value:async(input,init)=>{const raw=typeof input==='string'||input instanceof URL?input.toString():input.url;const url=new URL(raw,'https://app.test');const method=String(init?.method||(input instanceof Request?input.method:'GET')).toUpperCase();if(url.pathname==='/api/cloud-config')return json({configured:true,url:'https://supabase.test',publishableKey:'key'});if(url.pathname.endsWith('/organization_members')&&method==='GET')return json([membership]);if(url.pathname.endsWith('/propcontrol_records')&&method==='GET'){recordsGets+=1;requestStarted=true;return new Promise(()=>{});}throw new Error(`unexpected ${method} ${url}`);}});
+          writeTenantSnapshot(scope,crm,{markDirty:true,reason:'DR03 BEFORE',backup:false},storage);
+          queueCloudSave(scope,crm,false);
+          timers.runNext();
+          await new Promise((resolve)=>setImmediate(resolve));
+          await new Promise((resolve)=>setImmediate(resolve));
+          const sync=readTenantSyncState(scope,storage);
+          assert.equal(recordsGets,0);
+          assert.equal(requestStarted,false);
+          assert.match(sync.lastError??'',/TENANT_LOCAL_AUTHORIZATION_STALE:authenticated-member-missing/);
+          console.log('DR03_BEFORE_LOCAL_USER_ID=undefined');
+          console.log('DR03_BEFORE_FENCE=TENANT_LOCAL_AUTHORIZATION_STALE:authenticated-member-missing');
+          console.log('DR03_BEFORE_RECORDS_GET_COUNT=0');
+          console.log('DR03_BEFORE_REQUEST_STARTED=NO');
+          console.log('DR03_CAUSAL_CONTROL_BEFORE=PASS');
+          EOF
+          node dist/tests/a35-dr03-before-control.mjs
+
+      - name: Negative controls for cloud-remote and DR02 historical fixtures
         shell: bash
         run: |
           set -euo pipefail
@@ -63,9 +115,9 @@ jobs:
           grep -q 'TENANT_LOCAL_AUTHORIZATION_STALE:authenticated-member-missing' "$RUNNER_TEMP/dr02-before.tap"
           echo "CLOUD_REMOTE_FIXTURE_BEFORE=AUTHENTICATED_MEMBER_MISSING"
           echo "DR02_FIXTURE_BEFORE=AUTHENTICATED_MEMBER_MISSING"
-          echo "NEGATIVE_CONTROL=PASS"
+          echo "NEGATIVE_CONTROLS=PASS"
 
-      - name: Apply authorized fixture-only alignment in workspace
+      - name: Apply three authorized fixture-only alignments in workspace
         shell: bash
         run: |
           set -euo pipefail
@@ -76,38 +128,66 @@ jobs:
           text = cloud.read_text()
           old = """  const crm = structuredClone(initialData);\n  crm.organization.id = TENANT_SCOPE.organizationId;\n"""
           new = """  const crm = structuredClone(initialData);\n  const authenticatedMember = crm.teamMembers.find((member) => member.id === 1);\n  assert.ok(authenticatedMember);\n  authenticatedMember.userId = TENANT_SCOPE.userId;\n  authenticatedMember.role = 'Dueño';\n  authenticatedMember.status = 'Activo';\n  crm.organization.id = TENANT_SCOPE.organizationId;\n"""
-          if text.count(old) != 1:
-              raise SystemExit(f'cloud fixture marker count={text.count(old)}')
+          if text.count(old) != 1: raise SystemExit(f'cloud fixture marker count={text.count(old)}')
           cloud.write_text(text.replace(old, new, 1))
 
           dr02 = Path('src/tests/sec-fix-a1-dr02-cloud-writer-lease.test.ts')
           text = dr02.read_text()
           old = """  const crm = structuredClone(initialData);\n  crm.organization.id = organizationId;\n"""
           new = """  const crm = structuredClone(initialData);\n  const authenticatedMember = crm.teamMembers.find((member) => member.id === 1);\n  assert.ok(authenticatedMember);\n  authenticatedMember.userId = USER;\n  authenticatedMember.role = 'Dueño';\n  authenticatedMember.status = 'Activo';\n  crm.organization.id = organizationId;\n"""
-          if text.count(old) != 1:
-              raise SystemExit(f'DR02 fixture marker count={text.count(old)}')
+          if text.count(old) != 1: raise SystemExit(f'DR02 fixture marker count={text.count(old)}')
           dr02.write_text(text.replace(old, new, 1))
+
+          dr03 = Path('src/tests/sec-fix-a1-dr03-stale-sync-metadata.test.ts')
+          text = dr03.read_text()
+          old = """  const crm = structuredClone(initialData);\n  crm.organization.id = organizationId;\n"""
+          new = """  const crm = structuredClone(initialData);\n  const authenticatedMember = crm.teamMembers.find((member) => member.id === 1);\n  assert.ok(authenticatedMember);\n  authenticatedMember.userId = USER;\n  authenticatedMember.role = 'Dueño';\n  authenticatedMember.status = 'Activo';\n  crm.organization.id = organizationId;\n"""
+          if text.count(old) != 1: raise SystemExit(f'DR03 fixture marker count={text.count(old)}')
+          dr03.write_text(text.replace(old, new, 1))
           PY
           git diff --check
           mapfile -t changed < <(git diff --name-only | sort)
-          test "${#changed[@]}" -eq 2
+          test "${#changed[@]}" -eq 3
           test "${changed[0]}" = "src/tests/cloud-remote-verification.test.ts"
           test "${changed[1]}" = "src/tests/sec-fix-a1-dr02-cloud-writer-lease.test.ts"
-          test -z "$(git diff --name-only -- 'src/*.ts' 'src/**/*.ts' ':!src/tests/**')"
-          echo "FIXTURE_ALIGNMENT_SCOPE=PASS"
-          git diff -- src/tests/cloud-remote-verification.test.ts src/tests/sec-fix-a1-dr02-cloud-writer-lease.test.ts
+          test "${changed[2]}" = "src/tests/sec-fix-a1-dr03-stale-sync-metadata.test.ts"
+          test -z "$(git diff --name-only -- 'src/**' ':!src/tests/**')"
+          echo "THREE_FIXTURE_ALIGNMENT_SCOPE=PASS"
+          git diff -- src/tests/cloud-remote-verification.test.ts src/tests/sec-fix-a1-dr02-cloud-writer-lease.test.ts src/tests/sec-fix-a1-dr03-stale-sync-metadata.test.ts
 
       - name: Build aligned fixture candidate
         run: npm run build --silent
+
+      - name: Causal control DR03 AFTER alignment
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > dist/tests/a35-dr03-after-control.mjs <<'EOF'
+          import assert from 'node:assert/strict';
+          import { initialData } from '../models.js';
+          import { queueCloudSave } from '../cloud-api-compatible.js';
+          import { readTenantSyncState, writeTenantSnapshot } from '../tenant-storage.js';
+          import { installTenantRuntimeScope } from '../tenant-runtime.js';
+          const USER='user-dr03';const ORG='00000000-0000-0000-0000-00000000d301';const scope=Object.freeze({userId:USER,organizationId:ORG});
+          class MemoryStorage { values=new Map(); get length(){return this.values.size;} clear(){this.values.clear();} getItem(k){return this.values.get(k)??null;} key(i){return [...this.values.keys()][i]??null;} removeItem(k){this.values.delete(k);} setItem(k,v){this.values.set(k,v);} }
+          class ManualTimers { nextId=1; callbacks=new Map(); setTimeout=(handler)=>{const id=this.nextId++;this.callbacks.set(id,handler);return id;}; clearTimeout=(id)=>{if(typeof id==='number')this.callbacks.delete(id);}; runNext(){const next=this.callbacks.entries().next();assert.equal(next.done,false);const [id,cb]=next.value;this.callbacks.delete(id);cb();} }
+          const deferred=()=>{let resolve,reject;const promise=new Promise((done,fail)=>{resolve=done;reject=fail;});return {promise,resolve,reject};};
+          const storage=new MemoryStorage();const timers=new ManualTimers();storage.setItem('propcontrol-cloud-session-v1',JSON.stringify({accessToken:'access-dr03',refreshToken:'refresh-dr03',expiresAt:Date.now()+60000,userId:USER,email:'dr03@example.com'}));Object.defineProperty(globalThis,'localStorage',{configurable:true,writable:true,value:storage});Object.defineProperty(globalThis,'window',{configurable:true,writable:true,value:{setTimeout:timers.setTimeout,clearTimeout:timers.clearTimeout}});Object.defineProperty(globalThis,'document',{configurable:true,writable:true,value:new EventTarget()});installTenantRuntimeScope(scope,USER);
+          const crm=structuredClone(initialData);crm.organization.id=ORG;crm.organization.name='DR03 AFTER';crm.clients[0].nextAction='DR03 AFTER';const localMember=crm.teamMembers.find((m)=>m.id===1);assert.ok(localMember);localMember.userId=USER;localMember.role='Dueño';localMember.status='Activo';
+          let recordsGets=0;let requestStarted=false;const started=deferred();const pending=deferred();const membership={organization_id:ORG,member_id:1,user_id:USER,role:'owner',status:'active',display_name:'DR03 User',email:'dr03@example.com',created_at:'2026-09-09T00:00:00.000Z'};const json=(value,status=200)=>new Response(JSON.stringify(value),{status,headers:{'Content-Type':'application/json'}});Object.defineProperty(globalThis,'fetch',{configurable:true,writable:true,value:async(input,init)=>{const raw=typeof input==='string'||input instanceof URL?input.toString():input.url;const url=new URL(raw,'https://app.test');const method=String(init?.method||(input instanceof Request?input.method:'GET')).toUpperCase();if(url.pathname==='/api/cloud-config')return json({configured:true,url:'https://supabase.test',publishableKey:'key'});if(url.pathname.endsWith('/organization_members')&&method==='GET')return json([membership]);if(url.pathname.endsWith('/propcontrol_records')&&method==='GET'){recordsGets+=1;requestStarted=true;started.resolve();return pending.promise;}throw new Error(`unexpected ${method} ${url}`);}});
+          writeTenantSnapshot(scope,crm,{markDirty:true,reason:'DR03 AFTER',backup:false},storage);const before=readTenantSyncState(scope,storage);queueCloudSave(scope,crm,false);timers.runNext();await started.promise;assert.equal(recordsGets,1);assert.equal(requestStarted,true);pending.reject(new Error('DR03 synthetic rejection'));await new Promise((resolve)=>setImmediate(resolve));await new Promise((resolve)=>setImmediate(resolve));const after=readTenantSyncState(scope,storage);assert.equal(after.lastError,'Guardado localmente, sincronización pendiente. DR03 synthetic rejection');assert.equal(after.dirty,true);assert.equal(after.localGeneration,before.localGeneration);assert.equal(after.verifiedGeneration,before.verifiedGeneration);console.log('DR03_AFTER_AUTHORITY_MATCH=YES');console.log('DR03_AFTER_RECORDS_GET_COUNT=1');console.log('DR03_AFTER_REQUEST_STARTED=YES');console.log('DR03_AFTER_SYNTHETIC_REJECTION=YES');console.log('DR03_AFTER_QUEUE_CATCH_CONTRACT=PASS');console.log('DR03_CAUSAL_CONTROL_AFTER=PASS');
+          EOF
+          node dist/tests/a35-dr03-after-control.mjs
 
       - name: cloud-remote-verification complete
         shell: bash
         run: |
           set -euo pipefail
           node --test --test-concurrency=1 dist/tests/cloud-remote-verification.test.js 2>&1 | tee "$RUNNER_TEMP/cloud-after.tap"
+          grep -q '^# tests 3$' "$RUNNER_TEMP/cloud-after.tap"
+          grep -q '^# pass 3$' "$RUNNER_TEMP/cloud-after.tap"
           grep -q '^# fail 0$' "$RUNNER_TEMP/cloud-after.tap"
-          grep -q 'modern: no declara éxito si la relectura remota no coincide con el snapshot esperado' "$RUNNER_TEMP/cloud-after.tap"
-          grep -q 'legacy: tampoco declara éxito si el snapshot releído no coincide' "$RUNNER_TEMP/cloud-after.tap"
+          grep -q '^# cancelled 0$' "$RUNNER_TEMP/cloud-after.tap"
           if grep -q 'TENANT_LOCAL_AUTHORIZATION_STALE:authenticated-member-missing' "$RUNNER_TEMP/cloud-after.tap"; then exit 1; fi
           echo "CLOUD_REMOTE_ORIGINAL_CONTRACT_REACHED=PASS"
 
@@ -116,7 +196,10 @@ jobs:
         run: |
           set -euo pipefail
           node --test --test-concurrency=1 dist/tests/sec-fix-a1-dr02-cloud-writer-lease.test.js 2>&1 | tee "$RUNNER_TEMP/dr02-after.tap"
+          grep -q '^# tests 12$' "$RUNNER_TEMP/dr02-after.tap"
+          grep -q '^# pass 12$' "$RUNNER_TEMP/dr02-after.tap"
           grep -q '^# fail 0$' "$RUNNER_TEMP/dr02-after.tap"
+          grep -q '^# cancelled 0$' "$RUNNER_TEMP/dr02-after.tap"
           if grep -q 'TENANT_LOCAL_AUTHORIZATION_STALE:authenticated-member-missing' "$RUNNER_TEMP/dr02-after.tap"; then exit 1; fi
           echo "DR02_ORIGINAL_CONTRACT_REACHED=PASS"
 
@@ -124,37 +207,36 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          node --test --test-concurrency=1 dist/tests/sec-fix-a1-dr03-stale-sync-metadata.test.js 2>&1 | tee "$RUNNER_TEMP/dr03.tap"
-          grep -q '^# fail 0$' "$RUNNER_TEMP/dr03.tap"
-          grep -q '^# cancelled 0$' "$RUNNER_TEMP/dr03.tap"
-          echo "DR03_ISOLATED=PASS"
+          node --test --test-concurrency=1 dist/tests/sec-fix-a1-dr03-stale-sync-metadata.test.js 2>&1 | tee "$RUNNER_TEMP/dr03-after.tap"
+          grep -q '^# tests 6$' "$RUNNER_TEMP/dr03-after.tap"
+          grep -q '^# pass 6$' "$RUNNER_TEMP/dr03-after.tap"
+          grep -q '^# fail 0$' "$RUNNER_TEMP/dr03-after.tap"
+          grep -q '^# cancelled 0$' "$RUNNER_TEMP/dr03-after.tap"
+          echo "DR03_ALIGNMENT_RESULT=PASS"
 
-      - name: A3.5 committed A-G plus classifier
+      - name: A3.5 committed A-G plus Control F classifier
         shell: bash
         run: |
           set -euo pipefail
-          node --test --test-concurrency=1 \
-            dist/tests/sec-fix-a3-5-stale-role-fallback-authority.test.js \
-            dist/tests/sec-fix-a3-5-ownerless-normalization.test.js \
-            2>&1 | tee "$RUNNER_TEMP/a35.tap"
-          grep -q '^# fail 0$' "$RUNNER_TEMP/a35.tap"
-          grep -q 'CONTROL_A_NORMAL_DOWNGRADE=PASS_SAFE' "$RUNNER_TEMP/a35.tap"
-          grep -q 'CONTROL_B_TEAM_VIEW_TAMPER_SYNC=PASS_SAFE' "$RUNNER_TEMP/a35.tap"
-          grep -q 'CONTROL_C1_PRE_PROJECTION_AUTHORITY_FENCE=PASS' "$RUNNER_TEMP/a35.tap"
-          grep -q 'CONTROL_C2_PRE_PROJECTION_AUTHORITY_FENCE=PASS' "$RUNNER_TEMP/a35.tap"
-          grep -q 'CONTROL_D_SYNTHETIC_503_REACHED=YES' "$RUNNER_TEMP/a35.tap"
-          grep -q 'CONTROL_E=PASS_SAFE' "$RUNNER_TEMP/a35.tap"
-          grep -q 'CONTROL_F=PASS_SAFE' "$RUNNER_TEMP/a35.tap"
-          grep -q 'CONTROL_F_CLASSIFIER_VALID_TELEMETRY=ALLOWED' "$RUNNER_TEMP/a35.tap"
-          grep -q 'CONTROL_F_CLASSIFIER_STALE_CRM=FORBIDDEN' "$RUNNER_TEMP/a35.tap"
-          grep -q 'CONTROL_F_CLASSIFIER_WRONG_TENANT=FORBIDDEN' "$RUNNER_TEMP/a35.tap"
-          grep -q 'CONTROL_F_CLASSIFIER_WRONG_ACTOR=FORBIDDEN' "$RUNNER_TEMP/a35.tap"
-          grep -q 'CONTROL_F_CLASSIFIER_WRONG_CLIENT=FORBIDDEN' "$RUNNER_TEMP/a35.tap"
-          grep -q 'CONTROL_F_CLASSIFIER_GENERIC_ACTIVITY=FORBIDDEN' "$RUNNER_TEMP/a35.tap"
-          grep -q 'CONTROL_G_OWNERLESS_NO_PRIVILEGE_ESCALATION=PASS_SAFE' "$RUNNER_TEMP/a35.tap"
+          node --test --test-concurrency=1 dist/tests/sec-fix-a3-5-stale-role-fallback-authority.test.js dist/tests/sec-fix-a3-5-ownerless-normalization.test.js 2>&1 | tee "$RUNNER_TEMP/a35-ag.tap"
+          grep -q '^# fail 0$' "$RUNNER_TEMP/a35-ag.tap"
+          grep -q 'CONTROL_A_NORMAL_DOWNGRADE=PASS_SAFE' "$RUNNER_TEMP/a35-ag.tap"
+          grep -q 'CONTROL_B_TEAM_VIEW_TAMPER_SYNC=PASS_SAFE' "$RUNNER_TEMP/a35-ag.tap"
+          grep -q 'CONTROL_C1_PRE_PROJECTION_AUTHORITY_FENCE=PASS' "$RUNNER_TEMP/a35-ag.tap"
+          grep -q 'CONTROL_C2_PRE_PROJECTION_AUTHORITY_FENCE=PASS' "$RUNNER_TEMP/a35-ag.tap"
+          grep -q 'CONTROL_D_SYNTHETIC_503_REACHED=YES' "$RUNNER_TEMP/a35-ag.tap"
+          grep -q 'CONTROL_E=PASS_SAFE' "$RUNNER_TEMP/a35-ag.tap"
+          grep -q 'CONTROL_F=PASS_SAFE' "$RUNNER_TEMP/a35-ag.tap"
+          grep -q 'CONTROL_F_CLASSIFIER_VALID_TELEMETRY=ALLOWED' "$RUNNER_TEMP/a35-ag.tap"
+          grep -q 'CONTROL_F_CLASSIFIER_STALE_CRM=FORBIDDEN' "$RUNNER_TEMP/a35-ag.tap"
+          grep -q 'CONTROL_F_CLASSIFIER_WRONG_TENANT=FORBIDDEN' "$RUNNER_TEMP/a35-ag.tap"
+          grep -q 'CONTROL_F_CLASSIFIER_WRONG_ACTOR=FORBIDDEN' "$RUNNER_TEMP/a35-ag.tap"
+          grep -q 'CONTROL_F_CLASSIFIER_WRONG_CLIENT=FORBIDDEN' "$RUNNER_TEMP/a35-ag.tap"
+          grep -q 'CONTROL_F_CLASSIFIER_GENERIC_ACTIVITY=FORBIDDEN' "$RUNNER_TEMP/a35-ag.tap"
+          grep -q 'CONTROL_G_OWNERLESS_NO_PRIVILEGE_ESCALATION=PASS_SAFE' "$RUNNER_TEMP/a35-ag.tap"
           echo "A35_A_G_AND_CLASSIFIER=PASS"
 
-      - name: A3.5 H-I and empty-roster compatibility
+      - name: A3.5 H-I and fresh empty-roster compatibility
         shell: bash
         run: |
           set -euo pipefail
@@ -165,24 +247,7 @@ jobs:
           import { activateStorageForTenant, state } from '../store.js';
           import { canAccessSettings, canAdministerTeam, canViewAll } from '../team-access.js';
           import { writeTenantSnapshot } from '../tenant-storage.js';
-          const ORG='00000000-0000-0000-0000-00000000a351';
-          const AUTH='a35-preservation-auth';
-          const OWNER='a35-preservation-owner';
-          const scope=Object.freeze({userId:AUTH,organizationId:ORG});
-          const member=(id,userId,role)=>({id,userId,name:userId,email:`${userId}@example.test`,role,status:'Activo',createdAt:'2026-09-14T00:00:00.000Z'});
-          function crm(members){const v=structuredClone(initialData);v.organization={id:ORG,name:'A3.5 Preservation',seatLimit:null,planLabel:'validation'};v.teamMembers=members;v.activityLog=[];v.clients=[];v.properties=[];v.visits=[];v.offers=[];v.reservations=[];v.contacts=[];v.reminders=[];v.fichas=[];v.conversations=[];return v;}
-          function seed(members){localStorage.clear();writeTenantSnapshot(scope,crm(members),{markDirty:false,reason:'a35-preservation',backup:false});activateStorageForTenant(scope);}
-          seed([member(351,AUTH,'Corredor'),member(352,OWNER,'Dueño')]);
-          const hAuth=state.crm.teamMembers.find(x=>x.userId===AUTH),hOwner=state.crm.teamMembers.find(x=>x.userId===OWNER);
-          assert.equal(hAuth?.role,'Corredor');assert.equal(hOwner?.role,'Dueño');assert.equal(state.crm.teamMembers.filter(x=>x.role==='Dueño').length,1);
-          console.log('CONTROL_H_REAL_OWNER_PRESERVED=PASS_SAFE');
-          seed([member(351,AUTH,'Dueño'),member(352,OWNER,'Corredor')]);
-          const iAuth=state.crm.teamMembers.find(x=>x.userId===AUTH);
-          assert.equal(iAuth?.role,'Dueño');assert.equal(state.crm.teamMembers.filter(x=>x.role==='Dueño').length,1);assert.equal(state.activeMemberId,351);assert.equal(canViewAll(),true);assert.equal(canAccessSettings(),true);assert.equal(canAdministerTeam(),true);
-          console.log('CONTROL_I_REAL_OWNER_PRESERVED=PASS_SAFE');
-          localStorage.clear();writeTenantSnapshot(scope,crm([]),{markDirty:false,reason:'a35-empty-roster',backup:false});activateStorageForTenant(scope);
-          assert.equal(state.crm.teamMembers.length,initialData.teamMembers.length);assert.equal(state.crm.teamMembers[0]?.role,'Dueño');assert.equal(state.crm.teamMembers[0]?.userId,undefined);
-          console.log('FRESH_EMPTY_ROSTER_INITIALDATA_COMPATIBILITY=PASS_SAFE');
+          const ORG='00000000-0000-0000-0000-00000000a351';const AUTH='a35-preservation-auth';const OWNER='a35-preservation-owner';const scope=Object.freeze({userId:AUTH,organizationId:ORG});const member=(id,userId,role)=>({id,userId,name:userId,email:`${userId}@example.test`,role,status:'Activo',createdAt:'2026-09-14T00:00:00.000Z'});function crm(members){const v=structuredClone(initialData);v.organization={id:ORG,name:'A3.5 Preservation',seatLimit:null,planLabel:'validation'};v.teamMembers=members;v.activityLog=[];v.clients=[];v.properties=[];v.visits=[];v.offers=[];v.reservations=[];v.contacts=[];v.reminders=[];v.fichas=[];v.conversations=[];return v;}function seed(members){localStorage.clear();writeTenantSnapshot(scope,crm(members),{markDirty:false,reason:'a35-preservation',backup:false});activateStorageForTenant(scope);}seed([member(351,AUTH,'Corredor'),member(352,OWNER,'Dueño')]);const hAuth=state.crm.teamMembers.find(x=>x.userId===AUTH),hOwner=state.crm.teamMembers.find(x=>x.userId===OWNER);assert.equal(hAuth?.role,'Corredor');assert.equal(hOwner?.role,'Dueño');assert.equal(state.crm.teamMembers.filter(x=>x.role==='Dueño').length,1);console.log('CONTROL_H_REAL_OWNER_PRESERVED=PASS_SAFE');seed([member(351,AUTH,'Dueño'),member(352,OWNER,'Corredor')]);const iAuth=state.crm.teamMembers.find(x=>x.userId===AUTH);assert.equal(iAuth?.role,'Dueño');assert.equal(state.crm.teamMembers.filter(x=>x.role==='Dueño').length,1);assert.equal(state.activeMemberId,351);assert.equal(canViewAll(),true);assert.equal(canAccessSettings(),true);assert.equal(canAdministerTeam(),true);console.log('CONTROL_I_REAL_OWNER_PRESERVED=PASS_SAFE');localStorage.clear();writeTenantSnapshot(scope,crm([]),{markDirty:false,reason:'a35-empty-roster',backup:false});activateStorageForTenant(scope);assert.equal(state.crm.teamMembers.length,initialData.teamMembers.length);assert.equal(state.crm.teamMembers[0]?.role,'Dueño');assert.equal(state.crm.teamMembers[0]?.userId,undefined);console.log('FRESH_EMPTY_ROSTER_INITIALDATA_COMPATIBILITY=PASS_SAFE');
           EOF
           node dist/tests/a35-owner-preservation-focused.mjs 2>&1 | tee "$RUNNER_TEMP/a35-hi.tap"
           grep -q 'CONTROL_H_REAL_OWNER_PRESERVED=PASS_SAFE' "$RUNNER_TEMP/a35-hi.tap"
@@ -197,24 +262,27 @@ jobs:
           test "$(git rev-parse HEAD)" = "$BASE_CANDIDATE"
           test "$(git ls-remote origin refs/heads/$PRODUCT_BRANCH | awk '{print $1}')" = "$BASE_CANDIDATE"
           mapfile -t changed < <(git diff --name-only | sort)
-          test "${#changed[@]}" -eq 2
+          test "${#changed[@]}" -eq 3
           test "${changed[0]}" = "src/tests/cloud-remote-verification.test.ts"
           test "${changed[1]}" = "src/tests/sec-fix-a1-dr02-cloud-writer-lease.test.ts"
+          test "${changed[2]}" = "src/tests/sec-fix-a1-dr03-stale-sync-metadata.test.ts"
+          test -z "$(git diff --name-only -- 'src/**' ':!src/tests/**')"
           git diff --check
           echo "RUNTIME_FILES_CHANGED=0"
           echo "SQL_CHANGED=0"
           echo "MIGRATIONS_CHANGED=0"
-          echo "FOCUSED=GREEN"
+          echo "FOCUSED_RESULT=GREEN"
 
       - name: Create single official TEST-ONLY commit after focused GREEN
         shell: bash
         run: |
           set -euo pipefail
+          test "$(git ls-remote origin refs/heads/$PRODUCT_BRANCH | awk '{print $1}')" = "$BASE_CANDIDATE"
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add src/tests/cloud-remote-verification.test.ts src/tests/sec-fix-a1-dr02-cloud-writer-lease.test.ts
+          git add src/tests/cloud-remote-verification.test.ts src/tests/sec-fix-a1-dr02-cloud-writer-lease.test.ts src/tests/sec-fix-a1-dr03-stale-sync-metadata.test.ts
           git diff --cached --check
-          test "$(git diff --cached --name-only | wc -l)" -eq 2
+          test "$(git diff --cached --name-only | wc -l)" -eq 3
           git commit -m 'TEST-ONLY A3.5: align legacy cloud fixtures with authenticated authority'
           NEW_SHA="$(git rev-parse HEAD)"
           test "$(git rev-parse HEAD^)" = "$BASE_CANDIDATE"
