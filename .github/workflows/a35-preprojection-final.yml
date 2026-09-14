@@ -1,0 +1,510 @@
+name: A3.5 Pre-Projection Authority Closure
+
+on:
+  push:
+    branches: [validation/a35-preprojection-final]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  BASE_SHA: de091b9c98c33a31682cc77ede03313a8a66cb30
+  INITIAL_TEST_HEAD: 035ec63dc3c1cf743148df7699f83142f1c76400
+  PRODUCT_BRANCH: agent/sec-fix-a3-5-stale-role-fallback-fence
+  RELEASE_BRANCH: release/a34-webkit-572-reconciliation
+  RELEASE_SHA: de091b9c98c33a31682cc77ede03313a8a66cb30
+  A34_BRANCH: agent/sec-fix-a3-4-hydration-auth-fence
+  A34_SHA: 7bb3bdadbe34717cdc8f4d9a6646f8a0b47db1cc
+  MAIN_SHA: 68034c60f606326a1d75fc3d448c7e99de49b492
+
+jobs:
+  tighten-contract:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    outputs:
+      test_sha: ${{ steps.commit.outputs.test_sha }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ env.PRODUCT_BRANCH }}
+          fetch-depth: 0
+
+      - name: Prove exact TEST-ONLY starting head
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$INITIAL_TEST_HEAD"
+          test "$(git diff --name-only "$BASE_SHA"..HEAD | sort)" = "src/tests/sec-fix-a3-5-stale-role-fallback-authority.test.ts"
+          test "$(git diff --name-only "$BASE_SHA"..HEAD | grep -Ev '^src/tests/' | wc -l)" -eq 0
+          test "$(git ls-remote origin refs/heads/$RELEASE_BRANCH | awk '{print $1}')" = "$RELEASE_SHA"
+          test "$(git ls-remote origin refs/heads/$A34_BRANCH | awk '{print $1}')" = "$A34_SHA"
+          test "$(git ls-remote origin refs/heads/main | awk '{print $1}')" = "$MAIN_SHA"
+          echo "TEST_CONTRACT_PARENT=$INITIAL_TEST_HEAD"
+          echo "RUNTIME_DELTA=0"
+
+      - name: Tighten A3.5 E/F pre-projection contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('src/tests/sec-fix-a3-5-stale-role-fallback-authority.test.ts')
+          s = p.read_text()
+
+          old = """interface StoredSnapshot {
+            raw: CrmData | null;
+            dirty: boolean;
+            lastError: string;
+          }"""
+          new = """interface StoredSnapshot {
+            raw: CrmData | null;
+            rawText: string;
+            dirty: boolean;
+            lastError: string;
+          }"""
+          if s.count(old) != 1: raise SystemExit('A35_TEST_PATCH_STORED_INTERFACE_SHAPE')
+          s = s.replace(old, new)
+
+          old = """    return {
+                raw: rawValue ? JSON.parse(rawValue) : null,
+                dirty: sync.dirty === true,
+                lastError: String(sync.lastError || ''),
+              };"""
+          new = """    return {
+                raw: rawValue ? JSON.parse(rawValue) : null,
+                rawText: rawValue || '',
+                dirty: sync.dirty === true,
+                lastError: String(sync.lastError || ''),
+              };"""
+          if s.count(old) != 1: raise SystemExit('A35_TEST_PATCH_STORED_RETURN_SHAPE')
+          s = s.replace(old, new)
+
+          start = s.index("async function assertDowngradeFailureClosed(")
+          end = s.index("\ntest('A3.5 C1:", start)
+          replacement = r'''async function assertDowngradeFailureClosed(label: 'CONTROL_C1' | 'CONTROL_C2', pushFailure: SyntheticFailure): Promise<void> {
+            const localCrm = staleOwnerSnapshot();
+            const control = await newContextWithCloud(localCrm, {
+              dirty: true,
+              generation: `a35-${label.toLowerCase()}`,
+              pushFailure,
+              cloudRows: [],
+            });
+            try {
+              await loadApp(control.page);
+              const snap = await runtimeSnapshot(control.page);
+              const stored = await storedSnapshot(control.page);
+              printSnapshot(label, snap, stored);
+              console.log(`${label}_CURRENT_CLOUD_ROLE=Corredor`);
+              console.log(`${label}_LOCAL_HISTORICAL_ROLE=Dueño`);
+              console.log(`${label}_CONFIGURED_PUSH_FAILURE_STATUS=${pushFailure.status}`);
+              console.log(`${label}_AUTHORITY_DIRECTORY_QUERIES=${control.telemetry.directoryMembershipQueries}`);
+              console.log(`${label}_RECORDS_GETS=${control.telemetry.recordsGets}`);
+              console.log(`${label}_RECORDS_POSTS=${control.telemetry.recordsPosts}`);
+              console.log(`${label}_RECORDS_DELETES=${control.telemetry.recordsDeletes}`);
+
+              assert.ok(control.telemetry.directoryMembershipQueries > 0, `${label}: current cloud membership authority must be proven`);
+              assert.equal(control.telemetry.recordsGets, 0, `${label}: incompatible dirty snapshot must be fenced before cloud record projection/read`);
+              assert.equal(control.telemetry.recordsPosts, 0, `${label}: incompatible dirty snapshot must not POST`);
+              assert.equal(control.telemetry.recordsDeletes, 0, `${label}: incompatible dirty snapshot must not DELETE`);
+              assert.equal(control.telemetry.unexpectedEndpoints.length, 0);
+              assert.equal(snap.crmActive, false, `${label}: stale authorization must not complete CRM bootstrap`);
+              assert.match(snap.bootstrapError, new RegExp(EXPECTED_STALE_CODE));
+              assert.equal(snap.bodyHasSentinel, false);
+              assert.equal(snap.bodyHasStaleOwner, false);
+              assert.equal(snap.crmActive && (snap.canViewAll || snap.canAccessSettings || snap.canAdministerTeam), false);
+              assert.equal(stored.dirty, true);
+              assert.equal(stored.rawText, JSON.stringify(localCrm), `${label}: raw local snapshot must be byte-preserved`);
+              assert.deepEqual(stored.raw, localCrm);
+              assert.ok(stored.lastError.includes(EXPECTED_STALE_CODE));
+              console.log(`${label}_RAW_LOCAL_SNAPSHOT_PRESERVED=YES`);
+              console.log(`${label}_PRE_PROJECTION_AUTHORITY_FENCE=PASS`);
+            } finally {
+              await control.context.close();
+            }
+          }
+          '''
+          s = s[:start] + replacement + s[end:]
+
+          d_marker = """    assert.equal(stored.dirty, true);
+              assert.ok(stored.raw?.clients.some((client) => client.name === SAME_ROLE_DIRTY));
+              console.log('LOCAL_OWN_DIRTY_DATA_PRESERVED=YES');
+              console.log('CONTROL_D_SAME_AUTHORITY_OFFLINE_FALLBACK=PASS_SAFE');"""
+          d_replacement = """    assert.equal(stored.dirty, true);
+              assert.ok(stored.raw?.clients.some((client) => client.name === SAME_ROLE_DIRTY));
+              assert.ok(control.telemetry.recordsGets > 0, 'CONTROL_D: compatible dirty snapshot must reach cloud record read');
+              assert.ok(control.telemetry.recordsPosts > 0, 'CONTROL_D: compatible dirty snapshot must reach synthetic 503 POST');
+              assert.equal(control.telemetry.recordsDeletes, 0);
+              console.log(`CONTROL_D_RECORDS_POSTS=${control.telemetry.recordsPosts}`);
+              console.log('CONTROL_D_SYNTHETIC_503_REACHED=YES');
+              console.log('LOCAL_OWN_DIRTY_DATA_PRESERVED=YES');
+              console.log('CONTROL_D_SAME_AUTHORITY_OFFLINE_FALLBACK=PASS_SAFE');"""
+          if s.count(d_marker) != 1: raise SystemExit('A35_TEST_PATCH_D_SHAPE')
+          s = s.replace(d_marker, d_replacement)
+
+          e_start = s.index("test('A3.5 E:")
+          replacement = r'''test('A3.5 E: every dirty incompatible local authenticated member fails before projection without storage loss', async () => {
+            const cases = [
+              ['MISSING', missingLocalMemberSnapshot()],
+              ['MEMBER_ID_MISMATCH', mismatchedMemberIdSnapshot()],
+              ['ROLE_MISMATCH', mismatchedRoleSnapshot()],
+            ] as const;
+
+            for (const [name, crm] of cases) {
+              const control = await newContextWithCloud(crm, {
+                dirty: true,
+                generation: `a35-control-e-${name.toLowerCase()}`,
+                pushFailure: {
+                  status: 503,
+                  body: { message: `synthetic transient failure for ${name}`, code: 'SYNTHETIC_503' },
+                },
+                cloudRows: [],
+              });
+              try {
+                await loadApp(control.page);
+                const snap = await runtimeSnapshot(control.page);
+                const stored = await storedSnapshot(control.page);
+                printSnapshot(`CONTROL_E_${name}`, snap, stored);
+                console.log(`CONTROL_E_${name}_RECORDS_GETS=${control.telemetry.recordsGets}`);
+                console.log(`CONTROL_E_${name}_RECORDS_POSTS=${control.telemetry.recordsPosts}`);
+                console.log(`CONTROL_E_${name}_RECORDS_DELETES=${control.telemetry.recordsDeletes}`);
+                assert.equal(snap.crmActive, false, `${name}: incompatible dirty local authority must fail closed`);
+                assert.match(snap.bootstrapError, new RegExp(EXPECTED_STALE_CODE));
+                assert.equal(stored.dirty, true, `${name}: dirty flag must survive`);
+                assert.equal(stored.rawText, JSON.stringify(crm), `${name}: raw local snapshot must remain byte-identical`);
+                assert.deepEqual(stored.raw, crm, `${name}: parsed local CRM snapshot must remain intact`);
+                assert.equal(control.telemetry.recordsGets, 0, `${name}: fence must run before authorized record projection/read`);
+                assert.equal(control.telemetry.recordsPosts, 0, `${name}: no POST after local authority mismatch`);
+                assert.equal(control.telemetry.recordsDeletes, 0, `${name}: no DELETE after local authority mismatch`);
+                assert.ok(stored.lastError.includes(EXPECTED_STALE_CODE), `${name}: authority error must be classified into sync state`);
+                console.log(`CONTROL_E_${name}_RAW_LOCAL_SNAPSHOT_PRESERVED=YES`);
+                console.log(`CONTROL_E_${name}=PASS_SAFE`);
+              } finally {
+                await control.context.close();
+              }
+            }
+
+            console.log('CONTROL_E=PASS_SAFE');
+          });
+
+          test('A3.5 F: clean incompatible local snapshot is replaceable by current cloud authority', async () => {
+            const localCrm = missingLocalMemberSnapshot();
+            const control = await newContextWithCloud(localCrm, {
+              dirty: false,
+              generation: 'a35-control-f',
+            });
+            try {
+              await loadApp(control.page);
+              const snap = await runtimeSnapshot(control.page);
+              const stored = await storedSnapshot(control.page);
+              printSnapshot('CONTROL_F', snap, stored);
+              assert.equal(snap.crmActive, true, 'CONTROL_F: clean stale local snapshot must not permanently block bootstrap');
+              assert.equal(snap.bootstrapError, '');
+              assert.equal(snap.activeMemberUserId, USER_ID);
+              assert.equal(snap.activeMemberId, USER_MEMBER_ID);
+              assert.equal(snap.activeMemberRole, 'Corredor');
+              assert.equal(snap.currentUserTeamRole, 'Corredor');
+              assert.equal(snap.canViewAll, false);
+              assert.equal(snap.canAccessSettings, false);
+              assert.equal(snap.canAdministerTeam, false);
+              assert.ok(snap.clientNames.includes(CLOUD_ALLOWED), 'CONTROL_F: current cloud-authorized record must replace clean stale local snapshot');
+              assert.equal(snap.bodyHasSentinel, false);
+              assert.equal(stored.dirty, false);
+              assert.ok(control.telemetry.directoryMembershipQueries > 0);
+              assert.ok(control.telemetry.recordsGets > 0);
+              assert.equal(control.telemetry.recordsPosts, 0);
+              assert.equal(control.telemetry.recordsDeletes, 0);
+              console.log('CONTROL_F_CLEAN_STALE_REPLACED=YES');
+              console.log('CONTROL_F=PASS_SAFE');
+            } finally {
+              await control.context.close();
+            }
+          });
+          '''
+          s = s[:e_start] + replacement
+          p.write_text(s)
+          PY
+          test "$(git diff --name-only)" = "src/tests/sec-fix-a3-5-stale-role-fallback-authority.test.ts"
+          echo "TEST_CONTRACT_PATHS=1"
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci --silent
+      - name: Build tightened TEST-ONLY contract
+        run: npm run build --silent
+
+      - name: Commit TEST-ONLY contract
+        id: commit
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git diff --name-only)" = "src/tests/sec-fix-a3-5-stale-role-fallback-authority.test.ts"
+          git config user.name "PropControl Validation Writer"
+          git config user.email "validation@propcontrol.invalid"
+          git add src/tests/sec-fix-a3-5-stale-role-fallback-authority.test.ts
+          git commit -m "TEST-ONLY: tighten A3.5 pre-projection authority contract"
+          test "$(git diff --name-only "$BASE_SHA"..HEAD | sort)" = "src/tests/sec-fix-a3-5-stale-role-fallback-authority.test.ts"
+          git push origin HEAD:$PRODUCT_BRANCH
+          test_sha="$(git rev-parse HEAD)"
+          echo "test_sha=$test_sha" >> "$GITHUB_OUTPUT"
+          echo "TEST_CONTRACT_SHA=$test_sha"
+
+  baseline-red:
+    needs: tighten-contract
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.tighten-contract.outputs.test_sha }}
+          fetch-depth: 0
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci --silent
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+      - run: npm run build --silent
+      - name: Prove tightened contract RED on unchanged runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git diff --name-only "$BASE_SHA"..HEAD | grep -Ev '^src/tests/' | wc -l)" -eq 0
+          set +e
+          node --test --test-concurrency=1 dist/tests/sec-fix-a3-5-stale-role-fallback-authority.test.js 2>&1 | tee "$RUNNER_TEMP/a35-tightened-baseline.tap"
+          rc=${PIPESTATUS[0]}
+          set -e
+          test "$rc" -ne 0
+          grep -q 'CONTROL_D_SAME_AUTHORITY_OFFLINE_FALLBACK=PASS_SAFE' "$RUNNER_TEMP/a35-tightened-baseline.tap"
+          grep -q 'CONTROL_F=PASS_SAFE' "$RUNNER_TEMP/a35-tightened-baseline.tap"
+          grep -Eq 'not ok [0-9]+ - A3\.5 B:|not ok [0-9]+ - A3\.5 C1:|not ok [0-9]+ - A3\.5 E:' "$RUNNER_TEMP/a35-tightened-baseline.tap"
+          echo "A35_TIGHTENED_TEST_FIRST_RED=CONFIRMED"
+          echo "UNCHANGED_RUNTIME_DELTA=0"
+
+  runtime-candidate:
+    needs: [tighten-contract, baseline-red]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    outputs:
+      candidate_sha: ${{ steps.commit.outputs.candidate_sha }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ env.PRODUCT_BRANCH }}
+          fetch-depth: 0
+      - name: Prove exact runtime-writer precondition
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "${{ needs.tighten-contract.outputs.test_sha }}"
+          test "$(git diff --name-only "$BASE_SHA"..HEAD | grep -Ev '^src/tests/' | wc -l)" -eq 0
+          test "$(git ls-remote origin refs/heads/$RELEASE_BRANCH | awk '{print $1}')" = "$RELEASE_SHA"
+          test "$(git ls-remote origin refs/heads/$A34_BRANCH | awk '{print $1}')" = "$A34_SHA"
+          test "$(git ls-remote origin refs/heads/main | awk '{print $1}')" = "$MAIN_SHA"
+
+      - name: Apply minimal pre-projection authority fence
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          # cloud-records.ts: canonical local-vs-current-cloud authority boundary.
+          p = Path('src/cloud-records.ts')
+          s = p.read_text()
+          anchor = """export interface CloudMembershipContext {
+            organizationId: string;
+            currentMemberId: number;
+            currentRole: TeamRole;
+            members: TeamMember[];
+          }
+          """
+          insert = """export interface CloudMembershipContext {
+            organizationId: string;
+            currentMemberId: number;
+            currentRole: TeamRole;
+            members: TeamMember[];
+          }
+
+          export const TENANT_LOCAL_AUTHORIZATION_STALE = 'TENANT_LOCAL_AUTHORIZATION_STALE';
+
+          export class TenantLocalAuthorizationStaleError extends Error {
+            readonly code = TENANT_LOCAL_AUTHORIZATION_STALE;
+
+            constructor(reason: string) {
+              super(`${TENANT_LOCAL_AUTHORIZATION_STALE}:${reason}`);
+              this.name = 'TenantLocalAuthorizationStaleError';
+            }
+          }
+
+          function failLocalAuthorizationStale(reason: string): never {
+            throw new TenantLocalAuthorizationStaleError(reason);
+          }
+
+          export function assertLocalWriteAuthorityCompatible(
+            crm: CrmData,
+            context: Readonly<CloudMembershipContext>,
+            authenticatedUserId: string,
+          ): void {
+            if (crm.organization.id !== context.organizationId) {
+              failLocalAuthorizationStale('organization-mismatch');
+            }
+            const matches = crm.teamMembers.filter((member) => member.userId === authenticatedUserId);
+            if (matches.length === 0) failLocalAuthorizationStale('authenticated-member-missing');
+            if (matches.length !== 1) failLocalAuthorizationStale('authenticated-member-ambiguous');
+            const localMember = matches[0]!;
+            if (localMember.id !== context.currentMemberId) failLocalAuthorizationStale('member-id-mismatch');
+            if (normalizedRole(localMember.role) !== context.currentRole) failLocalAuthorizationStale('role-mismatch');
+            if (String(localMember.status ?? '').trim().toLowerCase() !== 'activo') {
+              failLocalAuthorizationStale('member-status-not-active');
+            }
+          }
+          """
+          if s.count(anchor) != 1: raise SystemExit('A35_CLOUD_RECORDS_ANCHOR_CHANGED')
+          p.write_text(s.replace(anchor, insert))
+
+          # tenant-cloud-data.ts: same transport.context fences modern and directly reachable legacy writers.
+          p = Path('src/tenant-cloud-data.ts')
+          s = p.read_text()
+          old = """  cloudRecordsToCrm,
+            crmToCloudRecords,
+            isSupervisedRecommendationTelemetryPayload,"""
+          new = """  assertLocalWriteAuthorityCompatible,
+            cloudRecordsToCrm,
+            crmToCloudRecords,
+            isSupervisedRecommendationTelemetryPayload,"""
+          if s.count(old) != 1: raise SystemExit('A35_CLOUD_DATA_IMPORT_SHAPE')
+          s = s.replace(old, new)
+          old = """  const transport = await tenantCloudTransport(scope);
+            assertCloudWriterLease(scope, runtimeLease);
+            const existing = await fetchCloudRecords(transport, runtimeLease);"""
+          new = """  const transport = await tenantCloudTransport(scope);
+            assertCloudWriterLease(scope, runtimeLease);
+            assertLocalWriteAuthorityCompatible(crm, transport.context, scope.userId);
+            assertCloudWriterLease(scope, runtimeLease);
+            const existing = await fetchCloudRecords(transport, runtimeLease);"""
+          if s.count(old) != 1: raise SystemExit('A35_MODERN_WRITE_SHAPE')
+          s = s.replace(old, new)
+          old = """  const transport = await tenantCloudTransport(scope);
+            assertCloudWriterLease(scope, runtimeLease);
+            const row = await tenantLegacySnapshotRow(transport, runtimeLease);"""
+          new = """  const transport = await tenantCloudTransport(scope);
+            assertCloudWriterLease(scope, runtimeLease);
+            assertLocalWriteAuthorityCompatible(crm, transport.context, scope.userId);
+            assertCloudWriterLease(scope, runtimeLease);
+            const row = await tenantLegacySnapshotRow(transport, runtimeLease);"""
+          if s.count(old) != 1: raise SystemExit('A35_LEGACY_WRITE_SHAPE')
+          p.write_text(s.replace(old, new))
+
+          # tenant-hydration.ts: structural write-fence errors are authority failures, never transient fallback.
+          p = Path('src/tenant-hydration.ts')
+          s = p.read_text()
+          old = """import { fetchMembershipCatalog } from './membership-catalog.js';
+          import type { CrmData } from './models.js';"""
+          new = """import { TENANT_LOCAL_AUTHORIZATION_STALE } from './cloud-records.js';
+          import { fetchMembershipCatalog } from './membership-catalog.js';
+          import type { CrmData } from './models.js';"""
+          if s.count(old) != 1: raise SystemExit('A35_HYDRATION_IMPORT_SHAPE')
+          s = s.replace(old, new)
+          old = """  TENANT_HYDRATION_SESSION_CHANGED,
+            TENANT_RUNTIME_SESSION_MISMATCH,"""
+          new = """  TENANT_HYDRATION_SESSION_CHANGED,
+            TENANT_LOCAL_AUTHORIZATION_STALE,
+            TENANT_RUNTIME_SESSION_MISMATCH,"""
+          if s.count(old) != 1: raise SystemExit('A35_HYDRATION_CODESET_SHAPE')
+          s = s.replace(old, new)
+          old = """      assertHydrationAuthCurrent(authGeneration, session, scope.userId);
+                if (isHydrationAuthorityFailure(error)) throw error;
+                const message = error instanceof Error ? error.message : 'No se pudieron sincronizar los cambios locales.';
+                markTenantSyncError(scope, message);"""
+          new = """      assertHydrationAuthCurrent(authGeneration, session, scope.userId);
+                if (isHydrationAuthorityFailure(error)) {
+                  const authorityMessage = error instanceof Error ? error.message : TENANT_LOCAL_AUTHORIZATION_STALE;
+                  markTenantSyncError(scope, authorityMessage);
+                  throw error;
+                }
+                const message = error instanceof Error ? error.message : 'No se pudieron sincronizar los cambios locales.';
+                markTenantSyncError(scope, message);"""
+          if s.count(old) != 1: raise SystemExit('A35_HYDRATION_CATCH_SHAPE')
+          p.write_text(s.replace(old, new))
+
+          # mvp-auth.ts: TEAM_VIEW_KEY cannot survive a successful cloud replacement.
+          p = Path('src/mvp-auth.ts')
+          s = p.read_text()
+          old = """    if (cloud && !replaceDataForTenant(scope, cloud)) assertTenantRuntimeLeaseCurrent(runtimeLease);
+              dispatchTenantCloudStatus(runtimeLease, 'Sincronización completada sin sobrescrituras.', 'success');"""
+          new = """    if (cloud && !replaceDataForTenant(scope, cloud)) assertTenantRuntimeLeaseCurrent(runtimeLease);
+              activateMember(scope, runtimeLease);
+              dispatchTenantCloudStatus(runtimeLease, 'Sincronización completada sin sobrescrituras.', 'success');"""
+          if s.count(old) != 1: raise SystemExit('A35_SYNC_PIN_SHAPE')
+          p.write_text(s.replace(old, new))
+          PY
+          paths="$(git diff --name-only | sort)"
+          expected="$(printf '%s\n' src/cloud-records.ts src/mvp-auth.ts src/tenant-cloud-data.ts src/tenant-hydration.ts | sort)"
+          test "$paths" = "$expected"
+          echo "RUNTIME_PATHS=4"
+          echo "$paths"
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci --silent
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+      - name: Build patched working tree
+        run: npm run build --silent
+      - name: A3.5 A-F must all be GREEN before runtime commit
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --test --test-concurrency=1 dist/tests/sec-fix-a3-5-stale-role-fallback-authority.test.js 2>&1 | tee "$RUNNER_TEMP/a35-af-green.tap"
+          grep -q 'CONTROL_A_NORMAL_DOWNGRADE=PASS_SAFE' "$RUNNER_TEMP/a35-af-green.tap"
+          grep -q 'CONTROL_B_TEAM_VIEW_TAMPER_SYNC=PASS_SAFE' "$RUNNER_TEMP/a35-af-green.tap"
+          grep -q 'CONTROL_C1_PRE_PROJECTION_AUTHORITY_FENCE=PASS' "$RUNNER_TEMP/a35-af-green.tap"
+          grep -q 'CONTROL_C2_PRE_PROJECTION_AUTHORITY_FENCE=PASS' "$RUNNER_TEMP/a35-af-green.tap"
+          grep -q 'CONTROL_D_SYNTHETIC_503_REACHED=YES' "$RUNNER_TEMP/a35-af-green.tap"
+          grep -q 'CONTROL_D_SAME_AUTHORITY_OFFLINE_FALLBACK=PASS_SAFE' "$RUNNER_TEMP/a35-af-green.tap"
+          grep -q 'CONTROL_E_MISSING=PASS_SAFE' "$RUNNER_TEMP/a35-af-green.tap"
+          grep -q 'CONTROL_E_MEMBER_ID_MISMATCH=PASS_SAFE' "$RUNNER_TEMP/a35-af-green.tap"
+          grep -q 'CONTROL_E_ROLE_MISMATCH=PASS_SAFE' "$RUNNER_TEMP/a35-af-green.tap"
+          grep -q 'CONTROL_E=PASS_SAFE' "$RUNNER_TEMP/a35-af-green.tap"
+          grep -q 'CONTROL_F=PASS_SAFE' "$RUNNER_TEMP/a35-af-green.tap"
+          echo "A35_A_TO_F=GREEN"
+
+      - name: Commit one runtime fix only after A-F GREEN
+        id: commit
+        shell: bash
+        run: |
+          set -euo pipefail
+          paths="$(git diff --name-only | sort)"
+          expected="$(printf '%s\n' src/cloud-records.ts src/mvp-auth.ts src/tenant-cloud-data.ts src/tenant-hydration.ts | sort)"
+          test "$paths" = "$expected"
+          git config user.name "PropControl Security Writer"
+          git config user.email "security@propcontrol.invalid"
+          git add src/cloud-records.ts src/mvp-auth.ts src/tenant-cloud-data.ts src/tenant-hydration.ts
+          git commit -m "SEC-FIX A3.5: fence dirty writes by current membership authority"
+          git push origin HEAD:$PRODUCT_BRANCH
+          candidate_sha="$(git rev-parse HEAD)"
+          echo "candidate_sha=$candidate_sha" >> "$GITHUB_OUTPUT"
+          echo "A35_CANDIDATE_SHA=$candidate_sha"
+
+      - name: Rebuild and re-run exact committed candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          candidate="$(git rev-parse HEAD)"
+          test "$candidate" = "${{ steps.commit.outputs.candidate_sha }}"
+          git diff --quiet
+          git diff --cached --quiet
+          npm run build --silent
+          node --test --test-concurrency=1 dist/tests/sec-fix-a3-5-stale-role-fallback-authority.test.js 2>&1 | tee "$RUNNER_TEMP/a35-candidate.tap"
+          grep -q 'CONTROL_E=PASS_SAFE' "$RUNNER_TEMP/a35-candidate.tap"
+          grep -q 'CONTROL_F=PASS_SAFE' "$RUNNER_TEMP/a35-candidate.tap"
+          test "$(git ls-remote origin refs/heads/$RELEASE_BRANCH | awk '{print $1}')" = "$RELEASE_SHA"
+          test "$(git ls-remote origin refs/heads/$A34_BRANCH | awk '{print $1}')" = "$A34_SHA"
+          test "$(git ls-remote origin refs/heads/main | awk '{print $1}')" = "$MAIN_SHA"
+          echo "A35_EXACT_COMMITTED_CANDIDATE_FOCUSED=GREEN"
