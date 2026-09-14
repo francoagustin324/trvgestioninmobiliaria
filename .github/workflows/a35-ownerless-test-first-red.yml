@@ -1,0 +1,48 @@
+name: A3.5 Ownerless Test-First RED
+
+on:
+  push:
+    branches:
+      - validation/a35-ownerless-test-first-red
+
+permissions:
+  contents: read
+
+jobs:
+  test-first-red:
+    runs-on: ubuntu-latest
+    env:
+      PRODUCT_TEST_SHA: 295fd37f1b0a6229176b66ed25a74ca45c52b291
+      BASE_SHA: 7220f30cac1c25f143974751c8097f80b2ad7a17
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ env.PRODUCT_TEST_SHA }}
+          fetch-depth: 0
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - name: Verify test-only product delta
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$PRODUCT_TEST_SHA"
+          test "$(git diff --name-only "$BASE_SHA" "$PRODUCT_TEST_SHA" | wc -l)" -eq 1
+          test "$(git diff --name-only "$BASE_SHA" "$PRODUCT_TEST_SHA")" = "src/tests/sec-fix-a3-5-ownerless-normalization.test.ts"
+      - name: Build exact test-first head
+        run: |
+          npm ci --silent
+          npm run build --silent
+      - name: Require ownerless security contract RED on vulnerable runtime
+        run: |
+          set +e
+          node --test --test-concurrency=1 dist/tests/sec-fix-a3-5-ownerless-normalization.test.js > "$RUNNER_TEMP/a35-ownerless-red.log" 2>&1
+          code=$?
+          set -e
+          cat "$RUNNER_TEMP/a35-ownerless-red.log"
+          test "$code" -ne 0
+          grep -F 'NORMALIZED_ROLE=Dueño' "$RUNNER_TEMP/a35-ownerless-red.log"
+          grep -F 'OWNER_COUNT=1' "$RUNNER_TEMP/a35-ownerless-red.log"
+          grep -F 'CAN_VIEW_ALL=YES' "$RUNNER_TEMP/a35-ownerless-red.log"
+          grep -F 'CAN_ACCESS_SETTINGS=YES' "$RUNNER_TEMP/a35-ownerless-red.log"
+          grep -F 'CAN_ADMINISTER_TEAM=YES' "$RUNNER_TEMP/a35-ownerless-red.log"
+          echo 'A35_OWNERLESS_TEST_FIRST_RED=CONFIRMED'
