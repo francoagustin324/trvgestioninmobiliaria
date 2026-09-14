@@ -1,0 +1,183 @@
+name: A3.5 Control F V3 R4 Causal Characterization
+
+on:
+  push:
+    branches:
+      - validation/a35-control-f-post-causal-characterization
+
+permissions:
+  contents: read
+
+env:
+  CANDIDATE: beb8876c4fd72f9c73f0a01b8022970a720d4581
+  PARENT: 295fd37f1b0a6229176b66ed25a74ca45c52b291
+  PRODUCT_BRANCH: agent/sec-fix-a3-5-stale-role-fallback-fence
+  VALIDATION_BRANCH: validation/a35-control-f-post-causal-characterization
+
+jobs:
+  causal-v3-r4:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - name: Checkout exact immutable candidate
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ env.CANDIDATE }}
+          fetch-depth: 0
+
+      - name: Phase 0 immutable proof
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$CANDIDATE"
+          test "$(git rev-parse HEAD^)" = "$PARENT"
+          ! git symbolic-ref -q HEAD >/dev/null 2>&1
+          git diff --quiet
+          git diff --cached --quiet
+          test -z "$(git status --porcelain --untracked-files=normal)"
+          test "$(git ls-remote origin refs/heads/$PRODUCT_BRANCH | awk '{print $1}')" = "$CANDIDATE"
+          echo "VALIDATION_SHA=$GITHUB_SHA" >> "$GITHUB_ENV"
+          echo "PHASE0_HEAD=$CANDIDATE"
+          echo "PHASE0_PRODUCT_BRANCH_IMMUTABLE=YES"
+
+      - name: Fetch validation-only harness to runner temp
+        shell: bash
+        run: |
+          set -euo pipefail
+          EVIDENCE="$RUNNER_TEMP/a35-evidence"
+          TRACE="$RUNNER_TEMP/a35-v3-traces"
+          HARNESS="$RUNNER_TEMP/a35-v3-harness"
+          PRELOAD="$RUNNER_TEMP/a35-control-f-v3-preload.mjs"
+          mkdir -p "$EVIDENCE" "$TRACE" "$HARNESS"
+          echo "A35_EVIDENCE_DIR=$EVIDENCE" >> "$GITHUB_ENV"
+          echo "A35_TRACE_DIR=$TRACE" >> "$GITHUB_ENV"
+          echo "A35_HARNESS_DIR=$HARNESS" >> "$GITHUB_ENV"
+          echo "A35_PRELOAD=$PRELOAD" >> "$GITHUB_ENV"
+          git fetch --quiet origin "$VALIDATION_BRANCH"
+          git show "origin/$VALIDATION_BRANCH:.github/validation/a35-v3-prepare.py" > "$HARNESS/prepare.py"
+          git show "origin/$VALIDATION_BRANCH:.github/validation/a35-v3-run.sh" > "$HARNESS/run.sh"
+          git show "origin/$VALIDATION_BRANCH:.github/validation/a35-v3-build.py" > "$HARNESS/build.py"
+          git show "origin/$VALIDATION_BRANCH:.github/validation/a35-control-f-v2-source.yml" > "$HARNESS/v2-source.yml"
+          chmod +x "$HARNESS/run.sh"
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install build and Chromium
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm ci --silent
+          npx playwright install --with-deps chromium
+          npm run build --silent
+
+      - name: Prepare V3 preload
+        shell: bash
+        run: |
+          set -euo pipefail
+          python "$A35_HARNESS_DIR/prepare.py" "$A35_HARNESS_DIR/v2-source.yml" "$A35_PRELOAD"
+          echo "V3_PRELOAD_SHA256=$(sha256sum "$A35_PRELOAD" | awk '{print $1}')" >> "$GITHUB_ENV"
+
+      - name: Instrumentation smoke
+        shell: bash
+        run: |
+          set -euo pipefail
+          NODE_OPTIONS="--import=$A35_PRELOAD" node --input-type=module -e "import { chromium } from 'playwright'; console.log('PRELOAD_SMOKE_OK=' + String(Object.prototype.hasOwnProperty.call(chromium,'launch')));"
+
+      - name: Run exact 25-observation matrix
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash "$A35_HARNESS_DIR/run.sh"
+
+      - name: Build durable evidence
+        if: always()
+        shell: bash
+        run: |
+          set +e
+          EVIDENCE="${A35_EVIDENCE_DIR:-$RUNNER_TEMP/a35-evidence}"
+          TRACE="${A35_TRACE_DIR:-$RUNNER_TEMP/a35-v3-traces}"
+          HARNESS="${A35_HARNESS_DIR:-$RUNNER_TEMP/a35-v3-harness}"
+          mkdir -p "$EVIDENCE" "$TRACE"
+          if [ -f "$HARNESS/build.py" ]; then
+            python "$HARNESS/build.py" "$TRACE" "$EVIDENCE"
+            BUILD_RC=$?
+          else
+            BUILD_RC=99
+          fi
+          if [ "$BUILD_RC" -ne 0 ]; then
+            printf 'CAUSE=NOT PROVEN\nEVIDENCE_BUILDER_RC=%s\n' "$BUILD_RC" > "$EVIDENCE/final-summary.txt"
+            [ -f "$EVIDENCE/reproduction-matrix.json" ] || printf '[]\n' > "$EVIDENCE/reproduction-matrix.json"
+            [ -f "$EVIDENCE/per-run.jsonl" ] || : > "$EVIDENCE/per-run.jsonl"
+            [ -f "$EVIDENCE/post-traces.jsonl" ] || : > "$EVIDENCE/post-traces.jsonl"
+            [ -f "$EVIDENCE/environment.json" ] || printf '{"evidenceBuilderRc":%s}\n' "$BUILD_RC" > "$EVIDENCE/environment.json"
+          fi
+          [ -f "$TRACE/run-meta.jsonl" ] && cp "$TRACE/run-meta.jsonl" "$EVIDENCE/run-meta.jsonl"
+          mkdir -p "$EVIDENCE/run-logs"
+          cp "$TRACE"/*.log "$EVIDENCE/run-logs/" 2>/dev/null || true
+          [ -f "$EVIDENCE/STOP" ] && cp "$EVIDENCE/STOP" "$EVIDENCE/security-stop.txt"
+          (
+            cd "$EVIDENCE"
+            rm -f SHA256SUMS
+            sha256sum reproduction-matrix.json per-run.jsonl post-traces.jsonl environment.json final-summary.txt > SHA256SUMS
+          )
+          cat "$EVIDENCE/final-summary.txt"
+          cat "$EVIDENCE/SHA256SUMS"
+          exit 0
+
+      - name: Upload durable causal evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: a35-control-f-v3-causal-evidence
+          path: ${{ runner.temp }}/a35-evidence/**
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: GitHub Step Summary
+        if: always()
+        shell: bash
+        run: |
+          EVIDENCE="${A35_EVIDENCE_DIR:-$RUNNER_TEMP/a35-evidence}"
+          {
+            echo "## A3.5 Control F V3 R4 causal evidence"
+            echo "- candidate SHA: \`$CANDIDATE\`"
+            echo "- validation SHA: \`${VALIDATION_SHA:-$GITHUB_SHA}\`"
+            echo "### Summary"
+            echo '```text'
+            cat "$EVIDENCE/final-summary.txt" 2>/dev/null || echo 'CAUSE=NOT PROVEN'
+            echo '```'
+            echo "### Matrix"
+            echo '```json'
+            cat "$EVIDENCE/reproduction-matrix.json" 2>/dev/null || echo '[]'
+            echo '```'
+            echo "### SHA256"
+            echo '```text'
+            cat "$EVIDENCE/SHA256SUMS" 2>/dev/null || true
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Final worktree and immutable refs proof
+        if: always()
+        shell: bash
+        run: |
+          set +e
+          rm -f "$PWD/.a35-control-f-preload.mjs" "$PWD/extension/trv-fichas-chrome.zip"
+          rm -rf "$PWD/dist" "$PWD/node_modules"
+          set -euo pipefail
+          echo "FINAL_HEAD=$(git rev-parse HEAD)"
+          test "$(git rev-parse HEAD)" = "$CANDIDATE"
+          remote_product="$(git ls-remote origin refs/heads/$PRODUCT_BRANCH | awk '{print $1}')"
+          echo "FINAL_PRODUCT_BRANCH=$remote_product"
+          test "$remote_product" = "$CANDIDATE"
+          git diff --quiet
+          git diff --cached --quiet
+          status="$(git status --porcelain --untracked-files=normal)"
+          if [ -n "$status" ]; then
+            echo "FINAL_DIRTINESS=STATUS"
+            printf '%s\n' "$status"
+            exit 1
+          fi
+          echo "FINAL_WORKTREE=CLEAN"
