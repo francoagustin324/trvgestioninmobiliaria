@@ -1,0 +1,220 @@
+name: SEC-FIX A3.5 Sync Conflict Static Assertion Focused
+
+on:
+  push:
+    branches:
+      - validation/a35-sync-conflict-static-assertion-alignment
+
+permissions:
+  contents: read
+
+jobs:
+  focused:
+    runs-on: ubuntu-24.04
+    env:
+      BASE_CANDIDATE: fdff36785e90197c9ef384394ad474d9787af72a
+      TEST_CANDIDATE: affa227aa464c0ff053434fe456090770cebb188
+      PRODUCT_BRANCH: agent/sec-fix-a3-5-stale-role-fallback-fence
+      HISTORICAL_A12F_BRANCH: agent/sec-fix-a1-2-f-tenant-recovery-cutover
+    steps:
+      - name: Checkout exact TEST-ONLY candidate detached
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ env.TEST_CANDIDATE }}
+          fetch-depth: 0
+
+      - name: Prove candidate integrity and official branch unmoved
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$TEST_CANDIDATE"
+          test "$(git rev-parse HEAD^)" = "$BASE_CANDIDATE"
+          if git symbolic-ref -q HEAD >/dev/null 2>&1; then exit 1; fi
+          test "$(git ls-remote origin refs/heads/$PRODUCT_BRANCH | awk '{print $1}')" = "$BASE_CANDIDATE"
+          mapfile -t changed < <(git diff --name-only "$BASE_CANDIDATE..$TEST_CANDIDATE" | sort)
+          test "${#changed[@]}" -eq 1
+          test "${changed[0]}" = 'src/tests/sync-conflict-ui.test.ts'
+          echo CANDIDATE_INTEGRITY=PASS
+          echo OFFICIAL_BRANCH_UNMOVED=YES
+          echo RUNTIME_DELTA=0
+
+      - name: Prove A1.2-F historical runtime/test drift
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin "refs/heads/$HISTORICAL_A12F_BRANCH:refs/remotes/origin/$HISTORICAL_A12F_BRANCH"
+          git show "origin/$HISTORICAL_A12F_BRANCH:src/mvp-auth.ts" > "$RUNNER_TEMP/a12f-runtime.ts"
+          git show "origin/$HISTORICAL_A12F_BRANCH:src/tests/sync-conflict-ui.test.ts" > "$RUNNER_TEMP/a12f-test.ts"
+          grep -Fq 'const mergedSnapshot = structuredClone(latestResult.merged)' "$RUNNER_TEMP/a12f-runtime.ts"
+          grep -Fq 'replaceDataForTenant(scope, mergedSnapshot)' "$RUNNER_TEMP/a12f-runtime.ts"
+          grep -Fq 'await pushCloudData(scope, mergedSnapshot)' "$RUNNER_TEMP/a12f-runtime.ts"
+          grep -Fq 'const verified = await pullCloudData(scope, mergedSnapshot)' "$RUNNER_TEMP/a12f-runtime.ts"
+          grep -Fq 'replaceDataForTenant(scope, verified)' "$RUNNER_TEMP/a12f-runtime.ts"
+          grep -Fq "auth.includes('replaceData(latestResult.merged)')" "$RUNNER_TEMP/a12f-test.ts"
+          grep -Fq "auth.includes('const verified = await pullCloudData(state.crm)')" "$RUNNER_TEMP/a12f-test.ts"
+          echo A1.2-F_RUNTIME_ALREADY_TENANT_SCOPED=YES
+          echo A1.2-F_SYNC_CONFLICT_UI_ASSERTION_STILL_LEGACY=YES
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci --silent
+
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Build
+        run: npm run build --silent
+
+      - name: sync-conflict-ui current contract and adversarial proof
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --test --test-concurrency=1 dist/tests/sync-conflict-ui.test.js 2>&1 | tee "$RUNNER_TEMP/sync-conflict.tap"
+          grep -q '^# tests 4$' "$RUNNER_TEMP/sync-conflict.tap"
+          grep -q '^# pass 4$' "$RUNNER_TEMP/sync-conflict.tap"
+          grep -q '^# fail 0$' "$RUNNER_TEMP/sync-conflict.tap"
+          grep -q '^# cancelled 0$' "$RUNNER_TEMP/sync-conflict.tap"
+          grep -q 'el contrato estático tenant-aware rechaza regresiones legacy y pérdida de protecciones' "$RUNNER_TEMP/sync-conflict.tap"
+          echo SYNC_CONFLICT_UI=GREEN
+          echo ADVERSARIAL_STATIC_CONTRACT=PASS
+
+      - name: Reconciliation and recovery gate suites
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --test --test-concurrency=1 \
+            dist/tests/sync-safety.test.js \
+            dist/tests/sync-reconciliation.test.js \
+            dist/tests/sync-recovery-bootstrap.test.js \
+            dist/tests/sec-fix-a1-2-f-recovery-async.test.js \
+            dist/tests/sec-fix-a1-2-f-tenant-recovery-cutover.test.js \
+            dist/tests/sec-fix-a1-fdr01-recovery-authority.test.js \
+            2>&1 | tee "$RUNNER_TEMP/recovery-gate.tap"
+          grep -q '^# fail 0$' "$RUNNER_TEMP/recovery-gate.tap"
+          grep -q '^# cancelled 0$' "$RUNNER_TEMP/recovery-gate.tap"
+          echo RECOVERY_GATE_SUITES=GREEN
+
+      - name: A1.2-F F1-F24 exact
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --test --test-concurrency=1 dist/tests/sec-fix-a1-2-f-tenant-recovery-cutover.test.js 2>&1 | tee "$RUNNER_TEMP/f1-f24.tap"
+          grep -q '^# tests 24$' "$RUNNER_TEMP/f1-f24.tap"
+          grep -q '^# pass 24$' "$RUNNER_TEMP/f1-f24.tap"
+          grep -q '^# fail 0$' "$RUNNER_TEMP/f1-f24.tap"
+          grep -q '^# cancelled 0$' "$RUNNER_TEMP/f1-f24.tap"
+          echo A12F_F1_F24=GREEN
+
+      - name: FDR01 complete
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --test --test-concurrency=1 dist/tests/sec-fix-a1-fdr01-recovery-authority.test.js 2>&1 | tee "$RUNNER_TEMP/fdr01.tap"
+          grep -q '^# tests 10$' "$RUNNER_TEMP/fdr01.tap"
+          grep -q '^# pass 10$' "$RUNNER_TEMP/fdr01.tap"
+          grep -q '^# fail 0$' "$RUNNER_TEMP/fdr01.tap"
+          grep -q '^# cancelled 0$' "$RUNNER_TEMP/fdr01.tap"
+          echo FDR01=GREEN
+
+      - name: Tenant storage hydration and async regressions
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --test --test-concurrency=1 \
+            dist/tests/sec-fix-a1-2-c1-tenant-hydration.test.js \
+            dist/tests/sec-fix-a1-2-b-tenant-storage.test.js \
+            dist/tests/sec-fix-a1-2-b-2-tenant-storage-boundary.test.js \
+            dist/tests/sec-fix-a1-2-c2-tenant-async.test.js \
+            dist/tests/sec-fix-a1-2-c3-stale-async.test.js \
+            2>&1 | tee "$RUNNER_TEMP/tenant-storage.tap"
+          grep -q '^# tests 81$' "$RUNNER_TEMP/tenant-storage.tap"
+          grep -q '^# pass 81$' "$RUNNER_TEMP/tenant-storage.tap"
+          grep -q '^# fail 0$' "$RUNNER_TEMP/tenant-storage.tap"
+          grep -q '^# cancelled 0$' "$RUNNER_TEMP/tenant-storage.tap"
+          echo TENANT_STORAGE_RECOVERY=GREEN
+
+      - name: A3.5 A-G plus Control F classifier
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --test --test-concurrency=1 \
+            dist/tests/sec-fix-a3-5-stale-role-fallback-authority.test.js \
+            dist/tests/sec-fix-a3-5-ownerless-normalization.test.js \
+            2>&1 | tee "$RUNNER_TEMP/a35.tap"
+          grep -q '^# tests 9$' "$RUNNER_TEMP/a35.tap"
+          grep -q '^# pass 9$' "$RUNNER_TEMP/a35.tap"
+          grep -q '^# fail 0$' "$RUNNER_TEMP/a35.tap"
+          grep -q '^# cancelled 0$' "$RUNNER_TEMP/a35.tap"
+          grep -q 'CONTROL_F=PASS_SAFE' "$RUNNER_TEMP/a35.tap"
+          grep -q 'CONTROL_F_CLASSIFIER_VALID_TELEMETRY=ALLOWED' "$RUNNER_TEMP/a35.tap"
+          grep -q 'CONTROL_F_CLASSIFIER_STALE_CRM=FORBIDDEN' "$RUNNER_TEMP/a35.tap"
+          grep -q 'CONTROL_F_CLASSIFIER_WRONG_TENANT=FORBIDDEN' "$RUNNER_TEMP/a35.tap"
+          grep -q 'CONTROL_F_CLASSIFIER_WRONG_ACTOR=FORBIDDEN' "$RUNNER_TEMP/a35.tap"
+          grep -q 'CONTROL_F_CLASSIFIER_WRONG_CLIENT=FORBIDDEN' "$RUNNER_TEMP/a35.tap"
+          grep -q 'CONTROL_F_CLASSIFIER_GENERIC_ACTIVITY=FORBIDDEN' "$RUNNER_TEMP/a35.tap"
+          grep -q 'NORMALIZED_ROLE=Corredor' "$RUNNER_TEMP/a35.tap"
+          grep -q 'OWNER_COUNT=0' "$RUNNER_TEMP/a35.tap"
+          echo A35_A_G_AND_CLASSIFIER=GREEN
+
+      - name: A3.5 H-I and fresh empty roster
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > dist/tests/a35-sync-conflict-hi.mjs <<'EOF'
+          import './sec-fix-a1-2-c2-test-setup.js';
+          import assert from 'node:assert/strict';
+          import { initialData } from '../models.js';
+          import { activateStorageForTenant, state } from '../store.js';
+          import { canAccessSettings, canAdministerTeam, canViewAll } from '../team-access.js';
+          import { writeTenantSnapshot } from '../tenant-storage.js';
+          const ORG='00000000-0000-0000-0000-00000000a351';const AUTH='a35-preservation-auth';const OWNER='a35-preservation-owner';const scope=Object.freeze({userId:AUTH,organizationId:ORG});const member=(id,userId,role)=>({id,userId,name:userId,email:`${userId}@example.test`,role,status:'Activo',createdAt:'2026-09-14T00:00:00.000Z'});function crm(members){const v=structuredClone(initialData);v.organization={id:ORG,name:'A3.5 Preservation',seatLimit:null,planLabel:'validation'};v.teamMembers=members;v.activityLog=[];v.clients=[];v.properties=[];v.visits=[];v.offers=[];v.reservations=[];v.contacts=[];v.reminders=[];v.fichas=[];v.conversations=[];return v;}function seed(members){localStorage.clear();writeTenantSnapshot(scope,crm(members),{markDirty:false,reason:'a35-preservation',backup:false});activateStorageForTenant(scope);}seed([member(351,AUTH,'Corredor'),member(352,OWNER,'Dueño')]);assert.equal(state.crm.teamMembers.find(x=>x.userId===AUTH)?.role,'Corredor');assert.equal(state.crm.teamMembers.find(x=>x.userId===OWNER)?.role,'Dueño');assert.equal(state.crm.teamMembers.filter(x=>x.role==='Dueño').length,1);console.log('CONTROL_H_REAL_OWNER_PRESERVED=PASS_SAFE');seed([member(351,AUTH,'Dueño'),member(352,OWNER,'Corredor')]);assert.equal(state.crm.teamMembers.find(x=>x.userId===AUTH)?.role,'Dueño');assert.equal(state.crm.teamMembers.filter(x=>x.role==='Dueño').length,1);assert.equal(state.activeMemberId,351);assert.equal(canViewAll(),true);assert.equal(canAccessSettings(),true);assert.equal(canAdministerTeam(),true);console.log('CONTROL_I_REAL_OWNER_PRESERVED=PASS_SAFE');localStorage.clear();writeTenantSnapshot(scope,crm([]),{markDirty:false,reason:'a35-empty-roster',backup:false});activateStorageForTenant(scope);assert.equal(state.crm.teamMembers.length,initialData.teamMembers.length);assert.equal(state.crm.teamMembers[0]?.role,'Dueño');assert.equal(state.crm.teamMembers[0]?.userId,undefined);console.log('FRESH_EMPTY_ROSTER_INITIALDATA_COMPATIBILITY=PASS_SAFE');
+          EOF
+          node dist/tests/a35-sync-conflict-hi.mjs 2>&1 | tee "$RUNNER_TEMP/a35-hi.tap"
+          grep -q 'CONTROL_H_REAL_OWNER_PRESERVED=PASS_SAFE' "$RUNNER_TEMP/a35-hi.tap"
+          grep -q 'CONTROL_I_REAL_OWNER_PRESERVED=PASS_SAFE' "$RUNNER_TEMP/a35-hi.tap"
+          grep -q 'FRESH_EMPTY_ROSTER_INITIALDATA_COMPATIBILITY=PASS_SAFE' "$RUNNER_TEMP/a35-hi.tap"
+          echo A35_A_I=GREEN
+
+      - name: Tenant cloud context and data regressions
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --test --test-concurrency=1 \
+            dist/tests/cloud-api-compatible.test.js \
+            dist/tests/cloud-records.test.js \
+            dist/tests/cloud-remote-verification.test.js \
+            dist/tests/cloud-save-serial.test.js \
+            dist/tests/sec-fix-a1-dr02-cloud-writer-lease.test.js \
+            dist/tests/sec-fix-a1-dr03-stale-sync-metadata.test.js \
+            dist/tests/sec-fix-a3-2-authenticated-write-identity.test.js \
+            dist/tests/sec-fix-a3-2-runtime-wiring.test.js \
+            2>&1 | tee "$RUNNER_TEMP/tenant-cloud.tap"
+          grep -q '^# tests 58$' "$RUNNER_TEMP/tenant-cloud.tap"
+          grep -q '^# pass 58$' "$RUNNER_TEMP/tenant-cloud.tap"
+          grep -q '^# fail 0$' "$RUNNER_TEMP/tenant-cloud.tap"
+          grep -q '^# cancelled 0$' "$RUNNER_TEMP/tenant-cloud.tap"
+          echo TENANT_CLOUD_CONTEXT_DATA=GREEN
+
+      - name: Final focused scope proof
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$TEST_CANDIDATE"
+          test "$(git rev-parse HEAD^)" = "$BASE_CANDIDATE"
+          test "$(git ls-remote origin refs/heads/$PRODUCT_BRANCH | awk '{print $1}')" = "$BASE_CANDIDATE"
+          mapfile -t changed < <(git diff --name-only "$BASE_CANDIDATE..$TEST_CANDIDATE" | sort)
+          test "${#changed[@]}" -eq 1
+          test "${changed[0]}" = 'src/tests/sync-conflict-ui.test.ts'
+          git diff --check "$BASE_CANDIDATE..$TEST_CANDIDATE"
+          echo CHANGED_FILES=1
+          echo RUNTIME_FILES_CHANGED=0
+          echo SQL_CHANGED=0
+          echo MIGRATIONS_CHANGED=0
+          echo SYNC_CONFLICT_UI=GREEN
+          echo RECOVERY_CONTROLS=GREEN
+          echo A3.5=GREEN
+          echo FOCUSED_RESULT=GREEN
