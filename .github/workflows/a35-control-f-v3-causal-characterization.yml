@@ -1,0 +1,701 @@
+name: A3.5 Control F V3 Causal Characterization
+
+on:
+  push:
+    branches: [validation/a35-control-f-post-causal-characterization]
+
+permissions:
+  contents: read
+
+env:
+  CANDIDATE: beb8876c4fd72f9c73f0a01b8022970a720d4581
+  PARENT: 295fd37f1b0a6229176b66ed25a74ca45c52b291
+  PRODUCT_BRANCH: agent/sec-fix-a3-5-stale-role-fallback-fence
+  VALIDATION_BRANCH: validation/a35-control-f-post-causal-characterization
+  V2_SOURCE_PATH: .github/validation/a35-control-f-v2-source.yml
+  ARTIFACT_NAME: a35-control-f-v3-causal-evidence
+
+jobs:
+  causal-v3:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - name: Checkout exact immutable candidate
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ env.CANDIDATE }}
+          fetch-depth: 0
+
+      - name: Phase 0 immutable proof
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$CANDIDATE"
+          test "$(git rev-parse HEAD^)" = "$PARENT"
+          if git symbolic-ref -q HEAD >/dev/null 2>&1; then
+            echo "EXPECTED_DETACHED_HEAD=NO"
+            exit 1
+          fi
+          git diff --quiet
+          git diff --cached --quiet
+          test -z "$(git status --porcelain --untracked-files=normal)"
+          test "$(git ls-remote origin refs/heads/$PRODUCT_BRANCH | awk '{print $1}')" = "$CANDIDATE"
+          echo "PHASE0_HEAD=$CANDIDATE"
+          echo "PHASE0_PARENT=$PARENT"
+          echo "PHASE0_WORKTREE=CLEAN"
+          echo "PHASE0_PRODUCT_BRANCH_IMMUTABLE=YES"
+          echo "VALIDATION_SHA=$GITHUB_SHA" >> "$GITHUB_ENV"
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install build and Chromium
+        run: |
+          set -euo pipefail
+          npm ci --silent
+          npx playwright install --with-deps chromium
+          npm run build --silent
+
+      - name: Reuse V2 preload from inert validation source
+        shell: bash
+        run: |
+          set -euo pipefail
+          EVIDENCE="$RUNNER_TEMP/a35-evidence"
+          TRACE="$RUNNER_TEMP/a35-v3-traces"
+          mkdir -p "$EVIDENCE" "$TRACE"
+          PRELOAD="$RUNNER_TEMP/a35-control-f-v2-preload.mjs"
+          AUGMENT="$RUNNER_TEMP/a35-control-f-v3-augment.mjs"
+          SOURCE="$RUNNER_TEMP/a35-control-f-v2-source.yml"
+
+          git fetch --quiet origin "$VALIDATION_BRANCH"
+          git show "origin/$VALIDATION_BRANCH:$V2_SOURCE_PATH" > "$SOURCE"
+
+          python - "$SOURCE" "$PRELOAD" <<'PY'
+          import pathlib, sys, textwrap
+          source = pathlib.Path(sys.argv[1]).read_text(encoding='utf-8')
+          marker = '          cat > "$PRELOAD" <<\'EOF\'\n'
+          start = source.find(marker)
+          if start < 0:
+              raise SystemExit('V2 preload start marker not found')
+          start += len(marker)
+          end = source.find('          EOF\n', start)
+          if end < 0:
+              raise SystemExit('V2 preload end marker not found')
+          body = textwrap.dedent(source[start:end])
+          pathlib.Path(sys.argv[2]).write_text(body, encoding='utf-8')
+          PY
+
+          cat > "$AUGMENT" <<'EOF'
+          import { appendFileSync } from 'node:fs';
+          import { chromium } from 'playwright';
+
+          const previousLaunch = chromium.launch.bind(chromium);
+          const LABEL = process.env.A35_PROBE_LABEL || 'unlabeled';
+          const OUTPUT = process.env.A35_AUGMENT_OUTPUT || '';
+          let launchSeq = 0;
+          let contextSeq = 0;
+
+          function parseJson(text) {
+            try { return JSON.parse(text); } catch { return text; }
+          }
+
+          Object.defineProperty(chromium, 'launch', {
+            configurable: true,
+            value: async (...args) => {
+              const browser = await previousLaunch(...args);
+              const thisLaunch = ++launchSeq;
+              const previousNewContext = browser.newContext.bind(browser);
+              browser.newContext = async (...contextArgs) => {
+                const context = await previousNewContext(...contextArgs);
+                const thisContext = ++contextSeq;
+                const cloudResponses = [];
+                const previousNewPage = context.newPage.bind(context);
+
+                context.newPage = async (...pageArgs) => {
+                  const page = await previousNewPage(...pageArgs);
+                  page.on('response', async (response) => {
+                    try {
+                      const request = response.request();
+                      const url = request.url();
+                      if (!url.includes('/rest/v1/propcontrol_records')) return;
+                      const headers = await request.allHeaders().catch(() => ({}));
+                      const text = await response.text().catch(() => '');
+                      cloudResponses.push({
+                        monoMs: Number(performance.now().toFixed(3)),
+                        method: request.method(),
+                        url,
+                        status: response.status(),
+                        requestBody: request.postData() || null,
+                        responseBody: text,
+                        responseJson: parseJson(text),
+                        probe: headers['x-a35-v3-probe'] || '',
+                      });
+                    } catch (error) {
+                      cloudResponses.push({ type: 'response-capture-error', error: String(error) });
+                    }
+                  });
+                  return page;
+                };
+
+                const previousClose = context.close.bind(context);
+                context.close = async (...closeArgs) => {
+                  for (const page of context.pages()) {
+                    let generation = '';
+                    try {
+                      generation = await page.evaluate(() => {
+                        try {
+                          return String(JSON.parse(localStorage.getItem('propcontrol-cloud-session-v1') || '{}').__propcontrolAuthGeneration || '');
+                        } catch { return ''; }
+                      });
+                    } catch {}
+                    if (generation !== 'a35-control-f') continue;
+
+                    const productPosts = cloudResponses.filter((e) => e.method === 'POST' && !e.probe);
+                    let cloudAfterProbe = null;
+                    const basis = [...cloudResponses].reverse().find((e) => e.method === 'GET' && !e.probe && typeof e.url === 'string');
+                    if (basis?.url) {
+                      try {
+                        cloudAfterProbe = await page.evaluate(async (url) => {
+                          const response = await fetch(url, { headers: { 'x-a35-v3-probe': 'cloud-after' } });
+                          const text = await response.text();
+                          let json = null;
+                          try { json = JSON.parse(text); } catch {}
+                          return { url, status: response.status, body: text, json };
+                        }, basis.url);
+                      } catch (error) {
+                        cloudAfterProbe = { error: String(error) };
+                      }
+                    }
+
+                    const firstPostMono = productPosts.length ? productPosts[0].monoMs : Number.POSITIVE_INFINITY;
+                    const beforeCandidates = cloudResponses.filter((e) => e.method === 'GET' && !e.probe && e.monoMs <= firstPostMono);
+                    const cloudBefore = beforeCandidates.length
+                      ? beforeCandidates[beforeCandidates.length - 1]
+                      : cloudResponses.find((e) => e.method === 'GET' && !e.probe) || null;
+
+                    const result = {
+                      label: LABEL,
+                      pid: process.pid,
+                      ppid: process.ppid,
+                      launchSeq: thisLaunch,
+                      contextSeq: thisContext,
+                      generation,
+                      cloudBefore,
+                      cloudAfterProbe,
+                      productPostResponses: productPosts,
+                      cloudResponses,
+                    };
+                    if (OUTPUT) appendFileSync(OUTPUT, `${JSON.stringify(result)}\n`, 'utf8');
+                  }
+                  return previousClose(...closeArgs);
+                };
+
+                return context;
+              };
+              return browser;
+            },
+          });
+          EOF
+
+          echo "A35_EVIDENCE_DIR=$EVIDENCE" >> "$GITHUB_ENV"
+          echo "A35_TRACE_DIR=$TRACE" >> "$GITHUB_ENV"
+          echo "A35_PRELOAD=$PRELOAD" >> "$GITHUB_ENV"
+          echo "A35_AUGMENT=$AUGMENT" >> "$GITHUB_ENV"
+          echo "V2_PRELOAD_SHA256=$(sha256sum "$PRELOAD" | awk '{print $1}')" >> "$GITHUB_ENV"
+          echo "V3_AUGMENT_SHA256=$(sha256sum "$AUGMENT" | awk '{print $1}')" >> "$GITHUB_ENV"
+
+      - name: Preload smoke
+        shell: bash
+        run: |
+          set -euo pipefail
+          NODE_OPTIONS="--import=$A35_PRELOAD --import=$A35_AUGMENT" node --input-type=module -e "import { chromium } from 'playwright'; console.log('PRELOAD_SMOKE_OK=' + String(Object.prototype.hasOwnProperty.call(chromium, 'launch')));"
+
+      - name: F isolated fresh process-browser-context x10
+        shell: bash
+        run: |
+          set -euo pipefail
+          for n in $(seq 1 10); do
+            [ -f "$A35_EVIDENCE_DIR/STOP" ] && break
+            label="case1-isolated-$n"
+            out="$A35_TRACE_DIR/$label.jsonl"
+            aug="$A35_TRACE_DIR/$label.augment.jsonl"
+            log="$A35_TRACE_DIR/$label.log"
+            set +e
+            A35_PROBE_LABEL="$label" A35_PROBE_OUTPUT="$out" A35_AUGMENT_OUTPUT="$aug" \
+              NODE_OPTIONS="--import=$A35_PRELOAD --import=$A35_AUGMENT" \
+              node --test --test-concurrency=1 --test-name-pattern='A3\.5 F:' \
+              dist/tests/sec-fix-a3-5-stale-role-fallback-authority.test.js >"$log" 2>&1
+            rc=$?
+            set -e
+            printf '{"label":"%s","scenario":"F isolated / fresh process-browser-context","run":%s,"processMode":"fresh node process","browserMode":"fresh browser","contextMode":"fresh context","rc":%s}\n' "$label" "$n" "$rc" >> "$A35_TRACE_DIR/run-meta.jsonl"
+            if [ ! -s "$out" ]; then
+              echo "HARNESS_NO_TRACE=$label RC=$rc" | tee -a "$A35_EVIDENCE_DIR/harness-errors.txt"
+              cat "$log" >> "$A35_EVIDENCE_DIR/harness-errors.txt"
+              break
+            fi
+            python - "$out" "$A35_EVIDENCE_DIR/STOP" <<'PY'
+          import json, pathlib, sys
+          rows=[json.loads(x) for x in pathlib.Path(sys.argv[1]).read_text().splitlines() if x.strip()]
+          reasons=[]
+          for row in rows:
+              for p in row.get('posts',[]):
+                  body=p.get('body') or ''
+                  if p.get('payloadClass') == 'STALE_LOCAL': reasons.append('STALE_LOCAL_SENT')
+                  if 'A35_STALE_OWNER_LOCAL_DATA' in body: reasons.append('STALE_OWNER_PAYLOAD')
+                  try:
+                      parsed=json.loads(body) if isinstance(body,str) else body
+                      items=parsed if isinstance(parsed,list) else [parsed]
+                      orgs={str(x.get('organization_id','')) for x in items if isinstance(x,dict)}
+                      if orgs and orgs != {'a35-downgrade-org'}: reasons.append('WRONG_TENANT')
+                  except Exception:
+                      pass
+          if reasons:
+              pathlib.Path(sys.argv[2]).write_text('\n'.join(sorted(set(reasons)))+'\n')
+          PY
+            echo "RUN=$label RC=$rc"
+            grep -E 'CONTROL_F_|A35_CONTROL_F_CAUSAL_RESULT=' "$log" || true
+          done
+
+      - name: A-E then F shared architecture x5
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          [ -f "$A35_EVIDENCE_DIR/STOP" ] && exit 0
+          for n in $(seq 1 5); do
+            [ -f "$A35_EVIDENCE_DIR/STOP" ] && break
+            label="case2-ae-then-f-$n"
+            out="$A35_TRACE_DIR/$label.jsonl"
+            aug="$A35_TRACE_DIR/$label.augment.jsonl"
+            log="$A35_TRACE_DIR/$label.log"
+            set +e
+            A35_PROBE_LABEL="$label" A35_PROBE_OUTPUT="$out" A35_AUGMENT_OUTPUT="$aug" \
+              NODE_OPTIONS="--import=$A35_PRELOAD --import=$A35_AUGMENT" \
+              node --test --test-concurrency=1 \
+              dist/tests/sec-fix-a3-5-stale-role-fallback-authority.test.js >"$log" 2>&1
+            rc=$?
+            set -e
+            printf '{"label":"%s","scenario":"A-E -> F / shared architecture","run":%s,"processMode":"single node test invocation","browserMode":"shared browser","contextMode":"fresh context per control","rc":%s}\n' "$label" "$n" "$rc" >> "$A35_TRACE_DIR/run-meta.jsonl"
+            if [ ! -s "$out" ]; then
+              echo "HARNESS_NO_TRACE=$label RC=$rc" | tee -a "$A35_EVIDENCE_DIR/harness-errors.txt"
+              cat "$log" >> "$A35_EVIDENCE_DIR/harness-errors.txt"
+              break
+            fi
+            python - "$out" "$A35_EVIDENCE_DIR/STOP" <<'PY'
+          import json, pathlib, sys
+          rows=[json.loads(x) for x in pathlib.Path(sys.argv[1]).read_text().splitlines() if x.strip()]
+          reasons=[]
+          for row in rows:
+              for p in row.get('posts',[]):
+                  body=p.get('body') or ''
+                  if p.get('payloadClass') == 'STALE_LOCAL': reasons.append('STALE_LOCAL_SENT')
+                  if 'A35_STALE_OWNER_LOCAL_DATA' in body: reasons.append('STALE_OWNER_PAYLOAD')
+                  try:
+                      parsed=json.loads(body) if isinstance(body,str) else body
+                      items=parsed if isinstance(parsed,list) else [parsed]
+                      orgs={str(x.get('organization_id','')) for x in items if isinstance(x,dict)}
+                      if orgs and orgs != {'a35-downgrade-org'}: reasons.append('WRONG_TENANT')
+                  except Exception:
+                      pass
+          if reasons:
+              pathlib.Path(sys.argv[2]).write_text('\n'.join(sorted(set(reasons)))+'\n')
+          PY
+            echo "RUN=$label RC=$rc"
+            grep -E 'CONTROL_F_|A35_CONTROL_F_CAUSAL_RESULT=' "$log" || true
+          done
+
+      - name: A-E then F fresh browser-context x5
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          [ -f "$A35_EVIDENCE_DIR/STOP" ] && exit 0
+          for n in $(seq 1 5); do
+            [ -f "$A35_EVIDENCE_DIR/STOP" ] && break
+            label="case3-fresh-browser-per-context-$n"
+            out="$A35_TRACE_DIR/$label.jsonl"
+            aug="$A35_TRACE_DIR/$label.augment.jsonl"
+            log="$A35_TRACE_DIR/$label.log"
+            set +e
+            A35_PROBE_FRESH_BROWSER_PER_CONTEXT=1 A35_PROBE_LABEL="$label" A35_PROBE_OUTPUT="$out" A35_AUGMENT_OUTPUT="$aug" \
+              NODE_OPTIONS="--import=$A35_PRELOAD --import=$A35_AUGMENT" \
+              node --test --test-concurrency=1 \
+              dist/tests/sec-fix-a3-5-stale-role-fallback-authority.test.js >"$log" 2>&1
+            rc=$?
+            set -e
+            printf '{"label":"%s","scenario":"A-E -> F / fresh browser-context","run":%s,"processMode":"single node test invocation","browserMode":"fresh browser per context","contextMode":"fresh context per control","rc":%s}\n' "$label" "$n" "$rc" >> "$A35_TRACE_DIR/run-meta.jsonl"
+            if [ ! -s "$out" ]; then
+              echo "HARNESS_NO_TRACE=$label RC=$rc" | tee -a "$A35_EVIDENCE_DIR/harness-errors.txt"
+              cat "$log" >> "$A35_EVIDENCE_DIR/harness-errors.txt"
+              break
+            fi
+            python - "$out" "$A35_EVIDENCE_DIR/STOP" <<'PY'
+          import json, pathlib, sys
+          rows=[json.loads(x) for x in pathlib.Path(sys.argv[1]).read_text().splitlines() if x.strip()]
+          reasons=[]
+          for row in rows:
+              for p in row.get('posts',[]):
+                  body=p.get('body') or ''
+                  if p.get('payloadClass') == 'STALE_LOCAL': reasons.append('STALE_LOCAL_SENT')
+                  if 'A35_STALE_OWNER_LOCAL_DATA' in body: reasons.append('STALE_OWNER_PAYLOAD')
+                  try:
+                      parsed=json.loads(body) if isinstance(body,str) else body
+                      items=parsed if isinstance(parsed,list) else [parsed]
+                      orgs={str(x.get('organization_id','')) for x in items if isinstance(x,dict)}
+                      if orgs and orgs != {'a35-downgrade-org'}: reasons.append('WRONG_TENANT')
+                  except Exception:
+                      pass
+          if reasons:
+              pathlib.Path(sys.argv[2]).write_text('\n'.join(sorted(set(reasons)))+'\n')
+          PY
+            echo "RUN=$label RC=$rc"
+            grep -E 'CONTROL_F_|A35_CONTROL_F_CAUSAL_RESULT=' "$log" || true
+          done
+
+      - name: Full Closure relevant architecture x5
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          [ -f "$A35_EVIDENCE_DIR/STOP" ] && exit 0
+          for n in $(seq 1 5); do
+            [ -f "$A35_EVIDENCE_DIR/STOP" ] && break
+            label="case4-full-closure-$n"
+            out="$A35_TRACE_DIR/$label.jsonl"
+            aug="$A35_TRACE_DIR/$label.augment.jsonl"
+            log="$A35_TRACE_DIR/$label.log"
+            set +e
+            A35_PROBE_LABEL="$label" A35_PROBE_OUTPUT="$out" A35_AUGMENT_OUTPUT="$aug" \
+              NODE_OPTIONS="--import=$A35_PRELOAD --import=$A35_AUGMENT" \
+              node --test --test-concurrency=1 \
+              dist/tests/sec-fix-a3-5-stale-role-fallback-authority.test.js \
+              dist/tests/sec-fix-a3-5-ownerless-normalization.test.js >"$log" 2>&1
+            rc=$?
+            set -e
+            printf '{"label":"%s","scenario":"Full Closure relevant architecture","run":%s,"processMode":"node test runner / two validation files","browserMode":"shared per test-file architecture","contextMode":"fresh contexts","rc":%s}\n' "$label" "$n" "$rc" >> "$A35_TRACE_DIR/run-meta.jsonl"
+            if [ ! -s "$out" ]; then
+              echo "HARNESS_NO_TRACE=$label RC=$rc" | tee -a "$A35_EVIDENCE_DIR/harness-errors.txt"
+              cat "$log" >> "$A35_EVIDENCE_DIR/harness-errors.txt"
+              break
+            fi
+            python - "$out" "$A35_EVIDENCE_DIR/STOP" <<'PY'
+          import json, pathlib, sys
+          rows=[json.loads(x) for x in pathlib.Path(sys.argv[1]).read_text().splitlines() if x.strip()]
+          reasons=[]
+          for row in rows:
+              for p in row.get('posts',[]):
+                  body=p.get('body') or ''
+                  if p.get('payloadClass') == 'STALE_LOCAL': reasons.append('STALE_LOCAL_SENT')
+                  if 'A35_STALE_OWNER_LOCAL_DATA' in body: reasons.append('STALE_OWNER_PAYLOAD')
+                  try:
+                      parsed=json.loads(body) if isinstance(body,str) else body
+                      items=parsed if isinstance(parsed,list) else [parsed]
+                      orgs={str(x.get('organization_id','')) for x in items if isinstance(x,dict)}
+                      if orgs and orgs != {'a35-downgrade-org'}: reasons.append('WRONG_TENANT')
+                  except Exception:
+                      pass
+          if reasons:
+              pathlib.Path(sys.argv[2]).write_text('\n'.join(sorted(set(reasons)))+'\n')
+          PY
+            echo "RUN=$label RC=$rc"
+            grep -E 'CONTROL_F_|A35_CONTROL_F_CAUSAL_RESULT=' "$log" || true
+          done
+
+      - name: Build durable evidence
+        if: always()
+        shell: bash
+        run: |
+          set -uo pipefail
+          mkdir -p "$A35_EVIDENCE_DIR"
+          python - "$A35_TRACE_DIR" "$A35_EVIDENCE_DIR" <<'PY'
+          import glob, hashlib, json, os, pathlib, re, sys
+          from collections import Counter, defaultdict
+
+          trace_root = pathlib.Path(sys.argv[1])
+          out_root = pathlib.Path(sys.argv[2])
+          out_root.mkdir(parents=True, exist_ok=True)
+
+          def load_jsonl(path):
+              rows=[]
+              p=pathlib.Path(path)
+              if not p.exists():
+                  return rows
+              for line in p.read_text(encoding='utf-8', errors='replace').splitlines():
+                  if not line.strip():
+                      continue
+                  try: rows.append(json.loads(line))
+                  except Exception as e: rows.append({'parseError':str(e),'raw':line})
+              return rows
+
+          metas={r.get('label'):r for r in load_jsonl(trace_root/'run-meta.jsonl') if r.get('label')}
+          v2=[]
+          for path in sorted(trace_root.glob('case*.jsonl')):
+              if '.augment.' in path.name:
+                  continue
+              v2.extend(load_jsonl(path))
+          aug_by_label=defaultdict(list)
+          for path in sorted(trace_root.glob('case*.augment.jsonl')):
+              for r in load_jsonl(path):
+                  aug_by_label[r.get('label','')].append(r)
+
+          scenarios = {
+              'case1':'F isolated / fresh process-browser-context',
+              'case2':'A-E -> F / shared architecture',
+              'case3':'A-E -> F / fresh browser-context',
+              'case4':'Full Closure relevant architecture',
+          }
+
+          def parse_body(body):
+              if not isinstance(body,str):
+                  return body
+              try: return json.loads(body)
+              except Exception: return body
+
+          def organization_ids(body):
+              parsed=parse_body(body)
+              items=parsed if isinstance(parsed,list) else [parsed]
+              return sorted({str(x.get('organization_id','')) for x in items if isinstance(x,dict) and x.get('organization_id') is not None})
+
+          def cloud_json(entry):
+              if not isinstance(entry,dict):
+                  return None
+              value=entry.get('responseJson')
+              if value is not None: return value
+              return parse_body(entry.get('responseBody',''))
+
+          per_runs=[]
+          post_rows=[]
+          stop_reasons=[]
+          for row in sorted(v2, key=lambda r:r.get('label','')):
+              label=row.get('label','')
+              prefix=label.split('-',1)[0]
+              meta=metas.get(label,{})
+              augment=(aug_by_label.get(label) or [{}])[-1]
+              posts=row.get('posts') or []
+              cloud_before=cloud_json(augment.get('cloudBefore'))
+              after_probe=augment.get('cloudAfterProbe')
+              cloud_after=(after_probe or {}).get('json') if isinstance(after_probe,dict) else None
+              if cloud_after is None and isinstance(after_probe,dict):
+                  cloud_after=parse_body(after_probe.get('body',''))
+              scenario=meta.get('scenario') or scenarios.get(prefix,'UNKNOWN')
+              run_number=meta.get('run')
+              if run_number is None:
+                  m=re.search(r'(\d+)$',label)
+                  run_number=int(m.group(1)) if m else None
+              run_record={
+                  'scenario':scenario,
+                  'run':run_number,
+                  'label':label,
+                  'candidateSha':os.environ.get('CANDIDATE',''),
+                  'validationSha':os.environ.get('VALIDATION_SHA',os.environ.get('GITHUB_SHA','')),
+                  'processBrowserContextMode':{
+                      'process':meta.get('processMode'),
+                      'browser':meta.get('browserMode'),
+                      'context':meta.get('contextMode'),
+                      'observedPid':augment.get('pid'),
+                      'observedPpid':augment.get('ppid'),
+                      'observedLaunchSeq':augment.get('launchSeq'),
+                      'observedContextSeq':augment.get('contextSeq'),
+                  },
+                  'testReturnCode':meta.get('rc'),
+                  'postCount':row.get('postCount',0),
+                  'eventSequence':row.get('fullTrace',[]),
+                  'timer700':row.get('timerEvents',[]),
+                  'syncDirtyReads':row.get('syncReads',[]),
+                  'bootstrapEvents':row.get('bootstrapEvents',[]),
+                  'serviceWorkers':row.get('serviceWorkers',[]),
+                  'finalSync':row.get('finalSync'),
+                  'runtimeFinal':row.get('runtime'),
+                  'cloudFixtureBefore':cloud_before,
+                  'cloudFixtureAfter':cloud_after,
+                  'cloudResponseEvidence':augment.get('cloudResponses',[]),
+              }
+              per_runs.append(run_record)
+
+              for idx,p in enumerate(posts,1):
+                  orgs=organization_ids(p.get('body'))
+                  exact={
+                      'label':label,
+                      'scenario':scenario,
+                      'run':run_number,
+                      'postIndex':idx,
+                      'candidateSha':os.environ.get('CANDIDATE',''),
+                      'requestMethod':p.get('method'),
+                      'requestUrl':p.get('url'),
+                      'requestBody':p.get('body'),
+                      'organization_id':orgs,
+                      'payloadClass':p.get('payloadClass'),
+                      'payloadStructuralDifferences':p.get('payloadDifferences',[]),
+                      'semanticIdempotent':p.get('semanticIdempotent'),
+                      'dirtyBefore':p.get('dirtyBefore'),
+                      'localSnapshotBeforePost':p.get('snapshot'),
+                      'cloudFixtureBefore':cloud_before,
+                      'cloudFixtureAfter':cloud_after,
+                      'replaceRelation':p.get('replaceRelation'),
+                      'precedingReplace':p.get('precedingReplace'),
+                      'followingReplace':p.get('followingReplace'),
+                      'jsStack':p.get('stack'),
+                      'cdpInitiator':p.get('cdpInitiator'),
+                      'responseStatus':p.get('responseStatus'),
+                      'monoMs':p.get('monoMs'),
+                      'timer700':row.get('timerEvents',[]),
+                      'syncDirtyReads':row.get('syncReads',[]),
+                      'bootstrapEvents':row.get('bootstrapEvents',[]),
+                      'serviceWorkers':row.get('serviceWorkers',[]),
+                      'finalSync':row.get('finalSync'),
+                      'runtimeFinal':row.get('runtime'),
+                      'fullEventSequence':row.get('fullTrace',[]),
+                  }
+                  post_rows.append(exact)
+                  body=str(p.get('body') or '')
+                  if p.get('payloadClass')=='STALE_LOCAL': stop_reasons.append('STALE_LOCAL_SENT')
+                  if 'A35_STALE_OWNER_LOCAL_DATA' in body: stop_reasons.append('STALE_OWNER_PAYLOAD')
+                  if orgs and orgs != ['a35-downgrade-org']: stop_reasons.append('WRONG_TENANT_OR_CROSS_TENANT')
+
+          matrix=[]
+          for key in ('case1','case2','case3','case4'):
+              vals=[r for r in per_runs if r['label'].startswith(key+'-')]
+              posts=[p for p in post_rows if p['label'].startswith(key+'-')]
+              matrix.append({
+                  'scenario':scenarios[key],
+                  'runs':len(vals),
+                  'POST=0':sum(r['postCount']==0 for r in vals),
+                  'POST=1+':sum(r['postCount']>0 for r in vals),
+                  'payloadClasses':sorted({p['payloadClass'] for p in posts if p.get('payloadClass')}),
+                  'origins':sorted({next((line.strip() for line in str(p.get('jsStack') or '').splitlines()[1:] if line.strip()),'UNKNOWN') for p in posts}),
+              })
+
+          (out_root/'reproduction-matrix.json').write_text(json.dumps(matrix,indent=2,ensure_ascii=False)+'\n',encoding='utf-8')
+          with (out_root/'per-run.jsonl').open('w',encoding='utf-8') as f:
+              for r in per_runs: f.write(json.dumps(r,ensure_ascii=False)+'\n')
+          with (out_root/'post-traces.jsonl').open('w',encoding='utf-8') as f:
+              for r in post_rows: f.write(json.dumps(r,ensure_ascii=False)+'\n')
+
+          env={
+              'candidateSha':os.environ.get('CANDIDATE',''),
+              'validationSha':os.environ.get('VALIDATION_SHA',os.environ.get('GITHUB_SHA','')),
+              'productBranch':os.environ.get('PRODUCT_BRANCH',''),
+              'validationBranch':os.environ.get('VALIDATION_BRANCH',''),
+              'runnerOS':os.environ.get('RUNNER_OS',''),
+              'runnerArch':os.environ.get('RUNNER_ARCH',''),
+              'nodeVersion':os.popen('node --version').read().strip(),
+              'v2PreloadSha256':os.environ.get('V2_PRELOAD_SHA256',''),
+              'v3AugmentSha256':os.environ.get('V3_AUGMENT_SHA256',''),
+              'stopReasons':sorted(set(stop_reasons)),
+          }
+          (out_root/'environment.json').write_text(json.dumps(env,indent=2,ensure_ascii=False)+'\n',encoding='utf-8')
+
+          classes=Counter(p.get('payloadClass') for p in post_rows)
+          wrong=sum(bool(p.get('organization_id')) and p.get('organization_id') != ['a35-downgrade-org'] for p in post_rows)
+          cloud_mutations=sum(p.get('cloudFixtureBefore') != p.get('cloudFixtureAfter') for p in post_rows if p.get('cloudFixtureBefore') is not None and p.get('cloudFixtureAfter') is not None)
+          stale=sum(p.get('payloadClass')=='STALE_LOCAL' for p in post_rows)
+          total_posts=len(post_rows)
+          complete_chain=sum(
+              p.get('requestBody') is not None
+              and p.get('organization_id') is not None
+              and p.get('dirtyBefore') is not None
+              and p.get('replaceRelation') is not None
+              and p.get('jsStack') is not None
+              and p.get('cloudFixtureBefore') is not None
+              and p.get('cloudFixtureAfter') is not None
+              for p in post_rows
+          )
+          cause='NOT PROVEN'
+          summary=[
+              f'CANDIDATE={os.environ.get("CANDIDATE","")}',
+              f'VALIDATION_SHA={os.environ.get("VALIDATION_SHA",os.environ.get("GITHUB_SHA",""))}',
+              f'TOTAL_RUNS={len(per_runs)}',
+              f'TOTAL_POSTS={total_posts}',
+              f'COMPLETE_CAUSAL_CHAINS={complete_chain}',
+              'PAYLOAD_CLASSES='+json.dumps(dict(classes),sort_keys=True),
+              f'STALE_POST_COUNT={stale}',
+              f'WRONG_TENANT_COUNT={wrong}',
+              f'CLOUD_MUTATION_COUNT={cloud_mutations}',
+              f'STOP_REASONS={json.dumps(sorted(set(stop_reasons)))}',
+              f'CAUSE={cause}',
+          ]
+          (out_root/'final-summary.txt').write_text('\n'.join(summary)+'\n',encoding='utf-8')
+          PY
+
+          if [ -f "$A35_TRACE_DIR/run-meta.jsonl" ]; then
+            cp "$A35_TRACE_DIR/run-meta.jsonl" "$A35_EVIDENCE_DIR/run-meta.jsonl"
+          fi
+          if [ -f "$A35_EVIDENCE_DIR/harness-errors.txt" ]; then :; fi
+          if [ -f "$A35_EVIDENCE_DIR/STOP" ]; then :; fi
+
+          (
+            cd "$A35_EVIDENCE_DIR"
+            rm -f SHA256SUMS
+            sha256sum reproduction-matrix.json per-run.jsonl post-traces.jsonl environment.json final-summary.txt > SHA256SUMS
+          )
+          cat "$A35_EVIDENCE_DIR/final-summary.txt"
+          cat "$A35_EVIDENCE_DIR/SHA256SUMS"
+
+      - name: Upload durable causal evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: a35-control-f-v3-causal-evidence
+          path: ${{ runner.temp }}/a35-evidence/**
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: GitHub Step Summary
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo "## A3.5 Control F V3 causal evidence"
+            echo
+            echo "- candidate SHA: \`$CANDIDATE\`"
+            echo "- validation SHA: \`${VALIDATION_SHA:-$GITHUB_SHA}\`"
+            if [ -f "$A35_EVIDENCE_DIR/final-summary.txt" ]; then
+              echo '```text'
+              cat "$A35_EVIDENCE_DIR/final-summary.txt"
+              echo '```'
+            fi
+            if [ -f "$A35_EVIDENCE_DIR/reproduction-matrix.json" ]; then
+              echo "### Scenario matrix"
+              echo '```json'
+              cat "$A35_EVIDENCE_DIR/reproduction-matrix.json"
+              echo '```'
+            fi
+            if [ -f "$A35_EVIDENCE_DIR/SHA256SUMS" ]; then
+              echo "### SHA256"
+              echo '```text'
+              cat "$A35_EVIDENCE_DIR/SHA256SUMS"
+              echo '```'
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Final worktree and immutable refs proof
+        if: always()
+        shell: bash
+        run: |
+          set +e
+          rm -f "$PWD/.a35-control-f-preload.mjs"
+          set -euo pipefail
+          printf 'FINAL_HEAD=%s\n' "$(git rev-parse HEAD)"
+          test "$(git rev-parse HEAD)" = "$CANDIDATE"
+          remote_product="$(git ls-remote origin refs/heads/$PRODUCT_BRANCH | awk '{print $1}')"
+          printf 'FINAL_PRODUCT_BRANCH=%s\n' "$remote_product"
+          test "$remote_product" = "$CANDIDATE"
+          if ! git diff --quiet; then
+            echo "FINAL_DIRTINESS=WORKTREE_DIFF"
+            git diff --stat
+            exit 1
+          fi
+          if ! git diff --cached --quiet; then
+            echo "FINAL_DIRTINESS=INDEX_DIFF"
+            git diff --cached --stat
+            exit 1
+          fi
+          status="$(git status --porcelain --untracked-files=normal)"
+          if [ -n "$status" ]; then
+            echo "FINAL_DIRTINESS=STATUS"
+            printf '%s\n' "$status"
+            exit 1
+          fi
+          echo "FINAL_WORKTREE=CLEAN"
