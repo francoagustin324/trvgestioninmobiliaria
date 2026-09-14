@@ -47,8 +47,35 @@ jobs:
       - name: Install Chromium
         run: npx playwright install --with-deps chromium
 
+      - name: Validation-only TypeScript browser-import accommodation
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('src/tests/sec-fix-a3-5-stale-role-fallback-authority.test.ts')
+          text = path.read_text()
+          old_store = "    const { state } = await import('/dist/store.js');"
+          old_access = "    const access = await import('/dist/team-access.js');"
+          new_store = "    const storeModule = '/dist/store.js';\n    const { state } = await import(storeModule);"
+          new_access = "    const accessModule = '/dist/team-access.js';\n    const access = await import(accessModule);"
+          if text.count(old_store) != 1 or text.count(old_access) != 1:
+              raise SystemExit('A35_BROWSER_IMPORT_FIXTURE_SHAPE_CHANGED')
+          path.write_text(text.replace(old_store, new_store).replace(old_access, new_access))
+          print('VALIDATION_ONLY_BROWSER_IMPORT_PATCH=2')
+          PY
+
       - name: Build test-only reproducer
         run: npm run build --silent
+
+      - name: Restore tracked test source before execution
+        shell: bash
+        run: |
+          set -euo pipefail
+          git checkout -- src/tests/sec-fix-a3-5-stale-role-fallback-authority.test.ts
+          git diff --exit-code
+          git diff --cached --exit-code
+          echo "TRACKED_PRODUCT_DIFF=EMPTY"
 
       - name: Run exact C1 reproducer and require RED
         shell: bash
