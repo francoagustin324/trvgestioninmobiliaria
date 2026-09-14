@@ -1,0 +1,316 @@
+name: A3.5 R10 Ownerless Roster Characterization
+
+on:
+  push:
+    branches:
+      - validation/a35-r10-ownerless-roster-characterization
+
+permissions:
+  contents: read
+
+concurrency:
+  group: a35-r10-ownerless-roster-characterization
+  cancel-in-progress: false
+
+jobs:
+  controls-a-b:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      CANDIDATE: 7220f30cac1c25f143974751c8097f80b2ad7a17
+      A35_BRANCH: agent/sec-fix-a3-5-stale-role-fallback-fence
+      A35_SHA: 7220f30cac1c25f143974751c8097f80b2ad7a17
+      RELEASE_BRANCH: release/a34-webkit-572-reconciliation
+      RELEASE_SHA: de091b9c98c33a31682cc77ede03313a8a66cb30
+      MAIN_SHA: 68034c60f606326a1d75fc3d448c7e99de49b492
+    steps:
+      - name: Checkout exact detached candidate
+        uses: actions/checkout@v7
+        with:
+          ref: 7220f30cac1c25f143974751c8097f80b2ad7a17
+          fetch-depth: 0
+
+      - name: Prove exact candidate and immutable refs
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$CANDIDATE"
+          if git symbolic-ref -q HEAD >/dev/null 2>&1; then
+            echo "Candidate checkout is not detached"
+            exit 1
+          fi
+          git diff --quiet
+          git diff --cached --quiet
+          test -z "$(git status --porcelain --untracked-files=normal)"
+          test "$(git ls-remote origin refs/heads/$A35_BRANCH | awk '{print $1}')" = "$A35_SHA"
+          test "$(git ls-remote origin refs/heads/$RELEASE_BRANCH | awk '{print $1}')" = "$RELEASE_SHA"
+          test "$(git ls-remote origin refs/heads/main | awk '{print $1}')" = "$MAIN_SHA"
+          echo "EXECUTION_SHA=$(git rev-parse HEAD)"
+          echo "DETACHED_HEAD=YES"
+          echo "IMMUTABLE_REFS=PASS"
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install and build exact candidate
+        run: |
+          npm ci --silent
+          npm run build --silent
+
+      - name: Generate characterization diagnostic outside product source
+        shell: bash
+        run: |
+          cat > dist/tests/a35-r10-ownerless-roster-characterization.mjs <<'EOF'
+          import './sec-fix-a1-2-c2-test-setup.js';
+          import assert from 'node:assert/strict';
+          import { initialData } from '../models.js';
+          import { state, activateStorageForTenant } from '../store.js';
+          import { assertLocalWriteAuthorityCompatible, TenantLocalAuthorizationStaleError } from '../cloud-records.js';
+          import { writeTenantSnapshot, readTenantSyncState, tenantStorageNamespace } from '../tenant-storage.js';
+          import { invalidateTenantRuntimeScope, currentTenantScope } from '../tenant-runtime.js';
+          import { captureSharedAuthGeneration, commitSharedCloudSession } from '../auth-session-generation.js';
+          import { hydrateTenantAfterAuth } from '../tenant-hydration.js';
+
+          const USER = 'a34-user-a';
+          const ORG = '00000000-0000-0000-0000-00000000a344';
+          const AUTH_MEMBER_ID = 344;
+          const OWNER_MEMBER_ID = 345;
+          const TRANSIENT = 'A34_TRANSIENT_NETWORK';
+          const TEAM_VIEW_KEY = 'propcontrol-active-team-member-v1';
+          const scope = Object.freeze({ userId: USER, organizationId: ORG });
+          const originalFetch = globalThis.fetch;
+
+          function reset() {
+            Object.defineProperty(globalThis, 'fetch', { configurable: true, writable: true, value: originalFetch });
+            localStorage.clear();
+            invalidateTenantRuntimeScope();
+            state.crm = structuredClone(initialData);
+          }
+
+          function member(id, userId, role, name) {
+            return {
+              id,
+              userId,
+              name,
+              email: `${userId}@example.test`,
+              role,
+              status: 'Activo',
+              createdAt: '2026-09-13T12:00:00.000Z',
+            };
+          }
+
+          function crmWithMembers(members) {
+            const crm = structuredClone(initialData);
+            crm.organization = { id: ORG, name: 'A3.5 R10 diagnostic', seatLimit: null, planLabel: 'validation-only' };
+            crm.teamMembers = members;
+            crm.clients = [{
+              id: 9344,
+              name: 'A35_R10_DIRTY_LOCAL',
+              phone: '3515559344',
+              interest: 'Validation only',
+              status: 'Activo',
+              temperature: 'Tibio',
+              pipeline: 'Nuevo',
+              assignedToId: AUTH_MEMBER_ID,
+              createdById: AUTH_MEMBER_ID,
+            }];
+            crm.properties = [];
+            crm.visits = [];
+            crm.offers = [];
+            crm.reservations = [];
+            crm.contacts = [];
+            crm.reminders = [];
+            crm.fichas = [];
+            crm.conversations = [];
+            crm.activityLog = [];
+            return crm;
+          }
+
+          function cloudMembership(id, userId, role, name) {
+            return {
+              organization_id: ORG,
+              member_id: id,
+              user_id: userId,
+              role,
+              status: 'active',
+              display_name: name,
+              email: `${userId}@example.test`,
+              phone: null,
+              created_at: '2026-09-13T12:00:00.000Z',
+              last_active_at: '2026-09-13T12:00:00.000Z',
+            };
+          }
+
+          function json(value, status = 200) {
+            return new Response(JSON.stringify(value), { status, headers: { 'Content-Type': 'application/json' } });
+          }
+
+          // CONTROL A — exact R10 ownerless mechanism through the real storage activation path.
+          reset();
+          const rawOwnerless = crmWithMembers([member(AUTH_MEMBER_ID, USER, 'Corredor', 'Authenticated Agent')]);
+          writeTenantSnapshot(scope, rawOwnerless, { markDirty: true, reason: 'R10 characterization A', backup: false });
+          const rawText = localStorage.getItem(tenantStorageNamespace(scope).dataKey);
+          assert.ok(rawText);
+          const rawStored = JSON.parse(rawText);
+          const rawAuth = rawStored.teamMembers.find((item) => item.userId === USER);
+          const rawOwners = rawStored.teamMembers.filter((item) => item.role === 'Dueño');
+          const currentContext = Object.freeze({
+            organizationId: ORG,
+            currentMemberId: AUTH_MEMBER_ID,
+            currentRole: 'agent',
+            members: [],
+          });
+          assert.doesNotThrow(() => assertLocalWriteAuthorityCompatible(rawStored, currentContext, USER));
+          console.log(`RAW_AUTHENTICATED_ROLE=${rawAuth?.role || ''}`);
+          console.log(`RAW_MEMBER_ID=${rawAuth?.id ?? ''}`);
+          console.log(`RAW_OWNER_COUNT=${rawOwners.length}`);
+          console.log('RAW_AUTHORITY_COMPATIBLE=YES');
+
+          activateStorageForTenant(scope);
+          const normalizedAuth = state.crm.teamMembers.find((item) => item.userId === USER);
+          const normalizedOwners = state.crm.teamMembers.filter((item) => item.role === 'Dueño');
+          console.log(`NORMALIZED_AUTHENTICATED_ROLE=${normalizedAuth?.role || ''}`);
+          console.log(`NORMALIZED_MEMBER_ID=${normalizedAuth?.id ?? ''}`);
+          console.log(`NORMALIZED_OWNER_COUNT=${normalizedOwners.length}`);
+          assert.equal(rawAuth.role, 'Corredor');
+          assert.equal(rawAuth.id, AUTH_MEMBER_ID);
+          assert.equal(rawOwners.length, 0);
+          assert.equal(normalizedAuth.role, 'Dueño');
+          assert.equal(normalizedAuth.id, AUTH_MEMBER_ID);
+          assert.equal(normalizedOwners.length, 1);
+          const rawComparable = { ...rawAuth, role: normalizedAuth.role };
+          assert.deepEqual(normalizedAuth, rawComparable);
+          assert.throws(
+            () => assertLocalWriteAuthorityCompatible(state.crm, currentContext, USER),
+            (error) => error instanceof TenantLocalAuthorizationStaleError && error.message.endsWith(':role-mismatch'),
+          );
+          console.log('NORMALIZATION_ONLY_ROLE_MUTATED=YES');
+          console.log('NORMALIZED_AUTHORITY_COMPATIBLE=NO_ROLE_MISMATCH');
+          console.log('CONTROL_A_NORMALIZATION=PROVEN');
+
+          // CONTROL B — exact R10 semantics with a realistic second Owner.
+          reset();
+          const realistic = crmWithMembers([
+            member(AUTH_MEMBER_ID, USER, 'Corredor', 'Authenticated Agent'),
+            member(OWNER_MEMBER_ID, 'a35-owner-user', 'Dueño', 'Different Owner'),
+          ]);
+          writeTenantSnapshot(scope, realistic, { markDirty: true, reason: 'R10 characterization B', backup: false });
+          localStorage.setItem(TEAM_VIEW_KEY, String(OWNER_MEMBER_ID));
+          const beforeStored = JSON.parse(localStorage.getItem(tenantStorageNamespace(scope).dataKey));
+          const beforeAuth = beforeStored.teamMembers.find((item) => item.userId === USER);
+          console.log(`AUTHENTICATED_ROLE_BEFORE=${beforeAuth?.role || ''}`);
+
+          let transientRequests = 0;
+          let directoryQueries = 0;
+          const currentAgent = cloudMembership(AUTH_MEMBER_ID, USER, 'agent', 'Authenticated Agent');
+          const currentOwner = cloudMembership(OWNER_MEMBER_ID, 'a35-owner-user', 'owner', 'Different Owner');
+          Object.defineProperty(globalThis, 'fetch', {
+            configurable: true,
+            writable: true,
+            value: async (input) => {
+              const raw = typeof input === 'string' || input instanceof URL ? input.toString() : input.url;
+              const url = new URL(raw, 'https://app.test');
+              if (url.pathname === '/api/cloud-config') {
+                return json({ configured: true, url: 'https://supabase.test', publishableKey: 'a35-key' });
+              }
+              if (url.pathname.endsWith('/rest/v1/organization_members')) {
+                if (url.searchParams.has('user_id')) return json([currentAgent]);
+                if (url.searchParams.has('organization_id')) {
+                  directoryQueries += 1;
+                  return json([currentAgent, currentOwner]);
+                }
+              }
+              if (url.pathname.endsWith('/rest/v1/rpc/visit_transaction_authority_active_v2')) return json(false);
+              if (url.pathname.endsWith('/rest/v1/propcontrol_records')) {
+                transientRequests += 1;
+                throw new Error(TRANSIENT);
+              }
+              if (url.pathname.endsWith('/rest/v1/fichas')) return json([]);
+              throw new Error(`UNEXPECTED_DIAGNOSTIC_FETCH:${url.toString()}`);
+            },
+          });
+
+          const generationBefore = captureSharedAuthGeneration();
+          commitSharedCloudSession(generationBefore, Object.freeze({
+            accessToken: 'a35-r10-access',
+            refreshToken: 'a35-r10-refresh',
+            expiresAt: Date.now() + 3_600_000,
+            userId: USER,
+            email: `${USER}@example.test`,
+          }));
+
+          const returnedScope = await hydrateTenantAfterAuth();
+          assert.deepEqual(returnedScope, scope);
+          assert.deepEqual(currentTenantScope(), scope);
+          const afterAuth = state.crm.teamMembers.find((item) => item.userId === USER);
+          const ownerAfter = state.crm.teamMembers.find((item) => item.id === OWNER_MEMBER_ID);
+          const syncAfter = readTenantSyncState(scope);
+          const rawAfter = JSON.parse(localStorage.getItem(tenantStorageNamespace(scope).dataKey));
+          console.log(`AUTHENTICATED_ROLE_AFTER_NORMALIZATION=${afterAuth?.role || ''}`);
+          console.log(`OWNER_REMAINS_DIFFERENT_MEMBER=${ownerAfter?.role === 'Dueño' && ownerAfter?.userId !== USER ? 'YES' : 'NO'}`);
+          console.log(`TRANSIENT_FAILURE_REACHED=${transientRequests > 0 ? 'YES' : 'NO'}`);
+          console.log('OFFLINE_FALLBACK_COMPLETES=YES');
+          console.log(`DIRTY_LOCAL_PRESERVED=${syncAfter.dirty === true && rawAfter.clients.some((item) => item.name === 'A35_R10_DIRTY_LOCAL') ? 'YES' : 'NO'}`);
+          console.log(`AUTHENTICATED_MEMBER_PINNED=${state.activeMemberId === AUTH_MEMBER_ID ? 'YES' : 'NO'}`);
+          console.log(`DIRECTORY_QUERIES=${directoryQueries}`);
+          assert.equal(beforeAuth.role, 'Corredor');
+          assert.equal(afterAuth.role, 'Corredor');
+          assert.equal(ownerAfter.role, 'Dueño');
+          assert.notEqual(ownerAfter.userId, USER);
+          assert.ok(transientRequests > 0);
+          assert.ok(directoryQueries > 0);
+          assert.equal(syncAfter.dirty, true);
+          assert.ok(rawAfter.clients.some((item) => item.name === 'A35_R10_DIRTY_LOCAL'));
+          assert.equal(state.activeMemberId, AUTH_MEMBER_ID);
+          console.log('A35_OFFLINE_CONTRACT_WITH_REALISTIC_ROSTER=PASS');
+          console.log('CONTROL_B_REALISTIC_R10=PASS');
+
+          reset();
+          EOF
+
+          test ! -e src/tests/a35-r10-ownerless-roster-characterization.mjs
+          echo "GENERATED_DIAGNOSTIC_SCOPE=dist/tests_ONLY"
+
+      - name: Execute Controls A and B
+        shell: bash
+        run: |
+          set -euo pipefail
+          node dist/tests/a35-r10-ownerless-roster-characterization.mjs 2>&1 | tee "$RUNNER_TEMP/r10-ownerless.log"
+          grep -q '^RAW_AUTHENTICATED_ROLE=Corredor$' "$RUNNER_TEMP/r10-ownerless.log"
+          grep -q '^RAW_MEMBER_ID=344$' "$RUNNER_TEMP/r10-ownerless.log"
+          grep -q '^RAW_OWNER_COUNT=0$' "$RUNNER_TEMP/r10-ownerless.log"
+          grep -q '^NORMALIZED_AUTHENTICATED_ROLE=Dueño$' "$RUNNER_TEMP/r10-ownerless.log"
+          grep -q '^NORMALIZED_MEMBER_ID=344$' "$RUNNER_TEMP/r10-ownerless.log"
+          grep -q '^NORMALIZED_OWNER_COUNT=1$' "$RUNNER_TEMP/r10-ownerless.log"
+          grep -q '^NORMALIZATION_ONLY_ROLE_MUTATED=YES$' "$RUNNER_TEMP/r10-ownerless.log"
+          grep -q '^CONTROL_A_NORMALIZATION=PROVEN$' "$RUNNER_TEMP/r10-ownerless.log"
+          grep -q '^AUTHENTICATED_ROLE_BEFORE=Corredor$' "$RUNNER_TEMP/r10-ownerless.log"
+          grep -q '^AUTHENTICATED_ROLE_AFTER_NORMALIZATION=Corredor$' "$RUNNER_TEMP/r10-ownerless.log"
+          grep -q '^OWNER_REMAINS_DIFFERENT_MEMBER=YES$' "$RUNNER_TEMP/r10-ownerless.log"
+          grep -q '^TRANSIENT_FAILURE_REACHED=YES$' "$RUNNER_TEMP/r10-ownerless.log"
+          grep -q '^OFFLINE_FALLBACK_COMPLETES=YES$' "$RUNNER_TEMP/r10-ownerless.log"
+          grep -q '^DIRTY_LOCAL_PRESERVED=YES$' "$RUNNER_TEMP/r10-ownerless.log"
+          grep -q '^AUTHENTICATED_MEMBER_PINNED=YES$' "$RUNNER_TEMP/r10-ownerless.log"
+          grep -q '^A35_OFFLINE_CONTRACT_WITH_REALISTIC_ROSTER=PASS$' "$RUNNER_TEMP/r10-ownerless.log"
+          grep -q '^CONTROL_B_REALISTIC_R10=PASS$' "$RUNNER_TEMP/r10-ownerless.log"
+
+      - name: Final read-only integrity proof
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$CANDIDATE"
+          git diff --quiet
+          git diff --cached --quiet
+          test -z "$(git status --porcelain --untracked-files=no)"
+          test "$(git ls-remote origin refs/heads/$A35_BRANCH | awk '{print $1}')" = "$A35_SHA"
+          test "$(git ls-remote origin refs/heads/$RELEASE_BRANCH | awk '{print $1}')" = "$RELEASE_SHA"
+          test "$(git ls-remote origin refs/heads/main | awk '{print $1}')" = "$MAIN_SHA"
+          echo "A35_BRANCH_UNCHANGED=$A35_SHA"
+          echo "RELEASE_BRANCH_UNCHANGED=$RELEASE_SHA"
+          echo "MAIN=$MAIN_SHA"
+          echo "PRODUCT_FILES_MODIFIED=0"
+          echo "DEPLOY=NO"
+          echo "SUPABASE_WRITE=NO"
+          echo "RAILWAY_WRITE=NO"
