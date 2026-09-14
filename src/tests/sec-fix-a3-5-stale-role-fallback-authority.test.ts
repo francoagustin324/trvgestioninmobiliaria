@@ -454,11 +454,13 @@ async function loadApp(page: Page): Promise<void> {
 
 async function runtimeSnapshot(page: Page): Promise<RuntimeSnapshot> {
   return page.evaluate(async ({ sessionKey, staleOwner, sentinel, sameRoleDirty }) => {
-    const { state } = await import('/dist/store.js');
-    const access = await import('/dist/team-access.js');
+    const storeModule = '/dist/store.js';
+    const { state } = await import(storeModule);
+    const accessModule = '/dist/team-access.js';
+    const access = await import(accessModule);
     const session = JSON.parse(localStorage.getItem(sessionKey) || '{}');
-    const active = state.crm.teamMembers.find((item) => item.id === state.activeMemberId) || null;
-    const current = state.crm.teamMembers.find((item) => item.userId === session.userId) || null;
+    const active = state.crm.teamMembers.find((item: { id: number }) => item.id === state.activeMemberId) || null;
+    const current = state.crm.teamMembers.find((item: { userId?: string }) => item.userId === session.userId) || null;
     const body = document.body.textContent || '';
     return {
       crmActive: Boolean(document.querySelector('#crm.active')),
@@ -476,10 +478,10 @@ async function runtimeSnapshot(page: Page): Promise<RuntimeSnapshot> {
       bodyHasStaleOwner: body.includes(staleOwner),
       bodyHasSentinel: body.includes(sentinel),
       bodyHasSameRoleDirty: body.includes(sameRoleDirty),
-      stateHasStaleOwner: state.crm.clients.some((client) => client.name === staleOwner),
-      stateHasSentinel: state.crm.clients.some((client) => client.name === sentinel),
-      stateHasSameRoleDirty: state.crm.clients.some((client) => client.name === sameRoleDirty),
-      clientNames: state.crm.clients.map((client) => client.name),
+      stateHasStaleOwner: state.crm.clients.some((client: { name: string }) => client.name === staleOwner),
+      stateHasSentinel: state.crm.clients.some((client: { name: string }) => client.name === sentinel),
+      stateHasSameRoleDirty: state.crm.clients.some((client: { name: string }) => client.name === sameRoleDirty),
+      clientNames: state.crm.clients.map((client: { name: string }) => client.name),
     };
   }, {
     sessionKey: SESSION_KEY,
