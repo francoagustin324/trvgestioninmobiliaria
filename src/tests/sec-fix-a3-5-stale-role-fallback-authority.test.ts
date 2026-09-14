@@ -60,6 +60,7 @@ interface RuntimeSnapshot {
 
 interface StoredSnapshot {
   raw: CrmData | null;
+  rawText: string;
   dirty: boolean;
   lastError: string;
 }
@@ -497,6 +498,7 @@ async function storedSnapshot(page: Page): Promise<StoredSnapshot> {
     const sync = JSON.parse(localStorage.getItem(syncKey) || '{}');
     return {
       raw: rawValue ? JSON.parse(rawValue) : null,
+      rawText: rawValue || '',
       dirty: sync.dirty === true,
       lastError: String(sync.lastError || ''),
     };
@@ -642,7 +644,8 @@ test('A3.5 B: TEAM_VIEW_KEY tamper cannot survive a successful manual sync', asy
 });
 
 async function assertDowngradeFailureClosed(label: 'CONTROL_C1' | 'CONTROL_C2', pushFailure: SyntheticFailure): Promise<void> {
-  const control = await newContextWithCloud(staleOwnerSnapshot(), {
+  const localCrm = staleOwnerSnapshot();
+  const control = await newContextWithCloud(localCrm, {
     dirty: true,
     generation: `a35-${label.toLowerCase()}`,
     pushFailure,
@@ -655,14 +658,16 @@ async function assertDowngradeFailureClosed(label: 'CONTROL_C1' | 'CONTROL_C2', 
     printSnapshot(label, snap, stored);
     console.log(`${label}_CURRENT_CLOUD_ROLE=Corredor`);
     console.log(`${label}_LOCAL_HISTORICAL_ROLE=Dueño`);
-    console.log(`${label}_PUSH_FAILURE_STATUS=${pushFailure.status}`);
-    console.log(`${label}_PUSH_FAILURE_BODY=${JSON.stringify(pushFailure.body)}`);
+    console.log(`${label}_CONFIGURED_PUSH_FAILURE_STATUS=${pushFailure.status}`);
     console.log(`${label}_AUTHORITY_DIRECTORY_QUERIES=${control.telemetry.directoryMembershipQueries}`);
+    console.log(`${label}_RECORDS_GETS=${control.telemetry.recordsGets}`);
     console.log(`${label}_RECORDS_POSTS=${control.telemetry.recordsPosts}`);
+    console.log(`${label}_RECORDS_DELETES=${control.telemetry.recordsDeletes}`);
 
     assert.ok(control.telemetry.directoryMembershipQueries > 0, `${label}: current cloud membership authority must be proven`);
-    assert.ok(control.telemetry.recordsGets > 0, `${label}: cloud read preceding push must execute`);
-    assert.ok(control.telemetry.recordsPosts > 0, `${label}: controlled push failure must execute`);
+    assert.equal(control.telemetry.recordsGets, 0, `${label}: incompatible dirty snapshot must be fenced before cloud record projection/read`);
+    assert.equal(control.telemetry.recordsPosts, 0, `${label}: incompatible dirty snapshot must not POST`);
+    assert.equal(control.telemetry.recordsDeletes, 0, `${label}: incompatible dirty snapshot must not DELETE`);
     assert.equal(control.telemetry.unexpectedEndpoints.length, 0);
     assert.equal(snap.crmActive, false, `${label}: stale authorization must not complete CRM bootstrap`);
     assert.match(snap.bootstrapError, new RegExp(EXPECTED_STALE_CODE));
@@ -670,11 +675,11 @@ async function assertDowngradeFailureClosed(label: 'CONTROL_C1' | 'CONTROL_C2', 
     assert.equal(snap.bodyHasStaleOwner, false);
     assert.equal(snap.crmActive && (snap.canViewAll || snap.canAccessSettings || snap.canAdministerTeam), false);
     assert.equal(stored.dirty, true);
-    assert.ok(stored.raw?.clients.some((client) => client.name === STALE_SENTINEL));
-    assert.ok(stored.raw?.clients.some((client) => client.name === STALE_OWNER));
-    const storedCurrent = stored.raw?.teamMembers.find((item) => item.userId === USER_ID);
-    assert.equal(storedCurrent?.role, 'Dueño');
-    assert.ok(stored.lastError.length > 0);
+    assert.equal(stored.rawText, JSON.stringify(localCrm), `${label}: raw local snapshot must be byte-preserved`);
+    assert.deepEqual(stored.raw, localCrm);
+    assert.ok(stored.lastError.includes(EXPECTED_STALE_CODE));
+    console.log(`${label}_RAW_LOCAL_SNAPSHOT_PRESERVED=YES`);
+    console.log(`${label}_PRE_PROJECTION_AUTHORITY_FENCE=PASS`);
   } finally {
     await control.context.close();
   }
@@ -732,6 +737,11 @@ test('A3.5 D: same authority + dirty local + transient 503 preserves legitimate 
     assert.equal(snap.bodyHasSentinel || snap.stateHasSentinel, false);
     assert.equal(stored.dirty, true);
     assert.ok(stored.raw?.clients.some((client) => client.name === SAME_ROLE_DIRTY));
+    assert.ok(control.telemetry.recordsGets > 0, 'CONTROL_D: compatible dirty snapshot must reach cloud record read');
+    assert.ok(control.telemetry.recordsPosts > 0, 'CONTROL_D: compatible dirty snapshot must reach synthetic 503 POST');
+    assert.equal(control.telemetry.recordsDeletes, 0);
+    console.log(`CONTROL_D_RECORDS_POSTS=${control.telemetry.recordsPosts}`);
+    console.log('CONTROL_D_SYNTHETIC_503_REACHED=YES');
     console.log('LOCAL_OWN_DIRTY_DATA_PRESERVED=YES');
     console.log('CONTROL_D_SAME_AUTHORITY_OFFLINE_FALLBACK=PASS_SAFE');
   } finally {
@@ -739,7 +749,7 @@ test('A3.5 D: same authority + dirty local + transient 503 preserves legitimate 
   }
 });
 
-test('A3.5 E: missing or mismatched local authenticated member always fails closed without destructive storage loss', async () => {
+test('A3.5 E: every dirty incompatible local authenticated member fails before projection without storage loss', async () => {
   const cases = [
     ['MISSING', missingLocalMemberSnapshot()],
     ['MEMBER_ID_MISMATCH', mismatchedMemberIdSnapshot()],
@@ -761,10 +771,19 @@ test('A3.5 E: missing or mismatched local authenticated member always fails clos
       const snap = await runtimeSnapshot(control.page);
       const stored = await storedSnapshot(control.page);
       printSnapshot(`CONTROL_E_${name}`, snap, stored);
-      assert.equal(snap.crmActive, false, `${name}: incompatible local authority must fail closed`);
+      console.log(`CONTROL_E_${name}_RECORDS_GETS=${control.telemetry.recordsGets}`);
+      console.log(`CONTROL_E_${name}_RECORDS_POSTS=${control.telemetry.recordsPosts}`);
+      console.log(`CONTROL_E_${name}_RECORDS_DELETES=${control.telemetry.recordsDeletes}`);
+      assert.equal(snap.crmActive, false, `${name}: incompatible dirty local authority must fail closed`);
       assert.match(snap.bootstrapError, new RegExp(EXPECTED_STALE_CODE));
       assert.equal(stored.dirty, true, `${name}: dirty flag must survive`);
-      assert.deepEqual(stored.raw, crm, `${name}: local CRM snapshot must remain byte-semantically intact`);
+      assert.equal(stored.rawText, JSON.stringify(crm), `${name}: raw local snapshot must remain byte-identical`);
+      assert.deepEqual(stored.raw, crm, `${name}: parsed local CRM snapshot must remain intact`);
+      assert.equal(control.telemetry.recordsGets, 0, `${name}: fence must run before authorized record projection/read`);
+      assert.equal(control.telemetry.recordsPosts, 0, `${name}: no POST after local authority mismatch`);
+      assert.equal(control.telemetry.recordsDeletes, 0, `${name}: no DELETE after local authority mismatch`);
+      assert.ok(stored.lastError.includes(EXPECTED_STALE_CODE), `${name}: authority error must be classified into sync state`);
+      console.log(`CONTROL_E_${name}_RAW_LOCAL_SNAPSHOT_PRESERVED=YES`);
       console.log(`CONTROL_E_${name}=PASS_SAFE`);
     } finally {
       await control.context.close();
@@ -772,4 +791,38 @@ test('A3.5 E: missing or mismatched local authenticated member always fails clos
   }
 
   console.log('CONTROL_E=PASS_SAFE');
+});
+
+test('A3.5 F: clean incompatible local snapshot is replaceable by current cloud authority', async () => {
+  const localCrm = missingLocalMemberSnapshot();
+  const control = await newContextWithCloud(localCrm, {
+    dirty: false,
+    generation: 'a35-control-f',
+  });
+  try {
+    await loadApp(control.page);
+    const snap = await runtimeSnapshot(control.page);
+    const stored = await storedSnapshot(control.page);
+    printSnapshot('CONTROL_F', snap, stored);
+    assert.equal(snap.crmActive, true, 'CONTROL_F: clean stale local snapshot must not permanently block bootstrap');
+    assert.equal(snap.bootstrapError, '');
+    assert.equal(snap.activeMemberUserId, USER_ID);
+    assert.equal(snap.activeMemberId, USER_MEMBER_ID);
+    assert.equal(snap.activeMemberRole, 'Corredor');
+    assert.equal(snap.currentUserTeamRole, 'Corredor');
+    assert.equal(snap.canViewAll, false);
+    assert.equal(snap.canAccessSettings, false);
+    assert.equal(snap.canAdministerTeam, false);
+    assert.ok(snap.clientNames.includes(CLOUD_ALLOWED), 'CONTROL_F: current cloud-authorized record must replace clean stale local snapshot');
+    assert.equal(snap.bodyHasSentinel, false);
+    assert.equal(stored.dirty, false);
+    assert.ok(control.telemetry.directoryMembershipQueries > 0);
+    assert.ok(control.telemetry.recordsGets > 0);
+    assert.equal(control.telemetry.recordsPosts, 0);
+    assert.equal(control.telemetry.recordsDeletes, 0);
+    console.log('CONTROL_F_CLEAN_STALE_REPLACED=YES');
+    console.log('CONTROL_F=PASS_SAFE');
+  } finally {
+    await control.context.close();
+  }
 });
