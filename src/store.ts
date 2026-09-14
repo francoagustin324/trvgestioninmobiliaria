@@ -107,7 +107,6 @@ function normalizedTeamMembers(value: unknown): TeamMember[] {
       lastActiveAt: record.lastActiveAt ? String(record.lastActiveAt) : undefined,
     } satisfies TeamMember;
   });
-  if (!members.some((member) => member.role === 'Dueño')) members[0] = { ...members[0]!, role: 'Dueño', status: 'Activo' };
   return members;
 }
 
