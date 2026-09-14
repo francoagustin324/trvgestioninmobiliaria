@@ -20,6 +20,7 @@ import {
   isTenantCloudAuthorityFailure,
   tenantCloudTransport,
 } from './tenant-cloud-context.js';
+import { TENANT_LOCAL_AUTHORIZATION_STALE } from './cloud-records.js';
 import { fetchMembershipCatalog } from './membership-catalog.js';
 import type { CrmData } from './models.js';
 import { initialData } from './models.js';
@@ -53,6 +54,7 @@ export const TENANT_LEGACY_STORAGE_RECOVERY_REQUIRED = 'TENANT_LEGACY_STORAGE_RE
 const HYDRATION_AUTHORITY_CODES = new Set<string>([
   AUTH_SHARED_GENERATION_STALE,
   TENANT_HYDRATION_SESSION_CHANGED,
+  TENANT_LOCAL_AUTHORIZATION_STALE,
   TENANT_RUNTIME_SESSION_MISMATCH,
   TENANT_RUNTIME_STALE,
 ]);
@@ -175,7 +177,11 @@ export async function hydrateTenantAfterAuth(): Promise<TenantScope> {
       // A transient/offline fallback is permitted only while the exact authority
       // proven before activation is still current. Authority failures propagate.
       assertHydrationAuthCurrent(authGeneration, session, scope.userId);
-      if (isHydrationAuthorityFailure(error)) throw error;
+      if (isHydrationAuthorityFailure(error)) {
+        const authorityMessage = error instanceof Error ? error.message : TENANT_LOCAL_AUTHORIZATION_STALE;
+        markTenantSyncError(scope, authorityMessage);
+        throw error;
+      }
       const message = error instanceof Error ? error.message : 'No se pudieron sincronizar los cambios locales.';
       markTenantSyncError(scope, message);
       activateAuthenticatedMember(scope, runtimeLease);

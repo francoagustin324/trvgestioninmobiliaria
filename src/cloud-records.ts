@@ -54,6 +54,40 @@ export interface CloudMembershipContext {
   members: TeamMember[];
 }
 
+export const TENANT_LOCAL_AUTHORIZATION_STALE = 'TENANT_LOCAL_AUTHORIZATION_STALE';
+
+export class TenantLocalAuthorizationStaleError extends Error {
+  readonly code = TENANT_LOCAL_AUTHORIZATION_STALE;
+
+  constructor(reason: string) {
+    super(`${TENANT_LOCAL_AUTHORIZATION_STALE}:${reason}`);
+    this.name = 'TenantLocalAuthorizationStaleError';
+  }
+}
+
+function failLocalAuthorizationStale(reason: string): never {
+  throw new TenantLocalAuthorizationStaleError(reason);
+}
+
+export function assertLocalWriteAuthorityCompatible(
+  crm: CrmData,
+  context: Readonly<CloudMembershipContext>,
+  authenticatedUserId: string,
+): void {
+  if (crm.organization.id !== context.organizationId) {
+    failLocalAuthorizationStale('organization-mismatch');
+  }
+  const matches = crm.teamMembers.filter((member) => member.userId === authenticatedUserId);
+  if (matches.length === 0) failLocalAuthorizationStale('authenticated-member-missing');
+  if (matches.length !== 1) failLocalAuthorizationStale('authenticated-member-ambiguous');
+  const localMember = matches[0]!;
+  if (localMember.id !== context.currentMemberId) failLocalAuthorizationStale('member-id-mismatch');
+  if (normalizedRole(localMember.role) !== context.currentRole) failLocalAuthorizationStale('role-mismatch');
+  if (String(localMember.status ?? '').trim().toLowerCase() !== 'activo') {
+    failLocalAuthorizationStale('member-status-not-active');
+  }
+}
+
 export function isSupervisedRecommendationTelemetryPayload(value: unknown): boolean {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
   const kind = (value as { recordKind?: unknown }).recordKind;

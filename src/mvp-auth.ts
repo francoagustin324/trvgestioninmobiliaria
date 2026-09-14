@@ -186,6 +186,7 @@ export async function synchronizeNow(): Promise<void> {
     const cloud = await pullCloudData(scope, localSnapshot);
     assertTenantRuntimeLeaseCurrent(runtimeLease);
     if (cloud && !replaceDataForTenant(scope, cloud)) assertTenantRuntimeLeaseCurrent(runtimeLease);
+    activateMember(scope, runtimeLease);
     dispatchTenantCloudStatus(runtimeLease, 'Sincronización completada sin sobrescrituras.', 'success');
     dispatchTenantRender(runtimeLease);
   } catch (error) {

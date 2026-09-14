@@ -1,5 +1,6 @@
 import type { TenantScope } from './active-organization.js';
 import {
+  assertLocalWriteAuthorityCompatible,
   cloudRecordsToCrm,
   crmToCloudRecords,
   isSupervisedRecommendationTelemetryPayload,
@@ -342,6 +343,8 @@ export async function pushTenantModernCloudData(
   assertCloudWriterLease(scope, runtimeLease);
   const transport = await tenantCloudTransport(scope);
   assertCloudWriterLease(scope, runtimeLease);
+  assertLocalWriteAuthorityCompatible(crm, transport.context, scope.userId);
+  assertCloudWriterLease(scope, runtimeLease);
   const existing = await fetchCloudRecords(transport, runtimeLease);
   assertCloudWriterLease(scope, runtimeLease);
   const next = crmToCloudRecords(crm, transport.context, scope.userId);
@@ -384,6 +387,8 @@ export async function pushTenantLegacyCloudData(
   assertTenantCrmScope(scope, crm);
   assertCloudWriterLease(scope, runtimeLease);
   const transport = await tenantCloudTransport(scope);
+  assertCloudWriterLease(scope, runtimeLease);
+  assertLocalWriteAuthorityCompatible(crm, transport.context, scope.userId);
   assertCloudWriterLease(scope, runtimeLease);
   const row = await tenantLegacySnapshotRow(transport, runtimeLease);
   assertCloudWriterLease(scope, runtimeLease);
