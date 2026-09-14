@@ -1,0 +1,513 @@
+name: A3.5 Control F POST Causal Matrix V2
+
+on:
+  push:
+    branches: [validation/a35-control-f-post-causal-characterization]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CANDIDATE: beb8876c4fd72f9c73f0a01b8022970a720d4581
+  PARENT: 295fd37f1b0a6229176b66ed25a74ca45c52b291
+  PRODUCT_BRANCH: agent/sec-fix-a3-5-stale-role-fallback-fence
+
+jobs:
+  matrix:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ env.CANDIDATE }}
+          fetch-depth: 0
+
+      - name: Phase 0 immutable proof
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$CANDIDATE"
+          test "$(git rev-parse HEAD^)" = "$PARENT"
+          if git symbolic-ref -q HEAD >/dev/null 2>&1; then exit 1; fi
+          git diff --quiet
+          git diff --cached --quiet
+          test -z "$(git status --porcelain --untracked-files=normal)"
+          test "$(git ls-remote origin refs/heads/$PRODUCT_BRANCH | awk '{print $1}')" = "$CANDIDATE"
+          echo "PHASE0_HEAD=$CANDIDATE"
+          echo "PHASE0_PARENT=$PARENT"
+          echo "PHASE0_WORKTREE=CLEAN"
+          echo "PHASE0_PRODUCT_BRANCH_IMMUTABLE=YES"
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install build and Chromium
+        run: |
+          npm ci --silent
+          npx playwright install --with-deps chromium
+          npm run build --silent
+
+      - name: Create ephemeral harness preload inside repo
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/a35cf-v2"
+          PRELOAD="$PWD/.a35-control-f-preload.mjs"
+          cat > "$PRELOAD" <<'EOF'
+          import { appendFileSync } from 'node:fs';
+          import { chromium } from 'playwright';
+
+          const realLaunch = chromium.launch.bind(chromium);
+          const OUTPUT = process.env.A35_PROBE_OUTPUT || '';
+          const LABEL = process.env.A35_PROBE_LABEL || 'unlabeled';
+          const freshBrowserPerContext = process.env.A35_PROBE_FRESH_BROWSER_PER_CONTEXT === '1';
+          const SESSION_KEY = 'propcontrol-cloud-session-v1';
+          const TENANT_KEY = 'trv-crm-basico:user:a35-downgrade-user:org:a35-downgrade-org';
+          const SYNC_KEY = `${TENANT_KEY}:sync`;
+          const CLOUD_ALLOWED = 'A35_CLOUD_ALLOWED_AGENT_LEAD';
+          const STALE_OWNER = 'A35_STALE_OWNER_LOCAL_DATA';
+          const STALE_SENTINEL = 'A35_STALE_OTHER_AGENT_SENTINEL';
+          const MISSING_DIRTY = 'A35_MISSING_MEMBER_DIRTY';
+          const expectedCloudPayload = {
+            id: 3500,
+            name: CLOUD_ALLOWED,
+            phone: '3515553500',
+            interest: 'Current cloud-authorized lead',
+            status: 'Lead',
+            temperature: 'Tibio',
+            pipeline: 'Nuevo',
+            assignedToId: 35,
+            createdById: 35,
+          };
+
+          function stable(value) {
+            if (Array.isArray(value)) return value.map(stable);
+            if (value && typeof value === 'object') {
+              return Object.fromEntries(Object.keys(value).sort().map((key) => [key, stable(value[key])]));
+            }
+            return value;
+          }
+          const same = (a, b) => JSON.stringify(stable(a)) === JSON.stringify(stable(b));
+
+          function parseBody(body) {
+            try { return typeof body === 'string' ? JSON.parse(body) : body; } catch { return null; }
+          }
+          function classifyPost(body) {
+            const parsed = parseBody(body);
+            const rows = Array.isArray(parsed) ? parsed : parsed ? [parsed] : [];
+            const names = rows.map((row) => row?.payload?.name).filter(Boolean);
+            if (names.includes(STALE_OWNER) || names.includes(STALE_SENTINEL) || names.includes(MISSING_DIRTY)) {
+              return { class: 'STALE_LOCAL', semanticIdempotent: false, differences: [] };
+            }
+            const current = rows.find((row) => row?.payload?.name === CLOUD_ALLOWED);
+            if (!current) return { class: 'OTHER', semanticIdempotent: false, differences: [{ key: 'names', actual: names }] };
+            const expected = {
+              organization_id: 'a35-downgrade-org',
+              entity_type: 'client',
+              entity_key: 'a35-downgrade-org:3500',
+              assigned_member_id: 35,
+              payload: expectedCloudPayload,
+              created_by: 'a35-downgrade-user',
+            };
+            const actual = {
+              organization_id: current.organization_id,
+              entity_type: current.entity_type,
+              entity_key: current.entity_key,
+              assigned_member_id: current.assigned_member_id,
+              payload: current.payload,
+              created_by: current.created_by,
+            };
+            const differences = Object.keys(expected)
+              .filter((key) => !same(actual[key], expected[key]))
+              .map((key) => ({ key, expected: expected[key], actual: actual[key] }));
+            return {
+              class: differences.length ? 'NORMALIZED_CURRENT' : 'CLOUD_CURRENT',
+              semanticIdempotent: differences.length === 0,
+              differences,
+            };
+          }
+
+          async function instrumentContext(context, childBrowser = null) {
+            const cdp = [];
+            await context.addInitScript(({ tenantKey, syncKey }) => {
+              const originalFetch = window.fetch.bind(window);
+              const storageProto = Storage.prototype;
+              const originalSetItem = storageProto.setItem;
+              const originalGetItem = storageProto.getItem;
+              const originalSetTimeout = window.setTimeout.bind(window);
+              let seq = 0;
+              let requestId = 0;
+              let timerId = 0;
+              const events = [];
+              const startedEpochMs = Date.now();
+              const record = (type, data = {}) => events.push({ seq: ++seq, monoMs: Number(performance.now().toFixed(3)), type, ...data });
+              const rawGet = (key) => originalGetItem.call(window.localStorage, key);
+              const parse = (raw) => { try { return raw ? JSON.parse(raw) : null; } catch { return null; } };
+              const dirty = () => parse(rawGet(syncKey))?.dirty === true;
+              const snapshot = () => {
+                const crm = parse(rawGet(tenantKey));
+                return crm ? {
+                  organizationId: crm.organization?.id || '',
+                  clients: Array.isArray(crm.clients) ? crm.clients.map((c) => ({ id: c?.id, name: c?.name, assignedToId: c?.assignedToId, createdById: c?.createdById })) : [],
+                  members: Array.isArray(crm.teamMembers) ? crm.teamMembers.map((m) => ({ id: m?.id, userId: m?.userId || '', role: m?.role, status: m?.status })) : [],
+                } : null;
+              };
+              globalThis.__a35cfTrace = { startedEpochMs, events };
+              record('bootstrap-init', { dirty: dirty(), snapshot: snapshot() });
+
+              storageProto.setItem = function(key, value) {
+                const local = this === window.localStorage;
+                const beforeDirty = local ? dirty() : null;
+                const stack = local && (key === tenantKey || key === syncKey) ? (new Error('A35_STORAGE_SET').stack || '') : '';
+                const result = originalSetItem.call(this, key, value);
+                if (local && (key === tenantKey || key === syncKey)) {
+                  record('storage-set', {
+                    key,
+                    beforeDirty,
+                    afterDirty: dirty(),
+                    value: key === syncKey ? parse(String(value)) : snapshot(),
+                    stack,
+                  });
+                }
+                return result;
+              };
+
+              storageProto.getItem = function(key) {
+                const value = originalGetItem.call(this, key);
+                if (this === window.localStorage && key === syncKey) {
+                  const stack = new Error('A35_SYNC_READ').stack || '';
+                  if (stack.includes('tenantHasPendingLocalChanges') || stack.includes('hasPendingLocalChanges') || stack.includes('queueCloudSave')) {
+                    record('sync-dirty-read', { dirty: parse(value)?.dirty === true, stack });
+                  }
+                }
+                return value;
+              };
+
+              window.setTimeout = function(callback, delay = 0, ...args) {
+                if (Number(delay) !== 700) return originalSetTimeout(callback, delay, ...args);
+                const id = ++timerId;
+                const stack = new Error('A35_TIMER_700').stack || '';
+                record('timer-700-schedule', { timerId: id, dirty: dirty(), snapshot: snapshot(), stack });
+                return originalSetTimeout(() => {
+                  record('timer-700-fire', { timerId: id, dirty: dirty(), snapshot: snapshot(), stack });
+                  if (typeof callback === 'function') return callback(...args);
+                  return Function(String(callback))();
+                }, delay);
+              };
+
+              window.fetch = async function(input, init) {
+                const id = ++requestId;
+                const url = typeof input === 'string' || input instanceof URL ? String(input) : input.url;
+                const method = String(init?.method || (input instanceof Request ? input.method : 'GET')).toUpperCase();
+                let body = typeof init?.body === 'string' ? init.body : null;
+                if (body === null && input instanceof Request) {
+                  try { body = await input.clone().text(); } catch {}
+                }
+                const stack = new Error('A35_FETCH_ORIGIN').stack || '';
+                record('fetch-start', { requestId: id, method, url, body, dirtyBefore: dirty(), snapshot: snapshot(), stack });
+                try {
+                  const response = await originalFetch(input, init);
+                  record('fetch-end', { requestId: id, method, url, status: response.status, dirtyAfter: dirty(), snapshot: snapshot() });
+                  return response;
+                } catch (error) {
+                  record('fetch-error', { requestId: id, method, url, error: String(error), dirtyAfter: dirty(), snapshot: snapshot() });
+                  throw error;
+                }
+              };
+
+              document.addEventListener('DOMContentLoaded', () => {
+                record('domcontentloaded', { dirty: dirty(), snapshot: snapshot() });
+                let done = false;
+                const inspect = () => {
+                  if (done) return;
+                  if (document.querySelector('#crm.active')) {
+                    done = true;
+                    record('bootstrap-complete-crm-active', { dirty: dirty(), snapshot: snapshot() });
+                  } else if (document.querySelector('[data-bootstrap-error]')) {
+                    done = true;
+                    record('bootstrap-complete-error', { dirty: dirty(), snapshot: snapshot() });
+                  }
+                };
+                inspect();
+                new MutationObserver(inspect).observe(document.documentElement, { subtree: true, childList: true, attributes: true });
+              }, { once: true });
+            }, { tenantKey: TENANT_KEY, syncKey: SYNC_KEY });
+
+            const originalNewPage = context.newPage.bind(context);
+            context.newPage = async (...args) => {
+              const page = await originalNewPage(...args);
+              try {
+                const session = await context.newCDPSession(page);
+                await session.send('Network.enable');
+                session.on('Network.requestWillBeSent', (event) => {
+                  const url = event.request?.url || '';
+                  if (!url.includes('/rest/v1/') && !url.includes('/api/cloud-config')) return;
+                  cdp.push({
+                    type: 'request', requestId: event.requestId, timestamp: event.timestamp, wallTime: event.wallTime,
+                    method: event.request.method, url, postData: event.request.postData || null, initiator: event.initiator || null,
+                  });
+                });
+                session.on('Network.responseReceived', (event) => {
+                  const url = event.response?.url || '';
+                  if (!url.includes('/rest/v1/') && !url.includes('/api/cloud-config')) return;
+                  cdp.push({ type: 'response', requestId: event.requestId, timestamp: event.timestamp, status: event.response.status, url });
+                });
+              } catch (error) {
+                cdp.push({ type: 'cdp-error', error: String(error) });
+              }
+              return page;
+            };
+
+            const originalClose = context.close.bind(context);
+            context.close = async (...args) => {
+              for (const page of context.pages()) {
+                let state;
+                try {
+                  state = await page.evaluate(async ({ sessionKey, syncKey }) => {
+                    const session = JSON.parse(localStorage.getItem(sessionKey) || '{}');
+                    const sync = JSON.parse(localStorage.getItem(syncKey) || '{}');
+                    let runtime = null;
+                    try {
+                      const { state } = await import('/dist/store.js');
+                      runtime = {
+                        organizationId: state.crm.organization.id,
+                        activeMemberId: state.activeMemberId,
+                        members: state.crm.teamMembers.map((m) => ({ id: m.id, userId: m.userId || '', role: m.role, status: m.status })),
+                        clients: state.crm.clients.map((c) => ({ id: c.id, name: c.name, assignedToId: c.assignedToId, createdById: c.createdById })),
+                      };
+                    } catch (error) { runtime = { importError: String(error) }; }
+                    let serviceWorkers = [];
+                    try { serviceWorkers = (await navigator.serviceWorker.getRegistrations()).map((r) => r.scope); } catch {}
+                    return { generation: String(session.__propcontrolAuthGeneration || ''), sync, runtime, serviceWorkers, trace: globalThis.__a35cfTrace || null };
+                  }, { sessionKey: SESSION_KEY, syncKey: SYNC_KEY });
+                } catch (error) { state = { generation: '', evaluationError: String(error), trace: null }; }
+                if (state?.generation !== 'a35-control-f') continue;
+                const events = state.trace?.events || [];
+                const starts = events.filter((e) => e.type === 'fetch-start');
+                const ends = new Map(events.filter((e) => e.type === 'fetch-end').map((e) => [e.requestId, e]));
+                const replacements = events.filter((e) => e.type === 'storage-set' && String(e.stack || '').includes('replaceDataForTenant'));
+                const posts = starts.filter((e) => e.method === 'POST' && String(e.url).includes('/rest/v1/propcontrol_records')).map((post) => {
+                  const classification = classifyPost(post.body);
+                  const before = replacements.filter((e) => e.seq < post.seq).at(-1) || null;
+                  const after = replacements.find((e) => e.seq > post.seq) || null;
+                  const cdpMatch = cdp.find((e) => e.type === 'request' && e.method === 'POST' && String(e.url).includes('/rest/v1/propcontrol_records') && (e.postData || null) === (post.body || null)) || null;
+                  return {
+                    ...post,
+                    responseStatus: ends.get(post.requestId)?.status ?? null,
+                    payloadClass: classification.class,
+                    semanticIdempotent: classification.semanticIdempotent,
+                    payloadDifferences: classification.differences,
+                    replaceRelation: before ? 'AFTER_REPLACE' : after ? 'BEFORE_REPLACE' : 'NO_REPLACE_TRACE',
+                    precedingReplace: before,
+                    followingReplace: after,
+                    cdpInitiator: cdpMatch?.initiator || null,
+                  };
+                });
+                const result = {
+                  label: LABEL,
+                  postCount: posts.length,
+                  posts,
+                  allRelevantRequests: starts.filter((e) => String(e.url).includes('/rest/v1/') || String(e.url).includes('/api/cloud-config')),
+                  replacements,
+                  timerEvents: events.filter((e) => e.type === 'timer-700-schedule' || e.type === 'timer-700-fire'),
+                  syncReads: events.filter((e) => e.type === 'sync-dirty-read'),
+                  bootstrapEvents: events.filter((e) => e.type.startsWith('bootstrap-') || e.type === 'domcontentloaded'),
+                  storageEvents: events.filter((e) => e.type === 'storage-set'),
+                  runtime: state.runtime,
+                  finalSync: state.sync,
+                  serviceWorkers: state.serviceWorkers,
+                  cdp,
+                  fullTrace: events,
+                };
+                if (OUTPUT) appendFileSync(OUTPUT, `${JSON.stringify(result)}\n`, 'utf8');
+                console.log('A35_CONTROL_F_CAUSAL_RESULT=' + JSON.stringify({
+                  label: LABEL,
+                  postCount: posts.length,
+                  classes: posts.map((p) => p.payloadClass),
+                  dirtyBefore: posts.map((p) => p.dirtyBefore),
+                  replaceRelations: posts.map((p) => p.replaceRelation),
+                  origins: posts.map((p) => String(p.stack || '').split('\n').slice(1, 9)),
+                  serviceWorkerCount: state.serviceWorkers.length,
+                  finalDirty: state.sync?.dirty,
+                }));
+              }
+              const result = await originalClose(...args);
+              if (childBrowser) await childBrowser.close();
+              return result;
+            };
+          }
+
+          async function wrapBrowser(browser, launchArgs) {
+            const originalNewContext = browser.newContext.bind(browser);
+            browser.newContext = async (...contextArgs) => {
+              if (freshBrowserPerContext) {
+                const child = await realLaunch(...launchArgs);
+                const context = await child.newContext(...contextArgs);
+                await instrumentContext(context, child);
+                return context;
+              }
+              const context = await originalNewContext(...contextArgs);
+              await instrumentContext(context);
+              return context;
+            };
+            return browser;
+          }
+
+          Object.defineProperty(chromium, 'launch', {
+            configurable: true,
+            value: async (...args) => wrapBrowser(await realLaunch(...args), args),
+          });
+          EOF
+          echo "A35_PRELOAD=$PRELOAD" >> "$GITHUB_ENV"
+          echo "A35_TRACE_DIR=$RUNNER_TEMP/a35cf-v2" >> "$GITHUB_ENV"
+          echo "HARNESS_PRELOAD=$PRELOAD"
+
+      - name: Preload smoke
+        shell: bash
+        run: |
+          set -euo pipefail
+          NODE_OPTIONS="--import=$A35_PRELOAD" node --input-type=module -e "import { chromium } from 'playwright'; console.log('PRELOAD_SMOKE_OK=' + String(Object.prototype.hasOwnProperty.call(chromium, 'launch')));"
+
+      - name: Case 1 isolated F fresh process browser context x10
+        shell: bash
+        run: |
+          set -euo pipefail
+          for n in $(seq 1 10); do
+            label="case1-isolated-$n"
+            out="$A35_TRACE_DIR/$label.jsonl"
+            log="$A35_TRACE_DIR/$label.log"
+            set +e
+            A35_PROBE_LABEL="$label" A35_PROBE_OUTPUT="$out" NODE_OPTIONS="--import=$A35_PRELOAD" \
+              node --test --test-concurrency=1 --test-name-pattern='A3\.5 F:' dist/tests/sec-fix-a3-5-stale-role-fallback-authority.test.js >"$log" 2>&1
+            rc=$?
+            set -e
+            if [ ! -s "$out" ]; then echo "HARNESS_NO_TRACE=$label RC=$rc"; cat "$log"; exit 1; fi
+            echo "RUN=$label RC=$rc"
+            grep -E 'CONTROL_F_|A35_CONTROL_F_CAUSAL_RESULT=' "$log" || true
+          done
+
+      - name: Case 2 A-E then F shared browser fresh context x5
+        shell: bash
+        run: |
+          set -euo pipefail
+          for n in $(seq 1 5); do
+            label="case2-ae-then-f-$n"
+            out="$A35_TRACE_DIR/$label.jsonl"
+            log="$A35_TRACE_DIR/$label.log"
+            set +e
+            A35_PROBE_LABEL="$label" A35_PROBE_OUTPUT="$out" NODE_OPTIONS="--import=$A35_PRELOAD" \
+              node --test --test-concurrency=1 dist/tests/sec-fix-a3-5-stale-role-fallback-authority.test.js >"$log" 2>&1
+            rc=$?
+            set -e
+            if [ ! -s "$out" ]; then echo "HARNESS_NO_TRACE=$label RC=$rc"; cat "$log"; exit 1; fi
+            echo "RUN=$label RC=$rc"
+            grep -E 'CONTROL_F_|A35_CONTROL_F_CAUSAL_RESULT=' "$log" || true
+          done
+
+      - name: Case 3 A-E then F fresh browser per context x5
+        shell: bash
+        run: |
+          set -euo pipefail
+          for n in $(seq 1 5); do
+            label="case3-fresh-browser-per-context-$n"
+            out="$A35_TRACE_DIR/$label.jsonl"
+            log="$A35_TRACE_DIR/$label.log"
+            set +e
+            A35_PROBE_FRESH_BROWSER_PER_CONTEXT=1 A35_PROBE_LABEL="$label" A35_PROBE_OUTPUT="$out" NODE_OPTIONS="--import=$A35_PRELOAD" \
+              node --test --test-concurrency=1 dist/tests/sec-fix-a3-5-stale-role-fallback-authority.test.js >"$log" 2>&1
+            rc=$?
+            set -e
+            if [ ! -s "$out" ]; then echo "HARNESS_NO_TRACE=$label RC=$rc"; cat "$log"; exit 1; fi
+            echo "RUN=$label RC=$rc"
+            grep -E 'CONTROL_F_|A35_CONTROL_F_CAUSAL_RESULT=' "$log" || true
+          done
+
+      - name: Case 4 Full Closure architecture shared browser fresh contexts x5
+        shell: bash
+        run: |
+          set -euo pipefail
+          for n in $(seq 1 5); do
+            label="case4-full-closure-$n"
+            out="$A35_TRACE_DIR/$label.jsonl"
+            log="$A35_TRACE_DIR/$label.log"
+            set +e
+            A35_PROBE_LABEL="$label" A35_PROBE_OUTPUT="$out" NODE_OPTIONS="--import=$A35_PRELOAD" \
+              node --test --test-concurrency=1 \
+              dist/tests/sec-fix-a3-5-stale-role-fallback-authority.test.js \
+              dist/tests/sec-fix-a3-5-ownerless-normalization.test.js >"$log" 2>&1
+            rc=$?
+            set -e
+            if [ ! -s "$out" ]; then echo "HARNESS_NO_TRACE=$label RC=$rc"; cat "$log"; exit 1; fi
+            echo "RUN=$label RC=$rc"
+            grep -E 'CONTROL_F_|A35_CONTROL_F_CAUSAL_RESULT=' "$log" || true
+          done
+
+      - name: Aggregate exact causal evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import glob, json, os
+          from collections import defaultdict
+          root = os.environ['A35_TRACE_DIR']
+          rows = []
+          for path in sorted(glob.glob(os.path.join(root, '*.jsonl'))):
+              with open(path, encoding='utf-8') as fh:
+                  rows.extend(json.loads(line) for line in fh if line.strip())
+          groups = defaultdict(list)
+          for row in rows: groups[row['label'].split('-', 1)[0]].append(row)
+          print('=== REPRODUCTION_MATRIX ===')
+          for key in ('case1','case2','case3','case4'):
+              vals = groups[key]
+              zero = sum(r['postCount'] == 0 for r in vals)
+              pos = sum(r['postCount'] > 0 for r in vals)
+              classes = sorted({p['payloadClass'] for r in vals for p in r['posts']})
+              origins = sorted({next((line.strip() for line in str(p.get('stack') or '').splitlines() if 'cloud-' in line or 'tenant-' in line or 'hydrate' in line or 'queueCloudSave' in line), 'UNKNOWN') for r in vals for p in r['posts']})
+              print(f'{key}|runs={len(vals)}|POST=0:{zero}|POST=1+:{pos}|classes={classes}|origins={origins}')
+          print('=== PER_RUN ===')
+          for row in rows:
+              print(json.dumps({
+                  'label': row['label'], 'postCount': row['postCount'],
+                  'classes': [p['payloadClass'] for p in row['posts']],
+                  'dirtyBefore': [p['dirtyBefore'] for p in row['posts']],
+                  'replaceRelation': [p['replaceRelation'] for p in row['posts']],
+                  'semanticIdempotent': [p['semanticIdempotent'] for p in row['posts']],
+                  'finalDirty': row.get('finalSync',{}).get('dirty'),
+                  'serviceWorkers': row.get('serviceWorkers',[]),
+              }, ensure_ascii=False))
+          print('=== POST_TRACES ===')
+          for row in rows:
+              for p in row['posts']:
+                  print('POST_TRACE=' + json.dumps({
+                      'label': row['label'], 'seq': p['seq'], 'monoMs': p['monoMs'], 'url': p['url'],
+                      'status': p.get('responseStatus'), 'dirtyBefore': p.get('dirtyBefore'),
+                      'snapshotBefore': p.get('snapshot'), 'payloadClass': p.get('payloadClass'),
+                      'semanticIdempotent': p.get('semanticIdempotent'), 'payloadDifferences': p.get('payloadDifferences'),
+                      'payload': p.get('body'), 'replaceRelation': p.get('replaceRelation'),
+                      'precedingReplace': p.get('precedingReplace'), 'followingReplace': p.get('followingReplace'),
+                      'stack': p.get('stack'), 'cdpInitiator': p.get('cdpInitiator'),
+                      'timers700': row.get('timerEvents',[]), 'syncReads': row.get('syncReads',[]),
+                      'bootstrapEvents': row.get('bootstrapEvents',[]), 'serviceWorkers': row.get('serviceWorkers',[]),
+                      'finalSync': row.get('finalSync'), 'runtimeFinal': row.get('runtime'),
+                  }, ensure_ascii=False))
+          print(f'TOTAL_F_RUNS={len(rows)}')
+          print(f'TOTAL_F_POST_RUNS={sum(r["postCount"] > 0 for r in rows)}')
+          PY
+
+      - name: Remove ephemeral preload and prove candidate remains clean
+        if: always()
+        shell: bash
+        run: |
+          rm -f "$PWD/.a35-control-f-preload.mjs"
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$CANDIDATE"
+          test "$(git ls-remote origin refs/heads/$PRODUCT_BRANCH | awk '{print $1}')" = "$CANDIDATE"
+          git diff --quiet
+          git diff --cached --quiet
+          test -z "$(git status --porcelain --untracked-files=normal)"
+          echo "FINAL_WORKTREE=CLEAN"
+          echo "RUNTIME_DELTA=0"
+          echo "PRODUCT_BRANCH_UNCHANGED=YES"
