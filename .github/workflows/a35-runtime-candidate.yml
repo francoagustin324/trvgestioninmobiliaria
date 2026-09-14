@@ -1,0 +1,197 @@
+name: A3.5 runtime candidate
+
+on:
+  push:
+    branches:
+      - validation/a35-runtime-validation
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  BASE_SHA: de091b9c98c33a31682cc77ede03313a8a66cb30
+  EXPECTED_TEST_HEAD: 035ec63dc3c1cf743148df7699f83142f1c76400
+  PRODUCT_BRANCH: agent/sec-fix-a3-5-stale-role-fallback-fence
+  RELEASE_BRANCH: release/a34-webkit-572-reconciliation
+  A34_BRANCH: agent/sec-fix-a3-4-hydration-auth-fence
+  A34_SHA: 7bb3bdadbe34717cdc8f4d9a6646f8a0b47db1cc
+  MAIN_SHA: 68034c60f606326a1d75fc3d448c7e99de49b492
+
+jobs:
+  candidate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Checkout exact test-first A3.5 head
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ env.PRODUCT_BRANCH }}
+          fetch-depth: 0
+
+      - name: Prove exact writer precondition
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_TEST_HEAD"
+          test "$(git diff --name-only "$BASE_SHA"..HEAD | sort)" = "src/tests/sec-fix-a3-5-stale-role-fallback-authority.test.ts"
+          test "$(git diff --name-only "$BASE_SHA"..HEAD | grep -Ev '^src/tests/' | wc -l)" -eq 0
+          echo "WRITER_PRECONDITION=PASS"
+          echo "RUNTIME_DELTA_BEFORE_FIX=0"
+
+      - name: Apply minimal A3.5 runtime fence
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          hydration = Path('src/tenant-hydration.ts')
+          text = hydration.read_text()
+
+          replacements = [
+            (
+              "import { fetchMembershipCatalog } from './membership-catalog.js';\nimport type { CrmData } from './models.js';",
+              "import { fetchMembershipCatalog } from './membership-catalog.js';\nimport type { CloudMembershipContext } from './cloud-records.js';\nimport type { CrmData } from './models.js';",
+            ),
+            (
+              "export const TENANT_HYDRATION_SESSION_CHANGED = 'TENANT_HYDRATION_SESSION_CHANGED';\nexport const TENANT_LEGACY_STORAGE_RECOVERY_REQUIRED = 'TENANT_LEGACY_STORAGE_RECOVERY_REQUIRED';",
+              "export const TENANT_HYDRATION_SESSION_CHANGED = 'TENANT_HYDRATION_SESSION_CHANGED';\nexport const TENANT_LOCAL_AUTHORIZATION_STALE = 'TENANT_LOCAL_AUTHORIZATION_STALE';\nexport const TENANT_LEGACY_STORAGE_RECOVERY_REQUIRED = 'TENANT_LEGACY_STORAGE_RECOVERY_REQUIRED';",
+            ),
+            (
+              "  TENANT_HYDRATION_SESSION_CHANGED,\n  TENANT_RUNTIME_SESSION_MISMATCH,",
+              "  TENANT_HYDRATION_SESSION_CHANGED,\n  TENANT_LOCAL_AUTHORIZATION_STALE,\n  TENANT_RUNTIME_SESSION_MISMATCH,",
+            ),
+            (
+              "function emptyOperationalData(crm: CrmData): CrmData {",
+              "function localAuthorizationStaleError(reason: string): Error & { code: string } {\n  const error = new Error(`${TENANT_LOCAL_AUTHORIZATION_STALE}:${reason}`) as Error & { code: string };\n  error.name = 'TenantHydrationAuthorityError';\n  error.code = TENANT_LOCAL_AUTHORIZATION_STALE;\n  return error;\n}\n\nfunction assertLocalFallbackAuthorizationCompatible(\n  scope: TenantScope,\n  localSnapshot: CrmData,\n  authority: Readonly<CloudMembershipContext>,\n): void {\n  if (authority.organizationId !== scope.organizationId) {\n    throw localAuthorizationStaleError('organization-authority-mismatch');\n  }\n  if (localSnapshot.organization.id !== scope.organizationId) {\n    throw localAuthorizationStaleError('local-organization-mismatch');\n  }\n  const localMember = localSnapshot.teamMembers.find((item) => item.userId === scope.userId);\n  if (!localMember) throw localAuthorizationStaleError('authenticated-member-missing');\n  if (localMember.userId !== scope.userId) throw localAuthorizationStaleError('authenticated-user-mismatch');\n  if (localMember.id !== authority.currentMemberId) throw localAuthorizationStaleError('member-id-mismatch');\n  if (localMember.role !== authority.currentRole) throw localAuthorizationStaleError('role-mismatch');\n  if (localMember.status !== 'Activo') throw localAuthorizationStaleError('member-status-not-active');\n}\n\nfunction emptyOperationalData(crm: CrmData): CrmData {",
+            ),
+            (
+              "  await tenantCloudTransport(scope);\n  assertHydrationAuthCurrent(authGeneration, session, scope.userId);",
+              "  const transport = await tenantCloudTransport(scope);\n  const hydrationAuthority: Readonly<CloudMembershipContext> = Object.freeze({\n    organizationId: transport.context.organizationId,\n    currentMemberId: transport.context.currentMemberId,\n    currentRole: transport.context.currentRole,\n    members: Object.freeze(transport.context.members.map((member) => Object.freeze({ ...member }))) as unknown as CloudMembershipContext['members'],\n  });\n  assertHydrationAuthCurrent(authGeneration, session, scope.userId);",
+            ),
+            (
+              "      const message = error instanceof Error ? error.message : 'No se pudieron sincronizar los cambios locales.';\n      markTenantSyncError(scope, message);\n      activateAuthenticatedMember(scope, runtimeLease);\n      return scope;",
+              "      const message = error instanceof Error ? error.message : 'No se pudieron sincronizar los cambios locales.';\n      try {\n        assertLocalFallbackAuthorizationCompatible(scope, localSnapshot, hydrationAuthority);\n      } catch (authorityError) {\n        const authorityMessage = authorityError instanceof Error\n          ? authorityError.message\n          : TENANT_LOCAL_AUTHORIZATION_STALE;\n        markTenantSyncError(scope, authorityMessage);\n        throw authorityError;\n      }\n      markTenantSyncError(scope, message);\n      activateAuthenticatedMember(scope, runtimeLease);\n      return scope;",
+            ),
+          ]
+          for old, new in replacements:
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f'A35_HYDRATION_PATCH_SHAPE_CHANGED::{count}::{old[:80]}')
+              text = text.replace(old, new)
+          hydration.write_text(text)
+
+          auth = Path('src/mvp-auth.ts')
+          auth_text = auth.read_text()
+          old = "    if (cloud && !replaceDataForTenant(scope, cloud)) assertTenantRuntimeLeaseCurrent(runtimeLease);\n    dispatchTenantCloudStatus(runtimeLease, 'Sincronización completada sin sobrescrituras.', 'success');"
+          new = "    if (cloud && !replaceDataForTenant(scope, cloud)) assertTenantRuntimeLeaseCurrent(runtimeLease);\n    activateMember(scope, runtimeLease);\n    dispatchTenantCloudStatus(runtimeLease, 'Sincronización completada sin sobrescrituras.', 'success');"
+          if auth_text.count(old) != 1:
+              raise SystemExit(f'A35_SYNC_PIN_PATCH_SHAPE_CHANGED::{auth_text.count(old)}')
+          auth.write_text(auth_text.replace(old, new))
+          print('A35_RUNTIME_PATCH=APPLIED')
+          PY
+
+          paths="$(git diff --name-only | sort)"
+          expected="$(printf '%s\n' src/mvp-auth.ts src/tenant-hydration.ts | sort)"
+          test "$paths" = "$expected"
+          echo "RUNTIME_PATHS=2"
+          echo "$paths"
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci --silent
+
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Build patched candidate before commit
+        run: npm run build --silent
+
+      - name: Run full A3.5 A-E matrix before commit
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --test --test-concurrency=1 dist/tests/sec-fix-a3-5-stale-role-fallback-authority.test.js 2>&1 | tee "$RUNNER_TEMP/a35-focused.log"
+          grep -q 'CONTROL_A_NORMAL_DOWNGRADE=PASS_SAFE' "$RUNNER_TEMP/a35-focused.log"
+          grep -q 'CONTROL_B_TEAM_VIEW_TAMPER_SYNC=PASS_SAFE' "$RUNNER_TEMP/a35-focused.log"
+          grep -q 'IDENTITY_SPOOF_AFTER_SYNC=NO' "$RUNNER_TEMP/a35-focused.log"
+          grep -q 'CONTROL_C1_TRANSIENT_FAILURE=PASS_SAFE' "$RUNNER_TEMP/a35-focused.log"
+          grep -q 'CONTROL_C2_PERMISSION_FAILURE=PASS_SAFE' "$RUNNER_TEMP/a35-focused.log"
+          grep -q 'CONTROL_D_SAME_AUTHORITY_OFFLINE_FALLBACK=PASS_SAFE' "$RUNNER_TEMP/a35-focused.log"
+          grep -q 'LOCAL_OWN_DIRTY_DATA_PRESERVED=YES' "$RUNNER_TEMP/a35-focused.log"
+          grep -q 'CONTROL_E=PASS_SAFE' "$RUNNER_TEMP/a35-focused.log"
+          echo "A35_FOCUSED_MATRIX=GREEN"
+
+      - name: Commit exactly two runtime paths and push candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "PropControl A3.5 Writer"
+          git config user.email "a35-writer@propcontrol.invalid"
+          git add src/tenant-hydration.ts src/mvp-auth.ts
+          test "$(git diff --cached --name-only | sort)" = "$(printf '%s\n' src/mvp-auth.ts src/tenant-hydration.ts | sort)"
+          git commit -m "SEC-FIX A3.5: fence stale-role local fallback"
+          candidate="$(git rev-parse HEAD)"
+          parent="$(git rev-parse HEAD^)"
+          test "$parent" = "$EXPECTED_TEST_HEAD"
+          git push origin "HEAD:refs/heads/$PRODUCT_BRANCH"
+          echo "CANDIDATE_SHA=$candidate" | tee -a "$GITHUB_ENV"
+          echo "PARENT_SHA=$parent" | tee -a "$GITHUB_ENV"
+          echo "CANDIDATE_SHA=$candidate"
+          echo "PARENT_SHA=$parent"
+
+      - name: Rebuild exact committed candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          git checkout --detach "$CANDIDATE_SHA"
+          test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
+          git diff --exit-code
+          git diff --cached --exit-code
+          npm run build --silent
+          echo "DETACHED_CANDIDATE=YES"
+
+      - name: Re-run full A3.5 A-E matrix on detached candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --test --test-concurrency=1 dist/tests/sec-fix-a3-5-stale-role-fallback-authority.test.js 2>&1 | tee "$RUNNER_TEMP/a35-detached.log"
+          grep -q 'CONTROL_A_NORMAL_DOWNGRADE=PASS_SAFE' "$RUNNER_TEMP/a35-detached.log"
+          grep -q 'CONTROL_B_TEAM_VIEW_TAMPER_SYNC=PASS_SAFE' "$RUNNER_TEMP/a35-detached.log"
+          grep -q 'IDENTITY_SPOOF_AFTER_SYNC=NO' "$RUNNER_TEMP/a35-detached.log"
+          grep -q 'CONTROL_C1_TRANSIENT_FAILURE=PASS_SAFE' "$RUNNER_TEMP/a35-detached.log"
+          grep -q 'CONTROL_C2_PERMISSION_FAILURE=PASS_SAFE' "$RUNNER_TEMP/a35-detached.log"
+          grep -q 'CONTROL_D_SAME_AUTHORITY_OFFLINE_FALLBACK=PASS_SAFE' "$RUNNER_TEMP/a35-detached.log"
+          grep -q 'CONTROL_E=PASS_SAFE' "$RUNNER_TEMP/a35-detached.log"
+          echo "A35_DETACHED_MATRIX=GREEN"
+
+      - name: Exact candidate scope and immutable refs
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
+          changed="$(git diff --name-only "$BASE_SHA".."$CANDIDATE_SHA" | sort)"
+          expected="$(printf '%s\n' src/mvp-auth.ts src/tenant-hydration.ts src/tests/sec-fix-a3-5-stale-role-fallback-authority.test.ts | sort)"
+          test "$changed" = "$expected"
+          test "$(git diff --name-only "$BASE_SHA".."$CANDIDATE_SHA" | grep -E '\.sql$|(^|/)migrations?/' | wc -l)" -eq 0
+          test "$(git diff --name-only "$BASE_SHA".."$CANDIDATE_SHA" | grep -E '^\.github/workflows/' | wc -l)" -eq 0
+          test "$(git ls-remote origin "refs/heads/$RELEASE_BRANCH" | awk '{print $1}')" = "$BASE_SHA"
+          test "$(git ls-remote origin "refs/heads/$A34_BRANCH" | awk '{print $1}')" = "$A34_SHA"
+          test "$(git ls-remote origin refs/heads/main | awk '{print $1}')" = "$MAIN_SHA"
+          echo "FILES_CHANGED=3"
+          echo "RUNTIME_PATHS=2"
+          echo "TEST_PATHS=1"
+          echo "SQL_DELTA=0"
+          echo "MIGRATIONS_DELTA=0"
+          echo "PRODUCTIVE_WORKFLOW_DELTA=0"
+          echo "RELEASE_BRANCH_UNCHANGED=$BASE_SHA"
+          echo "A34_BRANCH_UNCHANGED=$A34_SHA"
+          echo "MAIN=UNTOUCHED"
+          echo "DEPLOY=NO"
+          echo "SUPABASE=UNTOUCHED"
+          echo "RAILWAY=UNTOUCHED"
