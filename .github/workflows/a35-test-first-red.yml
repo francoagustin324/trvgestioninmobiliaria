@@ -1,0 +1,86 @@
+name: A3.5 test-first RED
+
+on:
+  push:
+    branches:
+      - validation/a35-stale-role-fallback-fence
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  BASE_SHA: de091b9c98c33a31682cc77ede03313a8a66cb30
+  TEST_SHA: 84462dc1eff1e43a3161c93ef82379ae09731583
+
+jobs:
+  c1-red:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Checkout test-only A3.5 reproducer
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ env.TEST_SHA }}
+          fetch-depth: 0
+
+      - name: Prove test-only delta over exact de091
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD^)" = "$BASE_SHA"
+          test "$(git diff --name-only "$BASE_SHA"..HEAD | wc -l)" -eq 1
+          test "$(git diff --name-only "$BASE_SHA"..HEAD)" = "src/tests/sec-fix-a3-5-stale-role-fallback-authority.test.ts"
+          echo "BASE_SHA=$BASE_SHA"
+          echo "TEST_SHA=$(git rev-parse HEAD)"
+          echo "RUNTIME_DELTA=0"
+          echo "TEST_PATHS=1"
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci --silent
+
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Build test-only reproducer
+        run: npm run build --silent
+
+      - name: Run exact C1 reproducer and require RED
+        shell: bash
+        run: |
+          set -uo pipefail
+          set +e
+          node --test --test-concurrency=1 --test-name-pattern='A3.5 C1:' dist/tests/sec-fix-a3-5-stale-role-fallback-authority.test.js 2>&1 | tee "$RUNNER_TEMP/a35-c1-red.log"
+          status=${PIPESTATUS[0]}
+          set -e
+          if [ "$status" -eq 0 ]; then
+            echo "A35_TEST_FIRST_RED=NO_UNEXPECTED_GREEN"
+            exit 1
+          fi
+          grep -q 'CONTROL_C1_CURRENT_CLOUD_ROLE=Corredor' "$RUNNER_TEMP/a35-c1-red.log"
+          grep -q 'CONTROL_C1_LOCAL_HISTORICAL_ROLE=Dueño' "$RUNNER_TEMP/a35-c1-red.log"
+          grep -q 'CONTROL_C1_CRM_ACTIVE=YES' "$RUNNER_TEMP/a35-c1-red.log"
+          grep -q 'CONTROL_C1_STALE_OTHER_AGENT_SENTINEL_VISIBLE=YES' "$RUNNER_TEMP/a35-c1-red.log"
+          grep -q 'CONTROL_C1_PUSH_FAILURE_STATUS=503' "$RUNNER_TEMP/a35-c1-red.log"
+          echo "A35_TEST_FIRST_RED=CONFIRMED"
+          echo "P1_REPRODUCER_ON_DE091_RUNTIME=CONFIRMED"
+
+      - name: Final product immutability proof
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --exit-code
+          git diff --cached --exit-code
+          test "$(git ls-remote origin refs/heads/release/a34-webkit-572-reconciliation | awk '{print $1}')" = "$BASE_SHA"
+          test "$(git ls-remote origin refs/heads/main | awk '{print $1}')" = "68034c60f606326a1d75fc3d448c7e99de49b492"
+          echo "RELEASE_BRANCH_UNCHANGED=$BASE_SHA"
+          echo "MAIN=UNTOUCHED"
+          echo "DEPLOY=NO"
+          echo "SUPABASE=UNTOUCHED"
+          echo "RAILWAY=UNTOUCHED"
