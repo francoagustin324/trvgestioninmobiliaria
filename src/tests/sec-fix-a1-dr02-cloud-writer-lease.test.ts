@@ -63,6 +63,11 @@ function installStorage(): MemoryStorage {
 
 function crmFor(organizationId = ORG_A, clientCount?: number): CrmData {
   const crm = structuredClone(initialData);
+  const authenticatedMember = crm.teamMembers.find((member) => member.id === 1);
+  assert.ok(authenticatedMember);
+  authenticatedMember.userId = USER;
+  authenticatedMember.role = 'Dueño';
+  authenticatedMember.status = 'Activo';
   crm.organization.id = organizationId;
   crm.organization.name = `Org ${organizationId.slice(-4)}`;
   if (clientCount !== undefined) {

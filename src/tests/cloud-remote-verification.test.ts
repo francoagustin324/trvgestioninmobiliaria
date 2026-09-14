@@ -43,6 +43,11 @@ const membership = {
 
 function tenantCrm() {
   const crm = structuredClone(initialData);
+  const authenticatedMember = crm.teamMembers.find((member) => member.id === 1);
+  assert.ok(authenticatedMember);
+  authenticatedMember.userId = TENANT_SCOPE.userId;
+  authenticatedMember.role = 'Dueño';
+  authenticatedMember.status = 'Activo';
   crm.organization.id = TENANT_SCOPE.organizationId;
   crm.clients[0]!.nextFollowUp = '2026-08-08';
   return crm;
