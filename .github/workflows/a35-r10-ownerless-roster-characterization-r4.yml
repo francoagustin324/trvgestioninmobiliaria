@@ -1,0 +1,157 @@
+name: A3.5 R10 Ownerless Roster Characterization R4
+
+on:
+  push:
+    branches: [validation/a35-r10-ownerless-roster-characterization]
+
+permissions:
+  contents: read
+
+jobs:
+  characterize:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    env:
+      CANDIDATE: 7220f30cac1c25f143974751c8097f80b2ad7a17
+      A35_SHA: 7220f30cac1c25f143974751c8097f80b2ad7a17
+      RELEASE_SHA: de091b9c98c33a31682cc77ede03313a8a66cb30
+      MAIN_SHA: 68034c60f606326a1d75fc3d448c7e99de49b492
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: 7220f30cac1c25f143974751c8097f80b2ad7a17
+          fetch-depth: 0
+      - name: Exact detached candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$CANDIDATE"
+          ! git symbolic-ref -q HEAD
+          git diff --quiet && git diff --cached --quiet
+          test -z "$(git status --porcelain --untracked-files=normal)"
+          echo "EXECUTION_SHA=$(git rev-parse HEAD)"
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci --silent && npm run build --silent
+      - name: Controls A/B + real-app ownerless diagnostic
+        shell: bash
+        run: |
+          cat > dist/tests/a35-r10-ownerless-r4.mjs <<'EOF'
+          import './sec-fix-a1-2-c2-test-setup.js';
+          import assert from 'node:assert/strict';
+          import { spawn } from 'node:child_process';
+          import { existsSync } from 'node:fs';
+          import { chromium } from 'playwright';
+          import { initialData } from '../models.js';
+          import { state, activateStorageForTenant } from '../store.js';
+          import { assertLocalWriteAuthorityCompatible, TenantLocalAuthorizationStaleError } from '../cloud-records.js';
+          import { writeTenantSnapshot, readTenantSyncState, tenantStorageNamespace } from '../tenant-storage.js';
+          import { invalidateTenantRuntimeScope, currentTenantScope } from '../tenant-runtime.js';
+          import { captureSharedAuthGeneration, commitSharedCloudSession } from '../auth-session-generation.js';
+          import { hydrateTenantAfterAuth } from '../tenant-hydration.js';
+
+          const USER='a34-user-a', ORG='00000000-0000-0000-0000-00000000a344', AUTH=344, OWNER=345;
+          const scope=Object.freeze({userId:USER,organizationId:ORG}), originalFetch=globalThis.fetch;
+          const member=(id,userId,role,name)=>({id,userId,name,email:`${userId}@example.test`,role,status:'Activo',createdAt:'2026-09-13T12:00:00.000Z'});
+          const cloudMember=(id,userId,role,name)=>({organization_id:ORG,member_id:id,user_id:userId,role,status:'active',display_name:name,email:`${userId}@example.test`,phone:null,created_at:'2026-09-13T12:00:00.000Z',last_active_at:'2026-09-13T12:00:00.000Z'});
+          const json=(v,s=200)=>new Response(JSON.stringify(v),{status:s,headers:{'Content-Type':'application/json'}});
+          const crmKey=()=>tenantStorageNamespace(scope).crmKey;
+          function reset(){Object.defineProperty(globalThis,'fetch',{configurable:true,writable:true,value:originalFetch});localStorage.clear();invalidateTenantRuntimeScope();state.crm=structuredClone(initialData);}
+          function crm(members,name='R10_DIRTY'){const v=structuredClone(initialData);v.organization={id:ORG,name:'R10 diagnostic',seatLimit:null,planLabel:'validation'};v.teamMembers=members;v.clients=[{id:9344,name,phone:'3515559344',interest:'validation',status:'Activo',temperature:'Tibio',pipeline:'Nuevo',assignedToId:AUTH,createdById:AUTH}];v.properties=[];v.visits=[];v.offers=[];v.reservations=[];v.contacts=[];v.reminders=[];v.fichas=[];v.conversations=[];v.activityLog=[];return v;}
+
+          // CONTROL A
+          reset();
+          const raw=crm([member(AUTH,USER,'Corredor','Authenticated Agent')]);
+          writeTenantSnapshot(scope,raw,{markDirty:true,reason:'A',backup:false});
+          const stored=JSON.parse(localStorage.getItem(crmKey()));
+          const rawAuth=stored.teamMembers.find(x=>x.userId===USER);
+          const context=Object.freeze({organizationId:ORG,currentMemberId:AUTH,currentRole:'Corredor',members:[]});
+          assert.doesNotThrow(()=>assertLocalWriteAuthorityCompatible(stored,context,USER));
+          console.log(`RAW_AUTHENTICATED_ROLE=${rawAuth.role}`);
+          console.log(`RAW_MEMBER_ID=${rawAuth.id}`);
+          console.log(`RAW_OWNER_COUNT=${stored.teamMembers.filter(x=>x.role==='Dueño').length}`);
+          activateStorageForTenant(scope);
+          const norm=state.crm.teamMembers.find(x=>x.userId===USER);
+          console.log(`NORMALIZED_AUTHENTICATED_ROLE=${norm.role}`);
+          console.log(`NORMALIZED_MEMBER_ID=${norm.id}`);
+          console.log(`NORMALIZED_OWNER_COUNT=${state.crm.teamMembers.filter(x=>x.role==='Dueño').length}`);
+          assert.equal(norm.id,rawAuth.id);assert.equal(norm.userId,rawAuth.userId);assert.equal(norm.name,rawAuth.name);assert.equal(norm.email,rawAuth.email);assert.equal(norm.status,rawAuth.status);assert.equal(norm.createdAt,rawAuth.createdAt);assert.equal(norm.role,'Dueño');
+          assert.throws(()=>assertLocalWriteAuthorityCompatible(state.crm,context,USER),e=>e instanceof TenantLocalAuthorizationStaleError&&e.message.endsWith(':role-mismatch'));
+          console.log('NORMALIZATION_ONLY_ROLE_MUTATED=YES');
+          console.log('CONTROL_A_NORMALIZATION=PROVEN');
+
+          // CONTROL B
+          reset();
+          writeTenantSnapshot(scope,crm([member(AUTH,USER,'Corredor','Authenticated Agent'),member(OWNER,'a35-owner-user','Dueño','Different Owner')]),{markDirty:true,reason:'B',backup:false});
+          localStorage.setItem('propcontrol-active-team-member-v1',String(OWNER));
+          console.log('AUTHENTICATED_ROLE_BEFORE=Corredor');
+          let transient=0,directory=0;
+          const agent=cloudMember(AUTH,USER,'agent','Authenticated Agent'), owner=cloudMember(OWNER,'a35-owner-user','owner','Different Owner');
+          Object.defineProperty(globalThis,'fetch',{configurable:true,writable:true,value:async(input)=>{const u=new URL(typeof input==='string'||input instanceof URL?input.toString():input.url,'https://app.test');if(u.pathname==='/api/cloud-config')return json({configured:true,url:'https://supabase.test',publishableKey:'key'});if(u.pathname.endsWith('/rest/v1/organization_members')){if(u.searchParams.has('user_id'))return json([agent]);if(u.searchParams.has('organization_id')){directory++;return json([agent,owner]);}}if(u.pathname.endsWith('/rest/v1/rpc/visit_transaction_authority_active_v2'))return json(false);if(u.pathname.endsWith('/rest/v1/propcontrol_records')){transient++;throw new Error('A34_TRANSIENT_NETWORK');}if(u.pathname.endsWith('/rest/v1/fichas'))return json([]);throw new Error(`UNEXPECTED:${u}`);}});
+          commitSharedCloudSession(captureSharedAuthGeneration(),Object.freeze({accessToken:'access',refreshToken:'refresh',expiresAt:Date.now()+3600000,userId:USER,email:`${USER}@example.test`}));
+          const returned=await hydrateTenantAfterAuth();
+          assert.deepEqual(returned,scope);assert.deepEqual(currentTenantScope(),scope);
+          const after=state.crm.teamMembers.find(x=>x.userId===USER), ownerAfter=state.crm.teamMembers.find(x=>x.id===OWNER), sync=readTenantSyncState(scope), rawAfter=JSON.parse(localStorage.getItem(crmKey()));
+          console.log(`AUTHENTICATED_ROLE_AFTER_NORMALIZATION=${after.role}`);
+          console.log(`OWNER_REMAINS_DIFFERENT_MEMBER=${ownerAfter.role==='Dueño'&&ownerAfter.userId!==USER?'YES':'NO'}`);
+          console.log(`TRANSIENT_FAILURE_REACHED=${transient>0?'YES':'NO'}`);
+          console.log('OFFLINE_FALLBACK_COMPLETES=YES');
+          console.log(`DIRTY_LOCAL_PRESERVED=${sync.dirty===true&&rawAfter.clients.some(x=>x.name==='R10_DIRTY')?'YES':'NO'}`);
+          console.log(`AUTHENTICATED_MEMBER_PINNED=${state.activeMemberId===AUTH?'YES':'NO'}`);
+          assert.equal(after.role,'Corredor');assert.equal(ownerAfter.role,'Dueño');assert.ok(transient>0);assert.ok(directory>0);assert.equal(sync.dirty,true);assert.equal(state.activeMemberId,AUTH);
+          console.log('A35_OFFLINE_CONTRACT_WITH_REALISTIC_ROSTER=PASS');
+          console.log('CONTROL_B_REALISTIC_R10=PASS');
+          reset();
+
+          // CASE 2 required read-only real-app diagnostic. Synthetic network only; no real external writes.
+          const PORT=45670+Math.floor(Math.random()*200), origin=`http://127.0.0.1:${PORT}`;
+          const server=spawn(process.execPath,['dist/server.js'],{cwd:process.cwd(),env:{...process.env,PORT:String(PORT),SUPABASE_URL:'',SUPABASE_PUBLISHABLE_KEY:'',SUPABASE_SECRET_KEY:'',SUPABASE_SERVICE_ROLE_KEY:'',LEAD_QUALIFICATION_AI_ENDPOINT:'',LEAD_QUALIFICATION_AI_KEY:'',LEAD_QUALIFICATION_AI_MODEL:''},stdio:['ignore','pipe','pipe']});
+          async function waitServer(){for(let i=0;i<120;i++){try{if((await fetch(`${origin}/health`)).ok)return;}catch{}await new Promise(r=>setTimeout(r,100));}throw new Error('server unavailable');}
+          await waitServer();
+          const executable=['/usr/bin/google-chrome','/usr/bin/google-chrome-stable','/usr/bin/chromium','/usr/bin/chromium-browser'].find(existsSync);
+          const browser=await chromium.launch({headless:true,...(executable?{executablePath:executable}:{})});
+          const bc=await browser.newContext({viewport:{width:1366,height:768}});
+          const realUser='realapp-ownerless-agent', realOrg='realapp-ownerless-org', realMember=344;
+          const realTenantKey=`trv-crm-basico:user:${realUser}:org:${realOrg}`, realSyncKey=`${realTenantKey}:sync`;
+          const realCrm=structuredClone(initialData);realCrm.organization={id:realOrg,name:'Ownerless Real App Diagnostic',seatLimit:null,planLabel:'validation'};realCrm.teamMembers=[{id:realMember,userId:realUser,name:'Authenticated Corredor',email:'realapp@example.test',role:'Corredor',status:'Activo',createdAt:'2026-09-13T12:00:00.000Z'}];realCrm.clients=[];realCrm.properties=[];realCrm.visits=[];realCrm.offers=[];realCrm.reservations=[];realCrm.contacts=[];realCrm.reminders=[];realCrm.fichas=[];realCrm.conversations=[];realCrm.activityLog=[];
+          const realCloud={organization_id:realOrg,member_id:realMember,user_id:realUser,role:'agent',status:'active',display_name:'Authenticated Corredor',email:'realapp@example.test',phone:null,created_at:'2026-09-13T12:00:00.000Z',last_active_at:'2026-09-13T12:00:00.000Z'};
+          const fulfill=(body,status=200)=>({status,contentType:'application/json',headers:{'access-control-allow-origin':'*'},body:JSON.stringify(body)});
+          await bc.route('**/api/cloud-config',r=>r.fulfill(fulfill({configured:true,url:origin,publishableKey:'key'})));
+          await bc.route('**/rest/v1/**',async r=>{const req=r.request(),u=new URL(req.url());if(req.method()==='OPTIONS'){await r.fulfill({status:204,headers:{'access-control-allow-origin':'*','access-control-allow-headers':'*','access-control-allow-methods':'GET,POST,PATCH,DELETE,OPTIONS'},body:''});return;}if(u.pathname.endsWith('/rest/v1/organization_members')){await r.fulfill(fulfill([realCloud]));return;}if(u.pathname.endsWith('/rest/v1/rpc/visit_transaction_authority_active_v2')){await r.fulfill(fulfill(false));return;}if(u.pathname.endsWith('/rest/v1/propcontrol_records')){await r.fulfill(fulfill([]));return;}if(u.pathname.endsWith('/rest/v1/fichas')){await r.fulfill(fulfill([]));return;}if(u.pathname.endsWith('/rest/v1/rpc/activate_my_organization_memberships')){await r.fulfill(fulfill({}));return;}await r.fulfill(fulfill({message:`unexpected ${u.pathname}`},500));});
+          await bc.addInitScript(({crmValue,tenantKey,syncKey,userId,memberId})=>{const generation='realapp-ownerless-generation';localStorage.setItem('propcontrol-cloud-session-v1',JSON.stringify({accessToken:'access',refreshToken:'refresh',expiresAt:Date.now()+3600000,userId,email:'realapp@example.test',__propcontrolAuthGeneration:generation}));localStorage.setItem('propcontrol-cloud-auth-generation-v1',generation);localStorage.setItem(tenantKey,JSON.stringify(crmValue));localStorage.setItem(syncKey,JSON.stringify({dirty:false,localUpdatedAt:'2026-09-14T00:00:00.000Z',lastCloudSavedAt:'',lastCloudVersion:'',localGeneration:0}));localStorage.setItem('propcontrol-active-team-member-v1',String(memberId));},{crmValue:realCrm,tenantKey:realTenantKey,syncKey:realSyncKey,userId:realUser,memberId:realMember});
+          const page=await bc.newPage();await page.goto(origin,{waitUntil:'domcontentloaded'});await page.waitForFunction(()=>Boolean(document.querySelector('#crm.active'))||Boolean(document.querySelector('[data-bootstrap-error]')),undefined,{timeout:20000});
+          const snap=await page.evaluate(async({uid})=>{const {state}=await import('/dist/store.js');const access=await import('/dist/team-access.js');const auth=state.crm.teamMembers.find(x=>x.userId===uid);return{crmActive:Boolean(document.querySelector('#crm.active')),bootstrapError:document.querySelector('[data-bootstrap-error]')?.textContent?.trim()||'',authRole:auth?.role||'',ownerCount:state.crm.teamMembers.filter(x=>x.role==='Dueño').length,activeMemberId:state.activeMemberId,canViewAll:access.canViewAll(),canAccessSettings:access.canAccessSettings(),canAdministerTeam:access.canAdministerTeam()};},{uid:realUser});
+          console.log('REAL_APP_CURRENT_CLOUD_ROLE=Corredor');
+          console.log(`REAL_APP_CRM_ACTIVE=${snap.crmActive?'YES':'NO'}`);
+          console.log(`REAL_APP_BOOTSTRAP_ERROR=${snap.bootstrapError||'NO'}`);
+          console.log(`REAL_APP_NORMALIZED_AUTH_ROLE=${snap.authRole}`);
+          console.log(`REAL_APP_OWNER_COUNT=${snap.ownerCount}`);
+          console.log(`REAL_APP_ACTIVE_MEMBER_ID=${snap.activeMemberId}`);
+          console.log(`REAL_APP_CAN_VIEW_ALL=${snap.canViewAll?'YES':'NO'}`);
+          console.log(`REAL_APP_CAN_ACCESS_SETTINGS=${snap.canAccessSettings?'YES':'NO'}`);
+          console.log(`REAL_APP_CAN_ADMINISTER_TEAM=${snap.canAdministerTeam?'YES':'NO'}`);
+          assert.equal(snap.crmActive,true);assert.equal(snap.bootstrapError,'');assert.equal(snap.authRole,'Dueño');assert.equal(snap.ownerCount,1);assert.equal(snap.activeMemberId,realMember);assert.equal(snap.canViewAll,true);assert.equal(snap.canAccessSettings,true);assert.equal(snap.canAdministerTeam,true);
+          console.log('STORE_OWNER_PROMOTION_SECURITY_RISK=PROVEN');
+          await bc.close();await browser.close();server.kill('SIGTERM');
+          EOF
+          node dist/tests/a35-r10-ownerless-r4.mjs 2>&1 | tee "$RUNNER_TEMP/r4.log"
+          for m in 'RAW_AUTHENTICATED_ROLE=Corredor' 'RAW_MEMBER_ID=344' 'RAW_OWNER_COUNT=0' 'NORMALIZED_AUTHENTICATED_ROLE=Dueño' 'NORMALIZED_MEMBER_ID=344' 'NORMALIZED_OWNER_COUNT=1' 'NORMALIZATION_ONLY_ROLE_MUTATED=YES' 'CONTROL_A_NORMALIZATION=PROVEN' 'AUTHENTICATED_ROLE_BEFORE=Corredor' 'AUTHENTICATED_ROLE_AFTER_NORMALIZATION=Corredor' 'OWNER_REMAINS_DIFFERENT_MEMBER=YES' 'TRANSIENT_FAILURE_REACHED=YES' 'OFFLINE_FALLBACK_COMPLETES=YES' 'DIRTY_LOCAL_PRESERVED=YES' 'AUTHENTICATED_MEMBER_PINNED=YES' 'A35_OFFLINE_CONTRACT_WITH_REALISTIC_ROSTER=PASS' 'CONTROL_B_REALISTIC_R10=PASS' 'REAL_APP_CURRENT_CLOUD_ROLE=Corredor' 'REAL_APP_CRM_ACTIVE=YES' 'REAL_APP_BOOTSTRAP_ERROR=NO' 'REAL_APP_NORMALIZED_AUTH_ROLE=Dueño' 'REAL_APP_OWNER_COUNT=1' 'REAL_APP_CAN_VIEW_ALL=YES' 'REAL_APP_CAN_ACCESS_SETTINGS=YES' 'REAL_APP_CAN_ADMINISTER_TEAM=YES' 'STORE_OWNER_PROMOTION_SECURITY_RISK=PROVEN'; do grep -Fqx "$m" "$RUNNER_TEMP/r4.log"; done
+      - name: Final immutable refs
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$CANDIDATE"
+          git diff --quiet && git diff --cached --quiet
+          test -z "$(git status --porcelain --untracked-files=no)"
+          test "$(git ls-remote origin refs/heads/agent/sec-fix-a3-5-stale-role-fallback-fence | awk '{print $1}')" = "$A35_SHA"
+          test "$(git ls-remote origin refs/heads/release/a34-webkit-572-reconciliation | awk '{print $1}')" = "$RELEASE_SHA"
+          test "$(git ls-remote origin refs/heads/main | awk '{print $1}')" = "$MAIN_SHA"
+          echo "A35_BRANCH_UNCHANGED=$A35_SHA"
+          echo "RELEASE_BRANCH_UNCHANGED=$RELEASE_SHA"
+          echo "MAIN=$MAIN_SHA"
+          echo "PRODUCT_FILES_MODIFIED=0"
+          echo "DEPLOY=NO"
+          echo "SUPABASE_WRITE=NO"
+          echo "RAILWAY_WRITE=NO"
