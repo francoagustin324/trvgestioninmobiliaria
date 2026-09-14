@@ -1,0 +1,83 @@
+name: A3.5 Control F TEST-ONLY Assertion Correction R2
+
+on:
+  push:
+    branches: [validation/a35-control-f-assertion-correction-r2]
+
+permissions:
+  contents: write
+
+env:
+  OLD_CANDIDATE: beb8876c4fd72f9c73f0a01b8022970a720d4581
+  PRODUCT_BRANCH: agent/sec-fix-a3-5-stale-role-fallback-fence
+  VALIDATION_BRANCH: validation/a35-control-f-assertion-correction-r2
+  TEST_FILE: src/tests/sec-fix-a3-5-stale-role-fallback-authority.test.ts
+
+jobs:
+  author-test-only-commit:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout official A3.5 branch
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ env.PRODUCT_BRANCH }}
+          fetch-depth: 0
+
+      - name: Verify immutable parent
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$OLD_CANDIDATE"
+          test "$(git ls-remote origin refs/heads/$PRODUCT_BRANCH | awk '{print $1}')" = "$OLD_CANDIDATE"
+          git diff --quiet
+          git diff --cached --quiet
+          test -z "$(git status --porcelain)"
+
+      - name: Fetch validation-only patch script
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch --quiet origin "$VALIDATION_BRANCH"
+          git show "origin/$VALIDATION_BRANCH:.github/validation/a35-control-f-assertion-patch.py" > "$RUNNER_TEMP/a35-control-f-assertion-patch.py"
+
+      - name: Apply strict TEST-ONLY classifier correction
+        shell: bash
+        run: |
+          set -euo pipefail
+          python "$RUNNER_TEMP/a35-control-f-assertion-patch.py"
+
+      - name: Prove TEST-ONLY delta
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --check
+          changed="$(git diff --name-only)"
+          printf '%s\n' "$changed"
+          test "$changed" = "$TEST_FILE"
+          test -z "$(git diff --name-only -- . ':(exclude)src/tests/**')"
+          test -z "$(git diff --name-only -- 'supabase/**' '**/*.sql')"
+          grep -F "assert.equal(control.telemetry.recordsPosts, 0" "$TEST_FILE" >/dev/null
+          grep -F "CONTROL_F: every record POST must satisfy the strict recommendation telemetry contract" "$TEST_FILE" >/dev/null
+          grep -F "CONTROL_F_CLASSIFIER_GENERIC_ACTIVITY=FORBIDDEN" "$TEST_FILE" >/dev/null
+
+      - name: Commit and push exactly one TEST-ONLY commit
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add "$TEST_FILE"
+          git commit -m "TEST-ONLY A3.5: distinguish recommendation telemetry from stale CRM writes"
+          new_sha="$(git rev-parse HEAD)"
+          test "$(git rev-parse HEAD^)" = "$OLD_CANDIDATE"
+          test "$(git diff-tree --no-commit-id --name-only -r HEAD)" = "$TEST_FILE"
+          git push origin "HEAD:refs/heads/$PRODUCT_BRANCH"
+          {
+            echo "NEW_CANDIDATE=$new_sha"
+            echo "PARENT=$OLD_CANDIDATE"
+            echo "CHANGED_FILES=$TEST_FILE"
+            echo "RUNTIME_FILES_CHANGED=0"
+            echo "MIGRATIONS=0"
+            echo "SQL=0"
+            echo "V3_FINAL_SUMMARY_CAUSE_FIELD=HARDCODED_NOT_PROVEN"
+          } >> "$GITHUB_STEP_SUMMARY"
