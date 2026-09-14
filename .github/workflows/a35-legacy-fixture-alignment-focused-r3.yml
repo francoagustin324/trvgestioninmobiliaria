@@ -1,0 +1,195 @@
+name: SEC-FIX A3.5 Legacy Fixture Alignment Focused R3
+
+on:
+  push:
+    branches:
+      - validation/a35-legacy-fixture-alignment-focused-r3
+
+permissions:
+  contents: write
+
+jobs:
+  focused:
+    runs-on: ubuntu-24.04
+    env:
+      BASE_CANDIDATE: 71bfb273d593a2492ae508936b28c7b4c103d5dc
+      PRODUCT_BRANCH: agent/sec-fix-a3-5-stale-role-fallback-fence
+    steps:
+      - name: Checkout exact base detached
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ env.BASE_CANDIDATE }}
+          fetch-depth: 0
+
+      - name: Prove exact base and unmoved official branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$BASE_CANDIDATE"
+          if git symbolic-ref -q HEAD >/dev/null 2>&1; then exit 1; fi
+          test "$(git ls-remote origin refs/heads/$PRODUCT_BRANCH | awk '{print $1}')" = "$BASE_CANDIDATE"
+          test -z "$(git status --porcelain --untracked-files=normal)"
+          echo BASE_INTEGRITY=PASS
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci --silent
+
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Apply exactly three fixture alignments in workspace
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          specs = [
+            ('src/tests/cloud-remote-verification.test.ts',
+             "  const crm = structuredClone(initialData);\n  crm.organization.id = TENANT_SCOPE.organizationId;\n",
+             "  const crm = structuredClone(initialData);\n  const authenticatedMember = crm.teamMembers.find((member) => member.id === 1);\n  assert.ok(authenticatedMember);\n  authenticatedMember.userId = TENANT_SCOPE.userId;\n  authenticatedMember.role = 'Dueño';\n  authenticatedMember.status = 'Activo';\n  crm.organization.id = TENANT_SCOPE.organizationId;\n"),
+            ('src/tests/sec-fix-a1-dr02-cloud-writer-lease.test.ts',
+             "  const crm = structuredClone(initialData);\n  crm.organization.id = organizationId;\n",
+             "  const crm = structuredClone(initialData);\n  const authenticatedMember = crm.teamMembers.find((member) => member.id === 1);\n  assert.ok(authenticatedMember);\n  authenticatedMember.userId = USER;\n  authenticatedMember.role = 'Dueño';\n  authenticatedMember.status = 'Activo';\n  crm.organization.id = organizationId;\n"),
+            ('src/tests/sec-fix-a1-dr03-stale-sync-metadata.test.ts',
+             "  const crm = structuredClone(initialData);\n  crm.organization.id = organizationId;\n",
+             "  const crm = structuredClone(initialData);\n  const authenticatedMember = crm.teamMembers.find((member) => member.id === 1);\n  assert.ok(authenticatedMember);\n  authenticatedMember.userId = USER;\n  authenticatedMember.role = 'Dueño';\n  authenticatedMember.status = 'Activo';\n  crm.organization.id = organizationId;\n"),
+          ]
+          for path, old, new in specs:
+              p = Path(path)
+              text = p.read_text()
+              if text.count(old) != 1:
+                  raise SystemExit(f'{path}: marker count={text.count(old)}')
+              p.write_text(text.replace(old, new, 1))
+          PY
+          git diff --check
+          mapfile -t changed < <(git diff --name-only | sort)
+          test "${#changed[@]}" -eq 3
+          test "${changed[0]}" = 'src/tests/cloud-remote-verification.test.ts'
+          test "${changed[1]}" = 'src/tests/sec-fix-a1-dr02-cloud-writer-lease.test.ts'
+          test "${changed[2]}" = 'src/tests/sec-fix-a1-dr03-stale-sync-metadata.test.ts'
+          echo FIXTURE_SCOPE=PASS
+
+      - name: Build
+        run: npm run build --silent
+
+      - name: cloud-remote-verification 3/3
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --test --test-concurrency=1 dist/tests/cloud-remote-verification.test.js 2>&1 | tee "$RUNNER_TEMP/cloud.tap"
+          grep -q '^# tests 3$' "$RUNNER_TEMP/cloud.tap"
+          grep -q '^# pass 3$' "$RUNNER_TEMP/cloud.tap"
+          grep -q '^# fail 0$' "$RUNNER_TEMP/cloud.tap"
+          grep -q '^# cancelled 0$' "$RUNNER_TEMP/cloud.tap"
+          echo CLOUD_REMOTE=PASS_3_3
+
+      - name: DR02 12/12
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --test --test-concurrency=1 dist/tests/sec-fix-a1-dr02-cloud-writer-lease.test.js 2>&1 | tee "$RUNNER_TEMP/dr02.tap"
+          grep -q '^# tests 12$' "$RUNNER_TEMP/dr02.tap"
+          grep -q '^# pass 12$' "$RUNNER_TEMP/dr02.tap"
+          grep -q '^# fail 0$' "$RUNNER_TEMP/dr02.tap"
+          grep -q '^# cancelled 0$' "$RUNNER_TEMP/dr02.tap"
+          echo DR02=PASS_12_12
+
+      - name: DR03 6/6 isolated
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --test --test-concurrency=1 dist/tests/sec-fix-a1-dr03-stale-sync-metadata.test.js 2>&1 | tee "$RUNNER_TEMP/dr03.tap"
+          grep -q '^# tests 6$' "$RUNNER_TEMP/dr03.tap"
+          grep -q '^# pass 6$' "$RUNNER_TEMP/dr03.tap"
+          grep -q '^# fail 0$' "$RUNNER_TEMP/dr03.tap"
+          grep -q '^# cancelled 0$' "$RUNNER_TEMP/dr03.tap"
+          echo DR03_ALIGNMENT_RESULT=PASS
+
+      - name: A3.5 A-G plus Control F classifier
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --test --test-concurrency=1 dist/tests/sec-fix-a3-5-stale-role-fallback-authority.test.js dist/tests/sec-fix-a3-5-ownerless-normalization.test.js 2>&1 | tee "$RUNNER_TEMP/a35.tap"
+          grep -q '^# tests 9$' "$RUNNER_TEMP/a35.tap"
+          grep -q '^# pass 9$' "$RUNNER_TEMP/a35.tap"
+          grep -q '^# fail 0$' "$RUNNER_TEMP/a35.tap"
+          grep -q '^# cancelled 0$' "$RUNNER_TEMP/a35.tap"
+          grep -q 'CONTROL_A_NORMAL_DOWNGRADE=PASS_SAFE' "$RUNNER_TEMP/a35.tap"
+          grep -q 'CONTROL_B_TEAM_VIEW_TAMPER_SYNC=PASS_SAFE' "$RUNNER_TEMP/a35.tap"
+          grep -q 'CONTROL_C1_PRE_PROJECTION_AUTHORITY_FENCE=PASS' "$RUNNER_TEMP/a35.tap"
+          grep -q 'CONTROL_C2_PRE_PROJECTION_AUTHORITY_FENCE=PASS' "$RUNNER_TEMP/a35.tap"
+          grep -q 'CONTROL_D_SYNTHETIC_503_REACHED=YES' "$RUNNER_TEMP/a35.tap"
+          grep -q 'CONTROL_E=PASS_SAFE' "$RUNNER_TEMP/a35.tap"
+          grep -q 'CONTROL_F=PASS_SAFE' "$RUNNER_TEMP/a35.tap"
+          grep -q 'CONTROL_F_CLASSIFIER_VALID_TELEMETRY=ALLOWED' "$RUNNER_TEMP/a35.tap"
+          grep -q 'CONTROL_F_CLASSIFIER_STALE_CRM=FORBIDDEN' "$RUNNER_TEMP/a35.tap"
+          grep -q 'CONTROL_F_CLASSIFIER_WRONG_TENANT=FORBIDDEN' "$RUNNER_TEMP/a35.tap"
+          grep -q 'CONTROL_F_CLASSIFIER_WRONG_ACTOR=FORBIDDEN' "$RUNNER_TEMP/a35.tap"
+          grep -q 'CONTROL_F_CLASSIFIER_WRONG_CLIENT=FORBIDDEN' "$RUNNER_TEMP/a35.tap"
+          grep -q 'CONTROL_F_CLASSIFIER_GENERIC_ACTIVITY=FORBIDDEN' "$RUNNER_TEMP/a35.tap"
+          grep -q 'NORMALIZED_ROLE=Corredor' "$RUNNER_TEMP/a35.tap"
+          grep -q 'OWNER_COUNT=0' "$RUNNER_TEMP/a35.tap"
+          grep -q 'CAN_VIEW_ALL=NO' "$RUNNER_TEMP/a35.tap"
+          grep -q 'CAN_ACCESS_SETTINGS=NO' "$RUNNER_TEMP/a35.tap"
+          grep -q 'CAN_ADMINISTER_TEAM=NO' "$RUNNER_TEMP/a35.tap"
+          grep -q 'ACTIVE_MEMBER_USER_ID=a35-ownerless-agent' "$RUNNER_TEMP/a35.tap"
+          echo A35_A_G_AND_CLASSIFIER=PASS
+
+      - name: A3.5 H-I and fresh empty-roster
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > dist/tests/a35-hi-r3.mjs <<'EOF'
+          import './sec-fix-a1-2-c2-test-setup.js';
+          import assert from 'node:assert/strict';
+          import { initialData } from '../models.js';
+          import { activateStorageForTenant, state } from '../store.js';
+          import { canAccessSettings, canAdministerTeam, canViewAll } from '../team-access.js';
+          import { writeTenantSnapshot } from '../tenant-storage.js';
+          const ORG='00000000-0000-0000-0000-00000000a351';const AUTH='a35-preservation-auth';const OWNER='a35-preservation-owner';const scope=Object.freeze({userId:AUTH,organizationId:ORG});const member=(id,userId,role)=>({id,userId,name:userId,email:`${userId}@example.test`,role,status:'Activo',createdAt:'2026-09-14T00:00:00.000Z'});function crm(members){const v=structuredClone(initialData);v.organization={id:ORG,name:'A3.5 Preservation',seatLimit:null,planLabel:'validation'};v.teamMembers=members;v.activityLog=[];v.clients=[];v.properties=[];v.visits=[];v.offers=[];v.reservations=[];v.contacts=[];v.reminders=[];v.fichas=[];v.conversations=[];return v;}function seed(members){localStorage.clear();writeTenantSnapshot(scope,crm(members),{markDirty:false,reason:'a35-preservation',backup:false});activateStorageForTenant(scope);}seed([member(351,AUTH,'Corredor'),member(352,OWNER,'Dueño')]);assert.equal(state.crm.teamMembers.find(x=>x.userId===AUTH)?.role,'Corredor');assert.equal(state.crm.teamMembers.find(x=>x.userId===OWNER)?.role,'Dueño');assert.equal(state.crm.teamMembers.filter(x=>x.role==='Dueño').length,1);console.log('CONTROL_H_REAL_OWNER_PRESERVED=PASS_SAFE');seed([member(351,AUTH,'Dueño'),member(352,OWNER,'Corredor')]);assert.equal(state.crm.teamMembers.find(x=>x.userId===AUTH)?.role,'Dueño');assert.equal(state.crm.teamMembers.filter(x=>x.role==='Dueño').length,1);assert.equal(state.activeMemberId,351);assert.equal(canViewAll(),true);assert.equal(canAccessSettings(),true);assert.equal(canAdministerTeam(),true);console.log('CONTROL_I_REAL_OWNER_PRESERVED=PASS_SAFE');localStorage.clear();writeTenantSnapshot(scope,crm([]),{markDirty:false,reason:'a35-empty-roster',backup:false});activateStorageForTenant(scope);assert.equal(state.crm.teamMembers.length,initialData.teamMembers.length);assert.equal(state.crm.teamMembers[0]?.role,'Dueño');assert.equal(state.crm.teamMembers[0]?.userId,undefined);console.log('FRESH_EMPTY_ROSTER_INITIALDATA_COMPATIBILITY=PASS_SAFE');
+          EOF
+          node dist/tests/a35-hi-r3.mjs 2>&1 | tee "$RUNNER_TEMP/hi.tap"
+          grep -q 'CONTROL_H_REAL_OWNER_PRESERVED=PASS_SAFE' "$RUNNER_TEMP/hi.tap"
+          grep -q 'CONTROL_I_REAL_OWNER_PRESERVED=PASS_SAFE' "$RUNNER_TEMP/hi.tap"
+          grep -q 'FRESH_EMPTY_ROSTER_INITIALDATA_COMPATIBILITY=PASS_SAFE' "$RUNNER_TEMP/hi.tap"
+          echo A35_H_I_EMPTY=PASS
+
+      - name: Final scope proof
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$BASE_CANDIDATE"
+          test "$(git ls-remote origin refs/heads/$PRODUCT_BRANCH | awk '{print $1}')" = "$BASE_CANDIDATE"
+          mapfile -t changed < <(git diff --name-only | sort)
+          test "${#changed[@]}" -eq 3
+          test "${changed[0]}" = 'src/tests/cloud-remote-verification.test.ts'
+          test "${changed[1]}" = 'src/tests/sec-fix-a1-dr02-cloud-writer-lease.test.ts'
+          test "${changed[2]}" = 'src/tests/sec-fix-a1-dr03-stale-sync-metadata.test.ts'
+          git diff --check
+          echo RUNTIME_FILES_CHANGED=0
+          echo SQL_CHANGED=0
+          echo MIGRATIONS_CHANGED=0
+          echo FOCUSED_RESULT=GREEN
+
+      - name: Create one official TEST-ONLY commit
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git ls-remote origin refs/heads/$PRODUCT_BRANCH | awk '{print $1}')" = "$BASE_CANDIDATE"
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add src/tests/cloud-remote-verification.test.ts src/tests/sec-fix-a1-dr02-cloud-writer-lease.test.ts src/tests/sec-fix-a1-dr03-stale-sync-metadata.test.ts
+          test "$(git diff --cached --name-only | wc -l)" -eq 3
+          git diff --cached --check
+          git commit -m 'TEST-ONLY A3.5: align legacy cloud fixtures with authenticated authority'
+          NEW_SHA="$(git rev-parse HEAD)"
+          test "$(git rev-parse HEAD^)" = "$BASE_CANDIDATE"
+          git push origin "HEAD:refs/heads/$PRODUCT_BRANCH"
+          echo "NEW_CANDIDATE=$NEW_SHA"
+          echo "EXACT_PARENT=$BASE_CANDIDATE"
+          echo OFFICIAL_TEST_ONLY_COMMIT_CREATED=YES
