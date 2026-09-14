@@ -1,0 +1,132 @@
+name: A3.5 stabilize reproducer and prove RED
+
+on:
+  push:
+    branches:
+      - validation/a35-stale-role-fallback-fence
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  BASE_SHA: de091b9c98c33a31682cc77ede03313a8a66cb30
+  EXPECTED_TEST_HEAD: 84462dc1eff1e43a3161c93ef82379ae09731583
+  PRODUCT_BRANCH: agent/sec-fix-a3-5-stale-role-fallback-fence
+  RELEASE_BRANCH: release/a34-webkit-572-reconciliation
+
+jobs:
+  stabilize-red:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Checkout exact A3.5 test-only head
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ env.PRODUCT_BRANCH }}
+          fetch-depth: 0
+
+      - name: Prove writer precondition
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_TEST_HEAD"
+          test "$(git rev-parse HEAD^)" = "$BASE_SHA"
+          test "$(git diff --name-only "$BASE_SHA"..HEAD)" = "src/tests/sec-fix-a3-5-stale-role-fallback-authority.test.ts"
+          echo "WRITER_PRECONDITION=PASS"
+
+      - name: Stabilize TEST-ONLY browser typing
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('src/tests/sec-fix-a3-5-stale-role-fallback-authority.test.ts')
+          text = path.read_text()
+          replacements = {
+              "    const { state } = await import('/dist/store.js');": "    const storeModule = '/dist/store.js';\n    const { state } = await import(storeModule);",
+              "    const access = await import('/dist/team-access.js');": "    const accessModule = '/dist/team-access.js';\n    const access = await import(accessModule);",
+              "state.crm.teamMembers.find((item) => item.id === state.activeMemberId)": "state.crm.teamMembers.find((item: { id: number }) => item.id === state.activeMemberId)",
+              "state.crm.teamMembers.find((item) => item.userId === session.userId)": "state.crm.teamMembers.find((item: { userId?: string }) => item.userId === session.userId)",
+              "state.crm.clients.some((client) => client.name === staleOwner)": "state.crm.clients.some((client: { name: string }) => client.name === staleOwner)",
+              "state.crm.clients.some((client) => client.name === sentinel)": "state.crm.clients.some((client: { name: string }) => client.name === sentinel)",
+              "state.crm.clients.some((client) => client.name === sameRoleDirty)": "state.crm.clients.some((client: { name: string }) => client.name === sameRoleDirty)",
+              "state.crm.clients.map((client) => client.name)": "state.crm.clients.map((client: { name: string }) => client.name)",
+          }
+          for old, new in replacements.items():
+              if text.count(old) != 1:
+                  raise SystemExit(f'A35_STABLE_TEST_SHAPE_CHANGED::{old}::{text.count(old)}')
+              text = text.replace(old, new)
+          path.write_text(text)
+          print(f'TEST_ONLY_REPLACEMENTS={len(replacements)}')
+          PY
+          test "$(git diff --name-only | wc -l)" -eq 1
+          test "$(git diff --name-only)" = "src/tests/sec-fix-a3-5-stale-role-fallback-authority.test.ts"
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci --silent
+
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Build stable test-only reproducer
+        run: npm run build --silent
+
+      - name: Commit stable TEST-ONLY reproducer
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "PropControl Validation Writer"
+          git config user.email "validation@propcontrol.invalid"
+          git add src/tests/sec-fix-a3-5-stale-role-fallback-authority.test.ts
+          git diff --cached --quiet && { echo 'EXPECTED_TEST_ONLY_DIFF_MISSING'; exit 1; }
+          git diff --cached --name-only | grep -Fx 'src/tests/sec-fix-a3-5-stale-role-fallback-authority.test.ts'
+          test "$(git diff --cached --name-only | wc -l)" -eq 1
+          git commit -m "TEST-ONLY: stabilize A3.5 stale-role reproducer"
+          new_sha="$(git rev-parse HEAD)"
+          git push origin "HEAD:refs/heads/$PRODUCT_BRANCH"
+          echo "STABLE_TEST_SHA=$new_sha" | tee -a "$GITHUB_ENV"
+          echo "STABLE_TEST_SHA=$new_sha"
+
+      - name: Run exact C1 reproducer and require historical RED
+        shell: bash
+        run: |
+          set -uo pipefail
+          set +e
+          node --test --test-concurrency=1 --test-name-pattern='A3.5 C1:' dist/tests/sec-fix-a3-5-stale-role-fallback-authority.test.js 2>&1 | tee "$RUNNER_TEMP/a35-c1-red.log"
+          status=${PIPESTATUS[0]}
+          set -e
+          if [ "$status" -eq 0 ]; then
+            echo "A35_TEST_FIRST_RED=NO_UNEXPECTED_GREEN"
+            exit 1
+          fi
+          grep -q 'CONTROL_C1_CURRENT_CLOUD_ROLE=Corredor' "$RUNNER_TEMP/a35-c1-red.log"
+          grep -q 'CONTROL_C1_LOCAL_HISTORICAL_ROLE=Dueño' "$RUNNER_TEMP/a35-c1-red.log"
+          grep -q 'CONTROL_C1_CRM_ACTIVE=YES' "$RUNNER_TEMP/a35-c1-red.log"
+          grep -q 'CONTROL_C1_STALE_OTHER_AGENT_SENTINEL_VISIBLE=YES' "$RUNNER_TEMP/a35-c1-red.log"
+          grep -q 'CONTROL_C1_PUSH_FAILURE_STATUS=503' "$RUNNER_TEMP/a35-c1-red.log"
+          echo "A35_TEST_FIRST_RED=CONFIRMED"
+          echo "P1_REPRODUCER_ON_DE091_RUNTIME=CONFIRMED"
+
+      - name: Final test-first scope proof
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          live_product="$(git ls-remote origin "refs/heads/$PRODUCT_BRANCH" | awk '{print $1}')"
+          live_release="$(git ls-remote origin "refs/heads/$RELEASE_BRANCH" | awk '{print $1}')"
+          test "$live_release" = "$BASE_SHA"
+          test "$(git diff --name-only "$BASE_SHA".."$live_product" | wc -l)" -eq 1
+          test "$(git diff --name-only "$BASE_SHA".."$live_product")" = "src/tests/sec-fix-a3-5-stale-role-fallback-authority.test.ts"
+          echo "A35_TEST_ONLY_HEAD=$live_product"
+          echo "RUNTIME_DELTA=0"
+          echo "RELEASE_BRANCH_UNCHANGED=$live_release"
+          echo "MAIN=UNTOUCHED"
+          echo "DEPLOY=NO"
+          echo "SUPABASE=UNTOUCHED"
+          echo "RAILWAY=UNTOUCHED"
