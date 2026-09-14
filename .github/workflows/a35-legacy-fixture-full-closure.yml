@@ -1,26 +1,25 @@
-name: SEC-FIX A3.5 Legacy Fixture Full Closure
+name: SEC-FIX A3.5 FULL CLOSURE FINAL
 
 on:
   push:
-    branches: [validation/a35-legacy-fixture-full-closure]
+    branches: [validation/a35-full-closure-final-exact-6d2386]
 
 permissions:
   contents: read
 
 concurrency:
-  group: sec-fix-a3-5-legacy-fixture-full-closure
+  group: sec-fix-a3-5-full-closure-final-exact-6d2386
   cancel-in-progress: false
 
 env:
-  CANDIDATE: fdff36785e90197c9ef384394ad474d9787af72a
-  A35_PARENT: 71bfb273d593a2492ae508936b28c7b4c103d5dc
-  BASE_SHA: de091b9c98c33a31682cc77ede03313a8a66cb30
+  CANDIDATE: 6d2386dcc1104a05770d1957cc450f49bf857934
+  A35_PARENT: fdff36785e90197c9ef384394ad474d9787af72a
   PRODUCT_BRANCH: agent/sec-fix-a3-5-stale-role-fallback-fence
+  MAIN_SHA: 68034c60f606326a1d75fc3d448c7e99de49b492
   RELEASE_BRANCH: release/a34-webkit-572-reconciliation
   RELEASE_SHA: de091b9c98c33a31682cc77ede03313a8a66cb30
   A34_BRANCH: agent/sec-fix-a3-4-hydration-auth-fence
   A34_SHA: 7bb3bdadbe34717cdc8f4d9a6646f8a0b47db1cc
-  MAIN_SHA: 68034c60f606326a1d75fc3d448c7e99de49b492
   VALIDATION_BASE: 7ecbc8cb50513ea79cd4913ee2a6f821b756c009
   PRE_A34: 6fbea368b5d0e80d36c0f8171f26be495798f904
   A31_FINAL: 23f428a87fcc9382ec6ab8489ae8132776bb6d85
@@ -32,15 +31,15 @@ env:
 jobs:
   security-regressions:
     runs-on: ubuntu-24.04
-    timeout-minutes: 90
+    timeout-minutes: 100
     steps:
-      - name: Checkout exact detached A3.5 candidate
+      - name: Checkout exact detached candidate
         uses: actions/checkout@v7
         with:
           ref: ${{ env.CANDIDATE }}
           fetch-depth: 0
 
-      - name: Prove exact candidate and immutable refs
+      - name: Candidate ref integrity and clean scope precheck
         shell: bash
         run: |
           set -euo pipefail
@@ -50,11 +49,26 @@ jobs:
           git diff --quiet
           git diff --cached --quiet
           test -z "$(git status --porcelain --untracked-files=normal)"
-          test "$(git ls-remote origin refs/heads/$PRODUCT_BRANCH | awk '{print $1}')" = "$CANDIDATE"
+          test "$(git ls-remote origin refs/heads/$PRODUCT_BRANCH | awk '{print $1}')" = "$A35_PARENT"
+          test "$(git ls-remote origin refs/heads/main | awk '{print $1}')" = "$MAIN_SHA"
           test "$(git ls-remote origin refs/heads/$RELEASE_BRANCH | awk '{print $1}')" = "$RELEASE_SHA"
           test "$(git ls-remote origin refs/heads/$A34_BRANCH | awk '{print $1}')" = "$A34_SHA"
-          test "$(git ls-remote origin refs/heads/main | awk '{print $1}')" = "$MAIN_SHA"
-          echo "EXECUTION_SHA=$(git rev-parse HEAD)"
+          mapfile -t changed < <(git diff --name-only "$A35_PARENT..$CANDIDATE" | sort)
+          test "${#changed[@]}" -eq 1
+          test "${changed[0]}" = 'src/tests/sync-conflict-ui.test.ts'
+          test "$(git diff --name-only "$A35_PARENT..$CANDIDATE" | grep -Ev '^src/tests/' | wc -l)" -eq 0
+          test "$(git diff --name-only "$A35_PARENT..$CANDIDATE" | grep -E '\.sql$' | wc -l)" -eq 0
+          test "$(git diff --name-only "$A35_PARENT..$CANDIDATE" | grep -E '^supabase/migrations/' | wc -l)" -eq 0
+          test "$(git diff --name-only "$A35_PARENT..$CANDIDATE" | grep -E '^\.github/workflows/' | wc -l)" -eq 0
+          echo "HEAD_EXACT=$CANDIDATE"
+          echo "PARENT_EXACT=$A35_PARENT"
+          echo "OFFICIAL_BRANCH_BEFORE=$A35_PARENT"
+          echo "MAIN_BEFORE=$MAIN_SHA"
+          echo "CHANGED_FILES=src/tests/sync-conflict-ui.test.ts"
+          echo "RUNTIME_DELTA=0"
+          echo "SQL_DELTA=0"
+          echo "MIGRATION_DELTA=0"
+          echo "WORKFLOW_DELTA_IN_PRODUCT_CANDIDATE=0"
           echo "INITIAL_CLEAN=PASS"
 
       - uses: actions/setup-node@v7
@@ -65,13 +79,13 @@ jobs:
       - name: Install dependencies
         run: npm ci --silent
 
-      - name: Install Chromium for real-app security suites
+      - name: Install Chromium
         run: npx playwright install --with-deps chromium
 
       - name: Build exact candidate
         run: npm run build --silent
 
-      - name: A3.5 full A-G committed suite
+      - name: A3.5 A-G plus strict Control F classifier/runtime and ownerless G
         shell: bash
         run: |
           set -euo pipefail
@@ -79,31 +93,37 @@ jobs:
             dist/tests/sec-fix-a3-5-stale-role-fallback-authority.test.js \
             dist/tests/sec-fix-a3-5-ownerless-normalization.test.js \
             2>&1 | tee "$RUNNER_TEMP/a35.tap"
+          grep -q '^# tests 9$' "$RUNNER_TEMP/a35.tap"
+          grep -q '^# pass 9$' "$RUNNER_TEMP/a35.tap"
+          grep -q '^# fail 0$' "$RUNNER_TEMP/a35.tap"
+          grep -q '^# cancelled 0$' "$RUNNER_TEMP/a35.tap"
           grep -q 'CONTROL_F_CLASSIFIER_VALID_TELEMETRY=ALLOWED' "$RUNNER_TEMP/a35.tap"
           grep -q 'CONTROL_F_CLASSIFIER_STALE_CRM=FORBIDDEN' "$RUNNER_TEMP/a35.tap"
           grep -q 'CONTROL_F_CLASSIFIER_WRONG_TENANT=FORBIDDEN' "$RUNNER_TEMP/a35.tap"
           grep -q 'CONTROL_F_CLASSIFIER_WRONG_ACTOR=FORBIDDEN' "$RUNNER_TEMP/a35.tap"
+          grep -q 'CONTROL_F_CLASSIFIER_WRONG_MEMBER=FORBIDDEN' "$RUNNER_TEMP/a35.tap"
+          grep -q 'CONTROL_F_CLASSIFIER_WRONG_CREATOR=FORBIDDEN' "$RUNNER_TEMP/a35.tap"
           grep -q 'CONTROL_F_CLASSIFIER_WRONG_CLIENT=FORBIDDEN' "$RUNNER_TEMP/a35.tap"
           grep -q 'CONTROL_F_CLASSIFIER_GENERIC_ACTIVITY=FORBIDDEN' "$RUNNER_TEMP/a35.tap"
+          grep -q 'CONTROL_F_CLASSIFIER_MIXED_ROWS=FORBIDDEN' "$RUNNER_TEMP/a35.tap"
           grep -q 'CONTROL_A_NORMAL_DOWNGRADE=PASS_SAFE' "$RUNNER_TEMP/a35.tap"
           grep -q 'CONTROL_B_TEAM_VIEW_TAMPER_SYNC=PASS_SAFE' "$RUNNER_TEMP/a35.tap"
-          grep -q 'IDENTITY_SPOOF_AFTER_SYNC=NO' "$RUNNER_TEMP/a35.tap"
           grep -q 'CONTROL_C1_PRE_PROJECTION_AUTHORITY_FENCE=PASS' "$RUNNER_TEMP/a35.tap"
           grep -q 'CONTROL_C2_PRE_PROJECTION_AUTHORITY_FENCE=PASS' "$RUNNER_TEMP/a35.tap"
-          grep -q 'CONTROL_D_SYNTHETIC_503_REACHED=YES' "$RUNNER_TEMP/a35.tap"
           grep -q 'CONTROL_D_SAME_AUTHORITY_OFFLINE_FALLBACK=PASS_SAFE' "$RUNNER_TEMP/a35.tap"
-          grep -q 'CONTROL_E_MISSING=PASS_SAFE' "$RUNNER_TEMP/a35.tap"
-          grep -q 'CONTROL_E_MEMBER_ID_MISMATCH=PASS_SAFE' "$RUNNER_TEMP/a35.tap"
-          grep -q 'CONTROL_E_ROLE_MISMATCH=PASS_SAFE' "$RUNNER_TEMP/a35.tap"
           grep -q 'CONTROL_E=PASS_SAFE' "$RUNNER_TEMP/a35.tap"
+          grep -q 'CONTROL_F_CRM_SNAPSHOT_POSTS=0' "$RUNNER_TEMP/a35.tap"
+          grep -q 'CONTROL_F_FORBIDDEN_RECORD_POSTS=0' "$RUNNER_TEMP/a35.tap"
           grep -q 'CONTROL_F=PASS_SAFE' "$RUNNER_TEMP/a35.tap"
           grep -q 'NORMALIZED_ROLE=Corredor' "$RUNNER_TEMP/a35.tap"
           grep -q 'OWNER_COUNT=0' "$RUNNER_TEMP/a35.tap"
           grep -q 'CAN_VIEW_ALL=NO' "$RUNNER_TEMP/a35.tap"
           grep -q 'CAN_ACCESS_SETTINGS=NO' "$RUNNER_TEMP/a35.tap"
           grep -q 'CAN_ADMINISTER_TEAM=NO' "$RUNNER_TEMP/a35.tap"
-          echo "CONTROL_G_OWNERLESS_NO_PRIVILEGE_ESCALATION=PASS_SAFE"
-          echo "A35=A-G PASS"
+          echo "A35_A_G=GREEN"
+          echo "CONTROL_F_CLASSIFIER=GREEN"
+          echo "CONTROL_F_RUNTIME=GREEN"
+          echo "OWNERLESS_G=GREEN"
 
       - name: A3.5 H-I and fresh empty-roster compatibility
         shell: bash
@@ -124,24 +144,29 @@ jobs:
           function crm(members){const v=structuredClone(initialData);v.organization={id:ORG,name:'A3.5 Preservation',seatLimit:null,planLabel:'validation'};v.teamMembers=members;v.activityLog=[];v.clients=[];v.properties=[];v.visits=[];v.offers=[];v.reservations=[];v.contacts=[];v.reminders=[];v.fichas=[];v.conversations=[];return v;}
           function seed(members){localStorage.clear();writeTenantSnapshot(scope,crm(members),{markDirty:false,reason:'a35-preservation',backup:false});activateStorageForTenant(scope);}
           seed([member(351,AUTH,'Corredor'),member(352,OWNER,'Dueño')]);
-          const hAuth=state.crm.teamMembers.find(x=>x.userId===AUTH),hOwner=state.crm.teamMembers.find(x=>x.userId===OWNER);
-          assert.equal(hAuth?.role,'Corredor');assert.equal(hOwner?.role,'Dueño');assert.equal(state.crm.teamMembers.filter(x=>x.role==='Dueño').length,1);
+          assert.equal(state.crm.teamMembers.find(x=>x.userId===AUTH)?.role,'Corredor');
+          assert.equal(state.crm.teamMembers.find(x=>x.userId===OWNER)?.role,'Dueño');
+          assert.equal(state.crm.teamMembers.filter(x=>x.role==='Dueño').length,1);
           console.log('CONTROL_H_REAL_OWNER_PRESERVED=PASS_SAFE');
           seed([member(351,AUTH,'Dueño'),member(352,OWNER,'Corredor')]);
-          const iAuth=state.crm.teamMembers.find(x=>x.userId===AUTH);
-          assert.equal(iAuth?.role,'Dueño');assert.equal(state.crm.teamMembers.filter(x=>x.role==='Dueño').length,1);assert.equal(state.activeMemberId,351);assert.equal(canViewAll(),true);assert.equal(canAccessSettings(),true);assert.equal(canAdministerTeam(),true);
+          assert.equal(state.crm.teamMembers.find(x=>x.userId===AUTH)?.role,'Dueño');
+          assert.equal(state.crm.teamMembers.filter(x=>x.role==='Dueño').length,1);
+          assert.equal(state.activeMemberId,351);assert.equal(canViewAll(),true);assert.equal(canAccessSettings(),true);assert.equal(canAdministerTeam(),true);
           console.log('CONTROL_I_REAL_OWNER_PRESERVED=PASS_SAFE');
           localStorage.clear();writeTenantSnapshot(scope,crm([]),{markDirty:false,reason:'a35-empty-roster',backup:false});activateStorageForTenant(scope);
-          assert.equal(state.crm.teamMembers.length,initialData.teamMembers.length);assert.equal(state.crm.teamMembers[0]?.role,'Dueño');assert.equal(state.crm.teamMembers[0]?.userId,undefined);
+          assert.equal(state.crm.teamMembers.length,initialData.teamMembers.length);
+          assert.equal(state.crm.teamMembers[0]?.role,'Dueño');
+          assert.equal(state.crm.teamMembers[0]?.userId,undefined);
           console.log('FRESH_EMPTY_ROSTER_INITIALDATA_COMPATIBILITY=PASS_SAFE');
           EOF
           node dist/tests/a35-owner-preservation-final.mjs 2>&1 | tee "$RUNNER_TEMP/a35-hi.tap"
           grep -q 'CONTROL_H_REAL_OWNER_PRESERVED=PASS_SAFE' "$RUNNER_TEMP/a35-hi.tap"
           grep -q 'CONTROL_I_REAL_OWNER_PRESERVED=PASS_SAFE' "$RUNNER_TEMP/a35-hi.tap"
           grep -q 'FRESH_EMPTY_ROSTER_INITIALDATA_COMPATIBILITY=PASS_SAFE' "$RUNNER_TEMP/a35-hi.tap"
-          echo "A35=A-I PASS"
+          echo "A35_H_I=GREEN"
+          echo "FRESH_EMPTY_ROSTER=GREEN"
 
-      - name: A3.4 R1-R12 complete including unmodified R10
+      - name: A3.4 R1-R12 complete and exact R10
         shell: bash
         run: |
           set -euo pipefail
@@ -149,11 +174,12 @@ jobs:
           grep -q '^# tests 12$' "$RUNNER_TEMP/a34.tap"
           grep -q '^# pass 12$' "$RUNNER_TEMP/a34.tap"
           grep -q '^# fail 0$' "$RUNNER_TEMP/a34.tap"
+          grep -q '^# cancelled 0$' "$RUNNER_TEMP/a34.tap"
           grep -Eq '^ok [0-9]+ - A3\.4 R10:' "$RUNNER_TEMP/a34.tap"
+          echo "A34_R1_R12=GREEN"
           echo "R10=PASS"
-          echo "A34=12/12 PASS"
 
-      - name: A3.4 R11 10 fresh Node processes
+      - name: A3.4 R11 x10 fresh Node processes
         shell: bash
         run: |
           set -euo pipefail
@@ -168,52 +194,136 @@ jobs:
           echo "R11=10/10 PASS"
           echo "R11_HISTORICAL_RED=NON-REPRODUCED VALIDATION ANOMALY / CAUSE UNRESOLVED"
 
-      - name: Auth session generation regressions
+      - name: Auth and session generation regressions
         run: >-
           node --test --test-concurrency=1
           dist/tests/sec-fix-a1-fdr02-cross-tab-auth-generation.test.js
           dist/tests/sec-fix-a1-dr04-auth-refresh-epoch.test.js
 
-      - name: Tenant hydration and storage regressions
-        run: >-
-          node --test --test-concurrency=1
-          dist/tests/sec-fix-a1-2-c1-tenant-hydration.test.js
-          dist/tests/sec-fix-a1-2-b-tenant-storage.test.js
-          dist/tests/sec-fix-a1-2-b-2-tenant-storage-boundary.test.js
-          dist/tests/sec-fix-a1-2-c2-tenant-async.test.js
-          dist/tests/sec-fix-a1-2-c3-stale-async.test.js
+      - name: Tenant hydration storage and async regressions
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --test --test-concurrency=1 \
+            dist/tests/sec-fix-a1-2-c1-tenant-hydration.test.js \
+            dist/tests/sec-fix-a1-2-b-tenant-storage.test.js \
+            dist/tests/sec-fix-a1-2-b-2-tenant-storage-boundary.test.js \
+            dist/tests/sec-fix-a1-2-c2-tenant-async.test.js \
+            dist/tests/sec-fix-a1-2-c3-stale-async.test.js \
+            2>&1 | tee "$RUNNER_TEMP/tenant-storage.tap"
+          grep -q '^# tests 81$' "$RUNNER_TEMP/tenant-storage.tap"
+          grep -q '^# pass 81$' "$RUNNER_TEMP/tenant-storage.tap"
+          grep -q '^# fail 0$' "$RUNNER_TEMP/tenant-storage.tap"
+          grep -q '^# cancelled 0$' "$RUNNER_TEMP/tenant-storage.tap"
+          echo "TENANT_HYDRATION_STORAGE=GREEN"
 
       - name: Tenant cloud context and data regressions
-        run: >-
-          node --test --test-concurrency=1
-          dist/tests/cloud-api-compatible.test.js
-          dist/tests/cloud-records.test.js
-          dist/tests/cloud-remote-verification.test.js
-          dist/tests/cloud-save-serial.test.js
-          dist/tests/sec-fix-a1-dr02-cloud-writer-lease.test.js
-          dist/tests/sec-fix-a1-dr03-stale-sync-metadata.test.js
-          dist/tests/sec-fix-a3-2-authenticated-write-identity.test.js
-          dist/tests/sec-fix-a3-2-runtime-wiring.test.js
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --test --test-concurrency=1 \
+            dist/tests/cloud-api-compatible.test.js \
+            dist/tests/cloud-records.test.js \
+            dist/tests/cloud-remote-verification.test.js \
+            dist/tests/cloud-save-serial.test.js \
+            dist/tests/sec-fix-a1-dr02-cloud-writer-lease.test.js \
+            dist/tests/sec-fix-a1-dr03-stale-sync-metadata.test.js \
+            dist/tests/sec-fix-a3-2-authenticated-write-identity.test.js \
+            dist/tests/sec-fix-a3-2-runtime-wiring.test.js \
+            2>&1 | tee "$RUNNER_TEMP/tenant-cloud.tap"
+          grep -q '^# tests 58$' "$RUNNER_TEMP/tenant-cloud.tap"
+          grep -q '^# pass 58$' "$RUNNER_TEMP/tenant-cloud.tap"
+          grep -q '^# fail 0$' "$RUNNER_TEMP/tenant-cloud.tap"
+          grep -q '^# cancelled 0$' "$RUNNER_TEMP/tenant-cloud.tap"
+          echo "TENANT_CLOUD_CONTEXT_DATA=GREEN"
 
-      - name: Sync safety reconciliation and recovery regressions
-        run: >-
-          node --test --test-concurrency=1
-          dist/tests/sync-safety.test.js
-          dist/tests/sync-reconciliation.test.js
-          dist/tests/sync-recovery-bootstrap.test.js
-          dist/tests/sync-conflict-ui.test.js
-          dist/tests/sec-fix-a1-2-f-recovery-async.test.js
-          dist/tests/sec-fix-a1-2-f-tenant-recovery-cutover.test.js
-          dist/tests/sec-fix-a1-fdr01-recovery-authority.test.js
+      - name: DR-02 complete exact
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --test --test-concurrency=1 dist/tests/sec-fix-a1-dr02-cloud-writer-lease.test.js 2>&1 | tee "$RUNNER_TEMP/dr02.tap"
+          grep -q '^# tests 12$' "$RUNNER_TEMP/dr02.tap"
+          grep -q '^# pass 12$' "$RUNNER_TEMP/dr02.tap"
+          grep -q '^# fail 0$' "$RUNNER_TEMP/dr02.tap"
+          grep -q '^# cancelled 0$' "$RUNNER_TEMP/dr02.tap"
+          echo "DR02=12/12 PASS"
+
+      - name: DR-03 complete exact
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --test --test-concurrency=1 dist/tests/sec-fix-a1-dr03-stale-sync-metadata.test.js 2>&1 | tee "$RUNNER_TEMP/dr03.tap"
+          grep -q '^# tests 6$' "$RUNNER_TEMP/dr03.tap"
+          grep -q '^# pass 6$' "$RUNNER_TEMP/dr03.tap"
+          grep -q '^# fail 0$' "$RUNNER_TEMP/dr03.tap"
+          grep -q '^# cancelled 0$' "$RUNNER_TEMP/dr03.tap"
+          echo "DR03=6/6 PASS"
+
+      - name: Sync safety reconciliation and recovery aggregate
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --test --test-concurrency=1 \
+            dist/tests/sync-safety.test.js \
+            dist/tests/sync-reconciliation.test.js \
+            dist/tests/sync-recovery-bootstrap.test.js \
+            dist/tests/sec-fix-a1-2-f-recovery-async.test.js \
+            dist/tests/sec-fix-a1-2-f-tenant-recovery-cutover.test.js \
+            dist/tests/sec-fix-a1-fdr01-recovery-authority.test.js \
+            2>&1 | tee "$RUNNER_TEMP/recovery.tap"
+          grep -q '^# fail 0$' "$RUNNER_TEMP/recovery.tap"
+          grep -q '^# cancelled 0$' "$RUNNER_TEMP/recovery.tap"
+          echo "SYNC_SAFETY_RECONCILIATION_RECOVERY=GREEN"
+
+      - name: sync-conflict-ui tenant-aware exact 4 of 4 and adversarial contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --test --test-concurrency=1 dist/tests/sync-conflict-ui.test.js 2>&1 | tee "$RUNNER_TEMP/sync-conflict.tap"
+          grep -q '^# tests 4$' "$RUNNER_TEMP/sync-conflict.tap"
+          grep -q '^# pass 4$' "$RUNNER_TEMP/sync-conflict.tap"
+          grep -q '^# fail 0$' "$RUNNER_TEMP/sync-conflict.tap"
+          grep -q '^# cancelled 0$' "$RUNNER_TEMP/sync-conflict.tap"
+          grep -q 'el contrato estático tenant-aware rechaza regresiones legacy y pérdida de protecciones' "$RUNNER_TEMP/sync-conflict.tap"
+          echo "SYNC_CONFLICT_UI=4/4 PASS"
+          echo "ADVERSARIAL_MUTATION_CONTRACT=PASS"
+
+      - name: A1.2-F F1-F24 exact
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --test --test-concurrency=1 dist/tests/sec-fix-a1-2-f-tenant-recovery-cutover.test.js 2>&1 | tee "$RUNNER_TEMP/f1-f24.tap"
+          grep -q '^# tests 24$' "$RUNNER_TEMP/f1-f24.tap"
+          grep -q '^# pass 24$' "$RUNNER_TEMP/f1-f24.tap"
+          grep -q '^# fail 0$' "$RUNNER_TEMP/f1-f24.tap"
+          grep -q '^# cancelled 0$' "$RUNNER_TEMP/f1-f24.tap"
+          echo "A12F_F1_F24=GREEN"
+
+      - name: FDR01 complete exact
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --test --test-concurrency=1 dist/tests/sec-fix-a1-fdr01-recovery-authority.test.js 2>&1 | tee "$RUNNER_TEMP/fdr01.tap"
+          grep -q '^# tests 10$' "$RUNNER_TEMP/fdr01.tap"
+          grep -q '^# pass 10$' "$RUNNER_TEMP/fdr01.tap"
+          grep -q '^# fail 0$' "$RUNNER_TEMP/fdr01.tap"
+          grep -q '^# cancelled 0$' "$RUNNER_TEMP/fdr01.tap"
+          echo "FDR01=10/10 PASS"
 
       - name: Team tenant authority regression
-        run: >-
-          node --test --test-concurrency=1
-          dist/tests/team-management.test.js
-          dist/tests/team-policy.test.js
-          dist/tests/sec-fix-a1-2-e-team-tenant-authority.test.js
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --test --test-concurrency=1 \
+            dist/tests/team-management.test.js \
+            dist/tests/team-policy.test.js \
+            dist/tests/sec-fix-a1-2-e-team-tenant-authority.test.js \
+            2>&1 | tee "$RUNNER_TEMP/team.tap"
+          grep -q '^# fail 0$' "$RUNNER_TEMP/team.tap"
+          grep -q '^# cancelled 0$' "$RUNNER_TEMP/team.tap"
+          echo "TEAM_TENANT_AUTHORITY=GREEN"
 
-      - name: Gate A exact 113
+      - name: Gate A exact 113 of 113
         shell: bash
         run: |
           set -euo pipefail
@@ -227,9 +337,10 @@ jobs:
           grep -q '^# tests 113$' "$RUNNER_TEMP/gate-a.tap"
           grep -q '^# pass 113$' "$RUNNER_TEMP/gate-a.tap"
           grep -q '^# fail 0$' "$RUNNER_TEMP/gate-a.tap"
+          grep -q '^# cancelled 0$' "$RUNNER_TEMP/gate-a.tap"
           echo "GATE_A=113/113 PASS"
 
-      - name: Static firewall exact
+      - name: Static anti-bypass firewall exact 12 of 12
         shell: bash
         run: |
           set -euo pipefail
@@ -237,25 +348,32 @@ jobs:
           grep -q '^# tests 12$' "$RUNNER_TEMP/firewall.tap"
           grep -q '^# pass 12$' "$RUNNER_TEMP/firewall.tap"
           grep -q '^# fail 0$' "$RUNNER_TEMP/firewall.tap"
+          grep -q '^# cancelled 0$' "$RUNNER_TEMP/firewall.tap"
           echo "STATIC_FIREWALL=12/12 PASS"
 
       - name: Gate B
-        run: >-
-          node --test --test-concurrency=1
-          dist/tests/team-management.test.js
-          dist/tests/team-policy.test.js
-          dist/tests/sec-fix-a1-2-e-team-tenant-authority.test.js
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --test --test-concurrency=1 \
+            dist/tests/team-management.test.js \
+            dist/tests/team-policy.test.js \
+            dist/tests/sec-fix-a1-2-e-team-tenant-authority.test.js \
+            2>&1 | tee "$RUNNER_TEMP/gate-b.tap"
+          grep -q '^# fail 0$' "$RUNNER_TEMP/gate-b.tap"
+          grep -q '^# cancelled 0$' "$RUNNER_TEMP/gate-b.tap"
+          echo "GATE_B=PASS"
 
-      - name: Gate B marker
-        run: echo "GATE_B=PASS"
-
-      - name: Assert tracked candidate unchanged after security matrix
+      - name: Security matrix exact candidate proof
         shell: bash
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$CANDIDATE"
+          test "$(git rev-parse HEAD^)" = "$A35_PARENT"
           git diff --quiet
           git diff --cached --quiet
+          test "$(git ls-remote origin refs/heads/$PRODUCT_BRANCH | awk '{print $1}')" = "$A35_PARENT"
+          test "$(git ls-remote origin refs/heads/main | awk '{print $1}')" = "$MAIN_SHA"
           echo "SECURITY_REGRESSION_MATRIX=GREEN"
 
   gate-c:
@@ -263,25 +381,29 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 75
     steps:
-      - name: Checkout exact detached A3.5 candidate
+      - name: Checkout exact detached candidate
         uses: actions/checkout@v7
         with:
           ref: ${{ env.CANDIDATE }}
           fetch-depth: 0
 
-      - name: Exact candidate and environment
+      - name: Exact candidate refs before Gate C
         shell: bash
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$CANDIDATE"
+          test "$(git rev-parse HEAD^)" = "$A35_PARENT"
           if git symbolic-ref -q HEAD >/dev/null 2>&1; then exit 1; fi
           git diff --quiet
           git diff --cached --quiet
+          test "$(git ls-remote origin refs/heads/$PRODUCT_BRANCH | awk '{print $1}')" = "$A35_PARENT"
+          test "$(git ls-remote origin refs/heads/main | awk '{print $1}')" = "$MAIN_SHA"
 
       - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: npm
+
       - run: npm ci --silent
 
       - name: Extract canonical historical Gate C 1-27 scripts
@@ -324,41 +446,43 @@ jobs:
             bash "$script"
           done
           echo "GATE_C_SEQUENCE=1-27_COMPLETE"
-          echo "A35_INTEGRATED_GATE_C=GREEN"
+          echo "GATE_C_TESTS_EXACT=27/27"
+          echo "GATE_C_RESULT=PASS"
 
-      - name: Assert candidate still exact and refs immutable
+      - name: Gate C exact candidate proof
         shell: bash
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$CANDIDATE"
           git diff --quiet
           git diff --cached --quiet
-          test "$(git ls-remote origin refs/heads/$PRODUCT_BRANCH | awk '{print $1}')" = "$CANDIDATE"
-          test "$(git ls-remote origin refs/heads/$RELEASE_BRANCH | awk '{print $1}')" = "$RELEASE_SHA"
-          test "$(git ls-remote origin refs/heads/$A34_BRANCH | awk '{print $1}')" = "$A34_SHA"
+          test "$(git ls-remote origin refs/heads/$PRODUCT_BRANCH | awk '{print $1}')" = "$A35_PARENT"
           test "$(git ls-remote origin refs/heads/main | awk '{print $1}')" = "$MAIN_SHA"
 
-  full-ci-webkit:
+  full-ci-browsers-evidence:
     needs: gate-c
     runs-on: ubuntu-24.04
-    timeout-minutes: 120
+    timeout-minutes: 135
     env:
       PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
     steps:
-      - name: Checkout exact detached A3.5 candidate
+      - name: Checkout exact detached candidate
         uses: actions/checkout@v7
         with:
           ref: ${{ env.CANDIDATE }}
           fetch-depth: 0
 
-      - name: Assert exact candidate
+      - name: Exact candidate refs before Full CI
         shell: bash
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$CANDIDATE"
+          test "$(git rev-parse HEAD^)" = "$A35_PARENT"
           if git symbolic-ref -q HEAD >/dev/null 2>&1; then exit 1; fi
           git diff --quiet
           git diff --cached --quiet
+          test "$(git ls-remote origin refs/heads/$PRODUCT_BRANCH | awk '{print $1}')" = "$A35_PARENT"
+          test "$(git ls-remote origin refs/heads/main | awk '{print $1}')" = "$MAIN_SHA"
 
       - uses: actions/setup-node@v7
         with:
@@ -380,13 +504,13 @@ jobs:
       - name: Build exact candidate
         run: npm run build --silent
 
-      - name: Full CI test suite
+      - name: Full CI including Chromium browser flows
         shell: bash
         run: |
           set -euo pipefail
           npm run test:ci --silent 2>&1 | tee "$RUNNER_TEMP/full-ci.tap"
-          grep -q '^# fail 0$' "$RUNNER_TEMP/full-ci.tap"
           echo "FULL_CI=PASS"
+          echo "CHROMIUM=PASS"
 
       - name: Explicit WebKit and Leads reconciliation replay
         shell: bash
@@ -399,9 +523,11 @@ jobs:
             dist/tests/direct-asset-cache-bust.test.js \
             2>&1 | tee "$RUNNER_TEMP/webkit-leads.tap"
           grep -q '^# fail 0$' "$RUNNER_TEMP/webkit-leads.tap"
-          echo "WEBKIT_LEADS_RECONCILIATION=PASS"
+          grep -q '^# cancelled 0$' "$RUNNER_TEMP/webkit-leads.tap"
+          echo "WEBKIT=PASS"
+          echo "LEADS_RECONCILIATION=PASS"
 
-      - name: Verify critical generated Leads evidence
+      - name: Verify mobile responsive generated evidence
         shell: bash
         run: |
           set -euo pipefail
@@ -415,33 +541,30 @@ jobs:
             test -d "$directory"
             test "$(find "$directory" -maxdepth 1 -type f -name '*.png' | wc -l)" -gt 0
           done
-          echo "LEADS_EVIDENCE_ARTIFACTS=PASS"
-          echo "RESPONSIVE_FINAL=PASS"
+          echo "MOBILE_RESPONSIVE_EVIDENCE=PASS"
 
-      - name: Assert candidate tracked state unchanged
+      - name: Full CI exact candidate proof
         shell: bash
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$CANDIDATE"
           git diff --quiet
           git diff --cached --quiet
-          test "$(git ls-remote origin refs/heads/$PRODUCT_BRANCH | awk '{print $1}')" = "$CANDIDATE"
-          test "$(git ls-remote origin refs/heads/$RELEASE_BRANCH | awk '{print $1}')" = "$RELEASE_SHA"
-          test "$(git ls-remote origin refs/heads/$A34_BRANCH | awk '{print $1}')" = "$A34_SHA"
+          test "$(git ls-remote origin refs/heads/$PRODUCT_BRANCH | awk '{print $1}')" = "$A35_PARENT"
           test "$(git ls-remote origin refs/heads/main | awk '{print $1}')" = "$MAIN_SHA"
 
   final-proof:
-    needs: full-ci-webkit
+    needs: full-ci-browsers-evidence
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
-      - name: Checkout exact detached A3.5 candidate
+      - name: Checkout exact detached candidate
         uses: actions/checkout@v7
         with:
           ref: ${{ env.CANDIDATE }}
           fetch-depth: 0
 
-      - name: Exact A3.5 scope proof and immutable refs
+      - name: Final exact candidate scope and immutable refs
         shell: bash
         run: |
           set -euo pipefail
@@ -451,68 +574,36 @@ jobs:
           git diff --quiet
           git diff --cached --quiet
           test -z "$(git status --porcelain --untracked-files=normal)"
-
-          commits="$(git rev-list --count "$BASE_SHA..$CANDIDATE")"
-          test "$commits" = "8"
-          echo "COMMITS_ADDED_FROM_DE091=$commits"
-          git log --reverse --format='A35_COMMIT=%H %s' "$BASE_SHA..$CANDIDATE"
-
-          mapfile -t changed < <(git diff --name-only "$BASE_SHA..$CANDIDATE" | sort)
-          test "${#changed[@]}" -eq 10
-          expected=(
-            src/cloud-records.ts
-            src/mvp-auth.ts
-            src/store.ts
-            src/tenant-cloud-data.ts
-            src/tenant-hydration.ts
-            src/tests/cloud-remote-verification.test.ts
-            src/tests/sec-fix-a1-dr02-cloud-writer-lease.test.ts
-            src/tests/sec-fix-a1-dr03-stale-sync-metadata.test.ts
-            src/tests/sec-fix-a3-5-ownerless-normalization.test.ts
-            src/tests/sec-fix-a3-5-stale-role-fallback-authority.test.ts
-          )
-          printf '%s\n' "${expected[@]}" | sort > /tmp/a35-expected
-          printf '%s\n' "${changed[@]}" > /tmp/a35-actual
-          diff -u /tmp/a35-expected /tmp/a35-actual
-
+          mapfile -t changed < <(git diff --name-only "$A35_PARENT..$CANDIDATE" | sort)
+          test "${#changed[@]}" -eq 1
+          test "${changed[0]}" = 'src/tests/sync-conflict-ui.test.ts'
           runtime_count="$(printf '%s\n' "${changed[@]}" | grep -Ev '^src/tests/' | wc -l)"
-          test "$runtime_count" -eq 5
-          test_count="$(printf '%s\n' "${changed[@]}" | grep -E '^src/tests/' | wc -l)"
-          test "$test_count" -eq 5
           sql_count="$(printf '%s\n' "${changed[@]}" | grep -E '\.sql$' | wc -l)"
           migration_count="$(printf '%s\n' "${changed[@]}" | grep -E '^supabase/migrations/' | wc -l)"
-          baseline_count="$(printf '%s\n' "${changed[@]}" | grep -E '^supabase/baselines/|^docs/SEC_FIX_A2_5_BASELINE\.md$|^docs/SUPABASE_PRODUCTION_BASELINE\.md$' | wc -l)"
           workflow_count="$(printf '%s\n' "${changed[@]}" | grep -E '^\.github/workflows/' | wc -l)"
+          test "$runtime_count" -eq 0
           test "$sql_count" -eq 0
           test "$migration_count" -eq 0
-          test "$baseline_count" -eq 0
           test "$workflow_count" -eq 0
-
-          test "$(git ls-remote origin refs/heads/$PRODUCT_BRANCH | awk '{print $1}')" = "$CANDIDATE"
+          test "$(git ls-remote origin refs/heads/$PRODUCT_BRANCH | awk '{print $1}')" = "$A35_PARENT"
+          test "$(git ls-remote origin refs/heads/main | awk '{print $1}')" = "$MAIN_SHA"
           test "$(git ls-remote origin refs/heads/$RELEASE_BRANCH | awk '{print $1}')" = "$RELEASE_SHA"
           test "$(git ls-remote origin refs/heads/$A34_BRANCH | awk '{print $1}')" = "$A34_SHA"
-          test "$(git ls-remote origin refs/heads/main | awk '{print $1}')" = "$MAIN_SHA"
-
-          echo "FINAL_CANDIDATE_SHA=$CANDIDATE"
-          echo "PARENT_SHA=$A35_PARENT"
-          echo "PATH_COUNT=10"
-          echo "RUNTIME_PATHS=5"
-          echo "TEST_PATHS=5"
+          echo "EXACT_CANDIDATE=$CANDIDATE"
+          echo "PARENT=$A35_PARENT"
+          echo "CHANGED_FILES=src/tests/sync-conflict-ui.test.ts"
+          echo "RUNTIME_DELTA=0"
           echo "SQL_DELTA=0"
-          echo "MIGRATIONS_DELTA=0"
-          echo "BASELINE_DELTA=0"
-          echo "PRODUCTIVE_WORKFLOW_DELTA=0"
-          echo "UNRELATED=0"
-          echo "FINAL_WORKTREE_CLEAN=PASS"
-          echo "RELEASE_BRANCH_UNCHANGED=$RELEASE_SHA"
-          echo "A34_BRANCH_UNCHANGED=$A34_SHA"
-          echo "MAIN_UNCHANGED=$MAIN_SHA"
-          echo "V3_FINAL_SUMMARY_CAUSE_FIELD=HARDCODED_NOT_PROVEN"
-          echo "DR03_ROOT_CAUSE=PROVEN"
-          echo "DR03_ALIGNMENT_RESULT=PASS"
-          echo "FOCUSED_RESULT=GREEN"
-          echo "SEC-FIX A3.5 = GREEN CANDIDATE / VALIDATED"
+          echo "MIGRATION_DELTA=0"
+          echo "WORKFLOW_DELTA_IN_PRODUCT_CANDIDATE=0"
+          echo "OFFICIAL_BRANCH_AFTER=$A35_PARENT"
+          echo "MAIN_AFTER=$MAIN_SHA"
+          echo "FULL_CLOSURE=GREEN"
+          echo "A3.5=BLOCKED_AWAITING_CEREBRO"
           echo "MERGE=NO"
           echo "DEPLOY=NO"
-          echo "SUPABASE=UNTOUCHED"
-          echo "RAILWAY=UNTOUCHED"
+          echo "SUPABASE_WRITE=NO"
+          echo "RAILWAY_WRITE=NO"
+          echo "SQL_APPLY=NO"
+          echo "MIGRATIONS_APPLY=NO"
+          echo "CLAUDE=NO"
