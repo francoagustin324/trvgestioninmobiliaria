@@ -1,0 +1,144 @@
+name: A3.5 Control F Assertion Focused Validation
+
+on:
+  push:
+    branches: [validation/a35-control-f-assertion-focused]
+
+permissions:
+  contents: read
+
+env:
+  CANDIDATE: 71bfb273d593a2492ae508936b28c7b4c103d5dc
+  PARENT: beb8876c4fd72f9c73f0a01b8022970a720d4581
+  PRODUCT_BRANCH: agent/sec-fix-a3-5-stale-role-fallback-fence
+  TEST_JS: dist/tests/sec-fix-a3-5-stale-role-fallback-authority.test.js
+
+jobs:
+  focused:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - name: Checkout exact candidate detached
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ env.CANDIDATE }}
+          fetch-depth: 0
+
+      - name: Candidate integrity
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$CANDIDATE"
+          test "$(git rev-parse HEAD^)" = "$PARENT"
+          ! git symbolic-ref -q HEAD >/dev/null 2>&1
+          test "$(git ls-remote origin refs/heads/$PRODUCT_BRANCH | awk '{print $1}')" = "$CANDIDATE"
+          test "$(git diff --name-only "$PARENT" "$CANDIDATE")" = "src/tests/sec-fix-a3-5-stale-role-fallback-authority.test.ts"
+          test -z "$(git diff --name-only "$PARENT" "$CANDIDATE" -- . ':(exclude)src/tests/**')"
+          echo "RUNTIME_DELTA=0"
+          echo "TEST_ONLY_DELTA=1"
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Build
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm ci --silent
+          npx playwright install --with-deps chromium
+          npm run build --silent
+
+      - name: Classifier adversarial contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --test --test-concurrency=1 --test-name-pattern='A3\.5 classifier contract:' "$TEST_JS" | tee "$RUNNER_TEMP/classifier.log"
+          grep -F 'CONTROL_F_CLASSIFIER_VALID_TELEMETRY=ALLOWED' "$RUNNER_TEMP/classifier.log"
+          grep -F 'CONTROL_F_CLASSIFIER_STALE_CRM=FORBIDDEN' "$RUNNER_TEMP/classifier.log"
+          grep -F 'CONTROL_F_CLASSIFIER_WRONG_TENANT=FORBIDDEN' "$RUNNER_TEMP/classifier.log"
+          grep -F 'CONTROL_F_CLASSIFIER_WRONG_ACTOR=FORBIDDEN' "$RUNNER_TEMP/classifier.log"
+          grep -F 'CONTROL_F_CLASSIFIER_WRONG_MEMBER=FORBIDDEN' "$RUNNER_TEMP/classifier.log"
+          grep -F 'CONTROL_F_CLASSIFIER_WRONG_CREATOR=FORBIDDEN' "$RUNNER_TEMP/classifier.log"
+          grep -F 'CONTROL_F_CLASSIFIER_WRONG_CLIENT=FORBIDDEN' "$RUNNER_TEMP/classifier.log"
+          grep -F 'CONTROL_F_CLASSIFIER_GENERIC_ACTIVITY=FORBIDDEN' "$RUNNER_TEMP/classifier.log"
+          grep -F 'CONTROL_F_CLASSIFIER_MIXED_ROWS=FORBIDDEN' "$RUNNER_TEMP/classifier.log"
+
+      - name: F isolated fresh process-browser-context x10
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/a35-focused"
+          for n in $(seq 1 10); do
+            node --test --test-concurrency=1 --test-name-pattern='A3\.5 F:' "$TEST_JS" | tee "$RUNNER_TEMP/a35-focused/isolated-$n.log"
+          done
+
+      - name: A-E then F shared architecture x5
+        shell: bash
+        run: |
+          set -euo pipefail
+          for n in $(seq 1 5); do
+            node --test --test-concurrency=1 --test-name-pattern='A3\.5 (A:|B:|C1:|C2:|D:|E:|F:)' "$TEST_JS" | tee "$RUNNER_TEMP/a35-focused/shared-$n.log"
+          done
+
+      - name: A-E then F fresh browser-context x5
+        shell: bash
+        run: |
+          set -euo pipefail
+          for n in $(seq 1 5); do
+            node --test --test-concurrency=1 --test-name-pattern='A3\.5 (A:|B:|C1:|C2:|D:|E:)' "$TEST_JS" > "$RUNNER_TEMP/a35-focused/fresh-pre-$n.log"
+            node --test --test-concurrency=1 --test-name-pattern='A3\.5 F:' "$TEST_JS" | tee "$RUNNER_TEMP/a35-focused/fresh-$n.log"
+          done
+
+      - name: Focused matrix proof
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import pathlib,re,os
+          root=pathlib.Path(os.environ['RUNNER_TEMP'])/'a35-focused'
+          logs=sorted(root.glob('isolated-*.log'))+sorted(root.glob('shared-*.log'))+sorted(root.glob('fresh-[0-9]*.log'))
+          assert len(logs)==20, len(logs)
+          rows=[]
+          for p in logs:
+            text=p.read_text(errors='replace')
+            posts=[int(x) for x in re.findall(r'CONTROL_F_RECORDS_POSTS=(\d+)',text)]
+            allowed=[int(x) for x in re.findall(r'CONTROL_F_RECOMMENDATION_TELEMETRY_POSTS=(\d+)',text)]
+            crm=[int(x) for x in re.findall(r'CONTROL_F_CRM_SNAPSHOT_POSTS=(\d+)',text)]
+            forbidden=[int(x) for x in re.findall(r'CONTROL_F_FORBIDDEN_RECORD_POSTS=(\d+)',text)]
+            assert len(posts)==len(allowed)==len(crm)==len(forbidden)==1, (p,posts,allowed,crm,forbidden)
+            assert posts[0]==allowed[0], (p,posts,allowed)
+            assert crm[0]==0, (p,crm)
+            assert forbidden[0]==0, (p,forbidden)
+            rows.append((p.name,posts[0]))
+          zero=sum(1 for _,v in rows if v==0)
+          telemetry=sum(1 for _,v in rows if v>0)
+          print(f'FOCUSED_TOTAL_F_OBSERVATIONS={len(rows)}')
+          print(f'FOCUSED_POST_ZERO={zero}')
+          print(f'FOCUSED_ALLOWED_TELEMETRY_POSITIVE={telemetry}')
+          for name,value in rows: print(f'{name}:POSTS={value}')
+          assert zero>0, 'Focused matrix must demonstrate that POST=0 passes'
+          assert telemetry>0, 'Focused matrix must demonstrate that allowed recommendation telemetry passes'
+          PY
+
+      - name: A-E fail-closed assertion preservation
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(grep -Fc 'assert.equal(control.telemetry.recordsPosts, 0' src/tests/sec-fix-a3-5-stale-role-fallback-authority.test.ts)" -ge 2
+          grep -F 'incompatible dirty snapshot must not POST' src/tests/sec-fix-a3-5-stale-role-fallback-authority.test.ts
+          grep -F 'no POST after local authority mismatch' src/tests/sec-fix-a3-5-stale-role-fallback-authority.test.ts
+
+      - name: Summary
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo "## A3.5 Control F assertion focused validation"
+            echo "- candidate: \`$CANDIDATE\`"
+            echo "- parent: \`$PARENT\`"
+            echo "- V3_FINAL_SUMMARY_CAUSE_FIELD=HARDCODED_NOT_PROVEN"
+            echo "- runtime delta: 0"
+            echo "- test-only delta: src/tests/sec-fix-a3-5-stale-role-fallback-authority.test.ts"
+          } >> "$GITHUB_STEP_SUMMARY"
