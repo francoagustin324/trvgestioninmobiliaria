@@ -1,0 +1,106 @@
+name: A3.5 Ownerless Focused GREEN
+
+on:
+  push:
+    branches:
+      - validation/a35-ownerless-focused-green
+
+permissions:
+  contents: read
+
+jobs:
+  focused:
+    runs-on: ubuntu-latest
+    env:
+      CANDIDATE: beb8876c4fd72f9c73f0a01b8022970a720d4581
+      TEST_FIRST_SHA: 295fd37f1b0a6229176b66ed25a74ca45c52b291
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ env.CANDIDATE }}
+          fetch-depth: 0
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - name: Verify minimal runtime delta
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$CANDIDATE"
+          test "$(git diff --name-only "$TEST_FIRST_SHA" "$CANDIDATE" | wc -l)" -eq 1
+          test "$(git diff --name-only "$TEST_FIRST_SHA" "$CANDIDATE")" = "src/store.ts"
+          test "$(git diff --numstat "$TEST_FIRST_SHA" "$CANDIDATE" -- src/store.ts | awk '{print $1":"$2}')" = "0:1"
+      - name: Build candidate
+        run: |
+          npm ci --silent
+          npm run build --silent
+      - name: Run A3.5 A-G focused contracts
+        run: |
+          set -euo pipefail
+          node --test --test-concurrency=1 \
+            dist/tests/sec-fix-a3-5-stale-role-fallback-authority.test.js \
+            dist/tests/sec-fix-a3-5-ownerless-normalization.test.js \
+            2>&1 | tee "$RUNNER_TEMP/a35-focused.log"
+          grep -F 'CONTROL_A_NORMAL_DOWNGRADE=PASS_SAFE' "$RUNNER_TEMP/a35-focused.log"
+          grep -F 'CONTROL_B_TEAM_VIEW_TAMPER_SYNC=PASS_SAFE' "$RUNNER_TEMP/a35-focused.log"
+          grep -F 'CONTROL_C1_TRANSIENT_FAILURE=PASS_SAFE' "$RUNNER_TEMP/a35-focused.log"
+          grep -F 'CONTROL_C2_PERMISSION_FAILURE=PASS_SAFE' "$RUNNER_TEMP/a35-focused.log"
+          grep -F 'CONTROL_D_SYNTHETIC_503_REACHED=YES' "$RUNNER_TEMP/a35-focused.log"
+          grep -F 'CONTROL_D_SAME_AUTHORITY_OFFLINE_FALLBACK=PASS_SAFE' "$RUNNER_TEMP/a35-focused.log"
+          grep -F 'CONTROL_E=PASS_SAFE' "$RUNNER_TEMP/a35-focused.log"
+          grep -F 'CONTROL_F=PASS_SAFE' "$RUNNER_TEMP/a35-focused.log"
+          grep -F 'NORMALIZED_ROLE=Corredor' "$RUNNER_TEMP/a35-focused.log"
+          grep -F 'OWNER_COUNT=0' "$RUNNER_TEMP/a35-focused.log"
+          grep -F 'CAN_VIEW_ALL=NO' "$RUNNER_TEMP/a35-focused.log"
+          grep -F 'CAN_ACCESS_SETTINGS=NO' "$RUNNER_TEMP/a35-focused.log"
+          grep -F 'CAN_ADMINISTER_TEAM=NO' "$RUNNER_TEMP/a35-focused.log"
+          echo 'CONTROL_G_OWNERLESS_NO_PRIVILEGE_ESCALATION=PASS_SAFE'
+      - name: Run H/I and fresh-roster compatibility controls
+        run: |
+          cat > dist/tests/a35-owner-preservation-controls.mjs <<'EOF'
+          import './sec-fix-a1-2-c2-test-setup.js';
+          import assert from 'node:assert/strict';
+          import { initialData } from '../models.js';
+          import { activateStorageForTenant, state } from '../store.js';
+          import { canAccessSettings, canAdministerTeam, canViewAll } from '../team-access.js';
+          import { writeTenantSnapshot } from '../tenant-storage.js';
+
+          const ORG='00000000-0000-0000-0000-00000000a351';
+          const AUTH='a35-preservation-auth';
+          const OWNER='a35-preservation-owner';
+          const scope=Object.freeze({userId:AUTH,organizationId:ORG});
+          const member=(id,userId,role)=>({id,userId,name:userId,email:`${userId}@example.test`,role,status:'Activo',createdAt:'2026-09-14T00:00:00.000Z'});
+          function crm(members){const value=structuredClone(initialData);value.organization={id:ORG,name:'A3.5 Preservation',seatLimit:null,planLabel:'validation'};value.teamMembers=members;value.activityLog=[];value.clients=[];value.properties=[];value.visits=[];value.offers=[];value.reservations=[];value.contacts=[];value.reminders=[];value.fichas=[];value.conversations=[];return value;}
+          function seed(members){localStorage.clear();writeTenantSnapshot(scope,crm(members),{markDirty:false,reason:'a35-preservation',backup:false});activateStorageForTenant(scope);}
+
+          seed([member(351,AUTH,'Corredor'),member(352,OWNER,'Dueño')]);
+          const hAuth=state.crm.teamMembers.find(x=>x.userId===AUTH), hOwner=state.crm.teamMembers.find(x=>x.userId===OWNER);
+          assert.equal(hAuth?.role,'Corredor');assert.equal(hOwner?.role,'Dueño');assert.equal(state.crm.teamMembers.filter(x=>x.role==='Dueño').length,1);
+          console.log('CONTROL_H_AUTHENTICATED_ROLE=Corredor');console.log('CONTROL_H_OWNER_REMAINS_DIFFERENT_MEMBER=YES');console.log('CONTROL_H_REAL_OWNER_PRESERVED=PASS_SAFE');
+
+          seed([member(351,AUTH,'Dueño'),member(352,OWNER,'Corredor')]);
+          const iAuth=state.crm.teamMembers.find(x=>x.userId===AUTH);
+          assert.equal(iAuth?.role,'Dueño');assert.equal(state.crm.teamMembers.filter(x=>x.role==='Dueño').length,1);assert.equal(state.activeMemberId,351);assert.equal(canViewAll(),true);assert.equal(canAccessSettings(),true);assert.equal(canAdministerTeam(),true);
+          console.log('CONTROL_I_AUTHENTICATED_ROLE=Dueño');console.log('CONTROL_I_REAL_OWNER_PRESERVED=PASS_SAFE');
+
+          localStorage.clear();
+          writeTenantSnapshot(scope,crm([]),{markDirty:false,reason:'a35-empty-roster',backup:false});
+          activateStorageForTenant(scope);
+          assert.equal(state.crm.teamMembers.length,initialData.teamMembers.length);assert.equal(state.crm.teamMembers[0]?.role,'Dueño');assert.equal(state.crm.teamMembers[0]?.userId,undefined);
+          console.log('FRESH_EMPTY_ROSTER_INITIALDATA_COMPATIBILITY=PASS_SAFE');
+          EOF
+          node dist/tests/a35-owner-preservation-controls.mjs 2>&1 | tee "$RUNNER_TEMP/a35-hi.log"
+          grep -F 'CONTROL_H_REAL_OWNER_PRESERVED=PASS_SAFE' "$RUNNER_TEMP/a35-hi.log"
+          grep -F 'CONTROL_I_REAL_OWNER_PRESERVED=PASS_SAFE' "$RUNNER_TEMP/a35-hi.log"
+          grep -F 'FRESH_EMPTY_ROSTER_INITIALDATA_COMPATIBILITY=PASS_SAFE' "$RUNNER_TEMP/a35-hi.log"
+      - name: Run unmodified A3.4 R10
+        run: |
+          set -euo pipefail
+          node --test --test-concurrency=1 --test-name-pattern='A3.4 R10:' \
+            dist/tests/sec-fix-a3-4-pre-runtime-hydration-authority.test.js \
+            2>&1 | tee "$RUNNER_TEMP/r10.log"
+          grep -F '# pass 1' "$RUNNER_TEMP/r10.log"
+          grep -F '# fail 0' "$RUNNER_TEMP/r10.log"
+          echo 'R10=PASS'
+      - name: Final focused verdict
+        run: |
+          echo 'A35_FOCUSED_A_I=PASS'
