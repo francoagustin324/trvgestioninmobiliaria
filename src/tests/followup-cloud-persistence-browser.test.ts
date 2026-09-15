@@ -326,24 +326,106 @@ test('navegador real: contacto cloud A en vuelo + telemetría append-only + segu
 
     await waitForSignal(cloud.firstWriteStarted, 'FIRST_WRITE_STARTED', FIRST_WRITE_TIMEOUT_MS);
     assert.ok(cloud.v2AuthorityCalls() >= 1, 'La capability Visit debe resolverse mediante RPC V2 estricta.');
-    assert.equal(cloud.crmPostCount(), 1, 'A debe ser el único push CRM en vuelo');
+    const crmPostCountBeforeB = cloud.crmPostCount();
+    assert.equal(crmPostCountBeforeB, 1, 'A debe ser el único push CRM en vuelo antes de crear B.');
+    assert.equal(cloud.firstReleasePending(), true, 'A debe permanecer retenido antes de persistir B.');
+    console.log('A_STARTED_BEFORE_B=YES');
+    console.log(`CRM_POST_COUNT_BEFORE_B=${crmPostCountBeforeB}`);
 
-    assert.equal(await page.evaluate((key) => (JSON.parse(localStorage.getItem(key) || '{}') as CrmData).clients[0]?.nextFollowUp, STORAGE_KEY), FOLLOW_UP_DATE);
+    const followUpForm = page.locator('[data-whatsapp-followup-form]');
+    await followUpForm.waitFor({ state: 'visible' });
+    const threeDayChoice = followUpForm.locator('input[name="follow-up-choice"][value="3"]');
+    await threeDayChoice.check();
+    assert.equal(
+      await followUpForm.locator('input[name="selected-date"]').inputValue(),
+      FOLLOW_UP_DATE,
+      'El formulario real debe resolver En 3 días a FOLLOW_UP_DATE.',
+    );
+    await followUpForm.locator('button[type="submit"]').click();
+
+    await page.waitForFunction(({ key, expectedDate }) => {
+      const crm = JSON.parse(localStorage.getItem(key) || '{}') as CrmData;
+      const client = crm.clients?.[0];
+      return client?.nextFollowUp === expectedDate
+        && client?.nextAction === 'Volver a contactar por WhatsApp'
+        && crm.activityLog?.filter((entry) => entry.action === 'Seguimiento por WhatsApp programado').length === 1;
+    }, { key: STORAGE_KEY, expectedDate: FOLLOW_UP_DATE }, { timeout: 20_000 });
+
+    const localAfterB = await page.evaluate((key) => {
+      const crm = JSON.parse(localStorage.getItem(key) || '{}') as CrmData;
+      const client = crm.clients[0];
+      const contactActivities = crm.activityLog.filter((entry) => entry.action === 'Contacto por WhatsApp');
+      const followUpActivities = crm.activityLog.filter((entry) => entry.action === 'Seguimiento por WhatsApp programado');
+      return {
+        organizationId: crm.organization.id,
+        memberUserId: crm.teamMembers.find((member) => member.id === 1)?.userId || '',
+        nextFollowUp: client?.nextFollowUp || '',
+        nextAction: client?.nextAction || '',
+        contactActivityCount: contactActivities.length,
+        followUpActivityCount: followUpActivities.length,
+        contactActorIds: contactActivities.map((entry) => entry.actorId),
+        followUpActorIds: followUpActivities.map((entry) => entry.actorId),
+      };
+    }, STORAGE_KEY);
+    assert.equal(localAfterB.organizationId, ORG_ID, 'B debe conservar el tenant activo.');
+    assert.equal(localAfterB.memberUserId, USER_ID, 'B debe conservar el actor autenticado del tenant.');
+    assert.equal(localAfterB.nextFollowUp, FOLLOW_UP_DATE);
+    assert.equal(localAfterB.nextAction, 'Volver a contactar por WhatsApp');
+    assert.equal(localAfterB.contactActivityCount, 1, 'A debe existir una sola vez localmente.');
+    assert.equal(localAfterB.followUpActivityCount, 1, 'B debe existir una sola vez localmente.');
+    assert.deepEqual(localAfterB.contactActorIds, [1], 'La actividad A debe pertenecer al member autenticado.');
+    assert.deepEqual(localAfterB.followUpActorIds, [1], 'La actividad B debe pertenecer al member autenticado.');
+
     await page.clock.runFor(850);
-    assert.equal(cloud.crmPostCount(), 1, 'La cola CRM mantiene un único POST CRM mientras el primero sigue en vuelo');
+    const crmPostCountAfterB = cloud.crmPostCount();
+    assert.equal(crmPostCountAfterB, 1, 'B debe quedar en cola mientras A continúa retenido.');
+    assert.equal(cloud.firstReleasePending(), true, 'A debe seguir retenido después de persistir B localmente.');
+    console.log('A_HELD_WHILE_B_LOCAL_PERSISTED=YES');
+    console.log(`CRM_POST_COUNT_AFTER_B_BEFORE_RELEASE=${crmPostCountAfterB}`);
+    console.log(`LOCAL_NEXT_FOLLOWUP_AFTER_B=${localAfterB.nextFollowUp}`);
+    console.log(`LOCAL_NEXT_ACTION_AFTER_B=${localAfterB.nextAction}`);
+
     cloud.releaseFirstWrite();
     assert.equal(cloud.firstReleasePending(), false, 'firstRelease debe quedar liberado por el camino feliz.');
-    await page.waitForFunction(() => ((window as TestWindow).__cloudMessages || []).includes('Guardado seguro en la nube.'), null, { timeout: 20_000 });
-    assert.ok(cloud.crmPostCount() >= 1 && cloud.crmPostCount() <= 2, `La cola segura usó ${cloud.crmPostCount()} push(es) CRM.`);
+    console.log('FIRST_RELEASE_NORMAL=YES');
+    await waitForSafeCloudSave(page);
 
-    let remoteClient = cloud.remote().find((row) => row.entity_type === 'client')?.payload as { nextFollowUp?: string; nextAction?: string };
-    assert.equal(remoteClient.nextFollowUp, FOLLOW_UP_DATE);
-    assert.equal(remoteClient.nextAction, 'Volver a contactar por WhatsApp');
+    let remoteClient = cloud.remote().find((row) => row.entity_type === 'client')?.payload as { nextFollowUp?: string; nextAction?: string } | undefined;
+    for (let attempt = 0; attempt < 200 && (
+      remoteClient?.nextFollowUp !== FOLLOW_UP_DATE
+      || remoteClient?.nextAction !== 'Volver a contactar por WhatsApp'
+      || activityCount(cloud.remote(), 'Seguimiento por WhatsApp programado') !== 1
+    ); attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 25));
+      remoteClient = cloud.remote().find((row) => row.entity_type === 'client')?.payload as { nextFollowUp?: string; nextAction?: string } | undefined;
+    }
+
+    assert.equal(remoteClient?.nextFollowUp, FOLLOW_UP_DATE);
+    assert.equal(remoteClient?.nextAction, 'Volver a contactar por WhatsApp');
     assert.equal(activityCount(cloud.remote(), 'Contacto por WhatsApp'), 1);
     assert.equal(activityCount(cloud.remote(), 'Seguimiento por WhatsApp programado'), 1);
     assert.equal(cloud.remote().filter((row) => row.entity_type === 'reminder').length, 0);
+    const relevantRemoteRows = cloud.remote().filter((row) => row.entity_type === 'client' || (
+      row.entity_type === 'activity'
+      && ['Contacto por WhatsApp', 'Seguimiento por WhatsApp programado'].includes(String((row.payload as { action?: string }).action || ''))
+    ));
+    assert.ok(relevantRemoteRows.length >= 3, 'Cloud final debe contener Client + actividades A y B.');
+    assert.ok(relevantRemoteRows.every((row) => row.organization_id === ORG_ID), 'Cloud final no debe mezclar tenant.');
+    assert.ok(relevantRemoteRows.every((row) => row.created_by === USER_ID), 'Cloud final no debe mezclar actor creador.');
     assert.ok(cloud.telemetryPostCount() >= 1, 'La telemetría puede escribir concurrentemente sin secuestrar el bloqueo CRM.');
     assert.ok(cloud.remote().some(isTelemetryRow), 'La telemetría append-only sobrevive junto al CRM.');
+
+    await page.waitForFunction((key) => {
+      const sync = JSON.parse(localStorage.getItem(`${key}:sync`) || '{}') as { dirty?: boolean };
+      return sync.dirty === false;
+    }, STORAGE_KEY, { timeout: 20_000 });
+    const finalDirty = await page.evaluate((key) => (JSON.parse(localStorage.getItem(`${key}:sync`) || '{}') as { dirty?: boolean }).dirty, STORAGE_KEY);
+    assert.equal(finalDirty, false, 'Tras drenar A+B el snapshot local debe quedar limpio.');
+
+    console.log(`REMOTE_NEXT_FOLLOWUP_AFTER_DRAIN=${remoteClient.nextFollowUp}`);
+    console.log(`REMOTE_NEXT_ACTION_AFTER_DRAIN=${remoteClient.nextAction}`);
+    console.log(`CONTACT_ACTIVITY_COUNT=${activityCount(cloud.remote(), 'Contacto por WhatsApp')}`);
+    console.log(`FOLLOWUP_ACTIVITY_COUNT=${activityCount(cloud.remote(), 'Seguimiento por WhatsApp programado')}`);
 
     const activitiesBeforeNone = humanActivityRows(cloud.remote()).length;
     await page.evaluate(() => { (window as TestWindow).__cloudMessages = []; });
@@ -413,6 +495,7 @@ test('navegador real: contacto cloud A en vuelo + telemetría append-only + segu
       cloud.releaseFirstWrite();
       await Promise.resolve();
     }
+    console.log(`FIRST_RELEASE_FORCED=${forcedRelease ? 'YES' : 'NO'}`);
     console.log(`TEST_528_FORCED_FIRST_RELEASE=${forcedRelease ? 'YES' : 'NO'}`);
     await context.close();
     await browser.close();
