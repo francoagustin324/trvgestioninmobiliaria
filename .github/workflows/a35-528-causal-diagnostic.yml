@@ -1,0 +1,124 @@
+name: SEC-FIX A3.5 #528 Causal Diagnostic
+
+on:
+  push:
+    branches:
+      - validation/a35-528-causal-diagnostic
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sec-fix-a3-5-528-causal-diagnostic
+  cancel-in-progress: false
+
+env:
+  CANDIDATE: 4226db2d10e47a3082a0b1dc1b22239bedbd72ae
+  MAIN_SHA: 68034c60f606326a1d75fc3d448c7e99de49b492
+  OFFICIAL_A35: fdff36785e90197c9ef384394ad474d9787af72a
+  DIAGNOSTIC_BRANCH: validation/a35-528-causal-diagnostic
+
+jobs:
+  diagnostic-candidate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Checkout exact candidate
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ env.CANDIDATE }}
+          fetch-depth: 0
+
+      - name: Checkout diagnostic instrumentation only
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ env.DIAGNOSTIC_BRANCH }}
+          path: _diag
+          fetch-depth: 1
+
+      - name: Prove exact product SHA and overlay diagnostic test only
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$CANDIDATE"
+          if git symbolic-ref -q HEAD >/dev/null 2>&1; then echo 'DETACHED_HEAD=NO'; exit 1; fi
+          cp _diag/src/tests/a35-528-causal-diagnostic.test.ts src/tests/a35-528-causal-diagnostic.test.ts
+          rm -rf _diag
+          git status --porcelain
+          test "$(git status --porcelain | wc -l)" -eq 1
+          git status --porcelain | grep -Fx '?? src/tests/a35-528-causal-diagnostic.test.ts'
+          echo "EXECUTION_SHA=$(git rev-parse HEAD)"
+          echo 'RUNTIME_DELTA_FROM_TARGET=0'
+          echo 'DIAGNOSTIC_TEST_OVERLAY_ONLY=YES'
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci --silent
+
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Compile exact candidate plus diagnostic test overlay
+        run: npx tsc
+
+      - name: Run isolated #528 causal diagnostic against candidate
+        shell: bash
+        run: |
+          set -o pipefail
+          node --test --test-concurrency=1 dist/tests/a35-528-causal-diagnostic.test.js 2>&1 | tee "$RUNNER_TEMP/a35-528-candidate.log"
+
+  diagnostic-main:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Checkout exact main historical SHA
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ env.MAIN_SHA }}
+          fetch-depth: 0
+
+      - name: Checkout diagnostic instrumentation only
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ env.DIAGNOSTIC_BRANCH }}
+          path: _diag
+          fetch-depth: 1
+
+      - name: Prove exact product SHA and overlay diagnostic test only
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$MAIN_SHA"
+          if git symbolic-ref -q HEAD >/dev/null 2>&1; then echo 'DETACHED_HEAD=NO'; exit 1; fi
+          cp _diag/src/tests/a35-528-causal-diagnostic.test.ts src/tests/a35-528-causal-diagnostic.test.ts
+          rm -rf _diag
+          git status --porcelain
+          test "$(git status --porcelain | wc -l)" -eq 1
+          git status --porcelain | grep -Fx '?? src/tests/a35-528-causal-diagnostic.test.ts'
+          echo "EXECUTION_SHA=$(git rev-parse HEAD)"
+          echo 'RUNTIME_DELTA_FROM_TARGET=0'
+          echo 'DIAGNOSTIC_TEST_OVERLAY_ONLY=YES'
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci --silent
+
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Compile exact main plus diagnostic test overlay
+        run: npx tsc
+
+      - name: Run isolated #528 causal diagnostic against main
+        shell: bash
+        run: |
+          set -o pipefail
+          node --test --test-concurrency=1 dist/tests/a35-528-causal-diagnostic.test.js 2>&1 | tee "$RUNNER_TEMP/a35-528-main.log"
