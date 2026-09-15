@@ -37,9 +37,16 @@ function waitUntil(predicate: () => boolean, timeoutMs = 4_000, label = 'cloud s
   });
 }
 
-function contactSnapshot(organizationId: string): CrmData {
+function contactSnapshot(scope: TenantScope): CrmData {
   const crm = structuredClone(initialData);
-  crm.organization.id = organizationId;
+  crm.organization.id = scope.organizationId;
+  crm.teamMembers = [{
+    ...crm.teamMembers[0]!,
+    id: 1,
+    userId: scope.userId,
+    role: 'Dueño',
+    status: 'Activo',
+  }];
   const client = crm.clients[0]!;
   client.lastContact = '2026-08-07';
   crm.activityLog.push({
@@ -164,7 +171,34 @@ test('reproduce la pérdida física tenant-aware: contacto A en vuelo + seguimie
 
   const { queueCloudSave, pullCloudData } = await import('../cloud-api-compatible.js');
 
-  const contact = contactSnapshot(scopeA.organizationId);
+  const contact = contactSnapshot(scopeA);
+  const localMember = contact.teamMembers[0]!;
+  const cloudRole = membership.role === 'owner' ? 'Dueño' : membership.role;
+  const cloudStatus = membership.status === 'active' ? 'Activo' : membership.status;
+  assert.deepEqual(
+    {
+      userId: localMember.userId,
+      memberId: localMember.id,
+      role: localMember.role,
+      status: localMember.status,
+    },
+    {
+      userId: membership.user_id,
+      memberId: membership.member_id,
+      role: cloudRole,
+      status: cloudStatus,
+    },
+    'local fixture authority must exactly match the authenticated cloud membership',
+  );
+  console.log(`LOCAL_FIXTURE_USER_ID=${localMember.userId}`);
+  console.log(`CLOUD_MEMBERSHIP_USER_ID=${membership.user_id}`);
+  console.log(`LOCAL_MEMBER_ID=${localMember.id}`);
+  console.log(`CLOUD_MEMBER_ID=${membership.member_id}`);
+  console.log(`LOCAL_ROLE=${localMember.role}`);
+  console.log(`CLOUD_ROLE=${cloudRole}`);
+  console.log(`LOCAL_STATUS=${localMember.status}`);
+  console.log('AUTHORITY_FIXTURE_MATCH=YES');
+
   const selectedDate = '2026-08-08';
   const withFollowUp = followUpSnapshot(contact, selectedDate);
   const orgB = structuredClone(initialData);
