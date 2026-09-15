@@ -1,0 +1,92 @@
+name: SEC-FIX A3.5 #528 POST provenance diagnostic
+
+on:
+  push:
+    branches:
+      - validation/a35-528-post-provenance-diagnostic-9094c9c
+
+permissions:
+  contents: read
+
+jobs:
+  diagnostic:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      EXACT_CANDIDATE: 9094c9c6c7a27b82f4ad965f0b6fcdb57356b458
+      DIAGNOSTIC_COMMIT: 4fe899580fbc067d0a695a65324c0e94b57e4928
+      HISTORICAL_RELEASE: de091b9c98c33a31682cc77ede03313a8a66cb30
+      OFFICIAL_A35: fdff36785e90197c9ef384394ad474d9787af72a
+      MAIN_SHA: 68034c60f606326a1d75fc3d448c7e99de49b492
+      PRODUCT_BRANCH: agent/sec-fix-a3-5-stale-role-fallback-fence
+    steps:
+      - name: Checkout exact diagnostic commit
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ env.DIAGNOSTIC_COMMIT }}
+          fetch-depth: 0
+
+      - name: Exact scope and immutable branch precheck
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$DIAGNOSTIC_COMMIT"
+          test "$(git rev-parse HEAD^)" = "$EXACT_CANDIDATE"
+          test "$(git ls-remote origin refs/heads/$PRODUCT_BRANCH | awk '{print $1}')" = "$OFFICIAL_A35"
+          test "$(git ls-remote origin refs/heads/main | awk '{print $1}')" = "$MAIN_SHA"
+          git diff --name-only "$EXACT_CANDIDATE..$DIAGNOSTIC_COMMIT" | tee "$RUNNER_TEMP/changed.txt"
+          printf '%s\n' 'src/tests/a35-528-post-provenance-diagnostic.test.ts' > "$RUNNER_TEMP/expected.txt"
+          diff -u "$RUNNER_TEMP/expected.txt" "$RUNNER_TEMP/changed.txt"
+          grep '^src/' "$RUNNER_TEMP/changed.txt" | grep -v '^src/tests/' > "$RUNNER_TEMP/runtime.txt" || true
+          grep -E '\.sql$' "$RUNNER_TEMP/changed.txt" > "$RUNNER_TEMP/sql.txt" || true
+          grep '^supabase/migrations/' "$RUNNER_TEMP/changed.txt" > "$RUNNER_TEMP/migrations.txt" || true
+          test ! -s "$RUNNER_TEMP/runtime.txt"
+          test ! -s "$RUNNER_TEMP/sql.txt"
+          test ! -s "$RUNNER_TEMP/migrations.txt"
+          echo "EXACT_CANDIDATE=$EXACT_CANDIDATE"
+          echo "DIAGNOSTIC_COMMIT=$DIAGNOSTIC_COMMIT"
+          echo 'RUNTIME_DELTA=0'
+          echo 'SQL_DELTA=0'
+          echo 'MIGRATION_DELTA=0'
+
+      - name: Prove historical zero-training and coalescing structure
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --exit-code "$HISTORICAL_RELEASE" "$EXACT_CANDIDATE" -- \
+            src/leads-zero-training-phase1.ts \
+            src/cloud-api-compatible.ts \
+            src/cloud-save-serial.ts
+          echo 'ZERO_TRAINING_AND_COALESCING_STRUCTURE_PREEXISTED_A3_5=YES'
+
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies and Chromium
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm ci --silent
+          npx playwright install --with-deps chromium
+
+      - name: Compile diagnostic
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx tsc
+          test -f dist/tests/a35-528-post-provenance-diagnostic.test.js
+          echo 'DIAGNOSTIC_TYPESCRIPT_COMPILE=GREEN'
+
+      - name: One fresh diagnostic execution
+        shell: bash
+        run: |
+          set -euo pipefail
+          log="$RUNNER_TEMP/a35-528-post-provenance.tap"
+          node --test --test-concurrency=1 dist/tests/a35-528-post-provenance-diagnostic.test.js 2>&1 | tee "$log"
+          grep -q '^# pass 1$' "$log"
+          grep -q '^# fail 0$' "$log"
+          grep -q 'DIAGNOSTIC_CHECKPOINTS_COMPLETE=YES' "$log"
+          echo 'DIAGNOSTIC_EXECUTION=GREEN'
