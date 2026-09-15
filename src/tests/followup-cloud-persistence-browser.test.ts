@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import { spawn, type ChildProcess } from 'node:child_process';
-import { existsSync, mkdirSync } from 'node:fs';
+import { existsSync, mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import test from 'node:test';
 import { chromium, type Browser, type BrowserContext, type Page, type Route } from 'playwright';
 import {
@@ -11,12 +13,12 @@ import {
 } from '../cloud-records.js';
 import { initialData, type CrmData, type TeamMember } from '../models.js';
 
-const USER_ID = 'cloud-followup-owner';
-const ORG_ID = 'cloud-followup-org';
+const USER_ID = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+const ORG_ID = '11111111-1111-4111-8111-111111111111';
 const STORAGE_KEY = `trv-crm-basico:user:${USER_ID}`;
 const FIXED_TIME = new Date('2026-08-07T16:52:00-03:00');
 const FOLLOW_UP_DATE = '2026-08-10';
-const ARTIFACT_DIR = 'artifacts/cloud-followup-hotfix';
+const FIRST_WRITE_TIMEOUT_MS = 20_000;
 
 interface TestWindow extends Window {
   __cloudMessages?: string[];
@@ -26,12 +28,34 @@ interface TestWindow extends Window {
 interface Deferred {
   promise: Promise<void>;
   resolve: () => void;
+  isResolved: () => boolean;
 }
 
 function deferred(): Deferred {
-  let resolve!: () => void;
-  const promise = new Promise<void>((done) => { resolve = done; });
-  return { promise, resolve };
+  let settled = false;
+  let settle!: () => void;
+  const promise = new Promise<void>((done) => { settle = done; });
+  return {
+    promise,
+    resolve: () => {
+      if (settled) return;
+      settled = true;
+      settle();
+    },
+    isResolved: () => settled,
+  };
+}
+
+async function waitForSignal(promise: Promise<void>, label: string, timeoutMs: number): Promise<void> {
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_resolve, reject) => {
+    timeoutId = setTimeout(() => reject(new Error(`${label}_TIMEOUT_${timeoutMs}MS`)), timeoutMs);
+  });
+  try {
+    await Promise.race([promise, timeout]);
+  } finally {
+    if (timeoutId) clearTimeout(timeoutId);
+  }
 }
 
 function owner(): TeamMember {
@@ -143,14 +167,17 @@ function filteredRows(records: CloudRecordRow[], url: URL): CloudRecordRow[] {
 async function installCloudRoutes(context: BrowserContext, initial: CrmData): Promise<{
   firstWriteStarted: Promise<void>;
   releaseFirstWrite: () => void;
+  firstReleasePending: () => boolean;
   crmPostCount: () => number;
   telemetryPostCount: () => number;
+  v2AuthorityCalls: () => number;
   remote: () => CloudRecordRow[];
 }> {
   let remote = crmToCloudRecords(initial, contextForCloud(), USER_ID)
     .map((record) => ({ ...structuredClone(record), updated_at: '2026-08-07T19:40:00.000Z' }));
   let crmPostCount = 0;
   let telemetryPostCount = 0;
+  let v2AuthorityCalls = 0;
   let writeSequence = 0;
   const firstStarted = deferred();
   const firstRelease = deferred();
@@ -176,8 +203,20 @@ async function installCloudRoutes(context: BrowserContext, initial: CrmData): Pr
     const fulfill = (value: unknown) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(value) });
 
     if (url.pathname.endsWith('/rpc/activate_my_organization_memberships')) return fulfill({});
-    if (url.pathname.endsWith('/rpc/visit_transaction_authority_active')) return fulfill(false);
+    if (url.pathname.endsWith('/rpc/visit_transaction_authority_active_v2')) {
+      assert.equal(method, 'POST', 'visit_transaction_authority_active_v2 exige POST.');
+      assert.equal(request.headers()['authorization'], 'Bearer access', 'visit_transaction_authority_active_v2 exige actor autenticado.');
+      assert.equal(request.headers()['apikey'], 'key', 'visit_transaction_authority_active_v2 exige la publishable key esperada.');
+      assert.match(request.headers()['content-type'] || '', /^application\/json(?:;|$)/i, 'visit_transaction_authority_active_v2 exige JSON.');
+      const body = request.postDataJSON() as unknown;
+      assert.deepEqual(body, { p_organization_id: ORG_ID }, 'visit_transaction_authority_active_v2 debe recibir exclusivamente el tenant activo.');
+      v2AuthorityCalls += 1;
+      // Contrato SQL canónico: devuelve private.visit_authority_active(org).
+      // Sin fila de autoridad Visit, private.visit_authority_active devuelve false.
+      return fulfill(false);
+    }
     if (url.pathname.endsWith('/organization_members')) {
+      assert.equal(method, 'GET', 'organization_members debe consultarse por GET.');
       return fulfill([{ organization_id: ORG_ID, member_id: 1, user_id: USER_ID, role: 'owner', status: 'active', display_name: owner().name, email: owner().email, created_at: owner().createdAt }]);
     }
     if (url.pathname.endsWith('/propcontrol_records') && method === 'GET') {
@@ -211,8 +250,10 @@ async function installCloudRoutes(context: BrowserContext, initial: CrmData): Pr
   return {
     firstWriteStarted: firstStarted.promise,
     releaseFirstWrite: firstRelease.resolve,
+    firstReleasePending: () => !firstRelease.isResolved(),
     crmPostCount: () => crmPostCount,
     telemetryPostCount: () => telemetryPostCount,
+    v2AuthorityCalls: () => v2AuthorityCalls,
     remote: () => structuredClone(remote),
   };
 }
@@ -220,25 +261,25 @@ async function installCloudRoutes(context: BrowserContext, initial: CrmData): Pr
 async function installStorage(context: BrowserContext, crm: CrmData): Promise<void> {
   const actorKey = `cloud:${USER_ID}`;
   const identityKey = `propcontrol-whatsapp-human-identity-v1:${encodeURIComponent(ORG_ID)}:1:${encodeURIComponent(actorKey)}`;
-  await context.addInitScript(({ data, identityStorageKey }) => {
+  await context.addInitScript(({ data, identityStorageKey, userId, organizationId, storageKey }) => {
     const target = window as TestWindow;
     target.__cloudMessages = [];
     localStorage.setItem('propcontrol-cloud-session-v1', JSON.stringify({
       accessToken: 'access', refreshToken: 'refresh', expiresAt: Date.now() + 3_600_000,
-      userId: 'cloud-followup-owner', email: 'franco@propcontrol.test',
+      userId, email: 'franco@propcontrol.test',
     }));
-    if (!localStorage.getItem('trv-crm-basico:user:cloud-followup-owner')) localStorage.setItem('trv-crm-basico:user:cloud-followup-owner', JSON.stringify(data));
-    if (!localStorage.getItem('trv-crm-basico:user:cloud-followup-owner:sync')) {
-      localStorage.setItem('trv-crm-basico:user:cloud-followup-owner:sync', JSON.stringify({ dirty: false, localUpdatedAt: '2026-08-07T19:40:00.000Z', lastCloudSavedAt: '2026-08-07T19:40:00.000Z', lastCloudVersion: '2026-08-07T19:40:00.000Z' }));
+    if (!localStorage.getItem(storageKey)) localStorage.setItem(storageKey, JSON.stringify(data));
+    if (!localStorage.getItem(`${storageKey}:sync`)) {
+      localStorage.setItem(`${storageKey}:sync`, JSON.stringify({ dirty: false, localUpdatedAt: '2026-08-07T19:40:00.000Z', lastCloudSavedAt: '2026-08-07T19:40:00.000Z', lastCloudVersion: '2026-08-07T19:40:00.000Z' }));
     }
     localStorage.setItem('propcontrol-active-team-member-v1', '1');
-    localStorage.setItem(identityStorageKey, JSON.stringify({ version: 1, organizationId: 'cloud-followup-org', memberId: 1, actorKey: 'cloud:cloud-followup-owner', humanName: 'Franco Solis', confirmedAt: '2026-08-07T19:40:00.000Z' }));
+    localStorage.setItem(identityStorageKey, JSON.stringify({ version: 1, organizationId, memberId: 1, actorKey: `cloud:${userId}`, humanName: 'Franco Solis', confirmedAt: '2026-08-07T19:40:00.000Z' }));
     document.addEventListener('propcontrol-cloud-status', (event) => {
       const message = (event as CustomEvent<{ message?: string }>).detail?.message;
       if (message) target.__cloudMessages?.push(message);
     });
     Object.defineProperty(window, 'open', { configurable: true, value: () => { target.__windowOpened = true; return null; } });
-  }, { data: crm, identityStorageKey: identityKey });
+  }, { data: crm, identityStorageKey: identityKey, userId: USER_ID, organizationId: ORG_ID, storageKey: STORAGE_KEY });
 }
 
 async function load(page: Page, url: string): Promise<void> {
@@ -258,7 +299,8 @@ async function waitForSafeCloudSave(page: Page): Promise<void> {
 }
 
 test('navegador real: contacto cloud A en vuelo + telemetría append-only + seguimiento B conserva CRM, resumen y Agenda', { timeout: 240_000 }, async () => {
-  mkdirSync(ARTIFACT_DIR, { recursive: true });
+  const artifactDir = mkdtempSync(join(process.env.RUNNER_TEMP || tmpdir(), 'propcontrol-cloud-followup-'));
+  console.log(`TEST_528_ARTIFACT_DIR=${artifactDir}`);
   const executablePath = chromeExecutable();
   assert.ok(executablePath, 'Chrome/Chromium no disponible.');
   const port = 61520 + Math.floor(Math.random() * 100);
@@ -282,13 +324,15 @@ test('navegador real: contacto cloud A en vuelo + telemetría append-only + segu
     await page.locator('[data-whatsapp-confirm-sent]').click();
     await page.clock.runFor(750);
 
-    await cloud.firstWriteStarted;
+    await waitForSignal(cloud.firstWriteStarted, 'FIRST_WRITE_STARTED', FIRST_WRITE_TIMEOUT_MS);
+    assert.ok(cloud.v2AuthorityCalls() >= 1, 'La capability Visit debe resolverse mediante RPC V2 estricta.');
     assert.equal(cloud.crmPostCount(), 1, 'A debe ser el único push CRM en vuelo');
 
     assert.equal(await page.evaluate((key) => (JSON.parse(localStorage.getItem(key) || '{}') as CrmData).clients[0]?.nextFollowUp, STORAGE_KEY), FOLLOW_UP_DATE);
     await page.clock.runFor(850);
     assert.equal(cloud.crmPostCount(), 1, 'La cola CRM mantiene un único POST CRM mientras el primero sigue en vuelo');
     cloud.releaseFirstWrite();
+    assert.equal(cloud.firstReleasePending(), false, 'firstRelease debe quedar liberado por el camino feliz.');
     await page.waitForFunction(() => ((window as TestWindow).__cloudMessages || []).includes('Guardado seguro en la nube.'), null, { timeout: 20_000 });
     assert.ok(cloud.crmPostCount() >= 1 && cloud.crmPostCount() <= 2, `La cola segura usó ${cloud.crmPostCount()} push(es) CRM.`);
 
@@ -354,15 +398,22 @@ test('navegador real: contacto cloud A en vuelo + telemetría append-only + segu
     assert.match(await summary.innerText(), /Seguimiento/i);
     assert.doesNotMatch(await summary.innerText(), /Sin seguimiento/i);
     assert.equal(await page.evaluate(() => Boolean((window as TestWindow).__windowOpened)), false);
-    await card.screenshot({ path: `${ARTIFACT_DIR}/01-reload-tarjeta-resumen.png` });
+    await card.screenshot({ path: join(artifactDir, '01-reload-tarjeta-resumen.png') });
 
     await page.locator('[data-module="agenda"]:visible').first().click();
     await page.waitForSelector('#agenda.active', { state: 'visible' });
     const agenda = page.locator('#agenda.active .agenda-card').filter({ hasText: 'Lucía Martín' });
     assert.equal(await agenda.count(), 1);
     assert.equal(await agenda.locator(`time[datetime="${FOLLOW_UP_DATE}"]`).count(), 1);
-    await agenda.screenshot({ path: `${ARTIFACT_DIR}/02-reload-agenda.png` });
+    await agenda.screenshot({ path: join(artifactDir, '02-reload-agenda.png') });
+    assert.equal(cloud.firstReleasePending(), false, 'firstRelease no debe quedar pendiente al completar el camino feliz.');
   } finally {
+    const forcedRelease = cloud.firstReleasePending();
+    if (forcedRelease) {
+      cloud.releaseFirstWrite();
+      await Promise.resolve();
+    }
+    console.log(`TEST_528_FORCED_FIRST_RELEASE=${forcedRelease ? 'YES' : 'NO'}`);
     await context.close();
     await browser.close();
     await stopServer(server);
