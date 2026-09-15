@@ -1,0 +1,220 @@
+name: A3.5 Full CI Diagnostic Replay
+
+on:
+  push:
+    branches:
+      - validation/a35-full-ci-diagnostic-replay-20260915
+
+permissions:
+  contents: read
+
+concurrency:
+  group: a35-full-ci-diagnostic-replay-20260915
+  cancel-in-progress: false
+
+env:
+  CANDIDATE: f82bc3bad74450322c5e85c92ca5577059012145
+  OFFICIAL_A35: fdff36785e90197c9ef384394ad474d9787af72a
+  PRODUCT_BRANCH: agent/sec-fix-a3-5-stale-role-fallback-fence
+  MAIN_SHA: 68034c60f606326a1d75fc3d448c7e99de49b492
+  RELEASE_BRANCH: release/a34-webkit-572-reconciliation
+  RELEASE_SHA: de091b9c98c33a31682cc77ede03313a8a66cb30
+
+jobs:
+  full-ci-diagnostic:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - name: Checkout exact detached candidate
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ env.CANDIDATE }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify immutable refs and exact test-only delta
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$CANDIDATE"
+          if git symbolic-ref -q HEAD >/dev/null 2>&1; then
+            echo 'DETACHED_HEAD=NO'
+            exit 1
+          fi
+          git diff --quiet
+          git diff --cached --quiet
+          test -z "$(git status --porcelain --untracked-files=normal)"
+          test "$(git ls-remote origin refs/heads/$PRODUCT_BRANCH | awk '{print $1}')" = "$OFFICIAL_A35"
+          test "$(git ls-remote origin refs/heads/main | awk '{print $1}')" = "$MAIN_SHA"
+          test "$(git ls-remote origin refs/heads/$RELEASE_BRANCH | awk '{print $1}')" = "$RELEASE_SHA"
+
+          git diff --name-only "$OFFICIAL_A35..$CANDIDATE" | LC_ALL=C sort > "$RUNNER_TEMP/a35-actual-delta.txt"
+          cat > "$RUNNER_TEMP/a35-expected-delta.txt" <<'EOF'
+          src/tests/followup-cloud-persistence-browser.test.ts
+          src/tests/followup-cloud-persistence.test.ts
+          src/tests/sync-conflict-ui.test.ts
+          EOF
+          sed -i 's/^          //' "$RUNNER_TEMP/a35-expected-delta.txt"
+          LC_ALL=C sort -o "$RUNNER_TEMP/a35-expected-delta.txt" "$RUNNER_TEMP/a35-expected-delta.txt"
+          diff -u "$RUNNER_TEMP/a35-expected-delta.txt" "$RUNNER_TEMP/a35-actual-delta.txt"
+
+          grep '^src/' "$RUNNER_TEMP/a35-actual-delta.txt" | grep -v '^src/tests/' > "$RUNNER_TEMP/product-runtime-delta.txt" || true
+          grep -E '\.sql$' "$RUNNER_TEMP/a35-actual-delta.txt" > "$RUNNER_TEMP/product-sql-delta.txt" || true
+          grep '^supabase/migrations/' "$RUNNER_TEMP/a35-actual-delta.txt" > "$RUNNER_TEMP/product-migration-delta.txt" || true
+          grep '^\.github/workflows/' "$RUNNER_TEMP/a35-actual-delta.txt" > "$RUNNER_TEMP/product-workflow-delta.txt" || true
+          test ! -s "$RUNNER_TEMP/product-runtime-delta.txt"
+          test ! -s "$RUNNER_TEMP/product-sql-delta.txt"
+          test ! -s "$RUNNER_TEMP/product-migration-delta.txt"
+          test ! -s "$RUNNER_TEMP/product-workflow-delta.txt"
+
+          echo "EXECUTION_SHA=$(git rev-parse HEAD)"
+          echo 'CANDIDATE_SCOPE_EXACT_THREE_TESTS=YES'
+          echo 'PRODUCT_RUNTIME_DELTA=0'
+          echo 'PRODUCT_SQL_DELTA=0'
+          echo 'PRODUCT_MIGRATION_DELTA=0'
+          echo 'PRODUCT_WORKFLOW_DELTA=0'
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci --silent
+
+      - name: Install Chromium for real-app suites
+        run: npx playwright install --with-deps chromium
+
+      - name: Build exact candidate
+        run: npm run build --silent
+
+      - name: Full CI exact command with diagnostic preservation
+        id: full_ci
+        shell: bash
+        run: |
+          set -uo pipefail
+
+          TAP="$RUNNER_TEMP/full-ci.tap"
+          META="$RUNNER_TEMP/full-ci-summary.txt"
+          WATCH="$RUNNER_TEMP/full-ci-watchdog.log"
+          STOP="$RUNNER_TEMP/full-ci-watchdog.stop"
+          : > "$TAP"
+          : > "$META"
+          : > "$WATCH"
+          rm -f "$STOP"
+
+          FULL_CI_START="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+          START_EPOCH="$(date +%s)"
+          EXECUTION_SHA="$(git rev-parse HEAD)"
+
+          (
+            while [ ! -f "$STOP" ]; do
+              NOW_ISO="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+              NOW_EPOCH="$(date +%s)"
+              ELAPSED="$((NOW_EPOCH - START_EPOCH))"
+              TAP_BYTES="$(wc -c < "$TAP" 2>/dev/null || echo 0)"
+              LAST_LINE="$(tail -n 1 "$TAP" 2>/dev/null | tr '\n' ' ' | cut -c1-1000 || true)"
+              {
+                echo "WATCHDOG_TIMESTAMP=$NOW_ISO"
+                echo "WATCHDOG_ELAPSED_SECONDS=$ELAPSED"
+                echo "WATCHDOG_TAP_BYTES=$TAP_BYTES"
+                echo "WATCHDOG_LAST_LOG_LINE=$LAST_LINE"
+                echo 'WATCHDOG_PROCESSES_BEGIN'
+                ps -eo pid,ppid,etime,stat,comm,args | grep -Ei 'node|chromium|chrome|webkit' | grep -v -E 'grep -Ei|full-ci-watchdog' || true
+                echo 'WATCHDOG_PROCESSES_END'
+              } >> "$WATCH"
+              sleep 30
+            done
+          ) &
+          WATCHDOG_PID=$!
+
+          set +e
+          npm run test:ci --silent 2>&1 | tee "$TAP"
+          TEST_EXIT=${PIPESTATUS[0]}
+          set -e
+
+          FULL_CI_END="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+          END_EPOCH="$(date +%s)"
+          DURATION_SECONDS="$((END_EPOCH - START_EPOCH))"
+          touch "$STOP"
+          wait "$WATCHDOG_PID" || true
+
+          POSTCONDITION_EXIT=0
+          if ! grep -q '^# fail 0$' "$TAP"; then
+            POSTCONDITION_EXIT=1
+          fi
+
+          FIRST_NOT_OK_LINE="$(grep -m1 -E '^[[:space:]]*not ok [0-9]+' "$TAP" || true)"
+          FIRST_NOT_OK_NUMBER="$(printf '%s\n' "$FIRST_NOT_OK_LINE" | sed -nE 's/^[[:space:]]*not ok ([0-9]+).*/\1/p')"
+          FIRST_NOT_OK_TITLE="$(printf '%s\n' "$FIRST_NOT_OK_LINE" | sed -nE 's/^[[:space:]]*not ok [0-9]+ - (.*)$/\1/p')"
+          TOTAL_NOT_OK="$(grep -Ec '^[[:space:]]*not ok [0-9]+' "$TAP" || true)"
+          LAST_LOG_LINE="$(tail -n 1 "$TAP" 2>/dev/null | tr '\n' ' ' | cut -c1-1000 || true)"
+
+          TAP_TESTS="$(awk '/^# tests /{v=$3} END{print v}' "$TAP")"
+          TAP_PASS="$(awk '/^# pass /{v=$3} END{print v}' "$TAP")"
+          TAP_FAIL="$(awk '/^# fail /{v=$3} END{print v}' "$TAP")"
+          TAP_CANCELLED="$(awk '/^# cancelled /{v=$3} END{print v}' "$TAP")"
+          TAP_SKIPPED="$(awk '/^# skipped /{v=$3} END{print v}' "$TAP")"
+          TAP_TODO="$(awk '/^# todo /{v=$3} END{print v}' "$TAP")"
+
+          {
+            echo "EXECUTION_SHA=$EXECUTION_SHA"
+            echo "FULL_CI_START=$FULL_CI_START"
+            echo "FULL_CI_END=$FULL_CI_END"
+            echo "FULL_CI_DURATION_SECONDS=$DURATION_SECONDS"
+            echo "FULL_CI_EXIT_CODE=$TEST_EXIT"
+            echo "POSTCONDITION_EXIT_CODE=$POSTCONDITION_EXIT"
+            echo "FIRST_NOT_OK_NUMBER=$FIRST_NOT_OK_NUMBER"
+            echo "FIRST_NOT_OK_TITLE=$FIRST_NOT_OK_TITLE"
+            echo "TOTAL_NOT_OK=$TOTAL_NOT_OK"
+            echo "LAST_LOG_LINE=$LAST_LOG_LINE"
+            echo "TAP_TESTS=$TAP_TESTS"
+            echo "TAP_PASS=$TAP_PASS"
+            echo "TAP_FAIL=$TAP_FAIL"
+            echo "TAP_CANCELLED=$TAP_CANCELLED"
+            echo "TAP_SKIPPED=$TAP_SKIPPED"
+            echo "TAP_TODO=$TAP_TODO"
+          } | tee "$META"
+
+          if [ "$TEST_EXIT" -ne 0 ]; then
+            exit "$TEST_EXIT"
+          fi
+          if [ "$POSTCONDITION_EXIT" -ne 0 ]; then
+            exit "$POSTCONDITION_EXIT"
+          fi
+
+      - name: Print diagnostic evidence
+        if: always()
+        shell: bash
+        run: |
+          set +e
+          TAP="$RUNNER_TEMP/full-ci.tap"
+          META="$RUNNER_TEMP/full-ci-summary.txt"
+          EVIDENCE="$RUNNER_TEMP/full-ci-evidence.txt"
+          {
+            echo '=== METADATA ==='
+            cat "$META" 2>/dev/null || true
+            echo '=== TAP SUMMARY ==='
+            grep -E '^# (tests|suites|pass|fail|cancelled|skipped|todo|duration_ms) ' "$TAP" 2>/dev/null || true
+            echo '=== ALL NOT OK ==='
+            grep -nE '^[[:space:]]*not ok [0-9]+' "$TAP" 2>/dev/null || true
+            echo '=== TEST 528 MARKERS ==='
+            grep -E 'TEST_528|FIRST_POST_|A_STARTED_BEFORE_B|A_HELD_WHILE_B_LOCAL_PERSISTED|CRM_POST_COUNT_|LOCAL_NEXT_|FIRST_RELEASE_|REMOTE_NEXT_|CONTACT_ACTIVITY_COUNT|FOLLOWUP_ACTIVITY_COUNT|LATEST_' "$TAP" 2>/dev/null || true
+            echo '=== LAST 250 LINES ==='
+            tail -n 250 "$TAP" 2>/dev/null || true
+          } | tee "$EVIDENCE"
+
+      - name: Upload Full CI diagnostic artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: a35-full-ci-diagnostic-${{ github.run_id }}
+          if-no-files-found: error
+          retention-days: 30
+          path: |
+            ${{ runner.temp }}/full-ci.tap
+            ${{ runner.temp }}/full-ci-summary.txt
+            ${{ runner.temp }}/full-ci-watchdog.log
+            ${{ runner.temp }}/full-ci-evidence.txt
+            ${{ runner.temp }}/a35-actual-delta.txt
+            ${{ runner.temp }}/a35-expected-delta.txt
