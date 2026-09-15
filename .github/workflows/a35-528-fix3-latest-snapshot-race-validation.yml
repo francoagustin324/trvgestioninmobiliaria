@@ -1,0 +1,333 @@
+name: SEC-FIX A3.5 #528 FIX3 latest snapshot race validation
+
+on:
+  push:
+    branches:
+      - validation/a35-528-fix3-latest-snapshot-race
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sec-fix-a3-5-528-fix3-latest-snapshot-race
+  cancel-in-progress: false
+
+env:
+  EXACT_BASE: 9094c9c6c7a27b82f4ad965f0b6fcdb57356b458
+  FIX3_COMMIT: f82bc3bad74450322c5e85c92ca5577059012145
+  OFFICIAL_A35: fdff36785e90197c9ef384394ad474d9787af72a
+  MAIN_SHA: 68034c60f606326a1d75fc3d448c7e99de49b492
+  PRODUCT_BRANCH: agent/sec-fix-a3-5-stale-role-fallback-fence
+
+jobs:
+  focused-validation:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - name: Checkout exact detached FIX3
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ env.FIX3_COMMIT }}
+          fetch-depth: 0
+
+      - name: Exact parent and TEST-only scope precheck
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$FIX3_COMMIT"
+          test "$(git rev-parse HEAD^)" = "$EXACT_BASE"
+          if git symbolic-ref -q HEAD >/dev/null 2>&1; then
+            echo 'DETACHED_HEAD=NO'
+            exit 1
+          fi
+          test "$(git ls-remote origin refs/heads/$PRODUCT_BRANCH | awk '{print $1}')" = "$OFFICIAL_A35"
+          test "$(git ls-remote origin refs/heads/main | awk '{print $1}')" = "$MAIN_SHA"
+          git diff --name-only "$EXACT_BASE..$FIX3_COMMIT" | LC_ALL=C sort | tee "$RUNNER_TEMP/changed.txt"
+          printf '%s\n' 'src/tests/followup-cloud-persistence-browser.test.ts' > "$RUNNER_TEMP/expected.txt"
+          diff -u "$RUNNER_TEMP/expected.txt" "$RUNNER_TEMP/changed.txt"
+          test ! -e src/tests/a35-528-post-provenance-diagnostic.test.ts
+          grep '^src/' "$RUNNER_TEMP/changed.txt" | grep -v '^src/tests/' > "$RUNNER_TEMP/runtime.txt" || true
+          grep -E '\.sql$' "$RUNNER_TEMP/changed.txt" > "$RUNNER_TEMP/sql.txt" || true
+          grep '^supabase/migrations/' "$RUNNER_TEMP/changed.txt" > "$RUNNER_TEMP/migrations.txt" || true
+          test ! -s "$RUNNER_TEMP/runtime.txt"
+          test ! -s "$RUNNER_TEMP/sql.txt"
+          test ! -s "$RUNNER_TEMP/migrations.txt"
+          echo "FIX3_COMMIT=$FIX3_COMMIT"
+          echo "PARENT_SHA=$(git rev-parse HEAD^)"
+          echo 'CHANGED_FILES=src/tests/followup-cloud-persistence-browser.test.ts'
+          echo 'RUNTIME_DELTA=0'
+          echo 'SQL_DELTA=0'
+          echo 'MIGRATION_DELTA=0'
+          echo "MAIN=$(git ls-remote origin refs/heads/main | awk '{print $1}')"
+          echo "OFFICIAL_A3_5=$(git ls-remote origin refs/heads/$PRODUCT_BRANCH | awk '{print $1}')"
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies and browser prerequisite
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm ci --silent
+          npx playwright install --with-deps chromium
+          test ! -e artifacts
+          echo 'REPO_LOCAL_ARTIFACTS_BEFORE_528=ABSENT'
+
+      - name: Compile TypeScript first
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx tsc
+          test -f dist/tests/followup-cloud-persistence-browser.test.js
+          echo 'TYPESCRIPT_COMPILE=GREEN'
+
+      - name: Test 528 fresh process 1
+        shell: bash
+        run: |
+          set -euo pipefail
+          log="$RUNNER_TEMP/528-fix3-run-1.tap"
+          node --test --test-concurrency=1 dist/tests/followup-cloud-persistence-browser.test.js 2>&1 | tee "$log"
+          grep -q '^# pass 1$' "$log"
+          grep -q '^# fail 0$' "$log"
+          grep -q 'FIRST_POST_CLASSIFICATION=CONTACT_PLUS_FOLLOWUP' "$log"
+          grep -q 'FIRST_POST_NEXT_FOLLOWUP=2026-08-10' "$log"
+          grep -q 'FIRST_RELEASE_PENDING_WHILE_LATEST_LOCAL_SAVED=YES' "$log"
+          grep -q 'CRM_POST_COUNT_BEFORE_RELEASE=1' "$log"
+          grep -q 'LOCAL_LATEST_NEXT_FOLLOWUP=2026-08-14' "$log"
+          grep -q 'LOCAL_LATEST_NEXT_ACTION=Volver a contactar por WhatsApp' "$log"
+          grep -q 'REMOTE_FINAL_NEXT_FOLLOWUP=2026-08-14' "$log"
+          grep -q 'REMOTE_FINAL_NEXT_ACTION=Volver a contactar por WhatsApp' "$log"
+          grep -q 'CONTACT_ACTIVITY_COUNT=1' "$log"
+          grep -q 'FOLLOWUP_ACTIVITY_COUNT=1' "$log"
+          grep -q 'FINAL_DIRTY=false' "$log"
+          grep -q 'FIRST_RELEASE_FORCED=NO' "$log"
+          grep -q 'TEST_528_FORCED_FIRST_RELEASE=NO' "$log"
+          artifact_dir="$(grep 'TEST_528_ARTIFACT_DIR=' "$log" | tail -1 | cut -d= -f2-)"
+          test -n "$artifact_dir"
+          case "$artifact_dir" in "$GITHUB_WORKSPACE"|"$GITHUB_WORKSPACE"/*) echo "repo-local artifact dir: $artifact_dir"; exit 1;; esac
+          test ! -e artifacts
+          echo 'TEST_528_RUN_1=GREEN'
+
+      - name: Test 528 fresh process 2
+        shell: bash
+        run: |
+          set -euo pipefail
+          log="$RUNNER_TEMP/528-fix3-run-2.tap"
+          node --test --test-concurrency=1 dist/tests/followup-cloud-persistence-browser.test.js 2>&1 | tee "$log"
+          grep -q '^# pass 1$' "$log"
+          grep -q '^# fail 0$' "$log"
+          grep -q 'FIRST_POST_CLASSIFICATION=CONTACT_PLUS_FOLLOWUP' "$log"
+          grep -q 'FIRST_POST_NEXT_FOLLOWUP=2026-08-10' "$log"
+          grep -q 'FIRST_RELEASE_PENDING_WHILE_LATEST_LOCAL_SAVED=YES' "$log"
+          grep -q 'CRM_POST_COUNT_BEFORE_RELEASE=1' "$log"
+          grep -q 'LOCAL_LATEST_NEXT_FOLLOWUP=2026-08-14' "$log"
+          grep -q 'LOCAL_LATEST_NEXT_ACTION=Volver a contactar por WhatsApp' "$log"
+          grep -q 'REMOTE_FINAL_NEXT_FOLLOWUP=2026-08-14' "$log"
+          grep -q 'REMOTE_FINAL_NEXT_ACTION=Volver a contactar por WhatsApp' "$log"
+          grep -q 'CONTACT_ACTIVITY_COUNT=1' "$log"
+          grep -q 'FOLLOWUP_ACTIVITY_COUNT=1' "$log"
+          grep -q 'FINAL_DIRTY=false' "$log"
+          grep -q 'FIRST_RELEASE_FORCED=NO' "$log"
+          grep -q 'TEST_528_FORCED_FIRST_RELEASE=NO' "$log"
+          artifact_dir="$(grep 'TEST_528_ARTIFACT_DIR=' "$log" | tail -1 | cut -d= -f2-)"
+          test -n "$artifact_dir"
+          case "$artifact_dir" in "$GITHUB_WORKSPACE"|"$GITHUB_WORKSPACE"/*) echo "repo-local artifact dir: $artifact_dir"; exit 1;; esac
+          test ! -e artifacts
+          echo 'TEST_528_RUN_2=GREEN'
+
+      - name: Test 528 fresh process 3
+        shell: bash
+        run: |
+          set -euo pipefail
+          log="$RUNNER_TEMP/528-fix3-run-3.tap"
+          node --test --test-concurrency=1 dist/tests/followup-cloud-persistence-browser.test.js 2>&1 | tee "$log"
+          grep -q '^# pass 1$' "$log"
+          grep -q '^# fail 0$' "$log"
+          grep -q 'FIRST_POST_CLASSIFICATION=CONTACT_PLUS_FOLLOWUP' "$log"
+          grep -q 'FIRST_POST_NEXT_FOLLOWUP=2026-08-10' "$log"
+          grep -q 'FIRST_RELEASE_PENDING_WHILE_LATEST_LOCAL_SAVED=YES' "$log"
+          grep -q 'CRM_POST_COUNT_BEFORE_RELEASE=1' "$log"
+          grep -q 'LOCAL_LATEST_NEXT_FOLLOWUP=2026-08-14' "$log"
+          grep -q 'LOCAL_LATEST_NEXT_ACTION=Volver a contactar por WhatsApp' "$log"
+          grep -q 'REMOTE_FINAL_NEXT_FOLLOWUP=2026-08-14' "$log"
+          grep -q 'REMOTE_FINAL_NEXT_ACTION=Volver a contactar por WhatsApp' "$log"
+          grep -q 'CONTACT_ACTIVITY_COUNT=1' "$log"
+          grep -q 'FOLLOWUP_ACTIVITY_COUNT=1' "$log"
+          grep -q 'FINAL_DIRTY=false' "$log"
+          grep -q 'FIRST_RELEASE_FORCED=NO' "$log"
+          grep -q 'TEST_528_FORCED_FIRST_RELEASE=NO' "$log"
+          artifact_dir="$(grep 'TEST_528_ARTIFACT_DIR=' "$log" | tail -1 | cut -d= -f2-)"
+          test -n "$artifact_dir"
+          case "$artifact_dir" in "$GITHUB_WORKSPACE"|"$GITHUB_WORKSPACE"/*) echo "repo-local artifact dir: $artifact_dir"; exit 1;; esac
+          test ! -e artifacts
+          echo 'TEST_528_RUN_3=GREEN'
+
+      - name: Build
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm run build --silent
+          echo 'BUILD=GREEN'
+
+      - name: Gate18 complete followup 7 of 7
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --test --test-concurrency=1 \
+            dist/tests/followup-cloud-persistence.test.js \
+            dist/tests/followup-hotfix.test.js 2>&1 | tee "$RUNNER_TEMP/g18.tap"
+          grep -q '^# tests 7$' "$RUNNER_TEMP/g18.tap"
+          grep -q '^# pass 7$' "$RUNNER_TEMP/g18.tap"
+          grep -q '^# fail 0$' "$RUNNER_TEMP/g18.tap"
+          grep -q '^# skipped 0$' "$RUNNER_TEMP/g18.tap"
+          echo 'GATE18=GREEN_7_7'
+
+      - name: A3.5 controls A-G Control F ownerless
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --test --test-concurrency=1 \
+            dist/tests/sec-fix-a3-5-stale-role-fallback-authority.test.js \
+            dist/tests/sec-fix-a3-5-ownerless-normalization.test.js \
+            2>&1 | tee "$RUNNER_TEMP/a35.tap"
+          grep -q '^# tests 9$' "$RUNNER_TEMP/a35.tap"
+          grep -q '^# pass 9$' "$RUNNER_TEMP/a35.tap"
+          grep -q '^# fail 0$' "$RUNNER_TEMP/a35.tap"
+          grep -q 'CONTROL_A_NORMAL_DOWNGRADE=PASS_SAFE' "$RUNNER_TEMP/a35.tap"
+          grep -q 'CONTROL_B_TEAM_VIEW_TAMPER_SYNC=PASS_SAFE' "$RUNNER_TEMP/a35.tap"
+          grep -q 'IDENTITY_SPOOF_AFTER_SYNC=NO' "$RUNNER_TEMP/a35.tap"
+          grep -q 'CONTROL_C1_PRE_PROJECTION_AUTHORITY_FENCE=PASS' "$RUNNER_TEMP/a35.tap"
+          grep -q 'CONTROL_C2_PRE_PROJECTION_AUTHORITY_FENCE=PASS' "$RUNNER_TEMP/a35.tap"
+          grep -q 'CONTROL_D_SYNTHETIC_503_REACHED=YES' "$RUNNER_TEMP/a35.tap"
+          grep -q 'CONTROL_D_SAME_AUTHORITY_OFFLINE_FALLBACK=PASS_SAFE' "$RUNNER_TEMP/a35.tap"
+          grep -q 'CONTROL_E_MISSING=PASS_SAFE' "$RUNNER_TEMP/a35.tap"
+          grep -q 'CONTROL_E_MEMBER_ID_MISMATCH=PASS_SAFE' "$RUNNER_TEMP/a35.tap"
+          grep -q 'CONTROL_E_ROLE_MISMATCH=PASS_SAFE' "$RUNNER_TEMP/a35.tap"
+          grep -q 'CONTROL_E=PASS_SAFE' "$RUNNER_TEMP/a35.tap"
+          grep -q 'CONTROL_F_CLASSIFIER_VALID_TELEMETRY=ALLOWED' "$RUNNER_TEMP/a35.tap"
+          grep -q 'CONTROL_F_CLASSIFIER_STALE_CRM=FORBIDDEN' "$RUNNER_TEMP/a35.tap"
+          grep -q 'CONTROL_F_CLASSIFIER_WRONG_TENANT=FORBIDDEN' "$RUNNER_TEMP/a35.tap"
+          grep -q 'CONTROL_F_CLASSIFIER_WRONG_ACTOR=FORBIDDEN' "$RUNNER_TEMP/a35.tap"
+          grep -q 'CONTROL_F_CLASSIFIER_WRONG_MEMBER=FORBIDDEN' "$RUNNER_TEMP/a35.tap"
+          grep -q 'CONTROL_F_CLASSIFIER_WRONG_CREATOR=FORBIDDEN' "$RUNNER_TEMP/a35.tap"
+          grep -q 'CONTROL_F_CLASSIFIER_WRONG_CLIENT=FORBIDDEN' "$RUNNER_TEMP/a35.tap"
+          grep -q 'CONTROL_F_CLASSIFIER_GENERIC_ACTIVITY=FORBIDDEN' "$RUNNER_TEMP/a35.tap"
+          grep -q 'CONTROL_F_CLASSIFIER_MIXED_ROWS=FORBIDDEN' "$RUNNER_TEMP/a35.tap"
+          grep -q 'CONTROL_F_CRM_SNAPSHOT_POSTS=0' "$RUNNER_TEMP/a35.tap"
+          grep -q 'CONTROL_F_FORBIDDEN_RECORD_POSTS=0' "$RUNNER_TEMP/a35.tap"
+          grep -q 'CONTROL_F=PASS_SAFE' "$RUNNER_TEMP/a35.tap"
+          grep -q 'NORMALIZED_ROLE=Corredor' "$RUNNER_TEMP/a35.tap"
+          grep -q 'OWNER_COUNT=0' "$RUNNER_TEMP/a35.tap"
+          grep -q 'CAN_VIEW_ALL=NO' "$RUNNER_TEMP/a35.tap"
+          grep -q 'CAN_ACCESS_SETTINGS=NO' "$RUNNER_TEMP/a35.tap"
+          grep -q 'CAN_ADMINISTER_TEAM=NO' "$RUNNER_TEMP/a35.tap"
+          echo 'A35_A_G_CONTROL_F_OWNERLESS=GREEN'
+
+      - name: A3.5 controls H-I and empty-roster compatibility
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > dist/tests/a35-owner-preservation-fix3.mjs <<'EOF'
+          import './sec-fix-a1-2-c2-test-setup.js';
+          import assert from 'node:assert/strict';
+          import { initialData } from '../models.js';
+          import { activateStorageForTenant, state } from '../store.js';
+          import { canAccessSettings, canAdministerTeam, canViewAll } from '../team-access.js';
+          import { writeTenantSnapshot } from '../tenant-storage.js';
+          const ORG='00000000-0000-0000-0000-00000000a351';
+          const AUTH='a35-preservation-auth';
+          const OWNER='a35-preservation-owner';
+          const scope=Object.freeze({userId:AUTH,organizationId:ORG});
+          const member=(id,userId,role)=>({id,userId,name:userId,email:`${userId}@example.test`,role,status:'Activo',createdAt:'2026-09-14T00:00:00.000Z'});
+          function crm(members){const v=structuredClone(initialData);v.organization={id:ORG,name:'A3.5 Preservation',seatLimit:null,planLabel:'validation'};v.teamMembers=members;v.activityLog=[];v.clients=[];v.properties=[];v.visits=[];v.offers=[];v.reservations=[];v.contacts=[];v.reminders=[];v.fichas=[];v.conversations=[];return v;}
+          function seed(members){localStorage.clear();writeTenantSnapshot(scope,crm(members),{markDirty:false,reason:'a35-preservation',backup:false});activateStorageForTenant(scope);}
+          seed([member(351,AUTH,'Corredor'),member(352,OWNER,'Dueño')]);
+          const hAuth=state.crm.teamMembers.find(x=>x.userId===AUTH),hOwner=state.crm.teamMembers.find(x=>x.userId===OWNER);
+          assert.equal(hAuth?.role,'Corredor');assert.equal(hOwner?.role,'Dueño');assert.equal(state.crm.teamMembers.filter(x=>x.role==='Dueño').length,1);
+          console.log('CONTROL_H_REAL_OWNER_PRESERVED=PASS_SAFE');
+          seed([member(351,AUTH,'Dueño'),member(352,OWNER,'Corredor')]);
+          const iAuth=state.crm.teamMembers.find(x=>x.userId===AUTH);
+          assert.equal(iAuth?.role,'Dueño');assert.equal(state.crm.teamMembers.filter(x=>x.role==='Dueño').length,1);assert.equal(state.activeMemberId,351);assert.equal(canViewAll(),true);assert.equal(canAccessSettings(),true);assert.equal(canAdministerTeam(),true);
+          console.log('CONTROL_I_REAL_OWNER_PRESERVED=PASS_SAFE');
+          localStorage.clear();writeTenantSnapshot(scope,crm([]),{markDirty:false,reason:'a35-empty-roster',backup:false});activateStorageForTenant(scope);
+          assert.equal(state.crm.teamMembers.length,initialData.teamMembers.length);assert.equal(state.crm.teamMembers[0]?.role,'Dueño');assert.equal(state.crm.teamMembers[0]?.userId,undefined);
+          console.log('FRESH_EMPTY_ROSTER_INITIALDATA_COMPATIBILITY=PASS_SAFE');
+          EOF
+          node dist/tests/a35-owner-preservation-fix3.mjs 2>&1 | tee "$RUNNER_TEMP/a35-hi.tap"
+          grep -q 'CONTROL_H_REAL_OWNER_PRESERVED=PASS_SAFE' "$RUNNER_TEMP/a35-hi.tap"
+          grep -q 'CONTROL_I_REAL_OWNER_PRESERVED=PASS_SAFE' "$RUNNER_TEMP/a35-hi.tap"
+          grep -q 'FRESH_EMPTY_ROSTER_INITIALDATA_COMPATIBILITY=PASS_SAFE' "$RUNNER_TEMP/a35-hi.tap"
+          echo 'A3_5_FOCUSED=GREEN_A_I_OWNERLESS_CONTROL_F'
+
+      - name: Tenant cloud regressions
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --test --test-concurrency=1 \
+            dist/tests/cloud-api-compatible.test.js \
+            dist/tests/cloud-records.test.js \
+            dist/tests/cloud-remote-verification.test.js \
+            dist/tests/cloud-save-serial.test.js \
+            dist/tests/sec-fix-a3-2-authenticated-write-identity.test.js \
+            dist/tests/sec-fix-a3-2-runtime-wiring.test.js
+          echo 'TENANT_CLOUD=GREEN'
+
+      - name: DR02 DR03
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --test --test-concurrency=1 \
+            dist/tests/sec-fix-a1-dr02-cloud-writer-lease.test.js \
+            dist/tests/sec-fix-a1-dr03-stale-sync-metadata.test.js
+          echo 'DR02_DR03=GREEN'
+
+      - name: Sync safety reconciliation recovery
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --test --test-concurrency=1 \
+            dist/tests/sync-safety.test.js \
+            dist/tests/sync-reconciliation.test.js \
+            dist/tests/sync-recovery-bootstrap.test.js \
+            dist/tests/sync-conflict-ui.test.js \
+            dist/tests/sec-fix-a1-2-f-recovery-async.test.js \
+            dist/tests/sec-fix-a1-2-f-tenant-recovery-cutover.test.js \
+            dist/tests/sec-fix-a1-fdr01-recovery-authority.test.js
+          echo 'SYNC_RECOVERY=GREEN'
+
+      - name: Final artifact scope and git-status proof
+        shell: bash
+        run: |
+          set -euo pipefail
+          test ! -e artifacts
+          git diff --quiet
+          git diff --cached --quiet
+          test "$(git rev-parse HEAD)" = "$FIX3_COMMIT"
+          test "$(git rev-parse HEAD^)" = "$EXACT_BASE"
+          test "$(git ls-remote origin refs/heads/$PRODUCT_BRANCH | awk '{print $1}')" = "$OFFICIAL_A35"
+          test "$(git ls-remote origin refs/heads/main | awk '{print $1}')" = "$MAIN_SHA"
+          git diff --name-only "$EXACT_BASE..$FIX3_COMMIT" | LC_ALL=C sort > "$RUNNER_TEMP/final-changed.txt"
+          diff -u "$RUNNER_TEMP/expected.txt" "$RUNNER_TEMP/final-changed.txt"
+          grep '^src/' "$RUNNER_TEMP/final-changed.txt" | grep -v '^src/tests/' > "$RUNNER_TEMP/final-runtime.txt" || true
+          grep -E '\.sql$' "$RUNNER_TEMP/final-changed.txt" > "$RUNNER_TEMP/final-sql.txt" || true
+          grep '^supabase/migrations/' "$RUNNER_TEMP/final-changed.txt" > "$RUNNER_TEMP/final-migrations.txt" || true
+          test ! -s "$RUNNER_TEMP/final-runtime.txt"
+          test ! -s "$RUNNER_TEMP/final-sql.txt"
+          test ! -s "$RUNNER_TEMP/final-migrations.txt"
+          git status --porcelain --untracked-files=normal | LC_ALL=C sort | tee "$RUNNER_TEMP/final-status.txt"
+          cat > "$RUNNER_TEMP/expected-status.txt" <<'EOF'
+          ?? dist/
+          ?? extension/trv-fichas-chrome.zip
+          ?? node_modules/
+          EOF
+          sed -i 's/^          //' "$RUNNER_TEMP/expected-status.txt"
+          LC_ALL=C sort -o "$RUNNER_TEMP/expected-status.txt" "$RUNNER_TEMP/expected-status.txt"
+          diff -u "$RUNNER_TEMP/expected-status.txt" "$RUNNER_TEMP/final-status.txt"
+          echo 'MAIN_UNCHANGED=YES'
+          echo 'OFFICIAL_A3_5_UNCHANGED=YES'
+          echo 'RUNTIME_DELTA=0'
+          echo 'SQL_DELTA=0'
+          echo 'MIGRATION_DELTA=0'
+          echo 'FOCUSED_VALIDATION=GREEN'
