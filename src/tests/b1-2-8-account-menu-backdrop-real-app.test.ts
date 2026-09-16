@@ -113,7 +113,7 @@ async function h5InstallSyntheticAuthority(
   context: BrowserContext,
   origin: string,
   organizationId: string,
-  member: { id: number; userId: string; name: string; email?: string; phone?: string; role?: string },
+  member: { id: number; userId?: string; name: string; email?: string; phone?: string; role?: string },
 ): Promise<void> {
   let syntheticRecords: unknown[] = [];
   await context.route('**/api/cloud-config', async (route) => {
