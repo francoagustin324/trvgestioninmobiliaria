@@ -39,7 +39,7 @@ replace_once(
 replace_once(
     'src/tests/b1-2-8-account-menu-responsive-real-app.test.ts',
     "        const page = await adminContext.newPage();\n        await loadApplication(page, url);\n        assert.equal(await page.locator('[data-settings-security-recovery]').count(), 1);\n",
-    "        const page = await adminContext.newPage();\n        await loadApplication(page, url);\n        await seedRecoveryBackup(page, 'Administrador');\n        document.dispatchEvent;\n        await page.evaluate(() => document.dispatchEvent(new CustomEvent('trv-render')));\n        assert.equal(await page.locator('[data-settings-security-recovery]').count(), 1);\n",
+    "        const page = await adminContext.newPage();\n        await loadApplication(page, url);\n        await seedRecoveryBackup(page, 'Administrador');\n        await page.evaluate(() => document.dispatchEvent(new CustomEvent('trv-render')));\n        assert.equal(await page.locator('[data-settings-security-recovery]').count(), 1);\n",
 )
 replace_once(
     'src/tests/b1-2-8-account-menu-responsive-real-app.test.ts',
