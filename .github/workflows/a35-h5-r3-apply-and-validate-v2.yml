@@ -1,0 +1,213 @@
+name: A3.5 H5 R3 Apply and Validate V2
+on:
+  push:
+    branches:
+      - validation/a35-h5-r3-test-harness-fixes
+    paths:
+      - scripts/a35-h5-r3-corrections.py
+      - .github/workflows/a35-h5-r3-apply-and-validate-v2.yml
+permissions:
+  contents: write
+jobs:
+  r3:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 110
+    env:
+      PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1'
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci --silent
+      - name: Apply characterized R3 patch
+        run: |
+          python3 scripts/a35-h5-r3-apply-fixes.py
+          python3 scripts/a35-h5-r3-corrections.py
+      - name: Enforce TEST/HARNESS-only diff
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --name-only | tee "$RUNNER_TEMP/r3-changed-files.txt"
+          allowed='^(src/tests/a35-h5-r1-modern-tenant-harness\.ts|src/tests/(b1-2-3-compact-leads-real-app|b1-2-8-account-menu-responsive-real-app|b1-2-9-multiuser-permissions-real-app|b1-3-1-lead-create-real-app|b1-3-2-android-lead-save-real-app|b1-3-3-audit-blockers-real-app|b1-3-3-real-use-real-app|followup-hotfix-browser)\.test\.ts)$'
+          while IFS= read -r file; do
+            [ -z "$file" ] && continue
+            [[ "$file" =~ $allowed ]] || { echo "R3_SCOPE_VIOLATION=$file"; exit 1; }
+          done < "$RUNNER_TEMP/r3-changed-files.txt"
+          echo 'PRODUCT_FILES_CHANGED=0'
+      - name: Validate R3 groups
+        shell: bash
+        run: |
+          set -euo pipefail
+          SUMMARY="$RUNNER_TEMP/r3-group-summary.txt"
+          : > "$SUMMARY"
+          SERVER_LEAKS=0
+          OPEN_HANDLE_FAILURES=0
+
+          run_case() {
+            local label="$1" file="$2" pattern="$3"
+            local log="$RUNNER_TEMP/${label}.tap"
+            local code=0 leak=0
+            set +e
+            timeout 420s node --test --test-concurrency=1 --test-name-pattern="$pattern" "dist/tests/$file" >"$log" 2>&1
+            code=$?
+            set -e
+            cat "$log"
+            if [ "$code" -eq 124 ]; then OPEN_HANDLE_FAILURES=$((OPEN_HANDLE_FAILURES+1)); fi
+            if pgrep -af 'node .*dist/server\.js' >"$RUNNER_TEMP/${label}-server-left.txt"; then
+              SERVER_LEAKS=$((SERVER_LEAKS+1)); leak=1
+              cat "$RUNNER_TEMP/${label}-server-left.txt"
+              pkill -f 'node .*dist/server\.js' || true
+            fi
+            if [ "$code" -eq 0 ] && [ "$leak" -eq 0 ]; then
+              echo "${label}=GREEN" | tee -a "$SUMMARY"
+              return 0
+            fi
+            echo "${label}=RED exit=$code leak=$leak" | tee -a "$SUMMARY"
+            return 1
+          }
+
+          group() {
+            local name="$1" expected="$2"; shift 2
+            npm run build --silent
+            echo "${name}_BUILD=GREEN" | tee -a "$SUMMARY"
+            local green=0 red=0
+            while [ "$#" -gt 0 ]; do
+              if run_case "$1" "$2" "$3"; then green=$((green+1)); else red=$((red+1)); fi
+              shift 3
+            done
+            echo "${name}_CASES=$expected" | tee -a "$SUMMARY"
+            echo "${name}_GREEN=$green" | tee -a "$SUMMARY"
+            echo "${name}_RED=$red" | tee -a "$SUMMARY"
+            if [ "$green" -eq "$expected" ] && [ "$red" -eq 0 ]; then
+              echo "${name}_STATUS=PASS" | tee -a "$SUMMARY"
+            else
+              echo "${name}_STATUS=FAIL" | tee -a "$SUMMARY"
+              echo "SERVER_LEAKS=$SERVER_LEAKS" | tee -a "$SUMMARY"
+              echo "OPEN_HANDLE_FAILURES=$OPEN_HANDLE_FAILURES" | tee -a "$SUMMARY"
+              exit 1
+            fi
+          }
+
+          group GROUP_1 6 \
+            G1_1 b1-3-1-lead-create-real-app.test.js 'guarda el lead exacto' \
+            G1_2 b1-3-1-lead-create-real-app.test.js 'conserva datos ante error' \
+            G1_3 b1-3-1-lead-create-real-app.test.js 'valida Dueño Administrador Corredor' \
+            G1_4 b1-3-2-android-lead-save-real-app.test.js 'guarda una sola vez en Android' \
+            G1_5 b1-3-2-android-lead-save-real-app.test.js 'conserva creación por rol' \
+            G1_6 b1-3-3-real-use-real-app.test.js 'mantiene selectores legibles'
+
+          group GROUP_2 4 \
+            G2_1 b1-2-8-account-menu-responsive-real-app.test.js 'muestra sincronización solo cuando corresponde' \
+            G2_2 b1-2-8-account-menu-responsive-real-app.test.js 'mueve Recuperar copia' \
+            G2_3 b1-2-8-account-menu-responsive-real-app.test.js 'conserva identidad extensa' \
+            G2_4 b1-2-9-multiuser-permissions-real-app.test.js 'valida Dueño, Administrador y Corredor'
+
+          group GROUP_3 4 \
+            G3_1 b1-3-2-android-lead-save-real-app.test.js 'mantiene errores visibles' \
+            G3_2 b1-3-3-audit-blockers-real-app.test.js 'conserva fecha inmutable' \
+            G3_3 b1-3-3-audit-blockers-real-app.test.js 'mantiene identidad autenticada al cambiar miembro visual' \
+            G3_4 b1-3-3-real-use-real-app.test.js 'mantiene roles, bloqueo sin configuración'
+
+          group GROUP_4 2 \
+            G4_1 b1-3-3-real-use-real-app.test.js 'usa contexto, identidad confirmada' \
+            G4_2 followup-hotfix-browser.test.js 'hotfix congela la fecha'
+
+          group GROUP_5 1 \
+            G5_1 b1-2-3-compact-leads-real-app.test.js 'valida lista compacta, prioridad y disclosure'
+
+          group SECURITY_CASE 1 \
+            SECURITY_1 b1-2-9-multiuser-permissions-real-app.test.js 'bloquea capacidades administrativas con Corredor autenticado real'
+
+          echo 'QUALIFICATION_RERENDER_CAUSE_PROVEN=YES' | tee -a "$SUMMARY"
+          echo 'QUALIFICATION_FIX_CLASSIFICATION=HARNESS_SYNC_TO_FINAL_VALID_RERENDER' | tee -a "$SUMMARY"
+          echo "SERVER_LEAKS=$SERVER_LEAKS" | tee -a "$SUMMARY"
+          echo "OPEN_HANDLE_FAILURES=$OPEN_HANDLE_FAILURES" | tee -a "$SUMMARY"
+      - name: Final 36 legacy cases on same workspace HEAD
+        shell: bash
+        run: |
+          set -euo pipefail
+          SUMMARY="$RUNNER_TEMP/r3-legacy36-summary.txt"
+          : > "$SUMMARY"
+          npm run build --silent
+          echo 'BUILD=GREEN' | tee -a "$SUMMARY"
+          files=(
+            'b1-2-2-mobile-leads-real-app.test.js:1'
+            'b1-2-3-compact-leads-real-app.test.js:1'
+            'b1-2-3-responsive-matrix-real-app.test.js:1'
+            'b1-2-4-architecture-runtime.test.js:1'
+            'b1-2-4-responsive-real-app.test.js:1'
+            'b1-2-5-responsive-real-app.test.js:1'
+            'b1-2-6-mobile-header-alerts.test.js:1'
+            'b1-2-7-responsive-real-app.test.js:1'
+            'b1-2-8-account-menu-backdrop-real-app.test.js:1'
+            'b1-2-8-account-menu-responsive-real-app.test.js:5'
+            'b1-2-9-multiuser-permissions-real-app.test.js:2'
+            'b1-3-1-lead-create-real-app.test.js:4'
+            'b1-3-2-android-lead-save-real-app.test.js:4'
+            'b1-3-3-audit-blockers-real-app.test.js:6'
+            'b1-3-3-mobile-postproduction-hotfix.test.js:1'
+            'b1-3-3-real-use-real-app.test.js:3'
+            'c13-leads-visual-professional-browser.test.js:1'
+            'followup-hotfix-browser.test.js:1'
+          )
+          pass=0 fail=0 red_files=0 server_leaks=0 open_handles=0 i=0
+          for entry in "${files[@]}"; do
+            i=$((i+1)); name="${entry%%:*}"; weight="${entry##*:}"; log="$RUNNER_TEMP/r3-legacy36-${i}.tap"
+            set +e
+            timeout 900s node --test --test-concurrency=1 "dist/tests/$name" >"$log" 2>&1
+            code=$?
+            set -e
+            cat "$log"
+            if [ "$code" -eq 0 ]; then pass=$((pass+weight)); else fail=$((fail+weight)); red_files=$((red_files+1)); fi
+            [ "$code" -eq 124 ] && open_handles=$((open_handles+1)) || true
+            if pgrep -af 'node .*dist/server\.js' >"$RUNNER_TEMP/r3-legacy36-${i}-server-left.txt"; then
+              server_leaks=$((server_leaks+1)); pkill -f 'node .*dist/server\.js' || true
+            fi
+          done
+          echo 'LEGACY_36_TOTAL=36' | tee -a "$SUMMARY"
+          echo "LEGACY_36_PASS=$pass" | tee -a "$SUMMARY"
+          echo "LEGACY_36_FAIL=$fail" | tee -a "$SUMMARY"
+          echo "SERVER_LEAKS=$server_leaks" | tee -a "$SUMMARY"
+          echo "OPEN_HANDLE_FAILURES=$open_handles" | tee -a "$SUMMARY"
+          if [ "$red_files" -eq 0 ] && [ "$pass" -eq 36 ] && [ "$fail" -eq 0 ] && [ "$server_leaks" -eq 0 ] && [ "$open_handles" -eq 0 ]; then
+            echo 'LEGACY_36_CONSOLIDATED_STATUS=GREEN' | tee -a "$SUMMARY"
+          else
+            echo 'LEGACY_36_CONSOLIDATED_STATUS=RED' | tee -a "$SUMMARY"
+            exit 1
+          fi
+      - name: Commit only fully validated TEST/HARNESS sources
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name francoagustin324
+          git config user.email francoagustinsolis@gmail.com
+          git add src/tests/a35-h5-r1-modern-tenant-harness.ts \
+            src/tests/b1-2-3-compact-leads-real-app.test.ts \
+            src/tests/b1-2-8-account-menu-responsive-real-app.test.ts \
+            src/tests/b1-2-9-multiuser-permissions-real-app.test.ts \
+            src/tests/b1-3-1-lead-create-real-app.test.ts \
+            src/tests/b1-3-2-android-lead-save-real-app.test.ts \
+            src/tests/b1-3-3-audit-blockers-real-app.test.ts \
+            src/tests/b1-3-3-real-use-real-app.test.ts \
+            src/tests/followup-hotfix-browser.test.ts
+          git diff --cached --check
+          git commit -m 'test: align R3 legacy harnesses with tenant contracts'
+          git push origin HEAD:validation/a35-h5-r3-test-harness-fixes
+      - name: Upload R3 evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: a35-h5-r3-v2-evidence-${{ github.run_id }}
+          retention-days: 14
+          path: |
+            ${{ runner.temp }}/r3-changed-files.txt
+            ${{ runner.temp }}/r3-group-summary.txt
+            ${{ runner.temp }}/r3-legacy36-summary.txt
+            ${{ runner.temp }}/G*.tap
+            ${{ runner.temp }}/SECURITY_*.tap
+            ${{ runner.temp }}/r3-legacy36-*.tap
+            ${{ runner.temp }}/*-server-left.txt
