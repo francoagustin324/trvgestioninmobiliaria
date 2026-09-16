@@ -12,6 +12,7 @@ const STORAGE_KEY = `trv-crm-basico:user:${USER_ID}`;
 const PORT = 62753;
 const HIDDEN_SEARCH = '__r2_lead_oculto__';
 const HIDDEN_MESSAGE = 'Este lead está oculto por los filtros actuales. Ajustá o limpiá los filtros para verlo sin perder tu selección.';
+const SYNTHETIC_CLOUD_POST_HISTORY = new WeakMap<BrowserContext, unknown[]>();
 
 interface ScrollCall {
   clientId: string;
@@ -248,6 +249,8 @@ function syntheticJson(body: unknown, status = 200) {
 
 async function installSyntheticAuthority(context: BrowserContext, origin: string): Promise<void> {
   let syntheticRecords: unknown[] = [];
+  const syntheticPostHistory: unknown[] = [];
+  SYNTHETIC_CLOUD_POST_HISTORY.set(context, syntheticPostHistory);
   const ownerMembership = syntheticMembership(1, USER_ID, 'Franco R2', 'owner');
   const brokerMembership = syntheticMembership(2, 'hotfix-leads-ux-r2-broker', 'Corredor R2', 'agent');
 
@@ -308,7 +311,9 @@ async function installSyntheticAuthority(context: BrowserContext, origin: string
       }
       if (request.method() === 'POST') {
         const body = request.postDataJSON();
-        syntheticRecords = Array.isArray(body) ? structuredClone(body) : [structuredClone(body)];
+        const postedRecords = Array.isArray(body) ? structuredClone(body) : [structuredClone(body)];
+        syntheticPostHistory.push(...postedRecords);
+        syntheticRecords = postedRecords;
         await route.fulfill(syntheticJson(syntheticRecords, 201));
         return;
       }
@@ -519,6 +524,27 @@ async function telemetrySnapshot(page: Page): Promise<{ entries: Array<[string, 
     entries.sort(([left], [right]) => left.localeCompare(right));
     eventTypes.sort();
     return { entries, eventTypes };
+  });
+}
+
+function syntheticRecommendationTelemetrySnapshot(context: BrowserContext): Array<{
+  entityType: string;
+  recordKind: string;
+  eventType: string;
+  eventId: string;
+}> {
+  return (SYNTHETIC_CLOUD_POST_HISTORY.get(context) || []).flatMap((value) => {
+    if (!value || typeof value !== 'object') return [];
+    const record = value as Record<string, unknown>;
+    if (record.entity_type !== 'activity' || !record.payload || typeof record.payload !== 'object') return [];
+    const payload = record.payload as Record<string, unknown>;
+    if (payload.recordKind !== 'supervised_recommendation_event') return [];
+    return [{
+      entityType: String(record.entity_type),
+      recordKind: String(payload.recordKind),
+      eventType: String(payload.eventType || ''),
+      eventId: String(payload.eventId || ''),
+    }];
   });
 }
 
@@ -781,8 +807,18 @@ test('HOTFIX UX POST-B1.4.2 R3 — mobile tap, target y contraste accesible exac
           const crmBefore = await crmSnapshot(page);
           const whatsappBefore = await whatsAppSnapshot(page);
           const telemetryBefore = await telemetrySnapshot(page);
-          assert.ok(telemetryBefore.eventTypes.includes('RECOMMENDATION_SHOWN'), 'Debe aislarse SHOWN legítimo del render inicial.');
-          assert.equal(telemetryBefore.eventTypes.includes('RECOMMENDATION_DECISION'), false, 'Render inicial no debe contener DECISION.');
+          const syntheticTelemetryBefore = syntheticRecommendationTelemetrySnapshot(context);
+          assert.ok(
+            syntheticTelemetryBefore.some((event) => event.entityType === 'activity'
+              && event.recordKind === 'supervised_recommendation_event'
+              && event.eventType === 'RECOMMENDATION_SHOWN'),
+            'Debe aislarse SHOWN legítimo del render inicial en el synthetic cloud.',
+          );
+          assert.equal(
+            syntheticTelemetryBefore.some((event) => event.eventType === 'RECOMMENDATION_DECISION'),
+            false,
+            'Render inicial no debe contener DECISION.',
+          );
 
           await clearScrollEvidence(page);
           await queueButton.click();
@@ -790,7 +826,12 @@ test('HOTFIX UX POST-B1.4.2 R3 — mobile tap, target y contraste accesible exac
 
           assert.equal(await crmSnapshot(page), crmBefore, 'Navegar no debe mutar CRM persistido.');
           assert.deepEqual(await whatsAppSnapshot(page), whatsappBefore, 'Navegar no debe mutar estado comercial WhatsApp.');
-          assert.deepEqual(await telemetrySnapshot(page), telemetryBefore, 'Navegar no debe mutar lifecycle/outbox ni generar DECISION.');
+          assert.deepEqual(await telemetrySnapshot(page), telemetryBefore, 'Navegar no debe mutar lifecycle/outbox local.');
+          assert.deepEqual(
+            syntheticRecommendationTelemetrySnapshot(context),
+            syntheticTelemetryBefore,
+            'Navegar no debe generar nueva telemetría cloud ni DECISION.',
+          );
         } finally {
           await context.close();
         }
