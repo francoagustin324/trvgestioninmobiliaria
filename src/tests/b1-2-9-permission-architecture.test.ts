@@ -71,10 +71,12 @@ test('B1.2.9 protege Configuración, recuperación y Equipo al renderizar y al e
   assert.match(users, /const statusActor = authenticatedTeamActor\(renderScope, renderLease\);\s+if \(!target \|\| !canChangeTeamMemberStatus\(target, statusActor\)\)/);
   assert.match(users, /const actor = authenticatedTenantMember\(scope\);\s+if \(!actor\) throw new Error\('AUTHENTICATED_TENANT_MEMBER_REQUIRED'\);/);
 
-  const guardPosition = store.indexOf('if (!canRestoreLatestLocalBackup()) return false;');
-  const mutationPosition = store.indexOf('const restored = restoreLatestBackup();');
-  assert.ok(guardPosition >= 0, 'Falta el guard de ejecución de recuperación.');
-  assert.ok(mutationPosition > guardPosition, 'La autorización debe evaluarse antes de leer o aplicar la copia.');
+  const guardPosition = store.indexOf('if (!canRestoreLatestLocalBackup(scope)) return false;');
+  const mutationPosition = store.indexOf('const restored = restoreLatestTenantBackup(scope);');
+  assert.ok(guardPosition >= 0, 'Falta el guard tenant-aware de ejecución de recuperación.');
+  assert.ok(mutationPosition > guardPosition, 'La autorización tenant-aware debe evaluarse antes de leer o aplicar la copia.');
+  assert.match(store, /if \(!tenantScopesEqual\(scope, runtimeLease\.scope\)\) throw new Error\(TENANT_RUNTIME_STALE\);/);
+  assert.match(store, /assertTenantRuntimeLeaseCurrent\(runtimeLease\);[\s\S]*if \(!canRestoreLatestLocalBackup\(scope\)\) return false;[\s\S]*assertTenantRuntimeLeaseCurrent\(runtimeLease\);[\s\S]*const restored = restoreLatestTenantBackup\(scope\);/);
   assert.match(store, /roleCanManageTeam\(member\.role\)/);
 });
 
