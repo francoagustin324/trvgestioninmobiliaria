@@ -22,14 +22,16 @@ jobs:
           fetch-depth: 1
           persist-credentials: false
 
-      - name: Print every test startServer call with lifecycle context
+      - name: Capture every test startServer call with lifecycle context
         shell: python
         run: |
           from pathlib import Path
 
+          out = Path('/tmp/lifecycle-inventory.txt')
           root = Path('src/tests')
           total = 0
           files = set()
+          chunks = []
           for path in sorted(root.glob('*.test.ts')):
               lines = path.read_text(encoding='utf-8').splitlines()
               for idx, line in enumerate(lines):
@@ -37,13 +39,24 @@ jobs:
                       continue
                   total += 1
                   files.add(str(path))
-                  start = max(0, idx - 8)
-                  end = min(len(lines), idx + 26)
-                  print(f'=== STARTSERVER_OCCURRENCE {total} {path}:{idx + 1} ===')
+                  start = max(0, idx - 12)
+                  end = min(len(lines), idx + 40)
+                  chunks.append(f'=== STARTSERVER_OCCURRENCE {total} {path}:{idx + 1} ===')
                   for line_no in range(start, end):
-                      print(f'{line_no + 1:05d}: {lines[line_no]}')
-                  print('=== END_OCCURRENCE ===')
-          print(f'ALL_STARTSERVER_OCCURRENCES={total}')
-          print(f'ALL_STARTSERVER_FILES={len(files)}')
+                      chunks.append(f'{line_no + 1:05d}: {lines[line_no]}')
+                  chunks.append('=== END_OCCURRENCE ===')
+          chunks.append(f'ALL_STARTSERVER_OCCURRENCES={total}')
+          chunks.append(f'ALL_STARTSERVER_FILES={len(files)}')
           for path in sorted(files):
-              print(f'STARTSERVER_FILE={path}')
+              chunks.append(f'STARTSERVER_FILE={path}')
+          text = '\n'.join(chunks) + '\n'
+          out.write_text(text, encoding='utf-8')
+          print(text)
+
+      - name: Upload lifecycle inventory
+        uses: actions/upload-artifact@v4
+        with:
+          name: a35-h1-lifecycle-inventory-${{ github.run_id }}
+          if-no-files-found: error
+          retention-days: 14
+          path: /tmp/lifecycle-inventory.txt
