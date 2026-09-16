@@ -4,6 +4,8 @@ on:
   push:
     branches:
       - validation/a35-h1-538-lifecycle
+    paths:
+      - src/tests/hotfix-leads-ux-atender-ahora-browser.test.ts
 
 permissions:
   contents: read
