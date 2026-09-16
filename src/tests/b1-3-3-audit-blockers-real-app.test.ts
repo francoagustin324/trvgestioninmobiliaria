@@ -10,6 +10,7 @@ import {
   type Page,
 } from 'playwright';
 import { initialData, type Client, type CrmData, type TeamMember, type TeamRole } from '../models.js';
+import { activateA35H5R1RecordsOutage, armA35H5R1RecordsOutage, installA35H5R1ModernTenantHarness } from './a35-h5-r1-modern-tenant-harness.js';
 
 const sessionKey = 'propcontrol-cloud-session-v1';
 const activeMemberKey = 'propcontrol-active-team-member-v1';
@@ -197,9 +198,8 @@ async function contextFor(
 ): Promise<BrowserContext> {
   const current = identity('Dueño');
   const context = await browser.newContext(contextOptions(viewport));
-  await context.route('**/api/cloud-config', async (route) => {
-    await route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ message: 'Nube de prueba no disponible.' }) });
-  });
+  await installA35H5R1ModernTenantHarness(context, crm, current.userId);
+  armA35H5R1RecordsOutage(context);
   await context.addInitScript(({ data, session, memberId, keys, marker, identityKey, configuredIdentity }) => {
     if (!localStorage.getItem(marker)) {
       localStorage.setItem(marker, '1');
@@ -232,6 +232,7 @@ async function load(page: Page, url: string): Promise<void> {
   await page.waitForSelector('#crm.active', { state: 'visible', timeout: 25_000 });
   await page.locator('#mvp-lead-order').waitFor({ state: 'attached' });
   await page.waitForFunction(() => document.querySelector<HTMLSelectElement>('#mvp-lead-order')?.value === 'recent');
+  activateA35H5R1RecordsOutage(page.context());
 }
 
 async function snapshot(page: Page): Promise<CrmData> {
