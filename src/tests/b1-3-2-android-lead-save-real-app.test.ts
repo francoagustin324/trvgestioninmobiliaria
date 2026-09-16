@@ -10,6 +10,7 @@ import {
   type Page,
 } from 'playwright';
 import { initialData, type Client, type CrmData, type TeamMember, type TeamRole } from '../models.js';
+import { activateA35H5R1RecordsOutage, armA35H5R1RecordsOutage, installA35H5R1ModernTenantHarness } from './a35-h5-r1-modern-tenant-harness.js';
 
 const sessionKey = 'propcontrol-cloud-session-v1';
 const activeMemberKey = 'propcontrol-active-team-member-v1';
@@ -166,6 +167,8 @@ async function contextFor(
 ): Promise<BrowserContext> {
   const current = identity(role);
   const context = await browser.newContext(contextOptions(viewport));
+  const crm = fixture(role, clients);
+  await installA35H5R1ModernTenantHarness(context, crm, current.userId);
   await context.addInitScript(({ crm, session, memberId, keys, markerKey }) => {
     if (localStorage.getItem(markerKey)) return;
     localStorage.setItem(markerKey, '1');
@@ -179,7 +182,7 @@ async function contextFor(
     }));
     localStorage.setItem(keys.activeMember, String(memberId));
   }, {
-    crm: fixture(role, clients),
+    crm,
     session: {
       accessToken: `access-${current.userId}`,
       refreshToken: `refresh-${current.userId}`,
@@ -194,20 +197,14 @@ async function contextFor(
   return context;
 }
 
-async function installCloudFailure(context: BrowserContext, latency = 350): Promise<void> {
-  await context.route('**/api/cloud-config', async (route) => {
-    await new Promise((resolve) => setTimeout(resolve, latency));
-    await route.fulfill({
-      status: 503,
-      contentType: 'application/json',
-      body: JSON.stringify({ message: 'Nube B1.3.2 temporalmente no disponible.' }),
-    });
-  });
+async function installCloudFailure(context: BrowserContext, _latency = 350): Promise<void> {
+  armA35H5R1RecordsOutage(context);
 }
 
 async function load(page: Page, url: string): Promise<void> {
   await page.goto(url, { waitUntil: 'domcontentloaded' });
   await page.waitForSelector('#crm.active', { state: 'visible', timeout: 25_000 });
+  activateA35H5R1RecordsOutage(page.context());
 }
 
 async function throttleMotorola(page: Page): Promise<void> {
@@ -299,6 +296,8 @@ async function closeAndReopenWithStorage(
   const storageState = await context.storageState();
   await context.close();
   const reopened = await browser.newContext({ ...contextOptions({ width: 390, height: 844 }), storageState });
+  const reopenedCrm = fixture('Dueño');
+  await installA35H5R1ModernTenantHarness(reopened, reopenedCrm, identity('Dueño').userId);
   await installCloudFailure(reopened, 80);
   const page = await reopened.newPage();
   await load(page, url);
