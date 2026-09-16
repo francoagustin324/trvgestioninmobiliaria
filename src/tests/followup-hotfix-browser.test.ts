@@ -4,6 +4,7 @@ import { existsSync, mkdirSync } from 'node:fs';
 import test from 'node:test';
 import { chromium, type Browser, type BrowserContext, type Page } from 'playwright';
 import { initialData, type CrmData, type TeamMember } from '../models.js';
+import { installA35H5R1ModernTenantHarness } from './a35-h5-r1-modern-tenant-harness.js';
 
 const FIXED_TIME = new Date('2026-08-05T23:59:30-03:00');
 const AFTER_MIDNIGHT = new Date('2026-08-06T00:01:00-03:00');
@@ -135,6 +136,7 @@ async function browserContext(browser: Browser): Promise<BrowserContext> {
     timezoneId: 'America/Argentina/Cordoba',
     colorScheme: 'dark',
   });
+  await installA35H5R1ModernTenantHarness(context, crm, USER_ID);
   await context.addInitScript(({ data, sessionKey, storageKey, syncKey, activeMemberKey, identityStorageKey }) => {
     const target = window as FollowUpTestWindow;
     target.__followUpCloudMessages = [];
