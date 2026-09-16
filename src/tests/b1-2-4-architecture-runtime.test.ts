@@ -4,6 +4,7 @@ import { existsSync } from 'node:fs';
 import test from 'node:test';
 import { chromium, type Browser, type BrowserContext, type Page } from 'playwright';
 import { initialData, type Client, type CommercialStage, type CrmData } from '../models.js';
+import { installA35H5R1ModernTenantHarness } from './a35-h5-r1-modern-tenant-harness.js';
 
 const root = process.cwd();
 const mobileUa = 'Mozilla/5.0 (Linux; Android 14; Pixel 7 Build/AP2A.240705.004) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Mobile Safari/537.36';
@@ -136,6 +137,8 @@ async function contextFor(browser: Browser): Promise<BrowserContext> {
     locale: 'es-AR',
     colorScheme: 'dark',
   });
+  const crm = crmFixture();
+  await installA35H5R1ModernTenantHarness(context, crm, 'b124-owner');
   await context.addInitScript(({ data }) => {
     const userId = 'b124-owner';
     const key = `trv-crm-basico:user:${userId}`;
@@ -153,7 +156,7 @@ async function contextFor(browser: Browser): Promise<BrowserContext> {
       lastCloudSavedAt: new Date().toISOString(),
     }));
     localStorage.setItem('propcontrol-active-team-member-v1', '1');
-  }, { data: crmFixture() });
+  }, { data: crm });
   return context;
 }
 

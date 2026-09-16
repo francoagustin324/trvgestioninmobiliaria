@@ -4,6 +4,7 @@ import { existsSync, mkdirSync } from 'node:fs';
 import test from 'node:test';
 import { chromium, type Browser, type BrowserContext, type Page } from 'playwright';
 import { initialData, type CrmData, type TeamMember, type TeamRole } from '../models.js';
+import { installA35H5R1ModernTenantHarness } from './a35-h5-r1-modern-tenant-harness.js';
 
 const sessionKey = 'propcontrol-cloud-session-v1';
 const activeMemberKey = 'propcontrol-active-team-member-v1';
@@ -132,6 +133,8 @@ async function contextFor(
     timezoneId: 'America/Argentina/Cordoba',
     colorScheme: 'dark',
   });
+  const crm = fixture(role);
+  await installA35H5R1ModernTenantHarness(context, crm, current.userId);
   await context.addInitScript(({ crm, session, memberId, keys, markerKey }) => {
     if (!localStorage.getItem(markerKey)) {
       localStorage.setItem(markerKey, '1');
@@ -151,7 +154,7 @@ async function contextFor(
       value: (opened?: string | URL) => { target.__b131OpenedUrl = String(opened || ''); return null; },
     });
   }, {
-    crm: fixture(role),
+    crm,
     session: {
       accessToken: `access-${current.userId}`,
       refreshToken: `refresh-${current.userId}`,

@@ -9,6 +9,7 @@ import {
   type Page,
 } from 'playwright';
 import { initialData, type CrmData, type TeamMember, type TeamRole } from '../models.js';
+import { installA35H5R1ModernTenantHarness } from './a35-h5-r1-modern-tenant-harness.js';
 
 const sessionKey = 'propcontrol-cloud-session-v1';
 const activeMemberKey = 'propcontrol-active-team-member-v1';
@@ -188,6 +189,8 @@ async function createContext(
     colorScheme: 'dark',
   });
 
+  const crm = crmFixture(role);
+  await installA35H5R1ModernTenantHarness(context, crm, identity.userId);
   await context.addInitScript(({ data, backup, session, memberId, keys, sync, marker, trackRestricted }) => {
     if (!localStorage.getItem(marker)) {
       localStorage.setItem(marker, '1');
@@ -220,7 +223,7 @@ async function createContext(
     if (document.documentElement) install();
     else document.addEventListener('DOMContentLoaded', install, { once: true });
   }, {
-    data: crmFixture(role),
+    data: crm,
     backup: backupFixture(role),
     session: sessionValue(role),
     memberId: identity.memberId,

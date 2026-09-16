@@ -4,6 +4,7 @@ import { existsSync, mkdirSync } from 'node:fs';
 import test from 'node:test';
 import { chromium, type BrowserContext, type Locator, type Page } from 'playwright';
 import { initialData, type CrmData, type TeamMember } from '../models.js';
+import { installA35H5R1ModernTenantHarness } from './a35-h5-r1-modern-tenant-harness.js';
 
 const USER_ID = 'c13-visual-owner';
 const ORG_ID = 'c13-visual-org';
@@ -158,6 +159,8 @@ async function stopServer(server: ChildProcess): Promise<void> {
 }
 
 async function seedContext(context: BrowserContext): Promise<void> {
+  const crm = fixture();
+  await installA35H5R1ModernTenantHarness(context, crm, USER_ID);
   await context.addInitScript(({ crm, storageKey }) => {
     localStorage.setItem('propcontrol-cloud-session-v1', JSON.stringify({
       accessToken: 'access',
@@ -174,7 +177,7 @@ async function seedContext(context: BrowserContext): Promise<void> {
       lastCloudVersion: '2026-08-21T18:00:00.000Z',
     }));
     localStorage.setItem('propcontrol-active-team-member-v1', '1');
-  }, { crm: fixture(), storageKey: STORAGE_KEY });
+  }, { crm, storageKey: STORAGE_KEY });
 }
 
 async function load(page: Page, url: string): Promise<void> {
