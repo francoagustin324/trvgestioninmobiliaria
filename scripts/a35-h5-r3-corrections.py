@@ -108,11 +108,16 @@ replace_once(
     "        visual: visual ? { id: visual.id, userId: visual.userId, role: visual.role } : null,\n",
 )
 
-# B1.2.3: wait for the PROVEN final optional-analysis rerender, then atomically reacquire/focus/measure the current node.
+# B1.2.3: wait for the PROVEN final optional-analysis rerender, then inspect only controls from that final DOM.
 replace_once(
     'src/tests/b1-2-3-compact-leads-real-app.test.ts',
     "  await panel.locator('[data-analyze-qualification]').click();\n  await panel.locator('[data-apply-qualification]').waitFor({ state: 'visible' });\n  await panel.locator('.qualification-info').waitFor({ state: 'visible' });\n",
     "  const preRerenderTarget = await panel.locator('[data-suggestion-value]:not([disabled]), [data-qualification-text]').last().elementHandle();\n  assert.ok(preRerenderTarget, 'No se encontró el control previo al rerender de Qualification.');\n  await panel.locator('[data-analyze-qualification]').click();\n  await panel.locator('[data-apply-qualification]').waitFor({ state: 'visible' });\n  await panel.locator('.qualification-info').waitFor({ state: 'visible' });\n  await page.waitForFunction((element) => !element.isConnected, preRerenderTarget);\n",
+)
+replace_once(
+    'src/tests/b1-2-3-compact-leads-real-app.test.ts',
+    "  const controls = [\n    panel.locator('[data-close-qualification]'),\n    panel.locator('[data-copy-next-question]'),\n    panel.locator('[data-apply-qualification]'),\n  ];\n  for (const control of controls) {\n    if (await control.count()) {\n      await control.scrollIntoViewIfNeeded();\n      const box = await control.boundingBox();\n      assert.ok(box && box.width >= 43.5 && box.height >= 43.5, `Control del panel menor a 44px en ${width}px.`);\n    }\n  }\n",
+    "  const controlMetrics = await page.evaluate(() => {\n    const currentPanel = document.querySelector<HTMLElement>('#crm .lead-qualification-panel');\n    if (!currentPanel || !currentPanel.querySelector('.qualification-info')) {\n      throw new Error('El rerender final de Qualification no está presente para medir controles.');\n    }\n    return [\n      ['close', '[data-close-qualification]'],\n      ['copy-next-question', '[data-copy-next-question]'],\n      ['apply', '[data-apply-qualification]'],\n    ].flatMap(([name, selector]) => {\n      const element = currentPanel.querySelector<HTMLElement>(selector);\n      if (!element) return [];\n      element.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'auto' });\n      const rect = element.getBoundingClientRect();\n      return [{ name, width: rect.width, height: rect.height, connected: element.isConnected }];\n    });\n  });\n  for (const metric of controlMetrics) {\n    assert.ok(metric.connected && metric.width >= 43.5 && metric.height >= 43.5, `Control ${metric.name} del panel menor a 44px en ${width}px: ${JSON.stringify(metric)}`);\n  }\n",
 )
 replace_once(
     'src/tests/b1-2-3-compact-leads-real-app.test.ts',
