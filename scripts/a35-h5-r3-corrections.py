@@ -108,7 +108,7 @@ replace_once(
     "        visual: visual ? { id: visual.id, userId: visual.userId, role: visual.role } : null,\n",
 )
 
-# B1.2.3: close the remaining focus TOCTOU after the PROVEN optional-analysis rerender.
+# B1.2.3: wait for the PROVEN final optional-analysis rerender, then atomically reacquire/focus/measure the current node.
 replace_once(
     'src/tests/b1-2-3-compact-leads-real-app.test.ts',
     "  await panel.locator('[data-analyze-qualification]').click();\n  await panel.locator('[data-apply-qualification]').waitFor({ state: 'visible' });\n  await panel.locator('.qualification-info').waitFor({ state: 'visible' });\n",
@@ -117,7 +117,7 @@ replace_once(
 replace_once(
     'src/tests/b1-2-3-compact-leads-real-app.test.ts',
     "  await focusTarget.focus();\n  await page.waitForFunction(() => {\n    const panel = document.querySelector<HTMLElement>('#crm .lead-qualification-panel');\n    if (!panel) return false;\n    const targets = Array.from(panel.querySelectorAll<HTMLElement>('[data-suggestion-value]:not([disabled]), [data-qualification-text]'));\n    const element = targets.at(-1);\n    if (!element || document.activeElement !== element) return false;\n    const rect = element.getBoundingClientRect();\n    const nav = document.querySelector<HTMLElement>('.mobile-bottom-nav');\n    const navVisible = nav && getComputedStyle(nav).display !== 'none';\n    const navRect = navVisible ? nav.getBoundingClientRect() : null;\n    const visibleBottom = Math.min(window.innerHeight, navRect?.top ?? window.innerHeight);\n    return rect.top >= 0 && rect.bottom <= visibleBottom - 8;\n  });\n  const geometry = await focusTarget.evaluate((element) => {\n",
-    "  await focusTarget.scrollIntoViewIfNeeded();\n  const geometry = await focusTarget.evaluate((element) => {\n    element.focus();\n",
+    "  const geometry = await page.evaluate(() => {\n    const currentPanel = document.querySelector<HTMLElement>('#crm .lead-qualification-panel');\n    if (!currentPanel || !currentPanel.querySelector('.qualification-info')) {\n      throw new Error('El rerender final de Qualification no está presente.');\n    }\n    const targets = Array.from(currentPanel.querySelectorAll<HTMLElement>('[data-suggestion-value]:not([disabled]), [data-qualification-text]'));\n    const element = targets.at(-1);\n    if (!element) throw new Error('No se encontró el control equivalente del rerender final.');\n    element.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'auto' });\n    element.focus();\n",
 )
 
 print('R3_CORRECTIONS_APPLIED=YES')
