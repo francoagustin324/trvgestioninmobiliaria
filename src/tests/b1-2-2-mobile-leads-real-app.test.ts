@@ -21,6 +21,7 @@ const viewports = [
   { width: 1366, height: 768 },
 ];
 const mobileUserAgent = 'Mozilla/5.0 (Linux; Android 14; Pixel 7 Build/AP2A.240705.004) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Mobile Safari/537.36';
+const H5_AUTH_GENERATION = 'b122-h5-auth-generation';
 
 function visualCrm(): CrmData {
   const crm = structuredClone(initialData);
@@ -217,7 +218,90 @@ async function stopServer(server: ChildProcess): Promise<void> {
   });
 }
 
-async function createContext(browser: Browser, viewport: { width: number; height: number }): Promise<BrowserContext> {
+
+function h5SyntheticJson(body: unknown, status = 200) {
+  return {
+    status,
+    contentType: 'application/json',
+    headers: { 'access-control-allow-origin': '*' },
+    body: JSON.stringify(body),
+  };
+}
+
+async function h5InstallSyntheticAuthority(
+  context: BrowserContext,
+  origin: string,
+  organizationId: string,
+  member: { id: number; userId: string; name: string; email?: string; phone?: string; role?: string },
+): Promise<void> {
+  let syntheticRecords: unknown[] = [];
+  await context.route('**/api/cloud-config', async (route) => {
+    await route.fulfill(h5SyntheticJson({ configured: true, url: origin, publishableKey: 'h5-pilot-publishable-key' }));
+  });
+  await context.route('**/rest/v1/**', async (route) => {
+    const request = route.request();
+    const url = new URL(request.url());
+    if (request.method() === 'OPTIONS') {
+      await route.fulfill({
+        status: 204,
+        headers: {
+          'access-control-allow-origin': '*',
+          'access-control-allow-headers': '*',
+          'access-control-allow-methods': 'GET,POST,DELETE,OPTIONS',
+        },
+        body: '',
+      });
+      return;
+    }
+    if (url.pathname.endsWith('/rest/v1/rpc/activate_my_organization_memberships')) {
+      await route.fulfill(h5SyntheticJson({}));
+      return;
+    }
+    if (url.pathname.endsWith('/rest/v1/organization_members')) {
+      await route.fulfill(h5SyntheticJson([{
+        organization_id: organizationId,
+        member_id: member.id,
+        user_id: member.userId,
+        role: member.role === 'Administrador' ? 'admin' : member.role === 'Corredor' ? 'agent' : 'owner',
+        status: 'active',
+        display_name: member.name,
+        email: member.email || null,
+        phone: member.phone || null,
+        created_at: '2026-08-01T12:00:00.000Z',
+        last_active_at: '2026-09-16T12:00:00.000Z',
+      }]));
+      return;
+    }
+    if (url.pathname.endsWith('/rest/v1/rpc/visit_transaction_authority_active_v2')) {
+      await route.fulfill(h5SyntheticJson(false));
+      return;
+    }
+    if (url.pathname.endsWith('/rest/v1/propcontrol_records')) {
+      if (request.method() === 'GET') {
+        await route.fulfill(h5SyntheticJson(syntheticRecords));
+        return;
+      }
+      if (request.method() === 'POST') {
+        const body = request.postDataJSON();
+        syntheticRecords = Array.isArray(body) ? structuredClone(body) : [structuredClone(body)];
+        await route.fulfill(h5SyntheticJson(syntheticRecords, 201));
+        return;
+      }
+      if (request.method() === 'DELETE') {
+        syntheticRecords = [];
+        await route.fulfill({ status: 204, headers: { 'access-control-allow-origin': '*' }, body: '' });
+        return;
+      }
+    }
+    if (url.pathname.endsWith('/rest/v1/fichas')) {
+      await route.fulfill(h5SyntheticJson([]));
+      return;
+    }
+    await route.fulfill(h5SyntheticJson({ error: 'UNEXPECTED_H5_SYNTHETIC_ENDPOINT', path: url.pathname }, 500));
+  });
+}
+
+async function createContext(browser: Browser, viewport: { width: number; height: number }, origin: string): Promise<BrowserContext> {
   const mobile = viewport.width <= 430;
   const touch = viewport.width <= 720;
   const context = await browser.newContext({
@@ -230,7 +314,9 @@ async function createContext(browser: Browser, viewport: { width: number; height
     colorScheme: 'dark',
   });
   const crm = visualCrm();
-  await context.addInitScript(({ data, userId }) => {
+  const member = crm.teamMembers[0]!;
+  await h5InstallSyntheticAuthority(context, origin, crm.organization.id, member);
+  await context.addInitScript(({ data, generation, userId }) => {
     const sessionKey = 'propcontrol-cloud-session-v1';
     const storageKey = `trv-crm-basico:user:${userId}`;
     localStorage.setItem(sessionKey, JSON.stringify({
@@ -239,7 +325,9 @@ async function createContext(browser: Browser, viewport: { width: number; height
       expiresAt: Date.now() + 3_600_000,
       userId,
       email: 'franco@example.test',
+      __propcontrolAuthGeneration: generation,
     }));
+    localStorage.setItem('propcontrol-cloud-auth-generation-v1', generation);
     localStorage.setItem(storageKey, JSON.stringify(data));
     localStorage.setItem(`${storageKey}:sync`, JSON.stringify({
       dirty: false,
@@ -247,7 +335,7 @@ async function createContext(browser: Browser, viewport: { width: number; height
       lastCloudSavedAt: '2026-07-28T13:00:00.000Z',
     }));
     localStorage.setItem('propcontrol-active-team-member-v1', '1');
-  }, { data: crm, userId: 'mobile-visual-user' });
+  }, { data: crm, generation: H5_AUTH_GENERATION, userId: 'mobile-visual-user' });
   return context;
 }
 
@@ -658,7 +746,7 @@ test('B1.2.2 valida Leads con DOM real, CSS real y navegación real en todos los
 
   try {
     for (const viewport of viewports) {
-      const context = await createContext(browser, viewport);
+      const context = await createContext(browser, viewport, baseUrl);
       const page = await context.newPage();
       try {
         await waitForLeads(page, baseUrl);

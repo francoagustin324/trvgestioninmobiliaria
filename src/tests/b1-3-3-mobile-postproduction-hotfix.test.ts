@@ -22,6 +22,7 @@ const sessionKey = 'propcontrol-cloud-session-v1';
 const activeMemberKey = 'propcontrol-active-team-member-v1';
 const storageKey = `trv-crm-basico:user:${userId}`;
 const syncKey = `${storageKey}:sync`;
+const H5_AUTH_GENERATION = 'b133-hotfix-h5-auth-generation';
 const motorolaUserAgent = 'Mozilla/5.0 (Linux; Android 12; moto g(60) Build/S2RIS32.32-20-7-10) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Mobile Safari/537.36';
 
 function existingLead(): Client {
@@ -202,20 +203,99 @@ function contextOptions(viewport: { width: number; height: number }): BrowserCon
   };
 }
 
+
+function h5SyntheticJson(body: unknown, status = 200) {
+  return {
+    status,
+    contentType: 'application/json',
+    headers: { 'access-control-allow-origin': '*' },
+    body: JSON.stringify(body),
+  };
+}
+
+async function h5InstallSyntheticAuthority(
+  context: BrowserContext,
+  origin: string,
+  organizationId: string,
+  member: { id: number; userId: string; name: string; email?: string; phone?: string; role?: string },
+): Promise<void> {
+  let syntheticRecords: unknown[] = [];
+  await context.route('**/api/cloud-config', async (route) => {
+    await route.fulfill(h5SyntheticJson({ configured: true, url: origin, publishableKey: 'h5-pilot-publishable-key' }));
+  });
+  await context.route('**/rest/v1/**', async (route) => {
+    const request = route.request();
+    const url = new URL(request.url());
+    if (request.method() === 'OPTIONS') {
+      await route.fulfill({
+        status: 204,
+        headers: {
+          'access-control-allow-origin': '*',
+          'access-control-allow-headers': '*',
+          'access-control-allow-methods': 'GET,POST,DELETE,OPTIONS',
+        },
+        body: '',
+      });
+      return;
+    }
+    if (url.pathname.endsWith('/rest/v1/rpc/activate_my_organization_memberships')) {
+      await route.fulfill(h5SyntheticJson({}));
+      return;
+    }
+    if (url.pathname.endsWith('/rest/v1/organization_members')) {
+      await route.fulfill(h5SyntheticJson([{
+        organization_id: organizationId,
+        member_id: member.id,
+        user_id: member.userId,
+        role: member.role === 'Administrador' ? 'admin' : member.role === 'Corredor' ? 'agent' : 'owner',
+        status: 'active',
+        display_name: member.name,
+        email: member.email || null,
+        phone: member.phone || null,
+        created_at: '2026-08-01T12:00:00.000Z',
+        last_active_at: '2026-09-16T12:00:00.000Z',
+      }]));
+      return;
+    }
+    if (url.pathname.endsWith('/rest/v1/rpc/visit_transaction_authority_active_v2')) {
+      await route.fulfill(h5SyntheticJson(false));
+      return;
+    }
+    if (url.pathname.endsWith('/rest/v1/propcontrol_records')) {
+      if (request.method() === 'GET') {
+        await route.fulfill(h5SyntheticJson(syntheticRecords));
+        return;
+      }
+      if (request.method() === 'POST') {
+        const body = request.postDataJSON();
+        syntheticRecords = Array.isArray(body) ? structuredClone(body) : [structuredClone(body)];
+        await route.fulfill(h5SyntheticJson(syntheticRecords, 201));
+        return;
+      }
+      if (request.method() === 'DELETE') {
+        syntheticRecords = [];
+        await route.fulfill({ status: 204, headers: { 'access-control-allow-origin': '*' }, body: '' });
+        return;
+      }
+    }
+    if (url.pathname.endsWith('/rest/v1/fichas')) {
+      await route.fulfill(h5SyntheticJson([]));
+      return;
+    }
+    await route.fulfill(h5SyntheticJson({ error: 'UNEXPECTED_H5_SYNTHETIC_ENDPOINT', path: url.pathname }, 500));
+  });
+}
+
 async function contextFor(
   browser: Browser,
   viewport: { width: number; height: number },
   marker: string,
+  origin: string,
 ): Promise<BrowserContext> {
   const context = await browser.newContext(contextOptions(viewport));
-  await context.route('**/api/cloud-config', async (route) => {
-    await route.fulfill({
-      status: 503,
-      contentType: 'application/json',
-      body: JSON.stringify({ message: 'Nube de prueba no disponible.' }),
-    });
-  });
-  await context.addInitScript(({ data, keys, currentUserId, currentEmail, currentMemberId, initMarker }) => {
+  const data = fixture();
+  await h5InstallSyntheticAuthority(context, origin, data.organization.id, data.teamMembers[0]!);
+  await context.addInitScript(({ data, generation, keys, currentUserId, currentEmail, currentMemberId, initMarker }) => {
     if (localStorage.getItem(initMarker)) return;
     localStorage.setItem(initMarker, '1');
     localStorage.setItem(keys.session, JSON.stringify({
@@ -224,7 +304,9 @@ async function contextFor(
       expiresAt: Date.now() + 3_600_000,
       userId: currentUserId,
       email: currentEmail,
+      __propcontrolAuthGeneration: generation,
     }));
+    localStorage.setItem('propcontrol-cloud-auth-generation-v1', generation);
     localStorage.setItem(keys.storage, JSON.stringify(data));
     localStorage.setItem(keys.sync, JSON.stringify({
       dirty: false,
@@ -232,7 +314,8 @@ async function contextFor(
     }));
     localStorage.setItem(keys.activeMember, String(currentMemberId));
   }, {
-    data: fixture(),
+    data,
+    generation: H5_AUTH_GENERATION,
     keys: {
       session: sessionKey,
       storage: storageKey,
@@ -477,7 +560,7 @@ test('hotfix B1.3.3 valida Motorola 390x844, laptop 1280x720 y escritorio 1366x7
     server = started.server;
     browser = await chromium.launch({ executablePath, headless: true });
 
-    const desktopContext = await contextFor(browser, { width: 1366, height: 768 }, 'propcontrol-b133-hotfix-desktop');
+    const desktopContext = await contextFor(browser, { width: 1366, height: 768 }, 'propcontrol-b133-hotfix-desktop', started.url);
     try {
       const page = await desktopContext.newPage();
       await load(page, started.url);
@@ -487,7 +570,7 @@ test('hotfix B1.3.3 valida Motorola 390x844, laptop 1280x720 y escritorio 1366x7
       await desktopContext.close();
     }
 
-    const laptopContext = await contextFor(browser, { width: 1280, height: 720 }, 'propcontrol-b133-hotfix-laptop');
+    const laptopContext = await contextFor(browser, { width: 1280, height: 720 }, 'propcontrol-b133-hotfix-laptop', started.url);
     try {
       const page = await laptopContext.newPage();
       await load(page, started.url);
@@ -496,7 +579,7 @@ test('hotfix B1.3.3 valida Motorola 390x844, laptop 1280x720 y escritorio 1366x7
       await laptopContext.close();
     }
 
-    const mobileContext = await contextFor(browser, { width: 390, height: 844 }, 'propcontrol-b133-hotfix-mobile');
+    const mobileContext = await contextFor(browser, { width: 390, height: 844 }, 'propcontrol-b133-hotfix-mobile', started.url);
     try {
       const page = await mobileContext.newPage();
       await load(page, started.url);

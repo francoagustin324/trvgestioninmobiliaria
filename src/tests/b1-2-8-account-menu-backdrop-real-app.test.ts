@@ -2,13 +2,14 @@ import assert from 'node:assert/strict';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import test from 'node:test';
-import { chromium } from 'playwright';
+import { chromium, type BrowserContext } from 'playwright';
 import { initialData } from '../models.js';
 
 const userId = 'b128-backdrop-owner';
 const storageKey = `trv-crm-basico:user:${userId}`;
 const sessionKey = 'propcontrol-cloud-session-v1';
 const syncKey = `${storageKey}:sync`;
+const H5_AUTH_GENERATION = 'b128-h5-auth-generation';
 
 interface BackdropTestWindow extends Window {
   __b128BackgroundClicks?: number;
@@ -98,6 +99,89 @@ async function stopServer(server: ChildProcess): Promise<void> {
   });
 }
 
+
+function h5SyntheticJson(body: unknown, status = 200) {
+  return {
+    status,
+    contentType: 'application/json',
+    headers: { 'access-control-allow-origin': '*' },
+    body: JSON.stringify(body),
+  };
+}
+
+async function h5InstallSyntheticAuthority(
+  context: BrowserContext,
+  origin: string,
+  organizationId: string,
+  member: { id: number; userId: string; name: string; email?: string; phone?: string; role?: string },
+): Promise<void> {
+  let syntheticRecords: unknown[] = [];
+  await context.route('**/api/cloud-config', async (route) => {
+    await route.fulfill(h5SyntheticJson({ configured: true, url: origin, publishableKey: 'h5-pilot-publishable-key' }));
+  });
+  await context.route('**/rest/v1/**', async (route) => {
+    const request = route.request();
+    const url = new URL(request.url());
+    if (request.method() === 'OPTIONS') {
+      await route.fulfill({
+        status: 204,
+        headers: {
+          'access-control-allow-origin': '*',
+          'access-control-allow-headers': '*',
+          'access-control-allow-methods': 'GET,POST,DELETE,OPTIONS',
+        },
+        body: '',
+      });
+      return;
+    }
+    if (url.pathname.endsWith('/rest/v1/rpc/activate_my_organization_memberships')) {
+      await route.fulfill(h5SyntheticJson({}));
+      return;
+    }
+    if (url.pathname.endsWith('/rest/v1/organization_members')) {
+      await route.fulfill(h5SyntheticJson([{
+        organization_id: organizationId,
+        member_id: member.id,
+        user_id: member.userId,
+        role: member.role === 'Administrador' ? 'admin' : member.role === 'Corredor' ? 'agent' : 'owner',
+        status: 'active',
+        display_name: member.name,
+        email: member.email || null,
+        phone: member.phone || null,
+        created_at: '2026-08-01T12:00:00.000Z',
+        last_active_at: '2026-09-16T12:00:00.000Z',
+      }]));
+      return;
+    }
+    if (url.pathname.endsWith('/rest/v1/rpc/visit_transaction_authority_active_v2')) {
+      await route.fulfill(h5SyntheticJson(false));
+      return;
+    }
+    if (url.pathname.endsWith('/rest/v1/propcontrol_records')) {
+      if (request.method() === 'GET') {
+        await route.fulfill(h5SyntheticJson(syntheticRecords));
+        return;
+      }
+      if (request.method() === 'POST') {
+        const body = request.postDataJSON();
+        syntheticRecords = Array.isArray(body) ? structuredClone(body) : [structuredClone(body)];
+        await route.fulfill(h5SyntheticJson(syntheticRecords, 201));
+        return;
+      }
+      if (request.method() === 'DELETE') {
+        syntheticRecords = [];
+        await route.fulfill({ status: 204, headers: { 'access-control-allow-origin': '*' }, body: '' });
+        return;
+      }
+    }
+    if (url.pathname.endsWith('/rest/v1/fichas')) {
+      await route.fulfill(h5SyntheticJson([]));
+      return;
+    }
+    await route.fulfill(h5SyntheticJson({ error: 'UNEXPECTED_H5_SYNTHETIC_ENDPOINT', path: url.pathname }, 500));
+  });
+}
+
 test(
   'B1.2.8 el backdrop móvil cubre el viewport y bloquea pulsaciones del fondo',
   { timeout: 120_000 },
@@ -118,14 +202,18 @@ test(
         locale: 'es-AR',
         colorScheme: 'dark',
       });
-      await context.addInitScript(({ data, keys, user }) => {
+      const data = crmFixture();
+      await h5InstallSyntheticAuthority(context, url, data.organization.id, data.teamMembers[0]!);
+      await context.addInitScript(({ data, generation, keys, user }) => {
         localStorage.setItem(keys.session, JSON.stringify({
           accessToken: 'b128-access-token',
           refreshToken: 'b128-refresh-token',
           expiresAt: Date.now() + 3_600_000,
           userId: user,
           email: 'franco.solis@example.test',
+          __propcontrolAuthGeneration: generation,
         }));
+        localStorage.setItem('propcontrol-cloud-auth-generation-v1', generation);
         localStorage.setItem(keys.storage, JSON.stringify(data));
         localStorage.setItem(keys.sync, JSON.stringify({
           dirty: false,
@@ -135,7 +223,8 @@ test(
         }));
         localStorage.setItem('propcontrol-active-team-member-v1', '1');
       }, {
-        data: crmFixture(),
+        data,
+        generation: H5_AUTH_GENERATION,
         keys: { session: sessionKey, storage: storageKey, sync: syncKey },
         user: userId,
       });
