@@ -1,0 +1,90 @@
+name: A3.5 H5 R1 F1 Validate
+on:
+  push:
+    branches: [validation/a35-h5-r1-family-sanitization]
+    paths: [.github/workflows/a35-h5-r1-f1-validate.yml]
+permissions:
+  contents: read
+jobs:
+  validate-f1:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install dependencies
+        run: npm ci --silent
+      - name: Build
+        run: npm run build --silent
+      - name: Run F1 files isolated
+        shell: bash
+        run: |
+          set -uo pipefail
+          SUMMARY="$RUNNER_TEMP/a35-h5-r1-f1-summary.txt"
+          : > "$SUMMARY"
+          files=(
+            b1-2-3-compact-leads-real-app.test.js
+            b1-2-3-responsive-matrix-real-app.test.js
+            b1-2-4-architecture-runtime.test.js
+            b1-2-4-responsive-real-app.test.js
+            b1-2-5-responsive-real-app.test.js
+            b1-2-6-mobile-header-alerts.test.js
+            b1-2-7-responsive-real-app.test.js
+            b1-2-8-account-menu-responsive-real-app.test.js
+            b1-2-9-multiuser-permissions-real-app.test.js
+            b1-3-1-lead-create-real-app.test.js
+            c13-leads-visual-professional-browser.test.js
+          )
+          red=0
+          green=0
+          index=0
+          for name in "${files[@]}"; do
+            index=$((index+1))
+            log="$RUNNER_TEMP/f1-${index}.tap"
+            echo "F1_FILE_${index}=$name" | tee -a "$SUMMARY"
+            set +e
+            timeout 420s node --test --test-concurrency=1 "dist/tests/$name" >"$log" 2>&1
+            code=$?
+            set -e
+            cat "$log"
+            echo "F1_FILE_${index}_EXIT=$code" | tee -a "$SUMMARY"
+            if [ "$code" -eq 0 ]; then
+              green=$((green+1))
+              echo "F1_FILE_${index}_STATUS=GREEN" | tee -a "$SUMMARY"
+            else
+              red=$((red+1))
+              echo "F1_FILE_${index}_STATUS=RED" | tee -a "$SUMMARY"
+            fi
+            if grep -Eq "waiting for (locator|selector).*#crm\.active|waiting for (locator|selector).*mvp-lead-(card|compact-card)|waiting for (locator|selector).*data-account-toggle" "$log"; then
+              echo "F1_FILE_${index}_BOOTSTRAP=RED" | tee -a "$SUMMARY"
+            else
+              echo "F1_FILE_${index}_BOOTSTRAP=REACHED_OR_GREEN" | tee -a "$SUMMARY"
+            fi
+            if pgrep -af 'node .*dist/server\.js' >"$RUNNER_TEMP/f1-${index}-server-left.txt"; then
+              cat "$RUNNER_TEMP/f1-${index}-server-left.txt"
+              echo "F1_FILE_${index}_SERVER_LEFT=YES" | tee -a "$SUMMARY"
+              pkill -f 'node .*dist/server\.js' || true
+            else
+              echo "F1_FILE_${index}_SERVER_LEFT=NO" | tee -a "$SUMMARY"
+            fi
+          done
+          echo "F1_FILES_TOTAL=${#files[@]}" | tee -a "$SUMMARY"
+          echo "F1_FILES_GREEN=$green" | tee -a "$SUMMARY"
+          echo "F1_FILES_RED=$red" | tee -a "$SUMMARY"
+          cat "$SUMMARY"
+          if [ "$red" -ne 0 ]; then exit 1; fi
+      - name: Upload F1 evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: a35-h5-r1-f1-${{ github.run_id }}
+          retention-days: 14
+          path: |
+            ${{ runner.temp }}/a35-h5-r1-f1-summary.txt
+            ${{ runner.temp }}/f1-*.tap
+            ${{ runner.temp }}/f1-*-server-left.txt
