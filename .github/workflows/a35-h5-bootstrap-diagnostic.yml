@@ -1,0 +1,125 @@
+name: A3.5 H5 Legacy Bootstrap Diagnostic
+
+on:
+  push:
+    branches:
+      - validation/a35-h5-legacy-bootstrap-pilot
+    paths:
+      - .github/workflows/a35-h5-bootstrap-diagnostic.yml
+
+permissions:
+  contents: read
+
+jobs:
+  map-bootstrap:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Map exact legacy bootstrap signatures
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import json, re
+          from pathlib import Path
+
+          failures = {
+            'src/tests/b1-2-2-mobile-leads-real-app.test.ts': ['#crm.active .mvp-lead-card'],
+            'src/tests/b1-2-3-compact-leads-real-app.test.ts': ['#crm.active .mvp-lead-compact-card'],
+            'src/tests/b1-2-3-responsive-matrix-real-app.test.ts': ['#crm.active .mvp-lead-compact-card'],
+            'src/tests/b1-2-4-architecture-runtime.test.ts': ['#crm.active .mvp-lead-compact-card'],
+            'src/tests/b1-2-4-responsive-real-app.test.ts': ['#crm.active .mvp-lead-compact-card'],
+            'src/tests/b1-2-5-responsive-real-app.test.ts': ['#crm.active .mvp-lead-compact-card'],
+            'src/tests/b1-2-6-mobile-header-alerts.test.ts': ['#crm.active .mvp-lead-compact-card'],
+            'src/tests/b1-2-7-responsive-real-app.test.ts': ['#crm.active .mvp-lead-compact-card'],
+            'src/tests/b1-2-8-account-menu-backdrop-real-app.test.ts': ['[data-account-toggle]'],
+            'src/tests/b1-2-8-account-menu-responsive-real-app.test.ts': ['[data-account-toggle] x5'],
+            'src/tests/b1-2-9-multiuser-permissions-real-app.test.ts': ['[data-account-toggle] x2'],
+            'src/tests/b1-3-1-lead-create-real-app.test.ts': ['#crm.active x4'],
+            'src/tests/b1-3-2-android-lead-save-real-app.test.ts': ['#crm.active x4'],
+            'src/tests/b1-3-3-audit-blockers-real-app.test.ts': ['#crm.active x6'],
+            'src/tests/b1-3-3-mobile-postproduction-hotfix.test.ts': ['#crm.active'],
+            'src/tests/b1-3-3-real-use-real-app.test.ts': ['#crm.active x3'],
+            'src/tests/c13-leads-visual-professional-browser.test.ts': ['#crm.active'],
+            'src/tests/followup-hotfix-browser.test.ts': ['#crm.active'],
+          }
+
+          def yes(v): return 'YES' if v else 'NO'
+          rows=[]
+          for path, selectors in failures.items():
+            s=Path(path).read_text()
+            init_helpers=[]
+            for m in re.finditer(r'(?:async\s+)?function\s+([A-Za-z0-9_]+)\s*\([^)]*\)\s*(?::[^\{]+)?\{', s):
+              start=m.start(); name=m.group(1)
+              nxt=re.search(r'\n(?:async\s+)?function\s+[A-Za-z0-9_]+\s*\(', s[m.end():])
+              end=m.end()+(nxt.start() if nxt else min(6000, len(s)-m.end()))
+              body=s[m.end():end]
+              if 'addInitScript' in body or 'localStorage.setItem' in body:
+                init_helpers.append(name)
+            browser=[]
+            if re.search(r'\bchromium\b', s): browser.append('chromium')
+            if re.search(r'\bwebkit\b', s): browser.append('webkit')
+            if re.search(r'\bfirefox\b', s): browser.append('firefox')
+            human_identity = 'propcontrol-whatsapp-human-identity-v1' in s
+            auth_generation = ('propcontrol-cloud-auth-generation-v1' in s and '__propcontrolAuthGeneration' in s)
+            cloud_config = '/api/cloud-config' in s
+            organization_members = '/rest/v1/organization_members' in s
+            active_membership = organization_members and bool(re.search(r"status\s*:\s*['\"]active['\"]", s, re.I))
+            active_org_local = bool(re.search(r'\.organization\s*=\s*\{', s))
+            active_team = 'propcontrol-active-team-member-v1' in s
+            tenant_authority = ('activate_my_organization_memberships' in s and organization_members and 'visit_transaction_authority_active_v2' in s)
+            records = '/rest/v1/propcontrol_records' in s
+            fichas = '/rest/v1/fichas' in s
+            cloud_session = 'propcontrol-cloud-session-v1' in s
+            local_crm = 'trv-crm-basico:user:' in s
+            sync = ':sync' in s and 'localStorage.setItem' in s
+            lifecycle_unsafe = bool(re.search(r'const\s+server\s*=\s*await\s+startServer\([^;]*;\s*\n\s*const\s+browser\s*=\s*await\s+(?:chromium|webkit|firefox|launchChromium)', s))
+            row={
+              'file':path,
+              'failure_selector':selectors,
+              'bootstrap_helpers':init_helpers,
+              'browser':browser,
+              'cloud_session':yes(cloud_session),
+              'local_crm':yes(local_crm),
+              'sync':yes(sync),
+              'auth_generation':yes(auth_generation),
+              'cloud_config':yes(cloud_config),
+              'membership_active':yes(active_membership),
+              'organization_local_fixture':yes(active_org_local),
+              'human_identity':yes(human_identity),
+              'active_team_member':yes(active_team),
+              'tenant_authority':yes(tenant_authority),
+              'propcontrol_records':yes(records),
+              'fichas':yes(fichas),
+              'lifecycle_unsafe_pattern':yes(lifecycle_unsafe),
+            }
+            signature=tuple(row[k] for k in ['auth_generation','cloud_config','membership_active','human_identity','active_team_member','tenant_authority','propcontrol_records','fichas'])
+            row['signature']=signature
+            rows.append(row)
+
+          families={}
+          for row in rows:
+            key='|'.join(row['signature'])
+            families.setdefault(key,[]).append(row['file'])
+
+          helper_hits=[]
+          for p in Path('src/tests').glob('*.test.ts'):
+            s=p.read_text()
+            if 'propcontrol-cloud-auth-generation-v1' in s and '/api/cloud-config' in s and '/rest/v1/organization_members' in s and 'visit_transaction_authority_active_v2' in s:
+              funcs=re.findall(r'(?:async\s+)?function\s+([A-Za-z0-9_]+)\s*\(', s)
+              helper_hits.append({'file':str(p),'functions':[f for f in funcs if f in ('installSyntheticAuthority','seedContext','createContext','installCloudHarness','installSyntheticCloud')]})
+
+          output={'unique_files':len(rows),'failure_count':36,'family_count':len(families),'families':families,'rows':rows,'modern_helper_hits':helper_hits}
+          Path('h5-bootstrap-map.json').write_text(json.dumps(output, indent=2, ensure_ascii=False))
+          print(json.dumps(output, indent=2, ensure_ascii=False))
+          PY
+
+      - name: Upload map
+        uses: actions/upload-artifact@v4
+        with:
+          name: a35-h5-bootstrap-map-${{ github.run_id }}
+          path: h5-bootstrap-map.json
+          retention-days: 14
