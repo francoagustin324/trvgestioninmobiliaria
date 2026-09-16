@@ -11,7 +11,7 @@ const AFTER_MIDNIGHT = new Date('2026-08-06T00:01:00-03:00');
 const USER_ID = 'followup-owner';
 const SESSION_KEY = 'propcontrol-cloud-session-v1';
 const ACTIVE_MEMBER_KEY = 'propcontrol-active-team-member-v1';
-const STORAGE_KEY = `trv-crm-basico:user:${USER_ID}`;
+const STORAGE_KEY = `trv-crm-basico:user:${USER_ID}:org:followup-hotfix-org`;
 const SYNC_KEY = `${STORAGE_KEY}:sync`;
 const ARTIFACT_DIR = 'artifacts/b1-3';
 

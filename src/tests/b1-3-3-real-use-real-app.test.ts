@@ -37,8 +37,8 @@ function identity(role: TeamRole): Identity {
     memberId,
     userId,
     email: `${slug}-b133@propcontrol.test`,
-    storageKey: `trv-crm-basico:user:${userId}`,
-    syncKey: `trv-crm-basico:user:${userId}:sync`,
+    storageKey: `trv-crm-basico:user:${userId}:org:${organizationId}`,
+    syncKey: `trv-crm-basico:user:${userId}:org:${organizationId}:sync`,
   };
 }
 

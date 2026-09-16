@@ -38,8 +38,8 @@ function identity(role: TeamRole): Identity {
     memberId,
     userId,
     email: `${slug}-b133-audit@propcontrol.test`,
-    storageKey: `trv-crm-basico:user:${userId}`,
-    syncKey: `trv-crm-basico:user:${userId}:sync`,
+    storageKey: `trv-crm-basico:user:${userId}:org:${organizationId}`,
+    syncKey: `trv-crm-basico:user:${userId}:org:${organizationId}:sync`,
   };
 }
 
@@ -470,7 +470,7 @@ test('B1.3.3 invalida panel obsoleto tras cambiar identidad', { timeout: 240_000
   }
 });
 
-test('B1.3.3 invalida panel antiguo al cambiar miembro activo', { timeout: 240_000 }, async () => {
+test('B1.3.3 mantiene identidad autenticada al cambiar miembro visual', { timeout: 240_000 }, async () => {
   mkdirSync(artifactDir, { recursive: true });
   const executablePath = chromeExecutable();
   assert.ok(executablePath);
@@ -485,28 +485,33 @@ test('B1.3.3 invalida panel antiguo al cambiar miembro activo', { timeout: 240_0
     await load(page, url);
     await installActionCounters(page);
     await page.locator(`#crm.active [data-contact-whatsapp="${client.id}"]`).click();
-    await page.evaluate(() => {
-      const target = window as unknown as { __b133MemberStale: HTMLElement[] };
-      target.__b133MemberStale = [
-        document.querySelector<HTMLElement>('[data-whatsapp-copy]')!,
-        document.querySelector<HTMLElement>('[data-whatsapp-open]')!,
-      ];
-    });
-    await page.evaluate(async () => {
+    assert.match(await page.locator('[data-whatsapp-message]').inputValue(), /soy Franco de TRV Gestión Inmobiliaria/i);
+    await page.locator('[data-whatsapp-close]').click();
+
+    const authority = await page.evaluate(async () => {
       const store = await import('/dist/store.js');
       store.setActiveMemberId(2);
       document.dispatchEvent(new CustomEvent('trv-render'));
-      window.dispatchEvent(new Event('focus'));
+      const actor = store.state.crm.teamMembers.find((member) => member.userId === 'b133-audit-owner' && member.status === 'Activo') ?? null;
+      const visual = store.state.crm.teamMembers.find((member) => member.id === store.state.activeMemberId) ?? null;
+      return {
+        actor: actor ? { id: actor.id, userId: actor.userId, role: actor.role } : null,
+        visual: visual ? { id: visual.id, userId: visual.userId, role: visual.role } : null,
+      };
     });
-    await waitForFailClosedPanel(page);
-    await page.evaluate(() => {
-      const actions = (window as unknown as { __b133MemberStale: HTMLElement[] }).__b133MemberStale;
-      actions.forEach((action) => action.dispatchEvent(new MouseEvent('click', { bubbles: true })));
+    assert.deepEqual(authority, {
+      actor: { id: 1, userId: identity('Dueño').userId, role: 'Dueño' },
+      visual: { id: 2, userId: identity('Administrador').userId, role: 'Administrador' },
     });
+
+    await page.locator(`#crm.active [data-contact-whatsapp="${client.id}"]`).click();
+    const message = page.locator('[data-whatsapp-message]');
+    await message.waitFor({ state: 'attached' });
+    assert.match(await message.inputValue(), /soy Franco de TRV Gestión Inmobiliaria/i);
+    assert.equal(await page.locator('[data-whatsapp-open]').isDisabled(), false);
+    assert.equal(await page.locator('[data-whatsapp-copy]').isDisabled(), false);
     await assertZeroWhatsAppEffects(page, client.id);
-    assert.equal(await page.locator('[data-whatsapp-context-note]').count(), 1);
-    assert.equal(await page.locator('[data-whatsapp-context-note]').isVisible(), true);
-    await page.screenshot({ path: `${artifactDir}/16-panel-miembro-invalidado.png`, fullPage: true });
+    await page.screenshot({ path: `${artifactDir}/16-miembro-visual-no-cambia-identidad.png`, fullPage: true });
   } finally {
     await context.close();
     await browser.close();

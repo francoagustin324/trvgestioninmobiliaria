@@ -602,24 +602,51 @@ async function assertAutomaticPanel(page: Page, width: number): Promise<void> {
   await panel.waitFor({ state: 'visible' });
   const textarea = panel.locator('[data-qualification-text]');
   await textarea.fill('Busco en Manantiales. Presupuesto USD 120.000, contado, para vivir y puedo avanzar este mes.');
+  const preRerenderTarget = await panel.locator('[data-suggestion-value]:not([disabled]), [data-qualification-text]').last().elementHandle();
+  assert.ok(preRerenderTarget, 'No se encontró el control previo al rerender de Qualification.');
   await panel.locator('[data-analyze-qualification]').click();
   await panel.locator('[data-apply-qualification]').waitFor({ state: 'visible' });
-  const controls = [
-    panel.locator('[data-close-qualification]'),
-    panel.locator('[data-copy-next-question]'),
-    panel.locator('[data-apply-qualification]'),
-  ];
-  for (const control of controls) {
-    if (await control.count()) {
-      await control.scrollIntoViewIfNeeded();
-      const box = await control.boundingBox();
-      assert.ok(box && box.width >= 43.5 && box.height >= 43.5, `Control del panel menor a 44px en ${width}px.`);
+  await panel.locator('.qualification-info').waitFor({ state: 'visible' });
+  await page.waitForFunction((element) => !element.isConnected, preRerenderTarget);
+  const controlMetrics = await page.evaluate(() => {
+    const currentPanel = document.querySelector<HTMLElement>('#crm .lead-qualification-panel');
+    if (!currentPanel || !currentPanel.querySelector('.qualification-info')) {
+      throw new Error('El rerender final de Qualification no está presente para medir controles.');
     }
+    return [
+      ['close', '[data-close-qualification]'],
+      ['copy-next-question', '[data-copy-next-question]'],
+      ['apply', '[data-apply-qualification]'],
+    ].flatMap(([name, selector]) => {
+      const element = currentPanel.querySelector<HTMLElement>(selector!);
+      if (!element) return [];
+      element.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'instant' });
+      const rect = element.getBoundingClientRect();
+      return [{ name, width: rect.width, height: rect.height, connected: element.isConnected }];
+    });
+  });
+  for (const metric of controlMetrics) {
+    assert.ok(metric.connected && metric.width >= 43.5 && metric.height >= 43.5, `Control ${metric.name} del panel menor a 44px en ${width}px: ${JSON.stringify(metric)}`);
   }
   const focusTarget = panel.locator('[data-suggestion-value]:not([disabled]), [data-qualification-text]').last();
-  await focusTarget.focus();
-  await page.waitForTimeout(550);
-  const geometry = await focusTarget.evaluate((element) => {
+  const geometry = await page.evaluate(async () => {
+    const currentPanel = document.querySelector<HTMLElement>('#crm .lead-qualification-panel');
+    if (!currentPanel || !currentPanel.querySelector('.qualification-info')) {
+      throw new Error('El rerender final de Qualification no está presente.');
+    }
+    const initialTargets = Array.from(currentPanel.querySelectorAll<HTMLElement>('[data-suggestion-value]:not([disabled]), [data-qualification-text]'));
+    const initialElement = initialTargets.at(-1);
+    if (!initialElement) throw new Error('No se encontró el control equivalente del rerender final.');
+    initialElement.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'instant' });
+    await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+    const finalPanel = document.querySelector<HTMLElement>('#crm .lead-qualification-panel');
+    if (!finalPanel || !finalPanel.querySelector('.qualification-info')) {
+      throw new Error('El rerender final de Qualification dejó de estar presente tras el scroll.');
+    }
+    const finalTargets = Array.from(finalPanel.querySelectorAll<HTMLElement>('[data-suggestion-value]:not([disabled]), [data-qualification-text]'));
+    const element = finalTargets.at(-1);
+    if (!element) throw new Error('No se encontró el control final de Qualification tras el scroll.');
+    element.focus({ preventScroll: true });
     const rect = element.getBoundingClientRect();
     const nav = document.querySelector<HTMLElement>('.mobile-bottom-nav');
     const navVisible = nav && getComputedStyle(nav).display !== 'none';
@@ -721,8 +748,11 @@ test('B1.2.3 valida lista compacta, prioridad y disclosure con la aplicación re
           if (viewport.width === 390) {
             await assertFollowUpActions(page);
             await assertAutomaticPanel(page, viewport.width);
-            const panel = page.locator('#crm .lead-qualification-panel');
-            await panel.scrollIntoViewIfNeeded();
+            await page.evaluate(() => {
+              const currentPanel = document.querySelector<HTMLElement>('#crm .lead-qualification-panel');
+              if (!currentPanel) throw new Error('Panel final de Qualification no disponible para captura.');
+              currentPanel.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'instant' });
+            });
             await capture(page, `leads-panel-${key}.png`);
           }
         }

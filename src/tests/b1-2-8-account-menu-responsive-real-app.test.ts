@@ -73,7 +73,7 @@ interface FixtureIdentity {
 function fixtureIdentity(role: TeamRole): FixtureIdentity {
   const slug = role === 'Dueño' ? 'owner' : role === 'Administrador' ? 'admin' : 'agent';
   const userId = `b128-${slug}`;
-  const storageKey = `trv-crm-basico:user:${userId}`;
+  const storageKey = `trv-crm-basico:user:${userId}:org:trv-${userId}`;
   return {
     userId,
     email: `${slug}@propcontrol.test`,
@@ -294,11 +294,6 @@ async function createContext(
     }));
     localStorage.setItem(keys.storage, JSON.stringify(data));
     localStorage.setItem(keys.sync, JSON.stringify(sync));
-    localStorage.setItem(keys.backup, JSON.stringify([{
-      createdAt: '2026-07-29T13:00:00-03:00',
-      reason: 'Copia anterior de prueba',
-      crm: backup,
-    }]));
     localStorage.setItem('propcontrol-active-team-member-v1', String(memberId));
   }, {
     data: crm,
@@ -316,6 +311,17 @@ async function createContext(
     marker: fixtureMarker,
   });
   return context;
+}
+
+async function seedRecoveryBackup(page: Page, role: TeamRole): Promise<void> {
+  const identity = fixtureIdentity(role);
+  await page.evaluate(({ backupKey, backup }) => {
+    localStorage.setItem(backupKey, JSON.stringify([{
+      createdAt: '2026-07-29T13:00:00-03:00',
+      reason: 'Copia anterior de prueba',
+      crm: backup,
+    }]));
+  }, { backupKey: identity.backupKey, backup: backupFixture(role) });
 }
 
 async function loadApplication(page: Page, url: string): Promise<void> {
@@ -360,16 +366,18 @@ async function setSyncState(page: Page, value: Record<string, unknown>, role: Te
 }
 
 async function replaceIdentityData(page: Page): Promise<void> {
-  await page.evaluate((key) => {
-    const data = JSON.parse(localStorage.getItem(key) || '{}') as CrmData;
+  await page.evaluate(({ dataKey, syncKey, sync }) => {
+    const data = JSON.parse(localStorage.getItem(dataKey) || '{}') as CrmData;
     data.settings.profileName = 'Juan Ignacio Rodríguez Martínez de la Fuente';
     data.organization.name = 'Inmobiliaria Desarrollo Patrimonial del Centro de Córdoba';
     data.settings.agencyName = 'Inmobiliaria Desarrollo Patrimonial del Centro de Córdoba';
     data.teamMembers[0]!.name = 'Juan Ignacio Rodríguez Martínez de la Fuente';
-    localStorage.setItem(key, JSON.stringify(data));
-  }, ownerIdentity.storageKey);
+    localStorage.setItem(dataKey, JSON.stringify(data));
+    localStorage.setItem(syncKey, JSON.stringify(sync));
+  }, { dataKey: ownerIdentity.storageKey, syncKey: ownerIdentity.syncKey, sync: pendingSyncState() });
   await page.reload({ waitUntil: 'domcontentloaded' });
   await page.waitForSelector('[data-account-toggle]', { state: 'visible', timeout: 20_000 });
+  await setSyncState(page, savedSyncState());
 }
 
 async function restoreOwnerFixture(page: Page): Promise<void> {
@@ -647,6 +655,7 @@ test(
       try {
         const page = await ownerContext.newPage();
         await loadApplication(page, url);
+        await seedRecoveryBackup(page, 'Dueño');
         await assertSavedMenu(page);
         assert.equal(await accountPanel(page).locator('[data-account-restore]').count(), 0);
         assert.equal(await page.locator('[data-settings-security-recovery]').count(), 1);
@@ -688,6 +697,8 @@ test(
       try {
         const page = await adminContext.newPage();
         await loadApplication(page, url);
+        await seedRecoveryBackup(page, 'Administrador');
+        await page.evaluate(() => document.dispatchEvent(new CustomEvent('trv-render')));
         assert.equal(await page.locator('[data-settings-security-recovery]').count(), 1);
         assert.equal(await page.locator('#configuracion [data-account-restore]').count(), 1);
         assert.equal(await accountPanel(page).locator('[data-account-restore]').count(), 0);
@@ -700,6 +711,8 @@ test(
       try {
         const page = await corredorContext.newPage();
         await loadApplication(page, url);
+        await seedRecoveryBackup(page, 'Corredor');
+        await page.evaluate(() => document.dispatchEvent(new CustomEvent('trv-render')));
         assert.equal(await page.locator('[data-settings-security-recovery]').count(), 0);
         assert.equal(await page.locator('[data-account-restore]').count(), 0);
         assert.equal(await page.locator('[data-account-settings]').count(), 0);

@@ -40,8 +40,8 @@ function identity(role: TeamRole): Identity {
     memberId,
     userId,
     email: `${slug}-b132@propcontrol.test`,
-    storageKey: `trv-crm-basico:user:${userId}`,
-    syncKey: `trv-crm-basico:user:${userId}:sync`,
+    storageKey: `trv-crm-basico:user:${userId}:org:b132-org`,
+    syncKey: `trv-crm-basico:user:${userId}:org:b132-org:sync`,
   };
 }
 
@@ -468,10 +468,14 @@ test('B1.3.2 mantiene errores visibles, conserva datos y bloquea formularios obs
     await form.evaluate((node) => { node.dataset.b131Actor = '999'; });
     await form.locator('input[name="nextFollowUp"]').fill(await localToday(page));
     await form.locator('[data-save-lead]').click();
-    await form.locator('[data-lead-status]').getByText(/no tiene autorización/i).waitFor({ state: 'visible' });
-    assert.equal((await snapshot(page, 'Corredor')).clients.length, 0);
+    await page.locator('#notice').getByText(/VALIDACIONES B1\.3\.2 fue creado correctamente/).waitFor({ state: 'visible' });
+    const spoofSnapshot = await snapshot(page, 'Corredor');
+    assert.equal(spoofSnapshot.clients.length, 1);
+    const spoofedLead = spoofSnapshot.clients.find((item) => item.name === 'VALIDACIONES B1.3.2');
+    assert.ok(spoofedLead);
+    assert.equal(spoofedLead.createdById, identity('Corredor').memberId, 'El dataset DOM no sustituye al actor autenticado.');
+    assert.notEqual(spoofedLead.createdById, 999);
 
-    await page.locator('[data-toggle="client-form"]').click();
     form = await openLeadForm(page);
     await fillLead(form, { name: 'ERROR TECNICO B1.3.2', phone: '03515110067', date: await localToday(page) });
     await page.evaluate(() => {
@@ -488,7 +492,7 @@ test('B1.3.2 mantiene errores visibles, conserva datos y bloquea formularios obs
     await form.locator('[data-save-lead]').click();
     await form.locator('[data-lead-status]').getByText('No se pudo guardar el lead. Tus datos siguen en el formulario.', { exact: true }).waitFor({ state: 'visible' });
     assert.equal(await form.locator('input[name="name"]').inputValue(), 'ERROR TECNICO B1.3.2');
-    assert.equal((await snapshot(page, 'Corredor')).clients.length, 0);
+    assert.equal((await snapshot(page, 'Corredor')).clients.length, 1);
     await page.evaluate(() => {
       const target = window as unknown as B132Window;
       if (target.__b132OriginalSetItem) Storage.prototype.setItem = target.__b132OriginalSetItem;
@@ -508,7 +512,7 @@ test('B1.3.2 mantiene errores visibles, conserva datos y bloquea formularios obs
       if (stale && button) stale.requestSubmit(button);
     });
     await page.waitForTimeout(250);
-    assert.equal((await snapshot(page, 'Corredor')).clients.length, 0, 'El DOM obsoleto falla cerrado.');
+    assert.equal((await snapshot(page, 'Corredor')).clients.length, 1, 'El DOM obsoleto no crea una escritura adicional.');
     await assertNoHorizontalScroll(page);
   } finally {
     await context.close();

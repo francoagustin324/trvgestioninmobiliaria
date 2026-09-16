@@ -29,7 +29,7 @@ function identity(role: TeamRole): Identity {
   const memberId = role === 'Dueño' ? 1 : role === 'Administrador' ? 2 : 3;
   const slug = role === 'Dueño' ? 'owner' : role === 'Administrador' ? 'admin' : 'agent';
   const userId = `b131-${slug}`;
-  const storageKey = `trv-crm-basico:user:${userId}`;
+  const storageKey = `trv-crm-basico:user:${userId}:org:b131-org`;
   return { role, memberId, userId, email: `${slug}-b131@propcontrol.test`, storageKey, syncKey: `${storageKey}:sync` };
 }
 

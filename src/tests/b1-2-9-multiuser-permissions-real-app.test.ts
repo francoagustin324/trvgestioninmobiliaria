@@ -38,7 +38,7 @@ function fixtureIdentity(role: TeamRole): FixtureIdentity {
   const slug = role === 'Dueño' ? 'owner' : role === 'Administrador' ? 'admin' : 'agent';
   const memberId = role === 'Dueño' ? 1 : role === 'Administrador' ? 2 : 3;
   const userId = `b129-${slug}`;
-  const storageKey = `trv-crm-basico:user:${userId}`;
+  const storageKey = `trv-crm-basico:user:${userId}:org:b129-organization`;
   return {
     userId,
     email: `${slug}@propcontrol.test`,
@@ -197,11 +197,6 @@ async function createContext(
       localStorage.setItem(keys.session, JSON.stringify(session));
       localStorage.setItem(keys.storage, JSON.stringify(data));
       localStorage.setItem(keys.sync, JSON.stringify(sync));
-      localStorage.setItem(keys.backup, JSON.stringify([{
-        createdAt: '2026-07-29T20:00:00-03:00',
-        reason: 'Copia anterior B1.2.9',
-        crm: backup,
-      }]));
       localStorage.setItem(keys.activeMember, String(memberId));
     }
 
@@ -239,6 +234,18 @@ async function createContext(
     trackRestricted: role === 'Corredor',
   });
   return context;
+}
+
+async function seedRecoveryBackup(page: Page, role: TeamRole): Promise<void> {
+  const identity = fixtureIdentity(role);
+  await page.evaluate(({ backupKey, backup }) => {
+    localStorage.setItem(backupKey, JSON.stringify([{
+      createdAt: '2026-07-29T20:00:00-03:00',
+      reason: 'Copia anterior B1.2.9',
+      crm: backup,
+    }]));
+  }, { backupKey: identity.backupKey, backup: backupFixture(role) });
+  await page.evaluate(() => document.dispatchEvent(new CustomEvent('trv-render')));
 }
 
 async function loadApplication(page: Page, url: string): Promise<void> {
@@ -372,6 +379,7 @@ test(
           try {
             const page = await context.newPage();
             await loadApplication(page, url);
+            await seedRecoveryBackup(page, role);
             await assertRecoveryAccess(page, role);
             await navigateModules(page);
 
@@ -404,7 +412,7 @@ test(
 );
 
 test(
-  'B1.2.9 bloquea referencias DOM obsoletas y llamadas indirectas después de cambiar a Corredor',
+  'B1.2.9 bloquea capacidades administrativas con Corredor autenticado real',
   { timeout: 120_000 },
   async () => {
     const executablePath = chromeExecutable();
@@ -413,26 +421,15 @@ test(
     const url = `http://127.0.0.1:${port}`;
     const server = await startServer(port);
     const browser = await chromium.launch({ executablePath, headless: true });
-    const context = await createContext(browser, { width: 390, height: 844 }, 'Dueño');
+    const context = await createContext(browser, { width: 390, height: 844 }, 'Corredor');
     try {
       const page = await context.newPage();
       await loadApplication(page, url);
-      const ownerIdentity = fixtureIdentity('Dueño');
+      await seedRecoveryBackup(page, 'Corredor');
+      const identity = fixtureIdentity('Corredor');
 
-      const result = await page.evaluate(async ({ dataKey, backupKey }) => {
+      const result = await page.evaluate(async ({ dataKey, backupKey, actorUserId }) => {
         const targetWindow = window as unknown as B129Window;
-        targetWindow.__b129Restore = document.querySelector<HTMLButtonElement>('#configuracion [data-account-restore]') ?? undefined;
-        targetWindow.__b129TeamForm = document.querySelector<HTMLFormElement>('#mvp-user-form') ?? undefined;
-        targetWindow.__b129RoleSelect = document.querySelector<HTMLSelectElement>('[data-user-role="3"]') ?? undefined;
-        targetWindow.__b129StatusButton = document.querySelector<HTMLButtonElement>('[data-user-status="3"]') ?? undefined;
-        if (!targetWindow.__b129Restore || !targetWindow.__b129TeamForm || !targetWindow.__b129RoleSelect || !targetWindow.__b129StatusButton) {
-          throw new Error('No se pudieron conservar las referencias administrativas de Dueño.');
-        }
-
-        const name = targetWindow.__b129TeamForm.querySelector<HTMLInputElement>('[name="name"]');
-        const email = targetWindow.__b129TeamForm.querySelector<HTMLInputElement>('[name="email"]');
-        if (name) name.value = 'Usuario no autorizado';
-        if (email) email.value = 'sin-permiso@propcontrol.test';
         targetWindow.__b129TeamRequests = 0;
         const nativeFetch = window.fetch.bind(window);
         window.fetch = ((input: RequestInfo | URL, init?: RequestInit) => {
@@ -440,28 +437,19 @@ test(
           if (requestUrl.includes('/api/team/')) targetWindow.__b129TeamRequests = (targetWindow.__b129TeamRequests ?? 0) + 1;
           return nativeFetch(input, init);
         }) as typeof window.fetch;
-        window.confirm = () => true;
 
         const store = await import('/dist/store.js');
-        store.setActiveMemberId(3);
+        const actor = store.state.crm.teamMembers.find((member) => member.userId === actorUserId && member.status === 'Activo') ?? null;
+        const visual = store.state.crm.teamMembers.find((member) => member.id === store.state.activeMemberId) ?? null;
+        store.state.activeModule = 'equipo';
         document.dispatchEvent(new CustomEvent('trv-render'));
-        await new Promise((resolve) => setTimeout(resolve, 60));
-
-        targetWindow.__b129Restore.click();
-        targetWindow.__b129TeamForm.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
-        targetWindow.__b129RoleSelect.value = 'Administrador';
-        targetWindow.__b129RoleSelect.dispatchEvent(new Event('change', { bubbles: true }));
-        targetWindow.__b129StatusButton.click();
         const directRestore = store.restoreLatestLocalBackup();
-        document.dispatchEvent(new CustomEvent('propcontrol-cloud-status', {
-          detail: { message: '', kind: 'working' },
-        }));
         document.dispatchEvent(new CustomEvent('trv-render'));
-        await new Promise((resolve) => setTimeout(resolve, 100));
 
         return {
+          actor: actor ? { id: actor.id, userId: actor.userId, role: actor.role } : null,
+          visual: visual ? { id: visual.id, userId: visual.userId, role: visual.role } : null,
           directRestore,
-          activeMemberId: store.state.activeMemberId,
           activeModule: store.state.activeModule,
           teamRequests: targetWindow.__b129TeamRequests,
           zone: (JSON.parse(localStorage.getItem(dataKey) || '{}') as CrmData).settings.defaultZone,
@@ -471,11 +459,12 @@ test(
           settingsHtml: document.querySelector('#configuracion')?.innerHTML.trim() || '',
           teamHtml: document.querySelector('#equipo')?.innerHTML.trim() || '',
         };
-      }, { dataKey: ownerIdentity.storageKey, backupKey: ownerIdentity.backupKey });
+      }, { dataKey: identity.storageKey, backupKey: identity.backupKey, actorUserId: identity.userId });
 
       assert.deepEqual(result, {
+        actor: { id: 3, userId: identity.userId, role: 'Corredor' },
+        visual: { id: 3, userId: identity.userId, role: 'Corredor' },
         directRestore: false,
-        activeMemberId: 3,
         activeModule: 'crm',
         teamRequests: 0,
         zone: 'Datos actuales B1.2.9',

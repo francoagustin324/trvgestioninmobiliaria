@@ -1,4 +1,5 @@
 import type { BrowserContext, Route } from 'playwright';
+import { crmToCloudRecords, membershipContext, type CloudMembershipRow } from '../cloud-records.js';
 import type { CrmData, TeamMember } from '../models.js';
 
 export const A35_H5_R1_AUTH_GENERATION = 'a35-h5-r1-auth-generation';
@@ -26,18 +27,18 @@ function canonicalRole(member: TeamMember): 'owner' | 'admin' | 'agent' {
   return 'agent';
 }
 
-function membershipRows(crm: CrmData) {
+function membershipRows(crm: CrmData): CloudMembershipRow[] {
   return crm.teamMembers
     .filter((member) => typeof member.userId === 'string' && member.userId.length > 0)
     .map((member) => ({
       organization_id: crm.organization.id,
       member_id: member.id,
-      user_id: member.userId,
+      user_id: member.userId!,
       role: canonicalRole(member),
       status: 'active',
       display_name: member.name,
-      email: member.email || null,
-      phone: member.phone || null,
+      email: member.email || undefined,
+      phone: member.phone || undefined,
       created_at: member.createdAt || '2026-08-01T12:00:00.000Z',
       last_active_at: '2026-09-16T12:00:00.000Z',
     }));
@@ -101,8 +102,10 @@ export async function installA35H5R1ModernTenantHarness(
   crm: CrmData,
   actorUserId: string,
 ): Promise<void> {
+  const memberships = membershipRows(crm);
+  const cloudContext = membershipContext(memberships, actorUserId);
   const state: HarnessState = {
-    records: [],
+    records: crmToCloudRecords(crm, cloudContext, actorUserId),
     recordsOutageArmed: false,
     recordsOutageActive: false,
   };
