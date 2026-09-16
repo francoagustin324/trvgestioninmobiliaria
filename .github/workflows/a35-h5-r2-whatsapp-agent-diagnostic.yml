@@ -1,0 +1,23 @@
+name: A3.5 H5 R2 WhatsApp Agent Diagnostic
+on:
+  push:
+    branches: [validation/a35-h5-r1-family-sanitization]
+    paths:
+      - scripts/a35-h5-r2-whatsapp-agent-diagnostic.mjs
+      - .github/workflows/a35-h5-r2-whatsapp-agent-diagnostic.yml
+  workflow_dispatch:
+jobs:
+  diagnostic:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1'
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci --silent
+      - run: npm run build --silent
+      - run: node --test --test-concurrency=1 scripts/a35-h5-r2-whatsapp-agent-diagnostic.mjs
