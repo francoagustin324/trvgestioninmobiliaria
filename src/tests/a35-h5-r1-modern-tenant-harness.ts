@@ -61,6 +61,41 @@ async function fulfillOptions(route: Route): Promise<void> {
   });
 }
 
+async function installAuthGeneration(context: BrowserContext): Promise<void> {
+  await context.addInitScript(({ generation }) => {
+    const sessionKey = 'propcontrol-cloud-session-v1';
+    const generationKey = 'propcontrol-cloud-auth-generation-v1';
+    const nativeSetItem = Storage.prototype.setItem;
+
+    const normalizeSession = (raw: string): string => {
+      try {
+        const parsed = JSON.parse(raw) as Record<string, unknown>;
+        parsed.__propcontrolAuthGeneration = generation;
+        return JSON.stringify(parsed);
+      } catch {
+        return raw;
+      }
+    };
+
+    const patchExisting = (): void => {
+      const current = localStorage.getItem(sessionKey);
+      if (current) nativeSetItem.call(localStorage, sessionKey, normalizeSession(current));
+      nativeSetItem.call(localStorage, generationKey, generation);
+    };
+
+    patchExisting();
+    Storage.prototype.setItem = function setItem(key: string, value: string): void {
+      nativeSetItem.call(this, key, key === sessionKey ? normalizeSession(value) : value);
+      if (key === sessionKey) nativeSetItem.call(localStorage, generationKey, generation);
+    };
+
+    document.addEventListener('DOMContentLoaded', () => {
+      Storage.prototype.setItem = nativeSetItem;
+      patchExisting();
+    }, { once: true });
+  }, { generation: A35_H5_R1_AUTH_GENERATION });
+}
+
 export async function installA35H5R1ModernTenantHarness(
   context: BrowserContext,
   crm: CrmData,
@@ -72,6 +107,8 @@ export async function installA35H5R1ModernTenantHarness(
     recordsOutageActive: false,
   };
   states.set(context, state);
+
+  await installAuthGeneration(context);
 
   await context.route('**/api/cloud-config', async (route) => {
     const requestOrigin = new URL(route.request().url()).origin;
