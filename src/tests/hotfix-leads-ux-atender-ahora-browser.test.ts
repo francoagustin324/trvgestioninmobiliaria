@@ -632,223 +632,227 @@ function assertHorizontal(metrics: HorizontalMetrics, label: string, contentExpe
 
 test('HOTFIX UX POST-B1.4.2 R3 — mobile tap, target y contraste accesible exact-SHA', async (t) => {
   const server = await startServer();
-  const browser = await webkit.launch({ headless: true });
-  const url = `http://127.0.0.1:${PORT}`;
 
   try {
-    await t.test('A desktop: Todos conserva visual neutro, centrado, stage=Todas y contraste >=4.5', async () => {
-      const context = await createContext(browser, { width: 1366, height: 768 }, false);
-      try {
-        const page = await context.newPage();
-        await load(page, url);
-        assertTodosMetrics(await todosMetrics(page), 'desktop');
-        const normal = await stageContrastMetric(page);
-        assertContrast(normal, 'desktop normal');
-        const todos = page.locator('#crm .mvp-stage-counter[data-stage-quick="Todas"]');
-        await todos.hover();
-        const hover = await stageContrastMetric(page);
-        assertContrast(hover, 'desktop hover');
-        console.log(`R3_CONTRAST desktop ${JSON.stringify({ normal, hover })}`);
-      } finally {
-        await context.close();
-      }
-    });
+    const browser = await webkit.launch({ headless: true });
+    const url = `http://127.0.0.1:${PORT}`;
 
-    await t.test('B desktop: click real abre clientId exacto, foco/scroll y cero mutación CRM/telemetría', async () => {
-      const context = await createContext(browser, { width: 1366, height: 768 }, false);
-      try {
-        const page = await context.newPage();
-        await load(page, url);
-        const clientId = await targetClientId(page);
-        assert.equal(await page.locator('#crm .pc-supervised-attention-item[data-attention-client-id]').count(), 3, 'ATENDER AHORA debe respetar max3.');
-        const queueButton = page.locator(`#crm button.pc-supervised-attention-item[data-attention-client-id="${clientId}"]`).first();
-        assert.equal(await queueButton.evaluate((element) => element.tagName), 'BUTTON');
-        assert.equal(await queueButton.getAttribute('type'), 'button');
-        assert.match(await queueButton.getAttribute('aria-label') || '', /Abrir ficha completa de Lead R2 Prioritario/);
-
-        const crmBefore = await crmSnapshot(page);
-        const whatsappBefore = await whatsAppSnapshot(page);
-        const telemetryBefore = await telemetrySnapshot(page);
-        assert.ok(telemetryBefore.eventTypes.includes('RECOMMENDATION_SHOWN'), 'Debe aislarse SHOWN legítimo del render inicial.');
-        assert.equal(telemetryBefore.eventTypes.includes('RECOMMENDATION_DECISION'), false, 'Render inicial no debe contener DECISION.');
-
-        await clearScrollEvidence(page);
-        await queueButton.click();
-        await assertOpened(page, clientId);
-
-        assert.equal(await crmSnapshot(page), crmBefore, 'Navegar no debe mutar CRM persistido.');
-        assert.deepEqual(await whatsAppSnapshot(page), whatsappBefore, 'Navegar no debe mutar estado comercial WhatsApp.');
-        assert.deepEqual(await telemetrySnapshot(page), telemetryBefore, 'Navegar no debe mutar lifecycle/outbox ni generar DECISION.');
-      } finally {
-        await context.close();
-      }
-    });
-
-    await t.test('C desktop: Enter y Space heredan activación nativa y abren el lead correcto', async () => {
-      const context = await createContext(browser, { width: 1366, height: 768 }, false);
-      try {
-        const page = await context.newPage();
-        await load(page, url);
-        const clientId = await targetClientId(page);
-        const queueButton = page.locator(`#crm button.pc-supervised-attention-item[data-attention-client-id="${clientId}"]`).first();
-
-        await clearScrollEvidence(page);
-        await queueButton.focus();
-        assert.equal(await queueButton.evaluate((element) => document.activeElement === element), true);
-        await page.keyboard.press('Enter');
-        await assertOpened(page, clientId);
-
-        await closeSheet(page, clientId);
-        await queueButton.focus();
-        assert.equal(await queueButton.evaluate((element) => document.activeElement === element), true);
-        await page.keyboard.press('Space');
-        await assertOpened(page, clientId);
-      } finally {
-        await context.close();
-      }
-    });
-
-    await t.test('D desktop: hidden-by-filter conserva filtros, card oculta y aviso accesible', async () => {
-      const context = await createContext(browser, { width: 1366, height: 768 }, false);
-      try {
-        const page = await context.newPage();
-        await load(page, url);
-        const clientId = await targetClientId(page);
-        const filtersBaseline = await filterSnapshot(page);
-        assert.deepEqual(filtersBaseline, { search: '', stage: 'Todas', temperature: 'Todas', assignee: 'Todos', order: 'recent' });
-
-        const search = page.locator('#mvp-lead-search');
-        assert.equal(await search.isVisible(), true, 'El filtro usado debe ser UI real visible.');
-        await search.fill(HIDDEN_SEARCH);
-        await page.waitForFunction((id) => !document.querySelector(`#mvp-lead-results .mvp-lead-card[data-client-id="${id}"]`), clientId);
-
-        const filtersBefore = await filterSnapshot(page);
-        assert.deepEqual(filtersBefore, { ...filtersBaseline, search: HIDDEN_SEARCH });
-        const crmBefore = await crmSnapshot(page);
-        const telemetryBefore = await telemetrySnapshot(page);
-
-        await page.locator(`#crm button.pc-supervised-attention-item[data-attention-client-id="${clientId}"]`).first().click();
-        await page.waitForFunction((message) => {
-          const status = document.querySelector<HTMLElement>('[data-attention-navigation-status]');
-          return Boolean(status && !status.hidden && status.textContent?.trim() === message && status.getAttribute('role') === 'status' && status.getAttribute('aria-live') === 'polite');
-        }, HIDDEN_MESSAGE);
-
-        assert.deepEqual(await filterSnapshot(page), filtersBefore, 'ATENDER AHORA no debe resetear filtros.');
-        assert.equal(await page.locator(`#mvp-lead-results .mvp-lead-card[data-client-id="${clientId}"]`).count(), 0, 'Lead debe seguir oculto.');
-        assert.equal(await crmSnapshot(page), crmBefore, 'Lead oculto no debe mutar CRM.');
-        assert.deepEqual(await telemetrySnapshot(page), telemetryBefore, 'Lead oculto no debe generar DECISION.');
-      } finally {
-        await context.close();
-      }
-    });
-
-    await t.test('E targets: desktop, 390x844 y 320x568 miden >=44px en todas las recomendaciones visibles', async () => {
-      const specs = [
-        { name: 'desktop', viewport: { width: 1366, height: 768 }, mobile: false },
-        { name: '390x844', viewport: { width: 390, height: 844 }, mobile: true },
-        { name: '320x568', viewport: { width: 320, height: 568 }, mobile: true },
-      ];
-      const collected: Array<{ name: string; metrics: TargetMetrics }> = [];
-      for (const spec of specs) {
-        const context = await createContext(browser, spec.viewport, spec.mobile);
+    try {
+      await t.test('A desktop: Todos conserva visual neutro, centrado, stage=Todas y contraste >=4.5', async () => {
+        const context = await createContext(browser, { width: 1366, height: 768 }, false);
         try {
           const page = await context.newPage();
           await load(page, url);
-          collected.push({ name: spec.name, metrics: await targetMetrics(page) });
+          assertTodosMetrics(await todosMetrics(page), 'desktop');
+          const normal = await stageContrastMetric(page);
+          assertContrast(normal, 'desktop normal');
+          const todos = page.locator('#crm .mvp-stage-counter[data-stage-quick="Todas"]');
+          await todos.hover();
+          const hover = await stageContrastMetric(page);
+          assertContrast(hover, 'desktop hover');
+          console.log(`R3_CONTRAST desktop ${JSON.stringify({ normal, hover })}`);
         } finally {
           await context.close();
         }
-      }
-      collected.forEach(({ name, metrics }) => {
-        console.log(`R3_TARGET ${name} ${JSON.stringify(metrics)}`);
-        assertTargetMetrics(metrics, name);
       });
-    });
 
-    await t.test('F contraste mobile: 390x844 y 320x568 label/contador >=4.5, centrados y sin marrón', async () => {
-      const specs = [
-        { name: '390x844', viewport: { width: 390, height: 844 } },
-        { name: '320x568', viewport: { width: 320, height: 568 } },
-      ];
-      const collected: Array<{ name: string; visual: Awaited<ReturnType<typeof todosMetrics>>; contrast: StageContrastMetric }> = [];
-      for (const spec of specs) {
-        const context = await createContext(browser, spec.viewport, true);
+      await t.test('B desktop: click real abre clientId exacto, foco/scroll y cero mutación CRM/telemetría', async () => {
+        const context = await createContext(browser, { width: 1366, height: 768 }, false);
         try {
           const page = await context.newPage();
           await load(page, url);
-          collected.push({ name: spec.name, visual: await todosMetrics(page), contrast: await stageContrastMetric(page) });
+          const clientId = await targetClientId(page);
+          assert.equal(await page.locator('#crm .pc-supervised-attention-item[data-attention-client-id]').count(), 3, 'ATENDER AHORA debe respetar max3.');
+          const queueButton = page.locator(`#crm button.pc-supervised-attention-item[data-attention-client-id="${clientId}"]`).first();
+          assert.equal(await queueButton.evaluate((element) => element.tagName), 'BUTTON');
+          assert.equal(await queueButton.getAttribute('type'), 'button');
+          assert.match(await queueButton.getAttribute('aria-label') || '', /Abrir ficha completa de Lead R2 Prioritario/);
+
+          const crmBefore = await crmSnapshot(page);
+          const whatsappBefore = await whatsAppSnapshot(page);
+          const telemetryBefore = await telemetrySnapshot(page);
+          assert.ok(telemetryBefore.eventTypes.includes('RECOMMENDATION_SHOWN'), 'Debe aislarse SHOWN legítimo del render inicial.');
+          assert.equal(telemetryBefore.eventTypes.includes('RECOMMENDATION_DECISION'), false, 'Render inicial no debe contener DECISION.');
+
+          await clearScrollEvidence(page);
+          await queueButton.click();
+          await assertOpened(page, clientId);
+
+          assert.equal(await crmSnapshot(page), crmBefore, 'Navegar no debe mutar CRM persistido.');
+          assert.deepEqual(await whatsAppSnapshot(page), whatsappBefore, 'Navegar no debe mutar estado comercial WhatsApp.');
+          assert.deepEqual(await telemetrySnapshot(page), telemetryBefore, 'Navegar no debe mutar lifecycle/outbox ni generar DECISION.');
         } finally {
           await context.close();
         }
-      }
-      collected.forEach(({ name, visual, contrast }) => {
-        assertTodosMetrics(visual, name);
-        assertContrast(contrast, name);
-        console.log(`R3_CONTRAST ${name} ${JSON.stringify(contrast)}`);
       });
-    });
 
-    await t.test('G tap mobile 390x844: tap real abre exactamente la ficha correcta y mantiene foco/estado accesible', async () => {
-      const context = await createContext(browser, { width: 390, height: 844 }, true);
-      try {
-        const page = await context.newPage();
-        await load(page, url);
-        const clientId = await targetClientId(page);
-        const button = page.locator(`#crm button.pc-supervised-attention-item[data-attention-client-id="${clientId}"]`).first();
-        await clearScrollEvidence(page);
-        await button.tap();
-        await assertOpened(page, clientId);
-        const content = page.locator(`.mvp-lead-card[data-client-id="${clientId}"] .mvp-lead-full-content`);
-        assert.equal(await content.isVisible(), true, 'Ficha mobile debe ser visible.');
-        assert.ok((await content.innerText()).trim().length > 0, 'Ficha mobile debe contener información legible.');
-      } finally {
-        await context.close();
-      }
-    });
+      await t.test('C desktop: Enter y Space heredan activación nativa y abren el lead correcto', async () => {
+        const context = await createContext(browser, { width: 1366, height: 768 }, false);
+        try {
+          const page = await context.newPage();
+          await load(page, url);
+          const clientId = await targetClientId(page);
+          const queueButton = page.locator(`#crm button.pc-supervised-attention-item[data-attention-client-id="${clientId}"]`).first();
 
-    await t.test('H overflow 390x844: cero overflow antes y después del tap; cola/buttons/stages/ficha dentro de viewport', async () => {
-      const context = await createContext(browser, { width: 390, height: 844 }, true);
-      try {
-        const page = await context.newPage();
-        await load(page, url);
-        const before = await horizontalMetrics(page);
-        console.log(`R3_OVERFLOW 390x844 before ${JSON.stringify(before)}`);
-        assertHorizontal(before, '390x844 before', false);
+          await clearScrollEvidence(page);
+          await queueButton.focus();
+          assert.equal(await queueButton.evaluate((element) => document.activeElement === element), true);
+          await page.keyboard.press('Enter');
+          await assertOpened(page, clientId);
 
-        const clientId = await targetClientId(page);
-        await clearScrollEvidence(page);
-        await page.locator(`#crm button.pc-supervised-attention-item[data-attention-client-id="${clientId}"]`).first().tap();
-        await assertOpened(page, clientId);
-        const after = await horizontalMetrics(page, clientId);
-        console.log(`R3_OVERFLOW 390x844 after ${JSON.stringify(after)}`);
-        assertHorizontal(after, '390x844 after', true);
-      } finally {
-        await context.close();
-      }
-    });
+          await closeSheet(page, clientId);
+          await queueButton.focus();
+          assert.equal(await queueButton.evaluate((element) => document.activeElement === element), true);
+          await page.keyboard.press('Space');
+          await assertOpened(page, clientId);
+        } finally {
+          await context.close();
+        }
+      });
 
-    await t.test('I overflow 320x568: cero overflow antes y después del tap; cola/buttons/stages/ficha dentro de viewport', async () => {
-      const context = await createContext(browser, { width: 320, height: 568 }, true);
-      try {
-        const page = await context.newPage();
-        await load(page, url);
-        const before = await horizontalMetrics(page);
-        console.log(`R3_OVERFLOW 320x568 before ${JSON.stringify(before)}`);
-        assertHorizontal(before, '320x568 before', false);
+      await t.test('D desktop: hidden-by-filter conserva filtros, card oculta y aviso accesible', async () => {
+        const context = await createContext(browser, { width: 1366, height: 768 }, false);
+        try {
+          const page = await context.newPage();
+          await load(page, url);
+          const clientId = await targetClientId(page);
+          const filtersBaseline = await filterSnapshot(page);
+          assert.deepEqual(filtersBaseline, { search: '', stage: 'Todas', temperature: 'Todas', assignee: 'Todos', order: 'recent' });
 
-        const clientId = await targetClientId(page);
-        await clearScrollEvidence(page);
-        await page.locator(`#crm button.pc-supervised-attention-item[data-attention-client-id="${clientId}"]`).first().tap();
-        await assertOpened(page, clientId);
-        const after = await horizontalMetrics(page, clientId);
-        console.log(`R3_OVERFLOW 320x568 after ${JSON.stringify(after)}`);
-        assertHorizontal(after, '320x568 after', true);
-      } finally {
-        await context.close();
-      }
-    });
+          const search = page.locator('#mvp-lead-search');
+          assert.equal(await search.isVisible(), true, 'El filtro usado debe ser UI real visible.');
+          await search.fill(HIDDEN_SEARCH);
+          await page.waitForFunction((id) => !document.querySelector(`#mvp-lead-results .mvp-lead-card[data-client-id="${id}"]`), clientId);
+
+          const filtersBefore = await filterSnapshot(page);
+          assert.deepEqual(filtersBefore, { ...filtersBaseline, search: HIDDEN_SEARCH });
+          const crmBefore = await crmSnapshot(page);
+          const telemetryBefore = await telemetrySnapshot(page);
+
+          await page.locator(`#crm button.pc-supervised-attention-item[data-attention-client-id="${clientId}"]`).first().click();
+          await page.waitForFunction((message) => {
+            const status = document.querySelector<HTMLElement>('[data-attention-navigation-status]');
+            return Boolean(status && !status.hidden && status.textContent?.trim() === message && status.getAttribute('role') === 'status' && status.getAttribute('aria-live') === 'polite');
+          }, HIDDEN_MESSAGE);
+
+          assert.deepEqual(await filterSnapshot(page), filtersBefore, 'ATENDER AHORA no debe resetear filtros.');
+          assert.equal(await page.locator(`#mvp-lead-results .mvp-lead-card[data-client-id="${clientId}"]`).count(), 0, 'Lead debe seguir oculto.');
+          assert.equal(await crmSnapshot(page), crmBefore, 'Lead oculto no debe mutar CRM.');
+          assert.deepEqual(await telemetrySnapshot(page), telemetryBefore, 'Lead oculto no debe generar DECISION.');
+        } finally {
+          await context.close();
+        }
+      });
+
+      await t.test('E targets: desktop, 390x844 y 320x568 miden >=44px en todas las recomendaciones visibles', async () => {
+        const specs = [
+          { name: 'desktop', viewport: { width: 1366, height: 768 }, mobile: false },
+          { name: '390x844', viewport: { width: 390, height: 844 }, mobile: true },
+          { name: '320x568', viewport: { width: 320, height: 568 }, mobile: true },
+        ];
+        const collected: Array<{ name: string; metrics: TargetMetrics }> = [];
+        for (const spec of specs) {
+          const context = await createContext(browser, spec.viewport, spec.mobile);
+          try {
+            const page = await context.newPage();
+            await load(page, url);
+            collected.push({ name: spec.name, metrics: await targetMetrics(page) });
+          } finally {
+            await context.close();
+          }
+        }
+        collected.forEach(({ name, metrics }) => {
+          console.log(`R3_TARGET ${name} ${JSON.stringify(metrics)}`);
+          assertTargetMetrics(metrics, name);
+        });
+      });
+
+      await t.test('F contraste mobile: 390x844 y 320x568 label/contador >=4.5, centrados y sin marrón', async () => {
+        const specs = [
+          { name: '390x844', viewport: { width: 390, height: 844 } },
+          { name: '320x568', viewport: { width: 320, height: 568 } },
+        ];
+        const collected: Array<{ name: string; visual: Awaited<ReturnType<typeof todosMetrics>>; contrast: StageContrastMetric }> = [];
+        for (const spec of specs) {
+          const context = await createContext(browser, spec.viewport, true);
+          try {
+            const page = await context.newPage();
+            await load(page, url);
+            collected.push({ name: spec.name, visual: await todosMetrics(page), contrast: await stageContrastMetric(page) });
+          } finally {
+            await context.close();
+          }
+        }
+        collected.forEach(({ name, visual, contrast }) => {
+          assertTodosMetrics(visual, name);
+          assertContrast(contrast, name);
+          console.log(`R3_CONTRAST ${name} ${JSON.stringify(contrast)}`);
+        });
+      });
+
+      await t.test('G tap mobile 390x844: tap real abre exactamente la ficha correcta y mantiene foco/estado accesible', async () => {
+        const context = await createContext(browser, { width: 390, height: 844 }, true);
+        try {
+          const page = await context.newPage();
+          await load(page, url);
+          const clientId = await targetClientId(page);
+          const button = page.locator(`#crm button.pc-supervised-attention-item[data-attention-client-id="${clientId}"]`).first();
+          await clearScrollEvidence(page);
+          await button.tap();
+          await assertOpened(page, clientId);
+          const content = page.locator(`.mvp-lead-card[data-client-id="${clientId}"] .mvp-lead-full-content`);
+          assert.equal(await content.isVisible(), true, 'Ficha mobile debe ser visible.');
+          assert.ok((await content.innerText()).trim().length > 0, 'Ficha mobile debe contener información legible.');
+        } finally {
+          await context.close();
+        }
+      });
+
+      await t.test('H overflow 390x844: cero overflow antes y después del tap; cola/buttons/stages/ficha dentro de viewport', async () => {
+        const context = await createContext(browser, { width: 390, height: 844 }, true);
+        try {
+          const page = await context.newPage();
+          await load(page, url);
+          const before = await horizontalMetrics(page);
+          console.log(`R3_OVERFLOW 390x844 before ${JSON.stringify(before)}`);
+          assertHorizontal(before, '390x844 before', false);
+
+          const clientId = await targetClientId(page);
+          await clearScrollEvidence(page);
+          await page.locator(`#crm button.pc-supervised-attention-item[data-attention-client-id="${clientId}"]`).first().tap();
+          await assertOpened(page, clientId);
+          const after = await horizontalMetrics(page, clientId);
+          console.log(`R3_OVERFLOW 390x844 after ${JSON.stringify(after)}`);
+          assertHorizontal(after, '390x844 after', true);
+        } finally {
+          await context.close();
+        }
+      });
+
+      await t.test('I overflow 320x568: cero overflow antes y después del tap; cola/buttons/stages/ficha dentro de viewport', async () => {
+        const context = await createContext(browser, { width: 320, height: 568 }, true);
+        try {
+          const page = await context.newPage();
+          await load(page, url);
+          const before = await horizontalMetrics(page);
+          console.log(`R3_OVERFLOW 320x568 before ${JSON.stringify(before)}`);
+          assertHorizontal(before, '320x568 before', false);
+
+          const clientId = await targetClientId(page);
+          await clearScrollEvidence(page);
+          await page.locator(`#crm button.pc-supervised-attention-item[data-attention-client-id="${clientId}"]`).first().tap();
+          await assertOpened(page, clientId);
+          const after = await horizontalMetrics(page, clientId);
+          console.log(`R3_OVERFLOW 320x568 after ${JSON.stringify(after)}`);
+          assertHorizontal(after, '320x568 after', true);
+        } finally {
+          await context.close();
+        }
+      });
+    } finally {
+      await browser.close();
+    }
   } finally {
-    await browser.close();
     await stopServer(server);
   }
 });
