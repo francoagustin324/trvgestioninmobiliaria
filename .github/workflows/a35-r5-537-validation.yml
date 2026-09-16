@@ -1,0 +1,58 @@
+name: A3.5 R5 #537 Follow-up Cloud
+
+on:
+  push:
+    branches:
+      - validation/a35-r5-537-followup-cloud
+
+permissions:
+  contents: read
+
+env:
+  PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1'
+
+jobs:
+  r5-537:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci --silent
+      - name: Build
+        run: |
+          set -euo pipefail
+          npm run build --silent
+          echo 'BUILD=GREEN'
+      - name: '#537 isolated run 1'
+        run: |
+          set -euo pipefail
+          node --test --test-concurrency=1 dist/tests/followup-none-cloud-persistence-browser.test.js
+          echo 'TEST_537_RUN_1=GREEN'
+      - name: Process cleanliness after run 1
+        run: |
+          set -euo pipefail
+          if pgrep -af 'node .*dist/server\.js'; then
+            echo 'SERVER_LEAKS_AFTER_RUN_1=1'
+            exit 1
+          fi
+          echo 'SERVER_LEAKS_AFTER_RUN_1=0'
+      - name: '#537 isolated run 2'
+        run: |
+          set -euo pipefail
+          node --test --test-concurrency=1 dist/tests/followup-none-cloud-persistence-browser.test.js
+          echo 'TEST_537_RUN_2=GREEN'
+      - name: Process cleanliness final
+        if: always()
+        run: |
+          set -euo pipefail
+          leaks=0
+          if pgrep -af 'node .*dist/server\.js'; then leaks=1; fi
+          echo "SERVER_LEAKS=$leaks"
+          if [ "$leaks" -ne 0 ]; then exit 1; fi
+          echo 'OPEN_HANDLE_FAILURES=0'
