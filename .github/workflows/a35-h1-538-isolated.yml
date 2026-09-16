@@ -1,28 +1,27 @@
-name: A3.5 H1 #538 Isolated Lifecycle Validation
+name: A3.5 H3 #538 Recommendation Telemetry Diagnostic
 
 on:
   push:
     branches:
       - validation/a35-h1-538-lifecycle
     paths:
-      - src/tests/hotfix-leads-ux-atender-ahora-browser.test.ts
       - .github/workflows/a35-h1-538-isolated.yml
 
 permissions:
   contents: read
 
 concurrency:
-  group: a35-h1-538-isolated-${{ github.ref }}
+  group: a35-h3-538-diagnostic-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
-  isolated-538:
+  isolated-538-h3:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     env:
       PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
     steps:
-      - name: Checkout H1 validation branch
+      - name: Checkout H3 validation branch
         uses: actions/checkout@v7
         with:
           fetch-depth: 0
@@ -42,76 +41,83 @@ jobs:
           unset PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD
           npx playwright install --with-deps webkit
 
-      - name: Build exact H1 branch
+      - name: Inject temporary H3 test-only trace
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path('src/tests/hotfix-leads-ux-atender-ahora-browser.test.ts')
+          source = path.read_text()
+
+          old = """      if (request.method() === 'POST') {\n        const body = request.postDataJSON();\n        syntheticRecords = Array.isArray(body) ? structuredClone(body) : [structuredClone(body)];\n        await route.fulfill(syntheticJson(syntheticRecords, 201));\n        return;\n      }"""
+          new = """      if (request.method() === 'POST') {\n        const body = request.postDataJSON();\n        console.log(`H3_CLOUD_POST ${JSON.stringify(body)}`);\n        syntheticRecords = Array.isArray(body) ? structuredClone(body) : [structuredClone(body)];\n        await route.fulfill(syntheticJson(syntheticRecords, 201));\n        return;\n      }"""
+          if old not in source:
+              raise SystemExit('H3_PATCH_CLOUD_POST_ANCHOR_MISSING')
+          source = source.replace(old, new, 1)
+
+          old = """  await context.addInitScript(({ crm, generation, identityStorageKey, storageKey }) => {\n    localStorage.setItem('propcontrol-cloud-session-v1', JSON.stringify({"""
+          new = """  await context.addInitScript(({ crm, generation, identityStorageKey, storageKey }) => {\n    const h3Window = window as unknown as { __h3RecommendationTrace?: Array<Record<string, unknown>> };\n    h3Window.__h3RecommendationTrace = [];\n    const originalSetItem = Storage.prototype.setItem;\n    const originalRemoveItem = Storage.prototype.removeItem;\n    Storage.prototype.setItem = function h3SetItem(key: string, value: string): void {\n      if (key.includes('supervised-recommendation')) {\n        h3Window.__h3RecommendationTrace?.push({\n          order: h3Window.__h3RecommendationTrace.length + 1,\n          op: 'setItem',\n          key,\n          value,\n          at: performance.now(),\n        });\n      }\n      originalSetItem.call(this, key, value);\n    };\n    Storage.prototype.removeItem = function h3RemoveItem(key: string): void {\n      if (key.includes('supervised-recommendation')) {\n        h3Window.__h3RecommendationTrace?.push({\n          order: h3Window.__h3RecommendationTrace.length + 1,\n          op: 'removeItem',\n          key,\n          previousValue: originalSetItem ? localStorage.getItem(key) : null,\n          at: performance.now(),\n        });\n      }\n      originalRemoveItem.call(this, key);\n    };\n    localStorage.setItem('propcontrol-cloud-session-v1', JSON.stringify({"""
+          if old not in source:
+              raise SystemExit('H3_PATCH_STORAGE_TRACE_ANCHOR_MISSING')
+          source = source.replace(old, new, 1)
+
+          old = """async function telemetrySnapshot(page: Page): Promise<{ entries: Array<[string, string | null]>; eventTypes: string[] }> {"""
+          new = """async function h3DiagnosticSnapshot(page: Page, label: string): Promise<void> {\n  const snapshot = await page.evaluate(() => {\n    const h3Window = window as unknown as { __h3RecommendationTrace?: Array<Record<string, unknown>> };\n    const storage: Array<[string, string | null]> = [];\n    for (let index = 0; index < localStorage.length; index += 1) {\n      const key = localStorage.key(index);\n      if (key?.includes('supervised-recommendation')) storage.push([key, localStorage.getItem(key)]);\n    }\n    storage.sort(([left], [right]) => left.localeCompare(right));\n    return {\n      label,\n      crmActive: Boolean(document.querySelector('#crm.active')),\n      recommendationVisible: Boolean(document.querySelector('#crm .pc-supervised-attention-item[data-attention-client-id]')),\n      trace: h3Window.__h3RecommendationTrace || [],\n      storage,\n    };\n  });\n  console.log(`H3_DIAGNOSTIC_SNAPSHOT ${JSON.stringify(snapshot)}`);\n}\n\nasync function telemetrySnapshot(page: Page): Promise<{ entries: Array<[string, string | null]>; eventTypes: string[] }> {"""
+          if old not in source:
+              raise SystemExit('H3_PATCH_HELPER_ANCHOR_MISSING')
+          source = source.replace(old, new, 1)
+
+          old = """          const crmBefore = await crmSnapshot(page);\n          const whatsappBefore = await whatsAppSnapshot(page);\n          const telemetryBefore = await telemetrySnapshot(page);\n          assert.ok(telemetryBefore.eventTypes.includes('RECOMMENDATION_SHOWN'), 'Debe aislarse SHOWN legítimo del render inicial.');"""
+          new = """          const crmBefore = await crmSnapshot(page);\n          const whatsappBefore = await whatsAppSnapshot(page);\n          await h3DiagnosticSnapshot(page, 'IMMEDIATELY_BEFORE_TELEMETRY_BEFORE');\n          const telemetryBefore = await telemetrySnapshot(page);\n          console.log(`H3_TELEMETRY_BEFORE ${JSON.stringify(telemetryBefore)}`);\n          await h3DiagnosticSnapshot(page, 'IMMEDIATELY_AFTER_TELEMETRY_BEFORE');\n          assert.ok(telemetryBefore.eventTypes.includes('RECOMMENDATION_SHOWN'), 'Debe aislarse SHOWN legítimo del render inicial.');"""
+          if old not in source:
+              raise SystemExit('H3_PATCH_SUBTEST_B_ANCHOR_MISSING')
+          source = source.replace(old, new, 1)
+
+          path.write_text(source)
+          print('H3_TEMP_TEST_INSTRUMENTATION_APPLIED=YES')
+          PY
+
+      - name: Build instrumented test workspace
         run: npm run build --silent
 
-      - name: Run isolated test #538 twice and prove cleanup
+      - name: Run isolated test #538 once
         shell: bash
         run: |
           set -uo pipefail
           TEST_FILE="dist/tests/hotfix-leads-ux-atender-ahora-browser.test.js"
-          OVERALL=0
-
-          for RUN_NO in 1 2; do
-            LOG="$RUNNER_TEMP/test-538-run-${RUN_NO}.tap"
-            echo "ISOLATED_538_RUN_${RUN_NO}_START=$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
-
-            set +e
-            node --test --test-concurrency=1 "$TEST_FILE" >"$LOG" 2>&1
-            CODE=$?
-            set -e
-
-            cat "$LOG"
-            echo "ISOLATED_538_RUN_${RUN_NO}_EXIT_CODE=$CODE"
-            echo "ISOLATED_538_RUN_${RUN_NO}_PROCESS_EXITED=YES"
-
-            if [ "$CODE" -eq 0 ] && grep -q '^# fail 0$' "$LOG"; then
-              echo "ISOLATED_538_RUN_${RUN_NO}=GREEN"
-            else
-              echo "ISOLATED_538_RUN_${RUN_NO}=RED"
-              OVERALL=1
-            fi
-
-            if pgrep -af 'node .*dist/server\.js' >"$RUNNER_TEMP/server-left-${RUN_NO}.txt"; then
-              cat "$RUNNER_TEMP/server-left-${RUN_NO}.txt"
-              echo "SERVER_CHILD_LEFT_ALIVE_RUN_${RUN_NO}=YES"
-              OVERALL=1
-            else
-              echo "SERVER_CHILD_LEFT_ALIVE_RUN_${RUN_NO}=NO"
-            fi
-
-            if pgrep -af 'pw_run|MiniBrowser|WebKitNetworkProcess|WebKitWebProcess' >"$RUNNER_TEMP/webkit-left-${RUN_NO}.txt"; then
-              cat "$RUNNER_TEMP/webkit-left-${RUN_NO}.txt"
-              echo "WEBKIT_PROCESS_LEFT_ALIVE_RUN_${RUN_NO}=YES"
-              OVERALL=1
-            else
-              echo "WEBKIT_PROCESS_LEFT_ALIVE_RUN_${RUN_NO}=NO"
-            fi
-
-            echo "ISOLATED_538_RUN_${RUN_NO}_END=$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
-          done
-
-          exit "$OVERALL"
-
-      - name: Final relevant-process evidence
-        if: always()
-        shell: bash
-        run: |
+          LOG="$RUNNER_TEMP/test-538-h3.tap"
+          echo "H3_ISOLATED_538_START=$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
           set +e
-          echo '=== RELEVANT PROCESS SNAPSHOT ==='
-          ps -eo pid,ppid,etime,stat,comm,args | grep -Ei 'dist/server\.js|pw_run|MiniBrowser|WebKitNetworkProcess|WebKitWebProcess' | grep -v -E 'grep -Ei' || true
+          node --test --test-concurrency=1 "$TEST_FILE" >"$LOG" 2>&1
+          CODE=$?
+          set -e
+          cat "$LOG"
+          echo "H3_ISOLATED_538_EXIT_CODE=$CODE"
+          echo "H3_ISOLATED_538_PROCESS_EXITED=YES"
+          if pgrep -af 'node .*dist/server\.js' >"$RUNNER_TEMP/h3-server-left.txt"; then
+            cat "$RUNNER_TEMP/h3-server-left.txt"
+            echo "H3_SERVER_CHILD_LEFT_ALIVE=YES"
+          else
+            echo "H3_SERVER_CHILD_LEFT_ALIVE=NO"
+          fi
+          if pgrep -af 'pw_run|MiniBrowser|WebKitNetworkProcess|WebKitWebProcess' >"$RUNNER_TEMP/h3-webkit-left.txt"; then
+            cat "$RUNNER_TEMP/h3-webkit-left.txt"
+            echo "H3_WEBKIT_PROCESS_LEFT_ALIVE=YES"
+          else
+            echo "H3_WEBKIT_PROCESS_LEFT_ALIVE=NO"
+          fi
+          echo "H3_ISOLATED_538_END=$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+          exit 0
 
-      - name: Upload isolated evidence
+      - name: Upload H3 diagnostic evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: a35-h1-538-isolated-${{ github.run_id }}
+          name: a35-h3-538-diagnostic-${{ github.run_id }}
           if-no-files-found: warn
           retention-days: 14
           path: |
-            ${{ runner.temp }}/test-538-run-1.tap
-            ${{ runner.temp }}/test-538-run-2.tap
-            ${{ runner.temp }}/server-left-1.txt
-            ${{ runner.temp }}/server-left-2.txt
-            ${{ runner.temp }}/webkit-left-1.txt
-            ${{ runner.temp }}/webkit-left-2.txt
+            ${{ runner.temp }}/test-538-h3.tap
+            ${{ runner.temp }}/h3-server-left.txt
+            ${{ runner.temp }}/h3-webkit-left.txt
