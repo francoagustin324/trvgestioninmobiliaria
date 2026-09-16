@@ -1,0 +1,103 @@
+name: A3.5 H1 #538 Isolated Lifecycle Validation
+
+on:
+  push:
+    branches:
+      - validation/a35-h1-538-lifecycle
+
+permissions:
+  contents: read
+
+concurrency:
+  group: a35-h1-538-isolated-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  isolated-538:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
+    steps:
+      - name: Checkout H1 validation branch
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci --silent
+
+      - name: Install required WebKit runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          unset PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD
+          npx playwright install --with-deps webkit
+
+      - name: Build exact H1 branch
+        run: npm run build --silent
+
+      - name: Run isolated test #538 twice and prove cleanup
+        shell: bash
+        run: |
+          set -euo pipefail
+          TEST_FILE="dist/tests/hotfix-leads-ux-atender-ahora-browser.test.js"
+
+          for RUN_NO in 1 2; do
+            LOG="$RUNNER_TEMP/test-538-run-${RUN_NO}.tap"
+            echo "ISOLATED_538_RUN_${RUN_NO}_START=$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+
+            set +e
+            node --test --test-concurrency=1 "$TEST_FILE" >"$LOG" 2>&1
+            CODE=$?
+            set -e
+
+            cat "$LOG"
+            echo "ISOLATED_538_RUN_${RUN_NO}_EXIT_CODE=$CODE"
+            test "$CODE" -eq 0
+            grep -q '^# fail 0$' "$LOG"
+
+            if pgrep -af 'node .*dist/server\.js' >"$RUNNER_TEMP/server-left-${RUN_NO}.txt"; then
+              cat "$RUNNER_TEMP/server-left-${RUN_NO}.txt"
+              echo "SERVER_CHILD_LEFT_ALIVE_RUN_${RUN_NO}=YES"
+              exit 1
+            fi
+            echo "SERVER_CHILD_LEFT_ALIVE_RUN_${RUN_NO}=NO"
+
+            if pgrep -af 'pw_run|MiniBrowser|WebKitNetworkProcess|WebKitWebProcess' >"$RUNNER_TEMP/webkit-left-${RUN_NO}.txt"; then
+              cat "$RUNNER_TEMP/webkit-left-${RUN_NO}.txt"
+              echo "WEBKIT_PROCESS_LEFT_ALIVE_RUN_${RUN_NO}=YES"
+              exit 1
+            fi
+            echo "WEBKIT_PROCESS_LEFT_ALIVE_RUN_${RUN_NO}=NO"
+            echo "ISOLATED_538_RUN_${RUN_NO}_PROCESS_EXITED=YES"
+            echo "ISOLATED_538_RUN_${RUN_NO}_END=$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+          done
+
+      - name: Final relevant-process evidence
+        if: always()
+        shell: bash
+        run: |
+          set +e
+          echo '=== RELEVANT PROCESS SNAPSHOT ==='
+          ps -eo pid,ppid,etime,stat,comm,args | grep -Ei 'dist/server\.js|pw_run|MiniBrowser|WebKitNetworkProcess|WebKitWebProcess' | grep -v -E 'grep -Ei' || true
+
+      - name: Upload isolated evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: a35-h1-538-isolated-${{ github.run_id }}
+          if-no-files-found: warn
+          retention-days: 14
+          path: |
+            ${{ runner.temp }}/test-538-run-1.tap
+            ${{ runner.temp }}/test-538-run-2.tap
+            ${{ runner.temp }}/server-left-1.txt
+            ${{ runner.temp }}/server-left-2.txt
+            ${{ runner.temp }}/webkit-left-1.txt
+            ${{ runner.temp }}/webkit-left-2.txt
