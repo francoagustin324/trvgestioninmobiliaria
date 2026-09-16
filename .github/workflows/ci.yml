@@ -16,8 +16,10 @@ concurrency:
 jobs:
   build-and-test:
     runs-on: ubuntu-latest
+    timeout-minutes: 120
     env:
       PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
+      EXPECTED_TEST_TOTAL: "1421"
     steps:
       - uses: actions/checkout@v7
         with:
@@ -25,6 +27,13 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: 22
+      - name: Registrar evidencia de source SHA
+        shell: bash
+        run: |
+          set -euo pipefail
+          printf '%s\n' "$GITHUB_SHA" > ci-source-sha.txt
+          test -s ci-source-sha.txt
+          echo "FULL_CI_HEAD=$GITHUB_SHA"
       - name: Verificar cache-busting de assets directos
         run: node scripts/verify-direct-asset-cache-bust.mjs --ci
       - name: Instalar dependencias
@@ -35,35 +44,198 @@ jobs:
           npx playwright install --with-deps webkit
       - name: Compilar TypeScript
         id: build
+        shell: bash
         run: |
-          set +e
-          npm run build --silent > build.log 2>&1
-          code=$?
-          cat build.log
-          exit $code
+          set -euo pipefail
+          trap 'code=$?; printf "BUILD_EXIT_CODE=%s\n" "$code" > ci-build-status.txt' EXIT
+          npm run build --silent 2>&1 | tee build.log
       - name: Guardar diagnóstico de compilación
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: build-diagnostics
-          path: build.log
+          name: build-diagnostics-${{ github.sha }}
+          path: |
+            build.log
+            ci-build-status.txt
+            ci-source-sha.txt
           if-no-files-found: error
-          retention-days: 1
-      - name: Ejecutar pruebas
+          retention-days: 3
+      - name: Capturar baseline de procesos de la suite
+        shell: bash
         run: |
-          set +e
-          npm run test:ci --silent > test.log 2>&1
-          code=$?
-          cat test.log
-          exit $code
+          set -euo pipefail
+          ps -eo pid=,ppid=,args= > ci-processes-before-tests.txt
+          test -s ci-processes-before-tests.txt
+      - name: Ejecutar pruebas
+        id: tests
+        timeout-minutes: 110
+        shell: bash
+        run: |
+          set -euo pipefail
+          trap 'code=$?; printf "TEST_COMMAND_EXIT_CODE=%s\n" "$code" > ci-test-status.txt' EXIT
+          npm run test:ci --silent 2>&1 | tee test.log
+      - name: Verificar TAP, cardinalidad y limpieza de procesos
+        if: always()
+        shell: bash
+        env:
+          TEST_STEP_OUTCOME: ${{ steps.tests.outcome }}
+        run: |
+          set -euo pipefail
+          ps -eo pid=,ppid=,args= > ci-processes-after-tests.txt
+
+          python3 <<'PY'
+          import os
+          import re
+          from pathlib import Path
+
+          def load_processes(path: str):
+              result = {}
+              for raw in Path(path).read_text(encoding='utf-8', errors='replace').splitlines():
+                  match = re.match(r'^\s*(\d+)\s+(\d+)\s+(.*)$', raw)
+                  if not match:
+                      continue
+                  pid = int(match.group(1))
+                  result[pid] = (int(match.group(2)), match.group(3))
+              return result
+
+          before = load_processes('ci-processes-before-tests.txt') if Path('ci-processes-before-tests.txt').exists() else {}
+          after = load_processes('ci-processes-after-tests.txt')
+
+          patterns = {
+              'server': re.compile(r'\bnode\b.*\bdist/server\.js\b', re.I),
+              'node_test': re.compile(r'\bnode\b.*--test(?:\s|=).*\bdist/tests(?:/|\\)', re.I),
+              'webkit': re.compile(r'(?:/|\\)(?:ms-playwright|playwright)(?:/|\\).*webkit|\bMiniBrowser\b|\bWebKit(?:Web|Network|GPU)Process\b', re.I),
+              'chromium': re.compile(r'(?:/|\\)(?:ms-playwright|playwright)(?:/|\\).*(?:chromium|chrome)|\b(?:google-chrome|chromium|chromium-browser|headless_shell)\b', re.I),
+          }
+
+          leaks = {name: [] for name in patterns}
+          for pid, (ppid, command) in after.items():
+              prior = before.get(pid)
+              is_new = prior is None or prior[1] != command
+              if not is_new:
+                  continue
+              for name, pattern in patterns.items():
+                  if pattern.search(command):
+                      leaks[name].append((pid, ppid, command))
+
+          server_leaks = len(leaks['server'])
+          node_test_leaks = len(leaks['node_test'])
+          webkit_leaks = len(leaks['webkit'])
+          chromium_leaks = len(leaks['chromium'])
+          total = server_leaks + node_test_leaks + webkit_leaks + chromium_leaks
+          outcome = os.environ.get('TEST_STEP_OUTCOME', '')
+          normal = outcome == 'success' and node_test_leaks == 0
+
+          lines = [
+              f'SERVER_LEAKS={server_leaks}',
+              f'NODE_TEST_PROCESS_LEAKS={node_test_leaks}',
+              f'WEBKIT_PROCESS_LEAKS={webkit_leaks}',
+              f'CHROMIUM_PROCESS_LEAKS={chromium_leaks}',
+              f'PROCESS_LEAKS_TOTAL={total}',
+              f'NODE_TEST_PROCESS_EXITED_NORMALLY={"YES" if normal else "NO"}',
+          ]
+          for name, items in leaks.items():
+              for pid, ppid, command in items:
+                  lines.append(f'PROCESS_LEFT={name}:pid={pid}:ppid={ppid}:{command}')
+          Path('ci-process-summary.txt').write_text('\n'.join(lines) + '\n', encoding='utf-8')
+          print('\n'.join(lines))
+          if total:
+              raise SystemExit('Suite-owned process leak detected')
+          PY
+
+          test -s build.log
+          test -s test.log
+          echo 'BUILD_LOG_EXISTS=YES'
+          echo 'BUILD_LOG_NONEMPTY=YES'
+          echo 'TEST_LOG_EXISTS=YES'
+          echo 'TEST_LOG_NONEMPTY=YES'
+
+          python3 <<'PY'
+          import re
+          from pathlib import Path
+
+          text = Path('test.log').read_text(encoding='utf-8', errors='replace')
+          expected = 1421
+
+          def terminal_metric(name: str) -> int:
+              matches = re.findall(rf'^# {re.escape(name)}\s+(\d+)\s*$', text, flags=re.MULTILINE)
+              if not matches:
+                  raise SystemExit(f'Missing terminal TAP metric: {name}')
+              return int(matches[-1])
+
+          tests = terminal_metric('tests')
+          passed = terminal_metric('pass')
+          failed = terminal_metric('fail')
+          cancelled = terminal_metric('cancelled')
+          skipped = terminal_metric('skipped')
+          todo = terminal_metric('todo')
+          plan_matches = re.findall(r'^1\.\.(\d+)\s*$', text, flags=re.MULTILINE)
+          if not plan_matches:
+              raise SystemExit('Missing terminal TAP plan')
+          plan = int(plan_matches[-1])
+
+          summary = [
+              'FINAL_TAP_SUMMARY_PRESENT=YES',
+              f'TAP_PLAN={plan}',
+              f'TAP_TESTS={tests}',
+              f'TAP_PASS={passed}',
+              f'TAP_FAIL={failed}',
+              f'TAP_CANCELLED={cancelled}',
+              f'TAP_SKIPPED={skipped}',
+              f'TAP_TODO={todo}',
+              f'EXPECTED_TEST_TOTAL={expected}',
+          ]
+          Path('ci-tap-summary.txt').write_text('\n'.join(summary) + '\n', encoding='utf-8')
+          print('\n'.join(summary))
+
+          if tests != expected:
+              raise SystemExit(f'Unexpected TAP cardinality: {tests} != {expected}')
+          if plan != expected:
+              raise SystemExit(f'Unexpected TAP plan: {plan} != {expected}')
+          if failed != 0:
+              raise SystemExit(f'TAP fail must be 0, got {failed}')
+          if cancelled != 0:
+              raise SystemExit(f'TAP cancelled must be 0, got {cancelled}')
+          if todo != 0:
+              raise SystemExit(f'TAP todo must be 0, got {todo}')
+          if tests != passed + skipped:
+              raise SystemExit(f'TAP accounting mismatch: tests={tests}, pass={passed}, skipped={skipped}')
+          PY
+
+          python3 <<'PY'
+          import re
+          from pathlib import Path
+
+          text = Path('test.log').read_text(encoding='utf-8', errors='replace')
+          patterns = [
+              re.compile(r'generated asynchronous activity after the test ended', re.I),
+              re.compile(r'asynchronous activity after the test ended', re.I),
+              re.compile(r'open handles? detected', re.I),
+              re.compile(r'did not exit cleanly', re.I),
+          ]
+          hits = sum(len(pattern.findall(text)) for pattern in patterns)
+          Path('ci-open-handle-summary.txt').write_text(f'OPEN_HANDLE_FAILURES={hits}\n', encoding='utf-8')
+          print(f'OPEN_HANDLE_FAILURES={hits}')
+          if hits:
+              raise SystemExit('Open-handle failure reported by test output')
+          PY
+
       - name: Guardar diagnóstico de pruebas
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: test-diagnostics
-          path: test.log
+          name: test-diagnostics-${{ github.sha }}
+          path: |
+            test.log
+            ci-test-status.txt
+            ci-source-sha.txt
+            ci-processes-before-tests.txt
+            ci-processes-after-tests.txt
+            ci-process-summary.txt
+            ci-tap-summary.txt
+            ci-open-handle-summary.txt
           if-no-files-found: error
-          retention-days: 3
+          retention-days: 14
       - name: Verificar capturas WebKit PR142
         if: always()
         run: |
