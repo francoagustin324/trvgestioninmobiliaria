@@ -45,39 +45,48 @@ jobs:
       - name: Run isolated test #538 twice and prove cleanup
         shell: bash
         run: |
-          set -euo pipefail
+          set -uo pipefail
           TEST_FILE="dist/tests/hotfix-leads-ux-atender-ahora-browser.test.js"
+          OVERALL=0
 
           for RUN_NO in 1 2; do
             LOG="$RUNNER_TEMP/test-538-run-${RUN_NO}.tap"
             echo "ISOLATED_538_RUN_${RUN_NO}_START=$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
 
-            set +e
             node --test --test-concurrency=1 "$TEST_FILE" >"$LOG" 2>&1
             CODE=$?
-            set -e
 
             cat "$LOG"
             echo "ISOLATED_538_RUN_${RUN_NO}_EXIT_CODE=$CODE"
-            test "$CODE" -eq 0
-            grep -q '^# fail 0$' "$LOG"
+            echo "ISOLATED_538_RUN_${RUN_NO}_PROCESS_EXITED=YES"
+
+            if [ "$CODE" -eq 0 ] && grep -q '^# fail 0$' "$LOG"; then
+              echo "ISOLATED_538_RUN_${RUN_NO}=GREEN"
+            else
+              echo "ISOLATED_538_RUN_${RUN_NO}=RED"
+              OVERALL=1
+            fi
 
             if pgrep -af 'node .*dist/server\.js' >"$RUNNER_TEMP/server-left-${RUN_NO}.txt"; then
               cat "$RUNNER_TEMP/server-left-${RUN_NO}.txt"
               echo "SERVER_CHILD_LEFT_ALIVE_RUN_${RUN_NO}=YES"
-              exit 1
+              OVERALL=1
+            else
+              echo "SERVER_CHILD_LEFT_ALIVE_RUN_${RUN_NO}=NO"
             fi
-            echo "SERVER_CHILD_LEFT_ALIVE_RUN_${RUN_NO}=NO"
 
             if pgrep -af 'pw_run|MiniBrowser|WebKitNetworkProcess|WebKitWebProcess' >"$RUNNER_TEMP/webkit-left-${RUN_NO}.txt"; then
               cat "$RUNNER_TEMP/webkit-left-${RUN_NO}.txt"
               echo "WEBKIT_PROCESS_LEFT_ALIVE_RUN_${RUN_NO}=YES"
-              exit 1
+              OVERALL=1
+            else
+              echo "WEBKIT_PROCESS_LEFT_ALIVE_RUN_${RUN_NO}=NO"
             fi
-            echo "WEBKIT_PROCESS_LEFT_ALIVE_RUN_${RUN_NO}=NO"
-            echo "ISOLATED_538_RUN_${RUN_NO}_PROCESS_EXITED=YES"
+
             echo "ISOLATED_538_RUN_${RUN_NO}_END=$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
           done
+
+          exit "$OVERALL"
 
       - name: Final relevant-process evidence
         if: always()
