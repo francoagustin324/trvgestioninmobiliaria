@@ -14,6 +14,11 @@ replace_once(
     '      user_id: member.userId,\n',
     '      user_id: member.userId!,\n',
 )
+replace_once(
+    'src/tests/a35-h5-r1-modern-tenant-harness.ts',
+    '      email: member.email || null,\n      phone: member.phone || null,\n',
+    '      email: member.email || undefined,\n      phone: member.phone || undefined,\n',
+)
 
 replace_once(
     'src/tests/b1-2-9-multiuser-permissions-real-app.test.ts',
