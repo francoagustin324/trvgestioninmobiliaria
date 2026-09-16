@@ -1,0 +1,94 @@
+name: A3.5 H5 Three-Pilot Validation
+
+on:
+  push:
+    branches:
+      - validation/a35-h5-legacy-bootstrap-pilot
+    paths:
+      - .github/workflows/a35-h5-pilot-validation.yml
+
+permissions:
+  contents: read
+
+jobs:
+  validate-pilots:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install dependencies
+        run: npm ci --silent
+      - name: Build
+        run: npm run build --silent
+      - name: Run three isolated pilots
+        shell: bash
+        run: |
+          set -uo pipefail
+          SUMMARY="$RUNNER_TEMP/h5-pilot-summary.txt"
+          : > "$SUMMARY"
+
+          run_pilot() {
+            local label="$1"
+            local file="$2"
+            local old_selector="$3"
+            local log="$RUNNER_TEMP/h5-${label}.tap"
+            local code=0
+            echo "${label}_START=$(date -u +'%Y-%m-%dT%H:%M:%SZ')" | tee -a "$SUMMARY"
+            set +e
+            node --test --test-concurrency=1 "$file" >"$log" 2>&1
+            code=$?
+            set -e
+            cat "$log"
+            echo "${label}_EXIT_CODE=$code" | tee -a "$SUMMARY"
+            echo "${label}_PROCESS_EXITED=YES" | tee -a "$SUMMARY"
+
+            if grep -Fq "waiting for locator('$old_selector')" "$log"; then
+              echo "${label}_BOOTSTRAP=RED" | tee -a "$SUMMARY"
+              echo "${label}_FUNCTIONAL=NOT_REACHED" | tee -a "$SUMMARY"
+            else
+              echo "${label}_BOOTSTRAP=GREEN" | tee -a "$SUMMARY"
+              if [ "$code" -eq 0 ]; then
+                echo "${label}_FUNCTIONAL=GREEN" | tee -a "$SUMMARY"
+              else
+                echo "${label}_FUNCTIONAL=RED" | tee -a "$SUMMARY"
+              fi
+            fi
+
+            if pgrep -af 'node .*dist/server\.js' >"$RUNNER_TEMP/h5-${label}-server-left.txt"; then
+              cat "$RUNNER_TEMP/h5-${label}-server-left.txt"
+              echo "${label}_SERVER_LEFT=YES" | tee -a "$SUMMARY"
+            else
+              echo "${label}_SERVER_LEFT=NO" | tee -a "$SUMMARY"
+            fi
+            echo "${label}_END=$(date -u +'%Y-%m-%dT%H:%M:%SZ')" | tee -a "$SUMMARY"
+          }
+
+          set +e
+          run_pilot PILOT_1 dist/tests/b1-2-2-mobile-leads-real-app.test.js '#crm.active .mvp-lead-card'
+          run_pilot PILOT_2 dist/tests/b1-2-8-account-menu-backdrop-real-app.test.js '[data-account-toggle]'
+          run_pilot PILOT_3 dist/tests/b1-3-3-mobile-postproduction-hotfix.test.js '#crm.active'
+          set -e
+          cat "$SUMMARY"
+          exit 0
+      - name: Upload pilot evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: a35-h5-pilot-validation-${{ github.run_id }}
+          retention-days: 14
+          path: |
+            ${{ runner.temp }}/h5-pilot-summary.txt
+            ${{ runner.temp }}/h5-PILOT_1.tap
+            ${{ runner.temp }}/h5-PILOT_2.tap
+            ${{ runner.temp }}/h5-PILOT_3.tap
+            ${{ runner.temp }}/h5-PILOT_1-server-left.txt
+            ${{ runner.temp }}/h5-PILOT_2-server-left.txt
+            ${{ runner.temp }}/h5-PILOT_3-server-left.txt
