@@ -1,0 +1,51 @@
+name: A3.5 H5 Pilot Harness Type Fix
+
+on:
+  push:
+    branches:
+      - validation/a35-h5-legacy-bootstrap-pilot
+    paths:
+      - .github/workflows/a35-h5-pilot-type-fix.yml
+
+permissions:
+  contents: write
+
+jobs:
+  fix-pilot-types:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Correct H5 local helper TeamMember typing only
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          files = [
+            Path('src/tests/b1-2-2-mobile-leads-real-app.test.ts'),
+            Path('src/tests/b1-2-8-account-menu-backdrop-real-app.test.ts'),
+            Path('src/tests/b1-3-3-mobile-postproduction-hotfix.test.ts'),
+          ]
+          old = "member: { id: number; userId: string; name: string; email?: string; phone?: string; role?: string }"
+          new = "member: { id: number; userId?: string; name: string; email?: string; phone?: string; role?: string }"
+          for path in files:
+            source = path.read_text()
+            if source.count(old) != 1:
+              raise SystemExit(f'{path}: expected one H5 member type, got {source.count(old)}')
+            path.write_text(source.replace(old, new, 1))
+          PY
+          git diff --check
+          git diff --name-only
+      - name: Commit type-only harness correction
+        shell: bash
+        run: |
+          git config user.name 'francoagustin324'
+          git config user.email 'francoagustinsolis@gmail.com'
+          git add \
+            src/tests/b1-2-2-mobile-leads-real-app.test.ts \
+            src/tests/b1-2-8-account-menu-backdrop-real-app.test.ts \
+            src/tests/b1-3-3-mobile-postproduction-hotfix.test.ts
+          git commit -m 'test: correct H5 pilot helper member typing'
+          git push origin HEAD:validation/a35-h5-legacy-bootstrap-pilot
