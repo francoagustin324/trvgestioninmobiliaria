@@ -1,5 +1,6 @@
 name: A3.5 H5 Three-Pilot Validation
 
+# Rerun after correcting the pilot-only TeamMember helper typing.
 on:
   push:
     branches:
