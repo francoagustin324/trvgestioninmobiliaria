@@ -1,0 +1,38 @@
+name: A3.5 H5 R1 F4 Apply
+on:
+  push:
+    branches: [validation/a35-h5-r1-family-sanitization]
+    paths: [.github/workflows/a35-h5-r1-f4-apply.yml]
+permissions:
+  contents: write
+jobs:
+  apply:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+        with: {fetch-depth: 0}
+      - name: Apply F4 tenant bootstrap preserving human identity
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          file='src/tests/followup-hotfix-browser.test.ts'
+          p=Path(file); text=p.read_text()
+          imp="import { installA35H5R1ModernTenantHarness } from './a35-h5-r1-modern-tenant-harness.js';\n"
+          marker="from '../models.js';\n"
+          if imp.strip() not in text:
+            assert marker in text; text=text.replace(marker, marker+imp, 1)
+          old="""  const context = await browser.newContext({\n    viewport: { width: 1366, height: 768 },\n    locale: 'es-AR',\n    timezoneId: 'America/Argentina/Cordoba',\n    colorScheme: 'dark',\n  });\n  await context.addInitScript(({ data, sessionKey, storageKey, syncKey, activeMemberKey, identityStorageKey }) => {\n"""
+          new="""  const context = await browser.newContext({\n    viewport: { width: 1366, height: 768 },\n    locale: 'es-AR',\n    timezoneId: 'America/Argentina/Cordoba',\n    colorScheme: 'dark',\n  });\n  await installA35H5R1ModernTenantHarness(context, crm, USER_ID);\n  await context.addInitScript(({ data, sessionKey, storageKey, syncKey, activeMemberKey, identityStorageKey }) => {\n"""
+          assert text.count(old)==1; text=text.replace(old,new,1)
+          p.write_text(text)
+          PY
+      - name: Commit F4 test harness change
+        shell: bash
+        run: |
+          git config user.name francoagustin324
+          git config user.email francoagustinsolis@gmail.com
+          git add src/tests/followup-hotfix-browser.test.ts
+          git diff --cached --check
+          git commit -m 'test: align H5 R1 family 4 tenant bootstrap'
+          git push origin HEAD:validation/a35-h5-r1-family-sanitization
