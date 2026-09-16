@@ -1,0 +1,49 @@
+name: A3.5 H1 Lifecycle Inventory
+
+on:
+  push:
+    branches:
+      - validation/a35-h1-538-lifecycle
+    paths:
+      - .github/workflows/a35-h1-lifecycle-inventory.yml
+
+permissions:
+  contents: read
+
+jobs:
+  inventory:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Checkout immutable candidate
+        uses: actions/checkout@v7
+        with:
+          ref: f82bc3bad74450322c5e85c92ca5577059012145
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Print every test startServer call with lifecycle context
+        shell: python
+        run: |
+          from pathlib import Path
+
+          root = Path('src/tests')
+          total = 0
+          files = set()
+          for path in sorted(root.glob('*.test.ts')):
+              lines = path.read_text(encoding='utf-8').splitlines()
+              for idx, line in enumerate(lines):
+                  if 'await startServer(' not in line:
+                      continue
+                  total += 1
+                  files.add(str(path))
+                  start = max(0, idx - 8)
+                  end = min(len(lines), idx + 26)
+                  print(f'=== STARTSERVER_OCCURRENCE {total} {path}:{idx + 1} ===')
+                  for line_no in range(start, end):
+                      print(f'{line_no + 1:05d}: {lines[line_no]}')
+                  print('=== END_OCCURRENCE ===')
+          print(f'ALL_STARTSERVER_OCCURRENCES={total}')
+          print(f'ALL_STARTSERVER_FILES={len(files)}')
+          for path in sorted(files):
+              print(f'STARTSERVER_FILE={path}')
