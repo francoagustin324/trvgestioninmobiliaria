@@ -5,7 +5,7 @@ on:
     branches:
       - validation/a35-h5-r1-family-sanitization
     paths:
-      - src/tests/a35-h5-r2-security-diagnostic.test.ts
+      - scripts/a35-h5-r2-security-diagnostic.mjs
       - .github/workflows/a35-h5-r2-security-diagnostic.yml
   workflow_dispatch:
 
@@ -26,4 +26,4 @@ jobs:
       - name: Build
         run: npm run build --silent
       - name: Run R2 security diagnostic
-        run: node --test --test-concurrency=1 dist/tests/a35-h5-r2-security-diagnostic.test.js
+        run: node --test --test-concurrency=1 scripts/a35-h5-r2-security-diagnostic.mjs
