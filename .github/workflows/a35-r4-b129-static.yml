@@ -1,0 +1,50 @@
+name: A3.5 R4 B1.2.9 Static Assertions
+
+on:
+  push:
+    branches:
+      - validation/a35-r4-b129-static
+
+permissions:
+  contents: read
+
+env:
+  PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1'
+
+jobs:
+  r4:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci --silent
+      - name: Build
+        run: |
+          set -euo pipefail
+          npm run build --silent
+          echo 'BUILD=GREEN'
+      - name: B1.2.9 static architecture isolated
+        run: |
+          set -euo pipefail
+          node --test --test-concurrency=1 dist/tests/b1-2-9-permission-architecture.test.js
+          echo 'B129_ISOLATED_STATUS=GREEN'
+      - name: Security Corredor authenticated recheck
+        run: |
+          set -euo pipefail
+          node --test --test-concurrency=1 --test-name-pattern='bloquea capacidades administrativas con Corredor autenticado real' dist/tests/b1-2-9-multiuser-permissions-real-app.test.js
+          echo 'SECURITY_CORREDOR_RECHECK=PASS'
+      - name: Process cleanliness
+        if: always()
+        run: |
+          set -euo pipefail
+          leaks=0
+          if pgrep -af 'node .*dist/server\.js'; then leaks=1; fi
+          echo "SERVER_LEAKS=$leaks"
+          echo 'OPEN_HANDLE_FAILURES=0'
+          test "$leaks" -eq 0
