@@ -113,7 +113,7 @@ test('R2 browser proves visual member is not authenticated actor', { timeout: 90
       });
       const statusButton = page.locator('[data-user-status="3"]');
       assert.equal(await statusButton.count(), 1);
-      await statusButton.click();
+      await statusButton.evaluate((element) => element.click());
       await page.waitForTimeout(80);
       console.log('R2_SECURITY_OWNER_VISUAL_SWITCH=' + JSON.stringify(evidence));
       console.log('R2_SECURITY_OWNER_TEAM_REQUESTS=' + JSON.stringify(teamRequests));
