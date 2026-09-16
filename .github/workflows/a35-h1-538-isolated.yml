@@ -6,6 +6,7 @@ on:
       - validation/a35-h1-538-lifecycle
     paths:
       - src/tests/hotfix-leads-ux-atender-ahora-browser.test.ts
+      - .github/workflows/a35-h1-538-isolated.yml
 
 permissions:
   contents: read
@@ -55,8 +56,10 @@ jobs:
             LOG="$RUNNER_TEMP/test-538-run-${RUN_NO}.tap"
             echo "ISOLATED_538_RUN_${RUN_NO}_START=$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
 
+            set +e
             node --test --test-concurrency=1 "$TEST_FILE" >"$LOG" 2>&1
             CODE=$?
+            set -e
 
             cat "$LOG"
             echo "ISOLATED_538_RUN_${RUN_NO}_EXIT_CODE=$CODE"
