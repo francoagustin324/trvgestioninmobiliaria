@@ -4,6 +4,7 @@ import { existsSync, mkdirSync } from 'node:fs';
 import test from 'node:test';
 import { chromium, type Browser, type BrowserContext, type Page } from 'playwright';
 import { initialData, type CrmData, type TeamMember } from '../models.js';
+import { installA35H5R1ModernTenantHarness } from './a35-h5-r1-modern-tenant-harness.js';
 
 const USER_ID = 'zero-training-owner';
 const ORG_ID = 'zero-training-org';
@@ -66,14 +67,16 @@ async function contextFor(browser: Browser, viewport: { width: number; height: n
   const identityKey = `propcontrol-whatsapp-human-identity-v1:${encodeURIComponent(ORG_ID)}:1:${encodeURIComponent(actorKey)}`;
   const mobile = viewport.width <= 430;
   const context = await browser.newContext({ viewport, isMobile: mobile, hasTouch: mobile, locale: 'es-AR', timezoneId: 'America/Argentina/Cordoba', colorScheme: 'dark' });
-  await context.addInitScript(({ crm, identityStorageKey }) => {
+  const crm = fixture();
+  await installA35H5R1ModernTenantHarness(context, crm, USER_ID);
+  await context.addInitScript(({ seededCrm, identityStorageKey }) => {
     localStorage.setItem('propcontrol-cloud-session-v1', JSON.stringify({ accessToken: 'access', refreshToken: 'refresh', expiresAt: Date.now() + 3_600_000, userId: 'zero-training-owner', email: 'franco@propcontrol.test' }));
-    if (!localStorage.getItem('trv-crm-basico:user:zero-training-owner')) localStorage.setItem('trv-crm-basico:user:zero-training-owner', JSON.stringify(crm));
+    if (!localStorage.getItem('trv-crm-basico:user:zero-training-owner')) localStorage.setItem('trv-crm-basico:user:zero-training-owner', JSON.stringify(seededCrm));
     if (!localStorage.getItem('trv-crm-basico:user:zero-training-owner:sync')) localStorage.setItem('trv-crm-basico:user:zero-training-owner:sync', JSON.stringify({ dirty: false, localUpdatedAt: '2026-08-07T18:00:00.000Z', lastCloudSavedAt: '2026-08-07T18:00:00.000Z', lastCloudVersion: '2026-08-07T18:00:00.000Z' }));
     localStorage.setItem('propcontrol-active-team-member-v1', '1');
     localStorage.setItem(identityStorageKey, JSON.stringify({ version: 1, organizationId: 'zero-training-org', memberId: 1, actorKey: 'cloud:zero-training-owner', humanName: 'Franco Solis', confirmedAt: '2026-08-07T18:00:00.000Z' }));
     Object.defineProperty(window, 'open', { configurable: true, value: (url?: string | URL) => { (window as TestWindow).__zeroTrainingOpenedUrl = String(url || ''); return null; } });
-  }, { crm: fixture(), identityStorageKey: identityKey });
+  }, { seededCrm: crm, identityStorageKey: identityKey });
   return context;
 }
 
