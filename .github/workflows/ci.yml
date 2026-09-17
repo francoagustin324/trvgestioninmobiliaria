@@ -187,10 +187,13 @@ jobs:
           if not plan_matches:
               raise SystemExit('Missing terminal TAP plan')
           plan = int(plan_matches[-1])
+          top_level_results = len(re.findall(r'^(?:ok|not ok)\s+\d+\s+-\s+', text, flags=re.MULTILINE))
+          summary_total_consistent = tests == passed + failed + cancelled + skipped + todo
 
           summary = [
               'FINAL_TAP_SUMMARY_PRESENT=YES',
               f'TAP_PLAN={plan}',
+              f'TAP_TOP_LEVEL_RESULTS={top_level_results}',
               f'TAP_TESTS={tests}',
               f'TAP_PASS={passed}',
               f'TAP_FAIL={failed}',
@@ -198,22 +201,23 @@ jobs:
               f'TAP_SKIPPED={skipped}',
               f'TAP_TODO={todo}',
               f'EXPECTED_TEST_TOTAL={expected}',
+              f'SUMMARY_TOTAL_CONSISTENT={"YES" if summary_total_consistent else "NO"}',
           ]
           Path('ci-tap-summary.txt').write_text('\n'.join(summary) + '\n', encoding='utf-8')
           print('\n'.join(summary))
 
           if tests != expected:
               raise SystemExit(f'Unexpected TAP cardinality: {tests} != {expected}')
-          if plan != expected:
-              raise SystemExit(f'Unexpected TAP plan: {plan} != {expected}')
+          if plan != top_level_results:
+              raise SystemExit(f'TAP top-level plan mismatch: plan={plan}, top_level_results={top_level_results}')
           if failed != 0:
               raise SystemExit(f'TAP fail must be 0, got {failed}')
           if cancelled != 0:
               raise SystemExit(f'TAP cancelled must be 0, got {cancelled}')
           if todo != 0:
               raise SystemExit(f'TAP todo must be 0, got {todo}')
-          if tests != passed + skipped:
-              raise SystemExit(f'TAP accounting mismatch: tests={tests}, pass={passed}, skipped={skipped}')
+          if not summary_total_consistent:
+              raise SystemExit(f'TAP accounting mismatch: tests={tests}, pass={passed}, fail={failed}, cancelled={cancelled}, skipped={skipped}, todo={todo}')
           PY
 
           python3 <<'PY'
