@@ -4,6 +4,7 @@ import { existsSync } from 'node:fs';
 import test from 'node:test';
 import { chromium, type BrowserContext, type Page } from 'playwright';
 import { initialData, type CrmData, type TeamMember } from '../models.js';
+import { installA35H5R1ModernTenantHarness } from './a35-h5-r1-modern-tenant-harness.js';
 
 const USER_ID = 'p1-a2-1-owner';
 const STORAGE_KEY = `trv-crm-basico:user:${USER_ID}`;
@@ -120,6 +121,8 @@ async function stopServer(server: ChildProcess): Promise<void> {
 }
 
 async function seed(context: BrowserContext): Promise<void> {
+  const crm = blockedFixture();
+  await installA35H5R1ModernTenantHarness(context, crm, USER_ID);
   await context.addInitScript(({ crm, storageKey }) => {
     localStorage.setItem('propcontrol-cloud-session-v1', JSON.stringify({
       accessToken: 'access',
@@ -136,7 +139,7 @@ async function seed(context: BrowserContext): Promise<void> {
       lastCloudVersion: '2026-08-24T12:00:00.000Z',
     }));
     localStorage.setItem('propcontrol-active-team-member-v1', '1');
-  }, { crm: blockedFixture(), storageKey: STORAGE_KEY });
+  }, { crm, storageKey: STORAGE_KEY });
 }
 
 async function openLead(page: Page, url: string): Promise<void> {
