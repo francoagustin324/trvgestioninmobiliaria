@@ -17,30 +17,42 @@ test('el servidor genera enlaces sin enviar correo', () => {
   assert.ok(!server.includes('/auth/v1/invite'));
 });
 
-test('el enlace sólo se solicita después de validar sesión y permisos de equipo', () => {
+test('el enlace sólo se solicita después de validar sesión, tenant y permisos de equipo', () => {
   const inviteHandlerIndex = server.indexOf('async function inviteMember');
   const authIndex = server.indexOf('authenticatedUser(request, options)', inviteHandlerIndex);
-  const membershipIndex = server.indexOf('requesterMembership(user.id!, options)', authIndex);
+  const organizationIndex = server.indexOf('requestedOrganizationId(body.organizationId)', authIndex);
+  const membershipIndex = server.indexOf('requesterMembership(user.id!, organizationId, options)', organizationIndex);
   const existingLinkIndex = server.indexOf("generateTeamLink('recovery'", membershipIndex);
   const newLinkIndex = server.indexOf("generateTeamLink('invite'", membershipIndex);
   assert.ok(inviteHandlerIndex >= 0);
   assert.ok(authIndex > inviteHandlerIndex);
-  assert.ok(membershipIndex > authIndex);
+  assert.ok(organizationIndex > authIndex);
+  assert.ok(membershipIndex > organizationIndex);
   assert.ok(existingLinkIndex > membershipIndex);
   assert.ok(newLinkIndex > membershipIndex);
-  assert.ok(server.includes("['owner', 'admin'].includes"));
+
+  const membershipHandlerIndex = server.indexOf('async function requesterMembership');
+  const activeFilterIndex = server.indexOf("query.searchParams.set('status', 'eq.active')", membershipHandlerIndex);
+  const exactCountIndex = server.indexOf("if (rows.length !== 1) throw new Error('No tenés una membership ACTIVE exacta", activeFilterIndex);
+  const roleGuardIndex = server.indexOf("if (role !== 'owner' && role !== 'admin')", exactCountIndex);
+  assert.ok(membershipHandlerIndex >= 0);
+  assert.ok(activeFilterIndex > membershipHandlerIndex);
+  assert.ok(exactCountIndex > activeFilterIndex);
+  assert.ok(roleGuardIndex > exactCountIndex);
 });
 
 test('un correo ya asociado recibe recuperación sin consumir otro cupo', () => {
   const existingIndex = server.indexOf('const existingMember = await organizationMemberByEmail');
   const recoveryIndex = server.indexOf("generateTeamLink('recovery'", existingIndex);
-  const seatIndex = server.indexOf('await ensureSeat(requester.organization_id, options)', existingIndex);
+  const recoveryReturnIndex = server.indexOf('return;', recoveryIndex);
+  const seatIndex = server.indexOf('await ensureSeat(organizationId, options)', existingIndex);
   assert.ok(existingIndex >= 0);
   assert.ok(recoveryIndex > existingIndex);
-  assert.ok(seatIndex > recoveryIndex);
+  assert.ok(recoveryReturnIndex > recoveryIndex);
+  assert.ok(seatIndex > recoveryReturnIndex);
   assert.ok(server.includes("linkType: 'recovery'"));
   assert.ok(server.includes("existingRole === 'owner'"));
-  assert.ok(server.includes("normalizedRole(requester.role) === 'admin' && existingRole !== 'agent'"));
+  assert.ok(server.includes("exactMembershipRole(requester.role) === 'admin' && existingRole !== 'agent'"));
   assert.ok(server.includes('generated.userId !== existingMember.user_id'));
 });
 
