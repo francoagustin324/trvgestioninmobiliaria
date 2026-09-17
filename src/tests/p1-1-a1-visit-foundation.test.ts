@@ -12,7 +12,7 @@ import {
   type CloudMembershipRow,
   type CloudRecordRow,
 } from '../cloud-records.js';
-import { initialData, STORAGE_KEY, type CrmData, type Visit } from '../models.js';
+import { initialData, type CrmData, type Visit } from '../models.js';
 import { reconcileCrmSnapshots } from '../sync-reconciliation.js';
 import {
   hasLocalBackup,
@@ -114,24 +114,33 @@ function crmFixture(): CrmData {
   return crm;
 }
 
-test('P1.1-A1 normaliza un snapshot local histórico sin visits y conserva el round-trip completo', async () => {
+test('P1.1-A1 normaliza un snapshot local histórico sin visits y conserva el round-trip completo bajo tenant scope', async () => {
   const storage = new MemoryStorage();
   Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: storage });
 
+  const scope = { userId: 'owner-user', organizationId };
   const legacy = structuredClone(initialData) as Partial<CrmData> & { visits?: Visit[] };
+  legacy.organization = { ...legacy.organization!, id: organizationId };
   delete legacy.visits;
-  storage.setItem(STORAGE_KEY, JSON.stringify(legacy));
 
   const store = await import('../store.js');
-  assert.deepEqual(store.state.crm.visits, []);
+  const runtime = await import('../tenant-runtime.js');
+  const tenantStorage = await import('../tenant-storage.js');
+  runtime.installTenantRuntimeScope(scope, scope.userId);
+  try {
+    assert.equal(store.replaceDataForTenant(scope, legacy as CrmData), true);
+    assert.deepEqual(store.state.crm.visits, []);
 
-  const expected = visit({ id: 9, assignedToId: 1, createdById: 1 });
-  store.state.crm.visits = [expected];
-  store.saveData('P1.1-A1 local Visit');
-  assert.deepEqual(readLocalSnapshot(storage)?.visits, [expected]);
+    const expected = visit({ id: 9, assignedToId: 1, createdById: 1 });
+    store.state.crm.visits = [expected];
+    store.saveData('P1.1-A1 local Visit');
+    assert.deepEqual(tenantStorage.readTenantSnapshot(scope, storage)?.visits, [expected]);
 
-  store.activateStorageForCurrentSession();
-  assert.deepEqual(store.state.crm.visits, [expected]);
+    store.activateStorageForCurrentSession();
+    assert.deepEqual(store.state.crm.visits, [expected]);
+  } finally {
+    runtime.invalidateTenantRuntimeScope();
+  }
 });
 
 test('P1.1-A1 conserva visits en backup y restore sin cambiar la estrategia de storage', () => {
@@ -266,13 +275,12 @@ test('P1.1-A1 stale records conserva Visit vigente, detecta Visit removida y no 
   assert.equal(isSupervisedRecommendationTelemetryPayload(telemetry.payload), true);
 });
 
-test('P1.1-A1 agrega visits a la comparación remota y Agenda permanece ajena a visits', () => {
-  const compatible = readFileSync('src/cloud-api-compatible.ts', 'utf8');
+test('P1.1-A1 agrega visits a la comparación remota vigente y Agenda permanece ajena a visits', () => {
+  const cloudRecords = readFileSync('src/cloud-records.ts', 'utf8');
   const agenda = readFileSync('src/agenda.ts', 'utf8');
-  assert.match(
-    compatible,
-    /\['clients', 'properties', 'visits', 'offers', 'reservations', 'contacts', 'reminders', 'fichas', 'conversations'\]/,
-  );
+  assert.ok(cloudRecords.includes("visibleToCurrentMember(reconciled.visits, context).map((item) => row(org, 'visit'"));
+  assert.ok(cloudRecords.includes("visits: recordsOf<SyncedVisit>(rows, 'visit')"));
+  assert.ok(cloudRecords.includes('staleCloudRecords(existing: CloudRecordRow[], next: CloudRecordRow[])'));
   assert.doesNotMatch(agenda, /\bvisits\b/);
 });
 
