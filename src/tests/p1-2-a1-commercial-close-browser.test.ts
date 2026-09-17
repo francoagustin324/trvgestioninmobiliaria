@@ -4,6 +4,7 @@ import { existsSync } from 'node:fs';
 import test from 'node:test';
 import { chromium, type Browser, type BrowserContext, type Page } from 'playwright';
 import { initialData, type CrmData } from '../models.js';
+import { installA35H5R1ModernTenantHarness } from './a35-h5-r1-modern-tenant-harness.js';
 
 const repositoryRoot = process.cwd();
 const userId = 'p1-2-a1-browser-user';
@@ -175,6 +176,7 @@ async function stopServer(server: ChildProcess): Promise<void> {
 async function createContext(browser: Browser, viewport: { width: number; height: number }): Promise<BrowserContext> {
   const context = await browser.newContext({ viewport, locale: 'es-AR' });
   const data = browserCrm();
+  await installA35H5R1ModernTenantHarness(context, data, userId);
   await context.addInitScript(({ crm, accountUserId, accountStorageKey }) => {
     localStorage.setItem('propcontrol-cloud-session-v1', JSON.stringify({
       accessToken: 'p1-2-a1-browser-token',
