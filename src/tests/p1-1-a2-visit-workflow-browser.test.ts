@@ -202,7 +202,7 @@ async function installCloud(context: BrowserContext, initial: CrmData): Promise<
     });
 
     if (url.pathname.endsWith('/rpc/activate_my_organization_memberships')) return fulfill({});
-    if (url.pathname.endsWith('/rpc/visit_transaction_authority_active')) return fulfill(false);
+    if (url.pathname.endsWith('/rpc/visit_transaction_authority_active_v2')) return fulfill(false);
     if (url.pathname.endsWith('/organization_members')) {
       return fulfill([{
         organization_id: ORG_ID,
