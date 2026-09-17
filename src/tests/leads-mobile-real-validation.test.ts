@@ -4,6 +4,7 @@ import { existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
 import test from 'node:test';
 import { chromium, type Browser, type BrowserContext, type Page } from 'playwright';
 import { initialData, type CrmData, type TeamMember } from '../models.js';
+import { installA35H5R1ModernTenantHarness } from './a35-h5-r1-modern-tenant-harness.js';
 
 const USER_ID = 'mobile-real-validation-owner';
 const ORG_ID = 'mobile-real-validation-org';
@@ -115,9 +116,11 @@ async function stopServer(server: ChildProcess): Promise<void> {
 }
 
 async function seedContext(context: BrowserContext): Promise<void> {
+  const crm = fixture();
+  await installA35H5R1ModernTenantHarness(context, crm, USER_ID);
   const actorKey = `cloud:${USER_ID}`;
   const identityKey = `propcontrol-whatsapp-human-identity-v1:${encodeURIComponent(ORG_ID)}:1:${encodeURIComponent(actorKey)}`;
-  await context.addInitScript(({ crm, identityStorageKey, storageKey }) => {
+  await context.addInitScript(({ crm: data, identityStorageKey, storageKey }) => {
     localStorage.setItem('propcontrol-cloud-session-v1', JSON.stringify({
       accessToken: 'access',
       refreshToken: 'refresh',
@@ -125,7 +128,7 @@ async function seedContext(context: BrowserContext): Promise<void> {
       userId: 'mobile-real-validation-owner',
       email: 'franco@propcontrol.test',
     }));
-    localStorage.setItem(storageKey, JSON.stringify(crm));
+    localStorage.setItem(storageKey, JSON.stringify(data));
     localStorage.setItem(`${storageKey}:sync`, JSON.stringify({
       dirty: false,
       localUpdatedAt: '2026-08-09T18:00:00.000Z',
@@ -141,7 +144,7 @@ async function seedContext(context: BrowserContext): Promise<void> {
       humanName: 'Franco Solis',
       confirmedAt: '2026-08-09T18:00:00.000Z',
     }));
-  }, { crm: fixture(), identityStorageKey: identityKey, storageKey: STORAGE_KEY });
+  }, { crm, identityStorageKey: identityKey, storageKey: STORAGE_KEY });
 }
 
 async function mobileContext(browser: Browser): Promise<BrowserContext> {
