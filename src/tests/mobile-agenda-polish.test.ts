@@ -82,15 +82,17 @@ test('mantiene cálculos, filtros visibles y orden de Agenda', () => {
   assert.equal(css.includes('#whatsapp'), false);
 });
 
-test('completar y reprogramar usan las reglas comerciales sin duplicar Reminder', () => {
+test('completar y reprogramar usan las reglas comerciales tenant-aware sin duplicar Reminder', () => {
   assert.ok(ui.includes("querySelectorAll<HTMLButtonElement>('[data-complete-agenda]')"));
   assert.ok(ui.includes('completeClientFollowUp(client)'));
-  assert.ok(ui.includes('addActivity(result.activity)'));
+  assert.ok(ui.includes('addActivityForAuthenticatedTenant(renderScope, result.activity)'));
   assert.ok(ui.includes('reminder.completedAt = new Date().toISOString()'));
   assert.ok(ui.includes("querySelectorAll<HTMLFormElement>('[data-reprogram-source]')"));
   assert.ok(ui.includes('reprogramClientFollowUp(client, date)'));
   assert.ok(ui.includes('reminder.date = date'));
-  assert.ok(ui.includes("saveAndRender('Seguimiento reprogramado')"));
+  assert.ok(ui.includes("saveAndRender('Seguimiento reprogramado', renderScope, renderLease)"));
+  assert.ok(ui.includes('authenticatedTenantMember(scope)'));
+  assert.ok(ui.includes('assertTenantCrmScope(scope, state.crm)'));
   assert.equal(ui.includes('state.crm.reminders.push'), true);
 });
 
