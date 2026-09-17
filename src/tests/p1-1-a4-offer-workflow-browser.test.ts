@@ -4,6 +4,7 @@ import { existsSync } from 'node:fs';
 import test from 'node:test';
 import { chromium, type BrowserContext, type Locator, type Page } from 'playwright';
 import { initialData, type CrmData, type TeamMember } from '../models.js';
+import { installA35H5R1ModernTenantHarness } from './a35-h5-r1-modern-tenant-harness.js';
 
 const USER_ID = 'p1-a4-owner';
 const ORG_ID = 'p1-a4-org';
@@ -62,12 +63,14 @@ async function stopServer(server: ChildProcess): Promise<void> {
 }
 
 async function seedContext(context: BrowserContext): Promise<void> {
+  const crm = fixture();
+  await installA35H5R1ModernTenantHarness(context, crm, USER_ID);
   await context.addInitScript(({ crm, storageKey }) => {
     localStorage.setItem('propcontrol-cloud-session-v1', JSON.stringify({ accessToken: 'access', refreshToken: 'refresh', expiresAt: Date.now() + 3_600_000, userId: 'p1-a4-owner', email: 'franco@propcontrol.test' }));
     localStorage.setItem(storageKey, JSON.stringify(crm));
     localStorage.setItem(`${storageKey}:sync`, JSON.stringify({ dirty: false, localUpdatedAt: '2026-08-24T18:00:00.000Z', lastCloudSavedAt: '2026-08-24T18:00:00.000Z', lastCloudVersion: '2026-08-24T18:00:00.000Z' }));
     localStorage.setItem('propcontrol-active-team-member-v1', '1');
-  }, { crm: fixture(), storageKey: STORAGE_KEY });
+  }, { crm, storageKey: STORAGE_KEY });
 }
 
 function futureLocalDate(days: number): string {
