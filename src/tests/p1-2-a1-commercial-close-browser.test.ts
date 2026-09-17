@@ -211,13 +211,45 @@ async function openEditForm(page: Page, clientId: number): Promise<void> {
   await page.waitForSelector('#mvp-lead-form:not(.collapsed)', { state: 'visible' });
 }
 
+async function waitForStableInteractiveNode(page: Page, selector: string): Promise<void> {
+  await page.waitForFunction(async (target) => {
+    const isInteractive = (node: Element | null): node is HTMLElement => {
+      if (!(node instanceof HTMLElement) || !node.isConnected) return false;
+      const style = getComputedStyle(node);
+      const rect = node.getBoundingClientRect();
+      const disabled = node instanceof HTMLButtonElement && node.disabled;
+      return !disabled
+        && style.display !== 'none'
+        && style.visibility !== 'hidden'
+        && Number.parseFloat(style.opacity || '1') > 0
+        && rect.width > 0
+        && rect.height > 0;
+    };
+    const first = document.querySelector(target);
+    if (!isInteractive(first)) return false;
+    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    const second = document.querySelector(target);
+    if (second !== first || !isInteractive(second)) return false;
+    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    const third = document.querySelector(target);
+    return third === first && isInteractive(third);
+  }, selector);
+}
+
 async function openLeadDetails(page: Page, clientId: number): Promise<void> {
-  const card = page.locator(`.mvp-lead-card[data-client-id="${clientId}"]`);
-  const sheet = card.locator(`[data-lead-full-sheet="${clientId}"]`);
-  if ((await sheet.getAttribute('open')) !== null) return;
-  const menu = card.locator('.mvp-lead-actions-menu');
-  await menu.locator(':scope > summary').click();
-  await menu.locator(`[data-open-lead-details="${clientId}"]`).click();
+  const cardSelector = `.mvp-lead-card[data-client-id="${clientId}"]`;
+  const sheetSelector = `${cardSelector} [data-lead-full-sheet="${clientId}"]`;
+  if ((await page.locator(sheetSelector).getAttribute('open')) !== null) return;
+
+  const actionsSelector = `${cardSelector} .mvp-lead-quick-actions[data-zero-training-actions="true"]`;
+  await waitForStableInteractiveNode(page, actionsSelector);
+
+  const summarySelector = `${actionsSelector} .mvp-lead-actions-menu > summary`;
+  await page.locator(summarySelector).click();
+
+  const detailsSelector = `${actionsSelector} .mvp-lead-actions-menu[open] [data-open-lead-details="${clientId}"]`;
+  await waitForStableInteractiveNode(page, detailsSelector);
+  await page.locator(detailsSelector).click();
   await page.waitForFunction((id) => document.querySelector(`[data-lead-full-sheet="${id}"]`)?.hasAttribute('open'), clientId);
 }
 
@@ -293,9 +325,12 @@ test('P1.2-A1 browser: Won desktop, replay visual seguro y reapertura persistent
     assert.match(await card.locator('[data-commercial-close-card]').textContent() || '', /USD 3\.000/);
 
     await card.locator('[data-reopen-operation="1"]').click();
-    await page.waitForSelector('dialog[data-commercial-close-dialog][open] [data-commercial-close-modal-form="reopen"]');
-    await page.locator('dialog [name="reopenStage"]').selectOption('Negociación');
-    await page.locator('dialog [data-commercial-reopen-confirm]').click();
+    const reopenButtonSelector = 'dialog[data-commercial-close-dialog][open] [data-commercial-close-modal-form="reopen"] [data-commercial-reopen-confirm]';
+    await waitForStableInteractiveNode(page, reopenButtonSelector);
+    await page.locator('dialog[data-commercial-close-dialog][open] [name="reopenStage"]').selectOption('Negociación');
+    await page.waitForFunction(() => document.querySelector<HTMLSelectElement>('dialog[data-commercial-close-dialog][open] [name="reopenStage"]')?.value === 'Negociación');
+    await waitForStableInteractiveNode(page, reopenButtonSelector);
+    await page.locator(reopenButtonSelector).click();
     await page.waitForFunction(() => document.querySelector('.mvp-lead-card[data-client-id="1"] .mvp-stage-badge')?.textContent?.trim() === 'Negociación');
 
     crm = await localCrm(page);
