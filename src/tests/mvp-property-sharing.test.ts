@@ -32,12 +32,14 @@ test('el formulario separa información comercial e interna', () => {
   assert.ok(ui.includes('No aparece en la ficha del cliente'));
 });
 
-test('las fotos se cargan secuencialmente, se ordenan y se eliminan de la ficha', () => {
+test('las fotos se cargan secuencialmente, tenant-aware, se ordenan y se eliminan de la ficha', () => {
   assert.ok(ui.includes('type="file"'));
   assert.ok(ui.includes('accept="image/*"'));
   assert.ok(ui.includes('multiple'));
   assert.ok(ui.includes('for (let index = 0; index < files.length; index += 1)'));
-  assert.ok(ui.includes('await uploadPropertyPhoto(file, propertyId)'));
+  assert.ok(ui.includes('const tenantContext = { scope, runtimeLease }'));
+  assert.ok(ui.includes('await uploadPropertyPhoto(file, propertyId, tenantContext)'));
+  assert.ok(ui.includes('assertPropertyPhotoOperationCurrent(scope, runtimeLease)'));
   assert.ok(ui.includes('data-photo-left'));
   assert.ok(ui.includes('data-photo-right'));
   assert.ok(ui.includes('data-photo-remove'));
