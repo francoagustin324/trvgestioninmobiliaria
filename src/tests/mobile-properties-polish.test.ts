@@ -70,8 +70,10 @@ test('reutiliza el espacio inferior global y safe area sin duplicarlo', () => {
   assert.equal(css.includes('--pc-mobile-nav-height'), false);
 });
 
-test('no cambia URLs públicas, dependencias ni stack técnico', () => {
-  assert.ok(ui.includes('publishPropertyFicha(property)'));
+test('no cambia URLs públicas, dependencias ni stack técnico y conserva publicación tenant-aware', () => {
+  assert.ok(ui.includes('publishAndRememberPropertyFicha(property, scope, runtimeLease)'));
+  assert.ok(ui.includes('captureTenantRuntimeLease(scope)'));
+  assert.ok(ui.includes('assertPropertyShareOperationCurrent(scope, runtimeLease)'));
   assert.ok(ui.includes('published.url'));
   assert.equal(css.includes('/ficha/'), false);
   assert.equal(packageJson.includes('"react"'), false);
