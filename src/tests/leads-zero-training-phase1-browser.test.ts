@@ -4,11 +4,12 @@ import { existsSync, mkdirSync } from 'node:fs';
 import test from 'node:test';
 import { chromium, type Browser, type BrowserContext, type Page } from 'playwright';
 import { initialData, type CrmData, type TeamMember } from '../models.js';
+import { tenantStorageNamespace } from '../tenant-storage.js';
 import { installA35H5R1ModernTenantHarness } from './a35-h5-r1-modern-tenant-harness.js';
 
 const USER_ID = 'zero-training-owner';
 const ORG_ID = 'zero-training-org';
-const STORAGE_KEY = `trv-crm-basico:user:${USER_ID}`;
+const STORAGE_KEY = tenantStorageNamespace({ userId: USER_ID, organizationId: ORG_ID }).crmKey;
 const FIXED_TIME = new Date('2026-08-07T16:00:00-03:00');
 const TOMORROW = '2026-08-08';
 const PLUS_THREE = '2026-08-10';

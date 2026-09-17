@@ -4,11 +4,13 @@ import { existsSync } from 'node:fs';
 import test from 'node:test';
 import { chromium, type Browser, type BrowserContext, type Page } from 'playwright';
 import { initialData, type CrmData } from '../models.js';
+import { tenantStorageNamespace } from '../tenant-storage.js';
 import { installA35H5R1ModernTenantHarness } from './a35-h5-r1-modern-tenant-harness.js';
 
 const repositoryRoot = process.cwd();
 const userId = 'p1-2-a1-browser-user';
 const storageKey = `trv-crm-basico:user:${userId}`;
+const tenantReadbackKey = tenantStorageNamespace({ userId, organizationId: 'p1-2-a1-browser-org' }).crmKey;
 
 function browserCrm(): CrmData {
   const crm = structuredClone(initialData);
@@ -220,7 +222,7 @@ async function openLeadDetails(page: Page, clientId: number): Promise<void> {
 }
 
 async function localCrm(page: Page): Promise<CrmData> {
-  return page.evaluate((key) => JSON.parse(localStorage.getItem(key) || '{}') as CrmData, storageKey);
+  return page.evaluate((key) => JSON.parse(localStorage.getItem(key) || '{}') as CrmData, tenantReadbackKey);
 }
 
 async function assertDialogContained(page: Page): Promise<void> {

@@ -5,11 +5,13 @@ import test from 'node:test';
 import { chromium, type Browser, type BrowserContext, type Page } from 'playwright';
 import '../lead-source.js';
 import { initialData, type CrmData } from '../models.js';
+import { tenantStorageNamespace } from '../tenant-storage.js';
 import { installA35H5R1ModernTenantHarness } from './a35-h5-r1-modern-tenant-harness.js';
 
 const repositoryRoot = process.cwd();
 const userId = 'p1-3-a1-browser-user';
 const storageKey = `trv-crm-basico:user:${userId}`;
+const tenantReadbackKey = tenantStorageNamespace({ userId, organizationId: 'p1-3-a1-browser-org' }).crmKey;
 
 function browserCrm(): CrmData {
   const crm = structuredClone(initialData);
@@ -219,7 +221,7 @@ async function openApp(page: Page, baseUrl: string): Promise<void> {
 }
 
 async function localCrm(page: Page): Promise<CrmData> {
-  return page.evaluate((key) => JSON.parse(localStorage.getItem(key) || '{}') as CrmData, storageKey);
+  return page.evaluate((key) => JSON.parse(localStorage.getItem(key) || '{}') as CrmData, tenantReadbackKey);
 }
 
 test('P1.3-A1 browser desktop: filtro de origen, Para reactivar y seguimiento canónico', { timeout: 120_000 }, async (t) => {
