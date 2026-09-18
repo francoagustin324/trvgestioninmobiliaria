@@ -42,4 +42,24 @@ test('TRV Daily Use Gate mantiene contratos de navegación, actividad, agenda y 
   assert.doesNotMatch(opportunities, /data-edit-client="${client\.id}">Abrir ficha/);
   assert.match(workspace, /currentReadEntityTarget\(\)\?\.entityType === 'property'/);
   assert.match(leadCard, /navigation\?: string/);
+
+  const pipeline = readFileSync('src/lead-pipeline-essential.ts', 'utf8');
+  const followupUi = readFileSync('src/followup-completion-ui.ts', 'utf8');
+  const agendaUi = readFileSync('src/agenda-ui.ts', 'utf8');
+
+  assert.match(pipeline, /completeClientFollowUpWithDecision/);
+  assert.match(pipeline, /kind: 'scheduled'/);
+  assert.match(pipeline, /kind: 'none'/);
+  assert.match(pipeline, /Sin seguimiento por ahora/);
+  assert.match(pipeline, /nextFollowUp < today/);
+  assert.match(leads, /requestFollowUpCompletion\(client,[\s\S]*completeClientFollowUpWithDecision/);
+  assert.match(agendaUi, /requestFollowUpCompletion\(client,[\s\S]*completeClientFollowUpWithDecision/);
+  assert.match(leads, /addActivityForAuthenticatedTenant\(requireCurrentTenantScope\(\), result\.activity\)/);
+  assert.match(agendaUi, /addActivityForAuthenticatedTenant\(renderScope, result\.activity\)/);
+  assert.doesNotMatch(leads, /const result = completeClientFollowUp\(client\)/);
+  assert.doesNotMatch(agendaUi, /const result = completeClientFollowUp\(client\)/);
+  assert.match(followupUi, /type="button" class="quiet-button" data-followup-cancel/);
+  assert.match(followupUi, /data-followup-none/);
+  assert.match(followupUi, /event\.preventDefault\(\)/);
+  assert.doesNotMatch(followupUi, /localStorage|saveData|addActivity|queueCloudSave|waitForTimeout|setTimeout/);
 });

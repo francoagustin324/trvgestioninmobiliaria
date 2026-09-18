@@ -1,7 +1,7 @@
 import {
   commercialStage,
   COMMERCIAL_STAGES,
-  completeClientFollowUp,
+  completeClientFollowUpWithDecision,
   filterLeads,
   isTerminalClient,
   localIsoDate,
@@ -14,6 +14,7 @@ import {
   renderLeadQualificationPanel,
   requestLeadQualification,
 } from './lead-qualification-ui.js';
+import { requestFollowUpCompletion } from './followup-completion-ui.js';
 import {
   renderEssentialQualificationFields,
   renderSecondaryQualificationFields,
@@ -223,10 +224,12 @@ function bindDelegatedFollowUpActions(container: HTMLElement): void {
     event.stopPropagation();
     const client = visibleClients().find((item) => item.id === Number(button.dataset.completeClientFollowUp));
     if (!client || isTerminalClient(client)) return;
-    const result = completeClientFollowUp(client);
-    Object.assign(client, result.client);
-    addActivityForAuthenticatedTenant(requireCurrentTenantScope(), result.activity);
-    saveLeadFollowUp(`Seguimiento de lead completado: ${client.name}`, container);
+    requestFollowUpCompletion(client, (decision) => {
+      const result = completeClientFollowUpWithDecision(client, decision);
+      Object.assign(client, result.client);
+      addActivityForAuthenticatedTenant(requireCurrentTenantScope(), result.activity);
+      saveLeadFollowUp(`Seguimiento de lead completado: ${client.name}`, container);
+    });
   });
   container.addEventListener('submit', (event) => {
     const form = (event.target as HTMLElement).closest<HTMLFormElement>('[data-reprogram-client-follow-up]');

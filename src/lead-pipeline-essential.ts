@@ -297,6 +297,69 @@ export function activitiesForClientSave(previous: Client | null, next: Client): 
   return entries;
 }
 
+export type FollowUpCompletionDecision =
+  | Readonly<{ kind: 'scheduled'; nextAction: string; nextFollowUp: string }>
+  | Readonly<{ kind: 'none' }>;
+
+function validFollowUpDate(value: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const [yearText, monthText, dayText] = value.split('-');
+  const year = Number(yearText);
+  const month = Number(monthText);
+  const day = Number(dayText);
+  const parsed = new Date(Date.UTC(year, month - 1, day));
+  return parsed.getUTCFullYear() === year
+    && parsed.getUTCMonth() === month - 1
+    && parsed.getUTCDate() === day;
+}
+
+export function completeClientFollowUpWithDecision(
+  client: Client,
+  decision: FollowUpCompletionDecision,
+  now = new Date(),
+): {
+  client: Client;
+  activity: Omit<ActivityEntry, 'id' | 'actorId' | 'createdAt'>;
+} {
+  const completedAction = client.nextAction?.trim() || 'Seguimiento comercial';
+  const today = localIsoDate(now);
+  if (decision.kind === 'scheduled') {
+    const nextAction = decision.nextAction.trim();
+    const nextFollowUp = decision.nextFollowUp.trim();
+    if (!nextAction) throw new Error('FOLLOW_UP_NEXT_ACTION_REQUIRED');
+    if (!validFollowUpDate(nextFollowUp) || nextFollowUp < today) {
+      throw new Error('FOLLOW_UP_DATE_INVALID');
+    }
+    return {
+      client: {
+        ...client,
+        lastContact: today,
+        nextAction,
+        nextFollowUp,
+      },
+      activity: activity(
+        'Seguimiento completado',
+        client,
+        `${completedAction} · Próximo: ${nextAction} · ${nextFollowUp}`,
+      ),
+    };
+  }
+
+  return {
+    client: {
+      ...client,
+      lastContact: today,
+      nextFollowUp: undefined,
+      nextAction: undefined,
+    },
+    activity: activity(
+      'Seguimiento completado',
+      client,
+      `${completedAction} · Sin seguimiento por ahora`,
+    ),
+  };
+}
+
 export function completeClientFollowUp(client: Client, now = new Date()): {
   client: Client;
   activity: Omit<ActivityEntry, 'id' | 'actorId' | 'createdAt'>;

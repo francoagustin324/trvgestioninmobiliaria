@@ -10,7 +10,8 @@ import {
   type AgendaUrgency,
   type ReminderWithStatus,
 } from './agenda.js';
-import { completeClientFollowUp, reprogramClientFollowUp } from './lead-pipeline.js';
+import { completeClientFollowUpWithDecision, reprogramClientFollowUp } from './lead-pipeline.js';
+import { requestFollowUpCompletion } from './followup-completion-ui.js';
 import { authenticatedTenantMember, saveData, state } from './store.js';
 import { assertTenantCrmScope } from './tenant-storage.js';
 import { assertTenantRuntimeLeaseCurrent, captureTenantRuntimeLease, requireCurrentTenantScope, type TenantRuntimeLease } from './tenant-runtime.js';
@@ -283,10 +284,13 @@ export function renderAgenda(container: HTMLElement): void {
       if (button.dataset.completeAgenda === 'client') {
         const client = visibleClients().find((item) => item.id === id);
         if (!client) return;
-        const result = completeClientFollowUp(client);
-        Object.assign(client, result.client);
-        addActivityForAuthenticatedTenant(renderScope, result.activity);
-        saveAndRender(`Seguimiento de lead completado: ${client.name}`, renderScope, renderLease);
+        requestFollowUpCompletion(client, (decision) => {
+          assertTenantRuntimeLeaseCurrent(renderLease);
+          const result = completeClientFollowUpWithDecision(client, decision);
+          Object.assign(client, result.client);
+          addActivityForAuthenticatedTenant(renderScope, result.activity);
+          saveAndRender(`Seguimiento de lead completado: ${client.name}`, renderScope, renderLease);
+        });
         return;
       }
       const reminder = reminderRecords().find((item) => item.id === id);
