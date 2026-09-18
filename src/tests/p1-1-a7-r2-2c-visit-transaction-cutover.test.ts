@@ -182,7 +182,7 @@ test('R2.2C RPC cloud envía sólo intent y conserva operationId estable para re
   assert.match(cutover, /expectedVisitRevision: normalizeRevision\(input\.visit\.revision\)/i);
 });
 
-test('R2.2C reconciliación latest y post-RPC conserva authority=true hasta cloud push', () => {
+test('R2.2C reconciliación latest y post-RPC conserva authority=true hasta cloud push', async () => {
   assert.match(
     compatible,
     /export type CloudSaveJob = Readonly<\{[\s\S]*scope: TenantScope;[\s\S]*snapshot: CrmData;[\s\S]*token: Readonly<SyncSaveToken>;[\s\S]*runtimeLease: TenantRuntimeLease;/i,
@@ -199,8 +199,20 @@ test('R2.2C reconciliación latest y post-RPC conserva authority=true hasta clou
     compatible,
     /function emitAuthoritativeSnapshot\(job: CloudSaveJob,[\s\S]*scope: job\.scope,[\s\S]*runtimeLease: job\.runtimeLease,[\s\S]*token: job\.token,[\s\S]*propcontrol-cloud-authoritative-snapshot/i,
   );
-  assert.match(cutover, /propcontrol-cloud-authoritative-snapshot[\s\S]*state\.crm = structuredClone\(crm\)[\s\S]*markDirty: false[\s\S]*trv-render/i);
+  assert.match(cutover, /tenantFingerprint\(state\.crm\)[\s\S]*tenantFingerprint\(crm\)[\s\S]*materiallyChanged[\s\S]*if \(materiallyChanged\) state\.crm = structuredClone\(crm\)[\s\S]*writeTenantSnapshot\(runtimeLease\.scope, crm,[\s\S]*markDirty: false[\s\S]*if \(materiallyChanged\) document\.dispatchEvent\(new CustomEvent\('trv-render'\)\)/i);
   assert.doesNotMatch(cutover, /resetTransientState/);
+
+  const snapshotListenerStart = cutover.indexOf("document.addEventListener('propcontrol-cloud-authoritative-snapshot'");
+  const scopeGuardIndex = cutover.indexOf('tenantScopesEqual(activeScope, runtimeLease.scope)', snapshotListenerStart);
+  const leaseGuardIndex = cutover.indexOf('tenantRuntimeLeaseIsCurrent(runtimeLease)', snapshotListenerStart);
+  const fingerprintIndex = cutover.indexOf('tenantFingerprint(state.crm)', snapshotListenerStart);
+  const persistIndex = cutover.indexOf('writeTenantSnapshot(runtimeLease.scope, crm', snapshotListenerStart);
+  const renderIndex = cutover.indexOf("document.dispatchEvent(new CustomEvent('trv-render'))", snapshotListenerStart);
+  assert.ok(snapshotListenerStart >= 0);
+  assert.ok(scopeGuardIndex > snapshotListenerStart && leaseGuardIndex > scopeGuardIndex);
+  assert.ok(fingerprintIndex > leaseGuardIndex);
+  assert.ok(persistIndex > fingerprintIndex);
+  assert.ok(renderIndex > persistIndex);
 
   const runCloudPushStart = compatible.indexOf('async function runCloudPush');
   const tenantSaveQueueStart = compatible.indexOf('function tenantSaveQueue', runCloudPushStart);
@@ -229,6 +241,110 @@ test('R2.2C reconciliación latest y post-RPC conserva authority=true hasta clou
   const queueCloudSave = compatible.slice(queueStart);
   assert.match(queueCloudSave, /queueCloudSave\(scope: TenantScope, crm: CrmData, visitAuthorityDecision\?: boolean\): void;/);
   assert.match(queueCloudSave, /const job = createCloudSaveJob\(scope, crm, visitAuthorityDecision\);[\s\S]*tenantRuntimeLeaseIsCurrent\(job\.runtimeLease\)[\s\S]*enqueueCloudSaveJob\(job\)/i);
+
+  class R14MemoryStorage implements Storage {
+    private readonly values = new Map<string, string>();
+    get length(): number { return this.values.size; }
+    clear(): void { this.values.clear(); }
+    getItem(key: string): string | null { return this.values.get(key) ?? null; }
+    key(index: number): string | null { return [...this.values.keys()][index] ?? null; }
+    removeItem(key: string): void { this.values.delete(key); }
+    setItem(key: string, value: string): void { this.values.set(key, value); }
+  }
+
+  Object.defineProperty(globalThis, 'localStorage', {
+    configurable: true,
+    writable: true,
+    value: new R14MemoryStorage(),
+  });
+  const documentTarget = new EventTarget();
+  Object.defineProperty(globalThis, 'document', {
+    configurable: true,
+    writable: true,
+    value: documentTarget as unknown as Document,
+  });
+
+  const [{ initialData }, store, runtime, tenantStorage] = await Promise.all([
+    import('../models.js'),
+    import('../store.js'),
+    import('../tenant-runtime.js'),
+    import('../tenant-storage.js'),
+  ]);
+  await import('../visit-workflow-cutover.js');
+
+  const userId = 'a35-r14-user';
+  const orgA = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+  const orgB = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
+  const scopeA = Object.freeze({ userId, organizationId: orgA });
+  const scopeB = Object.freeze({ userId, organizationId: orgB });
+  const crmA = structuredClone(initialData);
+  crmA.organization.id = orgA;
+  crmA.organization.name = 'R14 Org A';
+  crmA.teamMembers[0]!.userId = userId;
+
+  runtime.installTenantRuntimeScope(scopeA, userId);
+  assert.equal(store.replaceDataForTenant(scopeA, crmA, false), true);
+  const lease = runtime.captureTenantRuntimeLease(scopeA);
+
+  let renderCount = 0;
+  documentTarget.addEventListener('trv-render', () => { renderCount += 1; });
+
+  const equivalentIdentity = store.state.crm;
+  const equivalent = structuredClone(store.state.crm);
+  const equivalentCurrentFingerprint = tenantStorage.tenantFingerprint(store.state.crm);
+  const equivalentAuthoritativeFingerprint = tenantStorage.tenantFingerprint(equivalent);
+  assert.equal(equivalentCurrentFingerprint, equivalentAuthoritativeFingerprint);
+
+  documentTarget.dispatchEvent(new CustomEvent('propcontrol-cloud-authoritative-snapshot', {
+    detail: { crm: equivalent, runtimeLease: lease },
+  }));
+  assert.equal(renderCount, 0, 'Un authoritative self-ACK equivalente no debe rebuildar la UI.');
+  assert.equal(store.state.crm, equivalentIdentity, 'El self-ACK equivalente debe preservar identidad del CRM vigente.');
+  assert.equal(
+    tenantStorage.tenantFingerprint(tenantStorage.readTenantSnapshot(scopeA)),
+    equivalentAuthoritativeFingerprint,
+    'La reconciliación equivalente sí debe persistir el snapshot autoritativo.',
+  );
+
+  const materiallyDistinct = structuredClone(store.state.crm);
+  materiallyDistinct.clients[0]!.notes = 'Cambio remoto material R14';
+  const materialFingerprint = tenantStorage.tenantFingerprint(materiallyDistinct);
+  assert.notEqual(materialFingerprint, tenantStorage.tenantFingerprint(store.state.crm));
+  documentTarget.dispatchEvent(new CustomEvent('propcontrol-cloud-authoritative-snapshot', {
+    detail: { crm: materiallyDistinct, runtimeLease: lease },
+  }));
+  assert.equal(renderCount, 1, 'Un authoritative snapshot materialmente distinto debe renderizar.');
+  assert.equal(store.state.crm.clients[0]!.notes, 'Cambio remoto material R14');
+  assert.equal(tenantStorage.tenantFingerprint(store.state.crm), materialFingerprint);
+
+  const afterMaterialIdentity = store.state.crm;
+  const foreignCrm = structuredClone(store.state.crm);
+  foreignCrm.organization.id = orgB;
+  foreignCrm.organization.name = 'R14 Org B';
+  const foreignLease = Object.freeze({
+    scope: scopeB,
+    generation: lease.generation,
+  });
+  documentTarget.dispatchEvent(new CustomEvent('propcontrol-cloud-authoritative-snapshot', {
+    detail: { crm: foreignCrm, runtimeLease: foreignLease },
+  }));
+  assert.equal(renderCount, 1, 'Un snapshot de otro tenant debe seguir cercado.');
+  assert.equal(store.state.crm, afterMaterialIdentity);
+  assert.equal(store.state.crm.organization.id, orgA);
+  assert.equal(tenantStorage.readTenantSnapshot(scopeB), null);
+
+  const staleLease = runtime.captureTenantRuntimeLease(scopeA);
+  runtime.installTenantRuntimeScope(scopeA, userId);
+  assert.equal(runtime.tenantRuntimeLeaseIsCurrent(staleLease), false);
+  const staleSnapshot = structuredClone(store.state.crm);
+  staleSnapshot.clients[0]!.notes = 'Cambio stale que debe rechazarse';
+  const beforeStaleIdentity = store.state.crm;
+  documentTarget.dispatchEvent(new CustomEvent('propcontrol-cloud-authoritative-snapshot', {
+    detail: { crm: staleSnapshot, runtimeLease: staleLease },
+  }));
+  assert.equal(renderCount, 1, 'Una lease stale debe seguir fail-closed.');
+  assert.equal(store.state.crm, beforeStaleIdentity);
+  assert.equal(store.state.crm.clients[0]!.notes, 'Cambio remoto material R14');
 });
 
 test('R2.2C1 capability ejecuta auth, RLS y OFF/ON en PostgreSQL 17', { timeout: 120_000 }, async () => {
