@@ -1,7 +1,7 @@
 import { getCloudSession, pushCloudData, queueCloudSave } from './cloud-api-compatible.js';
 import type { Client, CrmData, Property, SyncedVisit, VisitInterest, VisitStatus } from './models.js';
 import { authenticatedTenantMember, saveData, state } from './store.js';
-import { writeTenantSnapshot } from './tenant-storage.js';
+import { tenantFingerprint, writeTenantSnapshot } from './tenant-storage.js';
 import {
   assertTenantRuntimeLeaseCurrent,
   captureTenantRuntimeLease,
@@ -264,11 +264,15 @@ document.addEventListener('propcontrol-cloud-authoritative-snapshot', (event) =>
     || !tenantRuntimeLeaseIsCurrent(runtimeLease)
   ) return;
 
-  state.crm = structuredClone(crm);
-  writeTenantSnapshot(runtimeLease.scope, state.crm, {
+  const currentFingerprint = tenantFingerprint(state.crm);
+  const authoritativeFingerprint = tenantFingerprint(crm);
+  const materiallyChanged = currentFingerprint !== authoritativeFingerprint;
+
+  if (materiallyChanged) state.crm = structuredClone(crm);
+  writeTenantSnapshot(runtimeLease.scope, crm, {
     markDirty: false,
     reason: 'Reconciliación autoritativa cloud',
     backup: false,
   });
-  document.dispatchEvent(new CustomEvent('trv-render'));
+  if (materiallyChanged) document.dispatchEvent(new CustomEvent('trv-render'));
 });
