@@ -3,7 +3,7 @@ name: OrdenBroker Reconciliation Targeted
 on:
   push:
     branches:
-      - validation/ordenbroker-reconciliation-targeted
+      - validation/ordenbroker-reconciliation-targeted-v2
 
 permissions:
   contents: read
