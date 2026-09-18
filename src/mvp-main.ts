@@ -1,5 +1,5 @@
 import { organizeAccountMenuProductActions } from './account-menu-product.js';
-import './entity-read-navigation.js';
+import { clearReadEntityNavigation } from './entity-read-navigation.js';
 import type { ModuleId } from './models.js';
 import { modules } from './models.js';
 import { PRODUCT_BRAND } from './branding.js';
@@ -262,11 +262,11 @@ function bindEvents(): void {
       return;
     }
     const editId = Number(target.closest<HTMLElement>('[data-edit-client]')?.dataset.editClient);
-    if (editId) { state.activeModule = 'crm'; state.editingClientId = editId; state.openForms.client = true; render(); return; }
+    if (editId) { clearReadEntityNavigation(); state.activeModule = 'crm'; state.editingClientId = editId; state.openForms.client = true; render(); return; }
     if (target.closest('[data-cancel-client-edit]')) { state.editingClientId = null; state.openForms.client = false; render(); return; }
     const toggle = target.closest<HTMLElement>('[data-toggle]')?.dataset.toggle;
-    if (toggle === 'client-form') { state.editingClientId = null; state.openForms.client = !state.openForms.client; render(); return; }
-    if (toggle === 'property-form') { state.editingPropertyId = null; state.openForms.property = !state.openForms.property; render(); return; }
+    if (toggle === 'client-form') { clearReadEntityNavigation(); state.editingClientId = null; state.openForms.client = !state.openForms.client; render(); return; }
+    if (toggle === 'property-form') { clearReadEntityNavigation(); state.editingPropertyId = null; state.openForms.property = !state.openForms.property; render(); return; }
     if (toggle === 'reminder-form') { state.openForms.reminder = !state.openForms.reminder; render(); return; }
     const deleteButton = target.closest<HTMLElement>('[data-delete]');
     const collection = deleteButton?.dataset.delete;

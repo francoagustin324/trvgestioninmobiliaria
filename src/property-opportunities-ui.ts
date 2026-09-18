@@ -10,6 +10,7 @@ import {
   type PropertyOpportunity,
 } from './property-opportunities.js';
 import { propertyMatchReasonsHtml } from './property-matching-ui.js';
+import { openEntityReadOnly } from './entity-read-navigation.js';
 import { state } from './store.js';
 import { visibleClients, visibleProperties } from './team-access.js';
 import { escapeHtml } from './utils.js';
@@ -90,7 +91,7 @@ function opportunityCard(
         ${activityHtml(latestActivities.get(client.id))}
       </div>
       <div class="opportunity-card-actions">
-        <button type="button" class="secondary opportunity-open-client" data-edit-client="${client.id}">Abrir ficha</button>
+        <button type="button" class="secondary opportunity-open-client" data-open-opportunity-client="${client.id}">Abrir ficha</button>
       </div>
     </div>
   </article>`;
@@ -113,7 +114,7 @@ function propertySummary(property: Property): string {
       <strong>${escapeHtml(property.title)}</strong>
       <p>${escapeHtml(property.address)} · ${escapeHtml(property.type)}${bedrooms}</p>
     </div>
-    <div class="opportunity-property-price"><span>Precio</span><b>USD ${usdFormatter.format(property.price)}</b></div>
+    <div class="opportunity-property-price"><span>Precio</span><b>USD ${usdFormatter.format(property.price)}</b><button type="button" class="secondary" data-open-opportunity-property="${property.id}">Abrir propiedad</button></div>
   </article>`;
 }
 
@@ -183,6 +184,27 @@ export function renderPropertyOpportunities(container: HTMLElement, onBack: () =
     if (counter) counter.textContent = selectionText();
   };
 
+  const bindReadNavigation = (): void => {
+    workspace.querySelectorAll<HTMLButtonElement>('[data-open-opportunity-client]').forEach((button) => {
+      button.addEventListener('click', () => {
+        const clientId = Number(button.dataset.openOpportunityClient);
+        const propertyId = selectedPropertyId;
+        if (!clientId || !propertyId || !clients.some((client) => client.id === clientId)) return;
+        openEntityReadOnly(
+          { entityType: 'lead', entityId: clientId },
+          { returnTarget: { entityType: 'property', entityId: propertyId } },
+        );
+      });
+    });
+    workspace.querySelectorAll<HTMLButtonElement>('[data-open-opportunity-property]').forEach((button) => {
+      button.addEventListener('click', () => {
+        const propertyId = Number(button.dataset.openOpportunityProperty);
+        if (!propertyId || !properties.some((property) => property.id === propertyId)) return;
+        openEntityReadOnly({ entityType: 'property', entityId: propertyId });
+      });
+    });
+  };
+
   const bindSelection = (): void => {
     workspace.querySelectorAll<HTMLInputElement>('[data-opportunity-select]').forEach((checkbox) => {
       checkbox.addEventListener('change', () => {
@@ -211,6 +233,7 @@ export function renderPropertyOpportunities(container: HTMLElement, onBack: () =
       ? `<details class="opportunity-terminal" open><summary>Ganados / Perdidos fuera de acción (${terminalClients.length})</summary><div>${terminalClients.map(terminalCard).join('')}</div></details>`
       : '';
     bindSelection();
+    bindReadNavigation();
   };
 
   const bindFilters = (): void => {

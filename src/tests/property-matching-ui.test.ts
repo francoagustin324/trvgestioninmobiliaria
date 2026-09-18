@@ -16,14 +16,16 @@ test('Leads utiliza el motor existente y muestra hasta tres propiedades compatib
   assert.ok(leadUi.includes('match.warnings[0]'));
 });
 
-test('el acceso a una coincidencia respeta propiedades visibles y abre el módulo existente', () => {
+test('el acceso a una coincidencia respeta propiedades visibles y abre lectura sin caer en Edit', () => {
   assert.match(leadUi, /from '\.\/team-access\.js'/);
   assert.ok(leadUi.includes('visibleProperties()'));
   assert.ok(leadUi.includes('visibleProperties().some((property) => property.id === propertyId)'));
-  assert.ok(leadUi.includes("state.activeModule = 'propiedades'"));
-  assert.ok(leadUi.includes('state.editingPropertyId = propertyId'));
-  assert.ok(leadUi.includes('state.openForms.property = true'));
-  assert.ok(!leadUi.includes("state.activeModule = 'matching'"));
+  assert.match(leadUi, /openEntityReadOnly\([\s\S]*entityType: 'property'[\s\S]*returnTarget:[\s\S]*entityType: 'lead'/);
+  const openMatchStart = leadUi.indexOf("container.querySelectorAll<HTMLButtonElement>('[data-open-match-property]')");
+  const openMatchEnd = leadUi.indexOf('bindDelegatedFollowUpActions(container)', openMatchStart);
+  assert.ok(openMatchStart >= 0 && openMatchEnd > openMatchStart);
+  const openMatchBlock = leadUi.slice(openMatchStart, openMatchEnd);
+  assert.doesNotMatch(openMatchBlock, /editingPropertyId|openForms\.property|data-edit-property/);
 });
 
 test('el matching tiene presentación responsive, controles táctiles y recursos versionados', () => {

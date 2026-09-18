@@ -18,6 +18,7 @@ export interface CompactLeadCardContext {
   qualificationPanel: string;
   history: string;
   matches: string;
+  navigation?: string;
 }
 
 interface LeadFact {
@@ -97,6 +98,7 @@ function fullSheet(
   return `<details class="mvp-lead-full-sheet" data-lead-full-sheet="${client.id}"${context.expanded ? ' open' : ''}>
     <summary aria-expanded="${context.expanded ? 'true' : 'false'}"><span>${context.expanded ? 'Ocultar ficha' : 'Ver ficha completa'}</span><small>Datos secundarios, historial y propiedades</small></summary>
     <div class="mvp-lead-full-content">
+      ${context.navigation || ''}
       <div class="mvp-lead-full-grid">
         <div><span>Zona</span><strong>${text(client.zones)}</strong></div>
         <div><span>Finalidad</span><strong>${text(client.purpose)}</strong></div>

@@ -29,6 +29,13 @@ import { enhanceLeadsProfessionalRedesign } from './leads-professional-redesign.
 import { prepareLeadsProfessionalRedesign } from './leads-professional-redesign-blocking-fix.js';
 import { enhanceLeadForm, submitLeadForm } from './lead-create-reliability.js';
 import type { ActivityEntry, Client, CommercialStage, Temperature } from './models.js';
+import {
+  clearReadEntityNavigation,
+  currentReadEntityReturnTarget,
+  currentReadEntityTarget,
+  openEntityReadOnly,
+  returnToEntityReadOnly,
+} from './entity-read-navigation.js';
 import { matchPropertiesForClient, type PropertyMatch } from './property-matching.js';
 import { saveData, state } from './store.js';
 import { addActivityForAuthenticatedTenant, memberName, visibleClients, visibleProperties } from './team-access.js';
@@ -144,12 +151,19 @@ function card(client: Client): string {
     state.crm.settings.profileName,
     state.crm.settings.profileEmail,
   );
+  const readTarget = currentReadEntityTarget();
+  const returnTarget = currentReadEntityReturnTarget();
+  const openedReadOnly = readTarget?.entityType === 'lead' && readTarget.entityId === client.id;
+  const navigation = openedReadOnly && returnTarget?.entityType === 'property'
+    ? '<div class="mvp-read-return"><button type="button" class="secondary" data-return-read-entity>← Volver a propiedad</button></div>'
+    : '';
   return renderCompactLeadCard(client, {
-    expanded: expandedClientId === client.id,
+    expanded: expandedClientId === client.id || openedReadOnly,
     responsible,
     qualificationPanel: renderLeadQualificationPanel(client),
     history: historyBlock(client),
     matches: matchesForLead(client),
+    navigation,
   });
 }
 
@@ -234,6 +248,7 @@ function bindLeadCardActions(container: HTMLElement): void {
       event.stopPropagation();
       const clientId = Number(button.dataset.editClient);
       if (!clientId || !visibleClients().some((client) => client.id === clientId)) return;
+      clearReadEntityNavigation();
       state.editingClientId = clientId;
       state.openForms.client = true;
       renderMvpLeads(container);
@@ -253,11 +268,17 @@ function bindLeadCardActions(container: HTMLElement): void {
       event.stopPropagation();
       const propertyId = Number(button.dataset.openMatchProperty);
       if (!propertyId || !visibleProperties().some((property) => property.id === propertyId)) return;
-      state.activeModule = 'propiedades';
-      state.editingPropertyId = propertyId;
-      state.openForms.property = true;
-      document.dispatchEvent(new CustomEvent('trv-render'));
-      window.requestAnimationFrame(() => document.querySelector('#mvp-property-form')?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
+      openEntityReadOnly(
+        { entityType: 'property', entityId: propertyId },
+        { returnTarget: { entityType: 'lead', entityId: Number(button.closest('.mvp-lead-card')?.getAttribute('data-client-id')) } },
+      );
+    });
+  });
+  container.querySelectorAll<HTMLButtonElement>('[data-return-read-entity]').forEach((button) => {
+    button.addEventListener('click', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      returnToEntityReadOnly();
     });
   });
   bindDelegatedFollowUpActions(container);

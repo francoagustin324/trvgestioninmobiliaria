@@ -1,6 +1,13 @@
 import type { TenantScope } from './active-organization.js';
 import { getCloudSession } from './cloud-api.js';
 import type { Property } from './models.js';
+import {
+  clearReadEntityNavigation,
+  currentReadEntityReturnTarget,
+  currentReadEntityTarget,
+  openEntityReadOnly,
+  returnToEntityReadOnly,
+} from './entity-read-navigation.js';
 import { MAX_PROPERTY_PHOTOS, uploadPropertyPhoto } from './property-photo-upload.js';
 import type { PropertyWithFicha } from './property-ficha.js';
 import { publishPropertyFicha, type PublishedPropertyFicha } from './public-property-share.js';
@@ -120,6 +127,7 @@ function card(property: PropertyWithFicha): string {
       </div>
     </div>
     <div class="mvp-lead-actions mvp-property-card-actions">
+      <button type="button" class="secondary" data-open-property-read="${property.id}">Abrir</button>
       <button type="button" class="mvp-property-share" data-share-property-ficha="${property.id}">Compartir ficha</button>
       <button type="button" class="secondary" data-open-property-ficha="${property.id}">Ver ficha</button>
       <button type="button" class="secondary" data-edit-property="${property.id}" aria-controls="mvp-property-form">Editar</button>
@@ -139,6 +147,40 @@ function focusPropertyForm(container: HTMLElement): void {
 
 function findProperty(id: number): PropertyWithFicha | null {
   return (state.crm.properties as PropertyWithFicha[]).find((property) => property.id === id) ?? null;
+}
+
+function propertyReadOnlySheet(): string {
+  const target = currentReadEntityTarget();
+  if (target?.entityType !== 'property') return '';
+  const property = findProperty(target.entityId);
+  if (!property) return '';
+  const returnTarget = currentReadEntityReturnTarget();
+  const returnAction = returnTarget?.entityType === 'lead'
+    ? '<button type="button" class="secondary" data-return-read-entity>← Volver al lead</button>'
+    : '';
+  const details = [
+    property.type,
+    property.bedrooms ? `${property.bedrooms} dorm.` : '',
+    property.bathrooms ? `${property.bathrooms} baños` : '',
+    property.coveredMeters ? `${property.coveredMeters} m² cubiertos` : '',
+  ].filter(Boolean).join(' · ');
+  return `<section class="mvp-lead-card mvp-property-card mvp-property-read-sheet" data-property-read-sheet="${property.id}">
+    <div class="mvp-property-main">
+      <div class="mvp-lead-name mvp-property-title"><h2>${escapeHtml(property.title)}</h2><span>USD ${priceFormatter.format(property.price)}</span></div>
+      <p>${escapeHtml(property.address)}${details ? ` · ${escapeHtml(details)}` : ''}</p>
+      <div class="mvp-property-meta">
+        <span>${escapeHtml(property.operation)}</span>
+        <span>${escapeHtml(property.status)}</span>
+        <span>${escapeHtml(property.features || 'Sin características adicionales')}</span>
+      </div>
+      ${property.description?.trim() ? `<p>${escapeHtml(property.description.trim())}</p>` : ''}
+    </div>
+    <div class="mvp-lead-actions mvp-property-card-actions">
+      ${returnAction}
+      <button type="button" class="secondary" data-open-property-ficha="${property.id}">Ver ficha pública</button>
+      <button type="button" class="secondary" data-edit-property="${property.id}">Editar</button>
+    </div>
+  </section>`;
 }
 
 function propertyShareOperationIsCurrent(
@@ -323,11 +365,27 @@ export async function openPropertyFicha(property: PropertyWithFicha, button: HTM
 }
 
 function bindPropertyCardActions(container: HTMLElement, options: MvpPropertiesRenderOptions): void {
+  container.querySelectorAll<HTMLButtonElement>('[data-open-property-read]').forEach((button) => {
+    button.addEventListener('click', (event) => {
+      event.stopPropagation();
+      const propertyId = Number(button.dataset.openPropertyRead);
+      if (!propertyId || !findProperty(propertyId)) return;
+      openEntityReadOnly({ entityType: 'property', entityId: propertyId });
+    });
+  });
+
+  container.querySelectorAll<HTMLButtonElement>('[data-return-read-entity]').forEach((button) => {
+    button.addEventListener('click', (event) => {
+      event.stopPropagation();
+      returnToEntityReadOnly();
+    });
+  });
   container.querySelectorAll<HTMLButtonElement>('[data-edit-property]').forEach((button) => {
     button.addEventListener('click', (event) => {
       event.stopPropagation();
       const propertyId = Number(button.dataset.editProperty);
       if (!propertyId || !findProperty(propertyId)) return;
+      clearReadEntityNavigation();
       state.editingPropertyId = propertyId;
       state.openForms.property = true;
       renderMvpProperties(container, options);
@@ -526,6 +584,7 @@ export function renderMvpProperties(container: HTMLElement, options: MvpProperti
       <button type="button" class="mvp-properties-primary-action" data-toggle="property-form">Nueva propiedad</button>
     </div>
   </div>
+  ${propertyReadOnlySheet()}
   <form id="mvp-property-form" class="mvp-lead-form mvp-property-form ${state.openForms.property ? '' : 'collapsed'}">
     <div class="mvp-form-heading">
       <div><h2>${editing ? `Editar ${escapeHtml(editing.title)}` : 'Nueva propiedad'}</h2><p>Los datos comerciales se muestran en la ficha. Los datos internos nunca se comparten.</p></div>
