@@ -225,13 +225,23 @@ export const state = {
   openForms: { client: false, property: false, contact: false, reminder: false, ficha: false, member: false },
 };
 
-function resetTransientState(): void {
+type TransientStateResetHandler = () => void;
+
+const transientStateResetHandlers = new Set<TransientStateResetHandler>();
+
+export function registerTransientStateReset(handler: TransientStateResetHandler): () => void {
+  transientStateResetHandlers.add(handler);
+  return () => transientStateResetHandlers.delete(handler);
+}
+
+export function resetTransientState(): void {
   state.activeMemberId = loadActiveMemberId(state.crm);
   state.editingClientId = null;
   state.editingPropertyId = null;
   state.selectedConversationId = null;
   state.selectedContactId = null;
   state.editingContactId = null;
+  transientStateResetHandlers.forEach((handler) => handler());
 }
 
 export function activateStorageForTenant(scope: TenantScope): void {

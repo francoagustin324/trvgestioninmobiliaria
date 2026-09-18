@@ -1,4 +1,5 @@
 import { organizeAccountMenuProductActions } from './account-menu-product.js';
+import './entity-read-navigation.js';
 import type { ModuleId } from './models.js';
 import { modules } from './models.js';
 import { PRODUCT_BRAND } from './branding.js';

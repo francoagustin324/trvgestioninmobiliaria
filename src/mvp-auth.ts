@@ -16,6 +16,7 @@ import { appIcons } from './icons.js';
 import type { CrmData } from './models.js';
 import {
   replaceDataForTenant,
+  resetTransientState,
   restoreLatestLocalBackupForTenant,
   setActiveMemberId,
   state,
@@ -506,6 +507,7 @@ export function renderAccountMenu(): void {
   });
   container.querySelector<HTMLElement>('[data-account-logout]')?.addEventListener('click', () => {
     closeAccountMenuPanel({ restoreFocus: false });
+    resetTransientState();
     signOutCloud();
     location.assign('/login');
   });
