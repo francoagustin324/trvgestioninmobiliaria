@@ -4,6 +4,7 @@ import {
   agendaRelatedOptions,
   agendaUrgency,
   buildAgendaItems,
+  buildCommercialAgendaItems,
   completedReminders,
   daysBetweenIsoDates,
   filterAgendaRelatedOptions,
@@ -11,7 +12,7 @@ import {
   isValidIsoDate,
   todayIsoDate,
 } from '../agenda.js';
-import type { Client, Reminder } from '../models.js';
+import type { Client, Offer, Property, Reminder, Reservation, Visit } from '../models.js';
 
 function client(overrides: Partial<Client> = {}): Client {
   return {
@@ -119,4 +120,64 @@ test('groupAgendaItems crea las tres bandejas comerciales', () => {
   assert.equal(groups.overdue.length, 1);
   assert.equal(groups.today.length, 1);
   assert.equal(groups.upcoming.length, 1);
+
+  const clients = [
+    client({ id: 1, name: 'Lead A', assignedToId: 1 }),
+    client({ id: 2, name: 'Lead B', assignedToId: 2 }),
+  ];
+  const properties: Property[] = [
+    { id: 10, title: 'Propiedad A', address: 'A', type: 'Casa', operation: 'Venta', price: 100000, owner: 'A', status: 'Activa', assignedToId: 1, createdById: 1 },
+    { id: 20, title: 'Propiedad B', address: 'B', type: 'Casa', operation: 'Venta', price: 120000, owner: 'B', status: 'Activa', assignedToId: 2, createdById: 2 },
+  ];
+  const visits: Visit[] = [
+    { id: 1, clientId: 1, propertyId: 10, scheduledAt: '2026-07-13T10:30:00.000Z', status: 'Coordinada', assignedToId: 1, createdById: 1, createdAt: '2026-07-01', updatedAt: '2026-07-01' },
+    { id: 2, clientId: 2, propertyId: 20, scheduledAt: '2026-07-13T12:00:00.000Z', status: 'Coordinada', assignedToId: 2, createdById: 2, createdAt: '2026-07-01', updatedAt: '2026-07-01' },
+  ];
+  const offers: Offer[] = [
+    { id: 1, clientId: 1, propertyId: 10, origin: 'Cliente', amount: 95000, currency: 'USD', validUntil: '2026-07-14', status: 'Pendiente', assignedToId: 1, createdById: 1, createdAt: '2026-07-01', updatedAt: '2026-07-01' },
+    { id: 2, clientId: 2, propertyId: 20, origin: 'Cliente', amount: 110000, currency: 'USD', validUntil: '2026-07-14', status: 'Pendiente', assignedToId: 2, createdById: 2, createdAt: '2026-07-01', updatedAt: '2026-07-01' },
+  ];
+  const reservations: Reservation[] = [
+    { id: 1, clientId: 1, propertyId: 10, amount: 5000, currency: 'USD', reservedAt: '2026-07-10', expiresAt: '2026-07-15', status: 'Activa', assignedToId: 1, createdById: 1, createdAt: '2026-07-10', updatedAt: '2026-07-10' },
+    { id: 2, clientId: 2, propertyId: 20, amount: 6000, currency: 'USD', reservedAt: '2026-07-10', expiresAt: '2026-07-15', status: 'Activa', assignedToId: 2, createdById: 2, createdAt: '2026-07-10', updatedAt: '2026-07-10' },
+  ];
+
+  const ownerItems = buildCommercialAgendaItems({
+    clients,
+    reminders: [],
+    visits,
+    offers,
+    reservations,
+    properties,
+    actor: { id: 99, role: 'Dueño' },
+  }, '2026-07-13');
+  assert.equal(ownerItems.filter((item) => ['visit', 'offer', 'reservation'].includes(item.source)).length, 6);
+
+  const agentAItems = buildCommercialAgendaItems({
+    clients,
+    reminders: [],
+    visits,
+    offers,
+    reservations,
+    properties,
+    actor: { id: 1, role: 'Corredor' },
+  }, '2026-07-13');
+  assert.deepEqual(
+    agentAItems.filter((item) => ['visit', 'offer', 'reservation'].includes(item.source)).map((item) => item.sourceId),
+    [1, 1, 1],
+  );
+
+  const agentBItems = buildCommercialAgendaItems({
+    clients,
+    reminders: [],
+    visits,
+    offers,
+    reservations,
+    properties,
+    actor: { id: 2, role: 'Corredor' },
+  }, '2026-07-13');
+  assert.deepEqual(
+    agentBItems.filter((item) => ['visit', 'offer', 'reservation'].includes(item.source)).map((item) => item.sourceId),
+    [2, 2, 2],
+  );
 });

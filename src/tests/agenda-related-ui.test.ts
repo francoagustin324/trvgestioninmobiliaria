@@ -31,6 +31,13 @@ test('las tarjetas quedan en una sola secuencia vertical y con acciones secundar
   assert.ok(ui.includes('agenda-position'));
   assert.ok(ui.includes('<summary>Más acciones</summary>'));
   assert.ok(ui.includes('Ordenados por fecha y prioridad.'));
+  assert.match(ui, /buildCommercialAgendaItems/);
+  assert.match(ui, /data-agenda-source/);
+  assert.match(ui, /data-open-agenda-context/);
+  assert.match(ui, /openEntityReadOnly\(\{ entityType: 'lead', entityId: clientId \}\)/);
+  assert.match(ui, /item\.source === 'visit' \|\| item\.source === 'offer' \|\| item\.source === 'reservation'/);
+  assert.doesNotMatch(ui, /data-complete-agenda="visit"|data-complete-agenda="offer"|data-complete-agenda="reservation"/);
+  assert.match(css, /agenda-open-context[^}]*min-height:\s*44px/);
 });
 
 test('conserva versiones históricas y publica la entrada principal A2.2', () => {

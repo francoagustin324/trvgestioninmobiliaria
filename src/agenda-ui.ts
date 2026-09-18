@@ -1,6 +1,6 @@
 import {
   agendaRelatedOptions,
-  buildAgendaItems,
+  buildCommercialAgendaItems,
   completedReminders,
   daysBetweenIsoDates,
   filterAgendaRelatedOptions,
@@ -10,6 +10,7 @@ import {
   type AgendaUrgency,
   type ReminderWithStatus,
 } from './agenda.js';
+import { openEntityReadOnly } from './entity-read-navigation.js';
 import { completeClientFollowUpWithDecision, reprogramClientFollowUp } from './lead-pipeline.js';
 import { requestFollowUpCompletion } from './followup-completion-ui.js';
 import { authenticatedTenantMember, saveData, state } from './store.js';
@@ -18,6 +19,7 @@ import { assertTenantRuntimeLeaseCurrent, captureTenantRuntimeLease, requireCurr
 import type { TenantScope } from './active-organization.js';
 import { newSyncRecordMetadata } from './sync-identity.js';
 import { addActivityForAuthenticatedTenant, visibleClients, visibleReminders } from './team-access.js';
+import { visibleProperties } from './team-access.js';
 import { escapeHtml, field, formValues, nextId } from './utils.js';
 
 const dateFormatter = new Intl.DateTimeFormat('es-AR', { day: '2-digit', month: 'short', year: 'numeric', timeZone: 'UTC' });
@@ -53,7 +55,14 @@ function relativeDateLabel(item: AgendaItem, today: string): string {
 }
 
 function sourceBadge(item: AgendaItem): string {
-  return item.source === 'client' ? 'Lead' : 'Recordatorio';
+  const labels: Record<AgendaItem['source'], string> = {
+    client: 'Seguimiento',
+    reminder: 'Recordatorio',
+    visit: 'Visita',
+    offer: 'Oferta',
+    reservation: 'Reserva',
+  };
+  return labels[item.source];
 }
 
 function reprogramControl(item: AgendaItem): string {
@@ -66,16 +75,39 @@ function reprogramControl(item: AgendaItem): string {
   </div>`;
 }
 
+function agendaContextClientId(item: AgendaItem): number | null {
+  if (item.source === 'client') return item.sourceId;
+  return item.clientId ?? null;
+}
+
+function contextAction(item: AgendaItem): string {
+  const clientId = agendaContextClientId(item);
+  if (!clientId) return '';
+  return `<button type="button" class="secondary agenda-open-context" data-open-agenda-context="${clientId}">Abrir contexto</button>`;
+}
+
 function itemActions(item: AgendaItem): string {
-  const secondaryAction = item.source === 'client'
-    ? `<button type="button" class="secondary agenda-open-client" data-edit-client="${item.sourceId}">Abrir lead</button>`
-    : `<button type="button" class="secondary" data-edit-reminder="${item.sourceId}">Editar</button>
-       <button type="button" class="delete agenda-delete" data-delete="reminders" data-id="${item.sourceId}" aria-label="Eliminar ${escapeHtml(item.title)}">Eliminar</button>`;
-  return `<button type="button" class="agenda-complete" data-complete-agenda="${item.source}" data-id="${item.sourceId}">Completar</button>
+  if (item.source === 'visit' || item.source === 'offer' || item.source === 'reservation') {
+    return contextAction(item);
+  }
+
+  if (item.source === 'client') {
+    return `<button type="button" class="agenda-complete" data-complete-agenda="client" data-id="${item.sourceId}">Completar</button>
+      <details class="agenda-more-actions">
+        <summary>Más acciones</summary>
+        <div class="agenda-more-actions-panel">
+          ${contextAction(item)}
+          ${reprogramControl(item)}
+        </div>
+      </details>`;
+  }
+
+  return `<button type="button" class="agenda-complete" data-complete-agenda="reminder" data-id="${item.sourceId}">Completar</button>
     <details class="agenda-more-actions">
       <summary>Más acciones</summary>
       <div class="agenda-more-actions-panel">
-        ${secondaryAction}
+        <button type="button" class="secondary" data-edit-reminder="${item.sourceId}">Editar</button>
+        <button type="button" class="delete agenda-delete" data-delete="reminders" data-id="${item.sourceId}" aria-label="Eliminar ${escapeHtml(item.title)}">Eliminar</button>
         ${reprogramControl(item)}
       </div>
     </details>`;
@@ -85,7 +117,7 @@ function renderAgendaItem(item: AgendaItem, today: string, position: number): st
   return `<article class="agenda-card ${item.urgency}">
     <span class="agenda-position" aria-label="Posición ${position}">${position}</span>
     <div class="agenda-card-content">
-      <div class="agenda-card-header"><span class="agenda-source">${sourceBadge(item)}</span><time datetime="${item.date}">${escapeHtml(formattedDate(item.date))}</time></div>
+      <div class="agenda-card-header"><span class="agenda-source" data-agenda-source="${item.source}">${sourceBadge(item)}</span><time datetime="${item.date}${item.time ? `T${item.time}` : ''}">${escapeHtml(formattedDate(item.date))}${item.time ? ` · ${escapeHtml(item.time)} hs` : ''}</time></div>
       <span class="agenda-relative-date">${escapeHtml(relativeDateLabel(item, today))}</span>
       <h3>${escapeHtml(item.title)}</h3>
       <p>${escapeHtml(item.detail)}</p>
@@ -209,7 +241,16 @@ export function renderAgenda(container: HTMLElement): void {
   const today = todayIsoDate();
   const clients = visibleClients();
   const reminders = visibleReminders();
-  const groups = groupAgendaItems(buildAgendaItems(clients, reminders, today));
+  const actor = agendaWriteMember(renderScope, renderLease);
+  const groups = groupAgendaItems(buildCommercialAgendaItems({
+    clients,
+    reminders,
+    visits: state.crm.visits,
+    offers: state.crm.offers,
+    reservations: state.crm.reservations,
+    properties: visibleProperties(),
+    actor,
+  }, today));
   const completed = completedReminders(reminders);
   const total = groups.overdue.length + groups.today.length + groups.upcoming.length;
   const editing = editingReminderId === null ? null : reminderRecords().find((reminder) => reminder.id === editingReminderId) ?? null;
@@ -234,6 +275,15 @@ export function renderAgenda(container: HTMLElement): void {
   </details>`;
 
   bindRelatedPicker(container);
+
+  container.querySelectorAll<HTMLButtonElement>('[data-open-agenda-context]').forEach((button) => {
+    button.addEventListener('click', () => {
+      assertTenantRuntimeLeaseCurrent(renderLease);
+      const clientId = Number(button.dataset.openAgendaContext);
+      if (!clientId || !clients.some((client) => client.id === clientId)) return;
+      openEntityReadOnly({ entityType: 'lead', entityId: clientId });
+    });
+  });
 
   container.querySelector<HTMLFormElement>('#reminder-form')?.addEventListener('submit', (event) => {
     event.preventDefault();

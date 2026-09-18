@@ -75,4 +75,14 @@ test('TRV Daily Use Gate mantiene contratos de navegación, actividad, agenda y 
   assert.match(agendaModel, /assignmentVisible\(input\.actor\.role, input\.actor\.id, offer\.assignedToId\)/);
   assert.match(agendaModel, /assignmentVisible\(input\.actor\.role, input\.actor\.id, reservation\.assignedToId\)/);
   assert.doesNotMatch(agendaModel, /fetch\(|pushCloudData|queueCloudSave|saveData|writeTenantSnapshot/);
+
+  assert.match(agendaUi, /buildCommercialAgendaItems/);
+  assert.match(agendaUi, /visibleProperties\(\)/);
+  assert.match(agendaUi, /data-open-agenda-context/);
+  assert.match(agendaUi, /openEntityReadOnly\(\{ entityType: 'lead', entityId: clientId \}\)/);
+  assert.match(agendaUi, /client: 'Seguimiento'/);
+  assert.match(agendaUi, /visit: 'Visita'/);
+  assert.match(agendaUi, /offer: 'Oferta'/);
+  assert.match(agendaUi, /reservation: 'Reserva'/);
+  assert.doesNotMatch(agendaUi, /data-complete-agenda="visit"|data-complete-agenda="offer"|data-complete-agenda="reservation"/);
 });
