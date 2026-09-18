@@ -279,12 +279,16 @@ test('P1.1-A2 visita coordinada sobrevive snapshot local/F5 usando persistencia 
 
 test('P1.1-A2 conserva Agenda/Reminder/B1.4.2 fuera del flujo y Visit sin campos prohibidos', () => {
   const agenda = readFileSync('src/agenda.ts', 'utf8');
+  const agendaUi = readFileSync('src/agenda-ui.ts', 'utf8');
   const workflow = readFileSync('src/visit-workflow.ts', 'utf8');
   const ui = readFileSync('src/visit-workflow-ui.ts', 'utf8');
   const cutover = readFileSync('src/visit-workflow-cutover.ts', 'utf8');
   const model = readFileSync('src/models.ts', 'utf8');
   const visitBlock = model.match(/export interface Visit \{([\s\S]*?)\n\}/)?.[1] ?? '';
-  assert.doesNotMatch(agenda, /\bvisits\b/);
+  assert.match(agenda, /source:\s*'visit'/);
+  assert.match(agenda, /assignmentVisible\(input\.actor\.role, input\.actor\.id, visit\.assignedToId\)/);
+  assert.match(agendaUi, /item\.source === 'visit' \|\| item\.source === 'offer' \|\| item\.source === 'reservation'/);
+  assert.match(agendaUi, /return contextAction\(item\)/);
   assert.doesNotMatch(`${workflow}\n${ui}`, /state\.crm\.reminders|Reminder|lead-recommendation|supervised_recommendation/i);
   assert.doesNotMatch(visitBlock, /nextAction|nextFollowUp|offerId|reservationId|commissionId|metadata/);
   assert.match(ui, /coordinateVisitWithCutover\(/);

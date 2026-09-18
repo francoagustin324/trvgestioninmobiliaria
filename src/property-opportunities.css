@@ -92,6 +92,7 @@
 .opportunity-property-price { display:grid; justify-items:end; gap:5px; min-width:max-content; padding-left:14px; border-left:1px solid var(--glass-stroke); }
 .opportunity-property-price span { color:var(--ink-faint); font-size:.62rem; }
 .opportunity-property-price b { color:var(--brand-bright); font-size:.96rem; white-space:nowrap; }
+.opportunity-property-price [data-open-opportunity-property] { min-height:44px; }
 
 .opportunity-review { display:grid; gap:18px; padding:20px; }
 .opportunity-section-heading { display:flex; align-items:flex-start; gap:12px; padding-bottom:2px; }

@@ -315,7 +315,7 @@ test('P1.1-A5 existir Reservation no modifica pipeline, nextAction, nextFollowUp
   assert.deepEqual(crm.activityLog, activityBefore);
 });
 
-test('P1.1-A5 Reservations participa del cloud tenant-aware sin contaminar Agenda/Reminder', () => {
+test('P1.1-A5 Reservations participa del cloud tenant-aware y Agenda las expone read-only', () => {
   const crm = crmFixture();
   const owner = context('owner-user');
   const rows = crmToCloudRecords(crm, owner, 'owner-user');
@@ -359,9 +359,13 @@ test('P1.1-A5 Reservations participa del cloud tenant-aware sin contaminar Agend
   assert.doesNotMatch(compatible, /\b(?:push|pull|sync|save)Reservations?\w*\b/);
 
   const agenda = readFileSync('src/agenda.ts', 'utf8');
+  const agendaUi = readFileSync('src/agenda-ui.ts', 'utf8');
   const models = readFileSync('src/models.ts', 'utf8');
   const reminderBlock = models.match(/export interface Reminder \{([\s\S]*?)\n\}/)?.[1] ?? '';
-  assert.doesNotMatch(agenda, /\breservations\b/);
+  assert.match(agenda, /source:\s*'reservation'/);
+  assert.match(agenda, /assignmentVisible\(input\.actor\.role, input\.actor\.id, reservation\.assignedToId\)/);
+  assert.match(agendaUi, /item\.source === 'visit' \|\| item\.source === 'offer' \|\| item\.source === 'reservation'/);
+  assert.match(agendaUi, /return contextAction\(item\)/);
   assert.doesNotMatch(reminderBlock, /Reservation|reservation/);
 });
 
