@@ -584,6 +584,9 @@ async function assertFollowUpActions(page: Page): Promise<void> {
   });
   assert.equal(hitTarget.valid, true, `El botón Completar seguimiento está cubierto: ${JSON.stringify(hitTarget)}`);
   await completeButton.click();
+  const completionDialog = page.locator('dialog[data-followup-completion-dialog][open]');
+  await completionDialog.waitFor({ state: 'visible' });
+  await completionDialog.locator('[data-followup-none]').click();
   await page.waitForFunction(() => {
     const cards = [...document.querySelectorAll<HTMLElement>('#crm .mvp-lead-compact-card')];
     const card = cards.find((item) => item.textContent?.includes('Seguimiento muy vencido'));

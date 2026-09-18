@@ -737,5 +737,5 @@ test('PR143 cache bust: todo runtime modificado cambia URL servida', () => {
   assert.doesNotMatch(index, /\/dist\/leads-professional-redesign-blocking-fix\.js\?v=20260805-1/);
   assert.match(index, /\/dist\/leads-professional-redesign\.js\?v=20260908-1/);
   assert.doesNotMatch(index, /\/dist\/leads-professional-redesign\.js\?v=20260805-1/);
-  assert.match(index, /\/dist\/mvp-main\.js\?v=20260906-p1-4-a2-2-1/);
+  assert.match(index, /\/dist\/mvp-main\.js\?v=20260918-trv-daily-use-1/);
 });

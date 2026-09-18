@@ -6,7 +6,7 @@ const html = readFileSync('index.html', 'utf8');
 const whatsappScope = readFileSync('src/whatsapp-action-scope.ts', 'utf8');
 
 const shellVersion = '20260802-1';
-const mainVersion = '20260906-p1-4-a2-2-1';
+const mainVersion = '20260918-trv-daily-use-1';
 const leadRealUseVersion = '20260816-1';
 
 test('carga una versión nueva y coordinada del shell móvil', () => {

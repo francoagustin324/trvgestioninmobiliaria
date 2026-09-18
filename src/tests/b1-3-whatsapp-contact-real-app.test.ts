@@ -566,6 +566,13 @@ test('B1.3 completa contacto, confirmación, seguimiento, reprogramación y Agen
     await reprogram.locator('button[type="submit"]').click();
     assert.equal((await crmFromStorage(page, 'Dueño')).clients[0]?.nextFollowUp, '2026-10-17');
     await page.locator('#agenda [data-complete-agenda="client"][data-id="1"]').click();
+    const completionDialog = page.locator('dialog[data-followup-completion-dialog][open]');
+    await completionDialog.waitFor({ state: 'visible' });
+    await completionDialog.locator('[data-followup-none]').click();
+    await page.waitForFunction((key) => {
+      const crm = JSON.parse(localStorage.getItem(key) || '{}') as CrmData;
+      return crm.clients?.[0]?.nextFollowUp == null;
+    }, identity('Dueño').storageKey);
     const completed = await crmFromStorage(page, 'Dueño');
     assert.equal(completed.clients[0]?.nextFollowUp, undefined);
     assert.equal(completed.activityLog.filter((entry) => entry.action === 'Contacto por WhatsApp').length, 1, 'Completar no elimina el historial.');

@@ -47,7 +47,8 @@ test('conserva secciones, orden actual, encabezados y cantidades', () => {
 test('conserva prioridad, tipo, fecha, atraso y datos visibles de cada tarjeta', () => {
   assert.ok(ui.includes('class="agenda-position"'));
   assert.ok(ui.includes('class="agenda-source"'));
-  assert.ok(ui.includes('<time datetime="${item.date}">${escapeHtml(formattedDate(item.date))}</time>'));
+  assert.ok(ui.includes('datetime="${item.date}${item.time ? `T${item.time}` : \'\'}"'));
+  assert.ok(ui.includes("${item.time ? ` · ${escapeHtml(item.time)} hs` : ''}</time>"));
   assert.ok(ui.includes('class="agenda-relative-date"'));
   assert.ok(ui.includes('Vencido hace ${Math.abs(days)}'));
   assert.ok(ui.includes('<h3>${escapeHtml(item.title)}</h3>'));
@@ -60,7 +61,9 @@ test('conserva prioridad, tipo, fecha, atraso y datos visibles de cada tarjeta',
 test('conserva Completar, Más acciones, apertura, edición y reprogramación', () => {
   assert.ok(ui.includes('data-complete-agenda="${item.source}"'));
   assert.ok(ui.includes('<summary>Más acciones</summary>'));
-  assert.ok(ui.includes('data-edit-client="${item.sourceId}"'));
+  assert.ok(ui.includes('data-open-agenda-context="${clientId}"'));
+  assert.ok(ui.includes("if (item.source === 'visit' || item.source === 'offer' || item.source === 'reservation')"));
+  assert.ok(ui.includes('return contextAction(item);'));
   assert.ok(ui.includes('data-edit-reminder="${item.sourceId}"'));
   assert.ok(ui.includes('data-delete="reminders"'));
   assert.ok(ui.includes('data-reprogram-source="${item.source}"'));
@@ -71,7 +74,12 @@ test('conserva Completar, Más acciones, apertura, edición y reprogramación', 
 test('mantiene cálculos, filtros visibles y orden de Agenda', () => {
   assert.ok(ui.includes('const clients = visibleClients()'));
   assert.ok(ui.includes('const reminders = visibleReminders()'));
-  assert.ok(ui.includes('groupAgendaItems(buildAgendaItems(clients, reminders, today))'));
+  assert.ok(ui.includes('groupAgendaItems(buildCommercialAgendaItems({'));
+  assert.ok(ui.includes('visits: state.crm.visits'));
+  assert.ok(ui.includes('offers: state.crm.offers'));
+  assert.ok(ui.includes('reservations: state.crm.reservations'));
+  assert.ok(ui.includes('properties: visibleProperties()'));
+  assert.ok(ui.includes('actor'));
   assert.ok(ui.includes('completedReminders(reminders)'));
   assert.ok(ui.includes('groups.overdue.length + groups.today.length + groups.upcoming.length'));
   assert.ok(ui.includes('daysBetweenIsoDates(today, item.date)'));
@@ -84,7 +92,8 @@ test('mantiene cálculos, filtros visibles y orden de Agenda', () => {
 
 test('completar y reprogramar usan las reglas comerciales tenant-aware sin duplicar Reminder', () => {
   assert.ok(ui.includes("querySelectorAll<HTMLButtonElement>('[data-complete-agenda]')"));
-  assert.ok(ui.includes('completeClientFollowUp(client)'));
+  assert.ok(ui.includes('requestFollowUpCompletion(client, (decision) =>'));
+  assert.ok(ui.includes('completeClientFollowUpWithDecision(client, decision)'));
   assert.ok(ui.includes('addActivityForAuthenticatedTenant(renderScope, result.activity)'));
   assert.ok(ui.includes('reminder.completedAt = new Date().toISOString()'));
   assert.ok(ui.includes("querySelectorAll<HTMLFormElement>('[data-reprogram-source]')"));

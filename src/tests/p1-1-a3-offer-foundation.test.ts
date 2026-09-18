@@ -295,9 +295,10 @@ test('P1.1-A3 stale Offer se detecta sin tocar telemetría B1.4.2', () => {
   assert.equal(isSupervisedRecommendationTelemetryPayload(telemetry.payload), true);
 });
 
-test('P1.1-A3 cloud tenant-aware incluye Offers y Agenda/Reminder permanecen ajenos', () => {
+test('P1.1-A3 cloud tenant-aware incluye Offers y Agenda los expone read-only con visibilidad canónica', () => {
   const compatible = readFileSync('src/cloud-api-compatible.ts', 'utf8');
   const agenda = readFileSync('src/agenda.ts', 'utf8');
+  const agendaUi = readFileSync('src/agenda-ui.ts', 'utf8');
   const models = readFileSync('src/models.ts', 'utf8');
   const crm = crmFixture();
   const owner = context('owner-user');
@@ -329,7 +330,10 @@ test('P1.1-A3 cloud tenant-aware incluye Offers y Agenda/Reminder permanecen aje
   assert.match(compatible, /pushTenantLegacyCloudData/);
   assert.match(compatible, /pushCloudDataWithVisitAuthorityV2/);
   assert.doesNotMatch(compatible, /\b(?:push|pull|sync|save)Offer\w*\b/i);
-  assert.doesNotMatch(agenda, /\boffers\b/);
+  assert.match(agenda, /source:\s*'offer'/);
+  assert.match(agenda, /assignmentVisible\(input\.actor\.role, input\.actor\.id, offer\.assignedToId\)/);
+  assert.match(agendaUi, /item\.source === 'visit' \|\| item\.source === 'offer' \|\| item\.source === 'reservation'/);
+  assert.match(agendaUi, /return contextAction\(item\)/);
   assert.doesNotMatch(models.match(/export interface Reminder \{([\s\S]*?)\n\}/)?.[1] ?? '', /Offer|offer/);
 });
 

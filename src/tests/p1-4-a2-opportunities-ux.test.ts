@@ -80,7 +80,9 @@ test('P1.4-A2 integra Oportunidades con los tokens visuales oficiales sin volver
 test('P1.4-A2 conserva selección local, apertura de ficha y contratos P1.4-A1', () => {
   assert.match(uiSource, /const selectedClientIds = new Set<number>\(\)/);
   assert.match(uiSource, /data-opportunity-select/);
-  assert.match(uiSource, /data-edit-client="\$\{client\.id\}"/);
+  assert.match(uiSource, /data-open-opportunity-client="\$\{client\.id\}"/);
+  assert.doesNotMatch(uiSource, /data-edit-client="\$\{client\.id\}"/);
+  assert.match(uiSource, /openEntityReadOnly\(\s*\{ entityType: 'lead', entityId: clientId \},\s*\{ returnTarget: \{ entityType: 'property', entityId: propertyId \} \},\s*\)/);
   assert.match(uiSource, /selectedClientIds\.add\(clientId\)/);
   assert.match(uiSource, /selectedClientIds\.delete\(clientId\)/);
   assert.match(uiSource, /buildPropertyOpportunities\(property, clients\)/);
@@ -99,7 +101,7 @@ test('P1.4-A2 mantiene las regresiones browser que cubren filtros, selección, d
 });
 
 test('P1.4-A2.2 mantiene cache-busting vigente y retira el bootstrap de reinyección', () => {
-  assert.match(indexSource, /property-opportunities\.css\?v=20260906-p1-4-a2-1-1/);
-  assert.match(indexSource, /mvp-main\.js\?v=20260906-p1-4-a2-2-1/);
+  assert.match(indexSource, /property-opportunities\.css\?v=20260918-trv-daily-use-1/);
+  assert.match(indexSource, /mvp-main\.js\?v=20260918-trv-daily-use-1/);
   assert.doesNotMatch(indexSource, /property-opportunities-bootstrap\.js/);
 });

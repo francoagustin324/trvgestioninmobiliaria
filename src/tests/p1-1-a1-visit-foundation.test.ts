@@ -275,13 +275,17 @@ test('P1.1-A1 stale records conserva Visit vigente, detecta Visit removida y no 
   assert.equal(isSupervisedRecommendationTelemetryPayload(telemetry.payload), true);
 });
 
-test('P1.1-A1 agrega visits a la comparación remota vigente y Agenda permanece ajena a visits', () => {
+test('P1.1-A1 agrega visits a la comparación remota y Agenda los expone read-only con visibilidad canónica', () => {
   const cloudRecords = readFileSync('src/cloud-records.ts', 'utf8');
   const agenda = readFileSync('src/agenda.ts', 'utf8');
+  const agendaUi = readFileSync('src/agenda-ui.ts', 'utf8');
   assert.ok(cloudRecords.includes("visibleToCurrentMember(reconciled.visits, context).map((item) => row(org, 'visit'"));
   assert.ok(cloudRecords.includes("visits: recordsOf<SyncedVisit>(rows, 'visit')"));
   assert.ok(cloudRecords.includes('staleCloudRecords(existing: CloudRecordRow[], next: CloudRecordRow[])'));
-  assert.doesNotMatch(agenda, /\bvisits\b/);
+  assert.match(agenda, /source:\s*'visit'/);
+  assert.match(agenda, /assignmentVisible\(input\.actor\.role, input\.actor\.id, visit\.assignedToId\)/);
+  assert.match(agendaUi, /item\.source === 'visit' \|\| item\.source === 'offer' \|\| item\.source === 'reservation'/);
+  assert.match(agendaUi, /return contextAction\(item\)/);
 });
 
 test('P1.1-A1 mantiene Visit sin agenda/follow-up duplicados ni entidades futuras', () => {
