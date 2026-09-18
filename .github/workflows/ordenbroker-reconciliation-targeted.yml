@@ -1,0 +1,91 @@
+name: OrdenBroker Reconciliation Targeted
+
+on:
+  push:
+    branches:
+      - validation/ordenbroker-reconciliation-targeted
+
+permissions:
+  contents: read
+
+jobs:
+  targeted:
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    env:
+      PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - name: Install
+        run: npm ci --silent
+      - name: Verify Chromium
+        shell: bash
+        run: |
+          set -euo pipefail
+          executable="$(command -v google-chrome || command -v google-chrome-stable || command -v chromium || command -v chromium-browser || true)"
+          test -n "$executable"
+      - name: Provision WebKit
+        shell: bash
+        run: |
+          set -euo pipefail
+          unset PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD
+          npx playwright install --with-deps webkit
+      - name: Build
+        run: npm run build --silent
+      - name: Product touch target
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -F '.opportunity-property-price [data-open-opportunity-property] { min-height:44px; }' src/property-opportunities.css
+          node --test --test-concurrency=1 dist/tests/p1-4-a1-property-opportunities-browser.test.js
+          echo 'PRODUCT_TOUCH_TARGET=GREEN'
+      - name: Cache bust contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          node scripts/verify-direct-asset-cache-bust.mjs --base 8ceb16eab82cbc2ec48f958e407050788bed640a --head c215dc73cf788dfd0399183a3741c258a450d07d
+          node --test --test-concurrency=1             dist/tests/agenda-workflow.test.js             dist/tests/automatic-save.test.js             dist/tests/b1-2-8-account-menu-presentation.test.js             dist/tests/hotfix-leads-ux-atender-ahora.test.js             dist/tests/lead-edit.test.js             dist/tests/leads-desktop-zero-training.test.js             dist/tests/mobile-nav-cache-bust.test.js             dist/tests/mvp-property-sharing.test.js             dist/tests/p1-4-a2-2-properties-actions-ux.test.js             dist/tests/p1-4-a2-opportunities-ux.test.js             dist/tests/property-photo-upload-compat.test.js             dist/tests/sync-recovery-bootstrap.test.js
+          echo 'CACHE_BUST_TESTS=GREEN'
+      - name: Agenda contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --test --test-concurrency=1             dist/tests/mobile-agenda-polish.test.js             dist/tests/p1-1-a1-visit-foundation.test.js             dist/tests/p1-1-a2-visit-workflow.test.js             dist/tests/p1-1-a3-offer-foundation.test.js             dist/tests/p1-1-a4-offer-workflow.test.js             dist/tests/p1-1-a5-reservation-foundation.test.js             dist/tests/p1-1-a6-reservation-workflow.test.js             dist/tests/agenda.test.js             dist/tests/agenda-related-ui.test.js
+          echo 'AGENDA_TESTS=GREEN'
+      - name: Open edit contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --test --test-concurrency=1 dist/tests/p1-4-a2-opportunities-ux.test.js
+          echo 'OPEN_EDIT_TEST=GREEN'
+      - name: Followup contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --test --test-concurrency=1             dist/tests/b1-2-3-compact-leads-real-app.test.js             dist/tests/b1-3-whatsapp-contact-real-app.test.js
+          echo 'FOLLOWUP_TESTS=GREEN'
+      - name: Daily use regression guards
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --test --test-concurrency=1             dist/tests/trv-daily-use-browser.test.js             dist/tests/team-policy.test.js             dist/tests/sec-fix-a3-1-lead-explicit-tenant-write-identity.test.js
+          echo 'DAILY_USE_REGRESSION_GUARDS=GREEN'
+      - name: Cardinality static contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git diff --name-status 8ceb16eab82cbc2ec48f958e407050788bed640a..c215dc73cf788dfd0399183a3741c258a450d07d -- 'src/tests/*.test.ts' | awk '$1=="A" || $1=="D" {count++} END {print count+0}')" -eq 0
+          added="$(git diff --unified=0 8ceb16eab82cbc2ec48f958e407050788bed640a..c215dc73cf788dfd0399183a3741c258a450d07d -- 'src/tests/*.test.ts' | grep '^+' | grep -v '^+++' | grep -Ec '\btest\s*\(' || true)"
+          removed="$(git diff --unified=0 8ceb16eab82cbc2ec48f958e407050788bed640a..c215dc73cf788dfd0399183a3741c258a450d07d -- 'src/tests/*.test.ts' | grep '^-' | grep -v '^---' | grep -Ec '\btest\s*\(' || true)"
+          test "$added" -eq "$removed"
+          grep -F 'EXPECTED_TEST_TOTAL: "1422"' .github/workflows/ci.yml
+          grep -F 'expected = 1422' .github/workflows/ci.yml
+          echo "TEST_DECLARATIONS_ADDED=$added"
+          echo "TEST_DECLARATIONS_REMOVED=$removed"
+          echo 'ACTUAL_TEST_TOTAL_BASELINE=1422'
+          echo 'CARDINALITY_STATIC_CHECK=GREEN'
