@@ -1,4 +1,4 @@
-import { currentReadEntityTarget } from './entity-read-navigation.js';
+import { clearReadEntityNavigation, currentReadEntityTarget } from './entity-read-navigation.js';
 import { renderMvpProperties } from './mvp-properties-ui.js';
 import { renderPropertyOpportunities } from './property-opportunities-ui.js';
 
@@ -16,6 +16,7 @@ export function renderMvpPropertiesWorkspace(container: HTMLElement): void {
 
   renderMvpProperties(container, {
     onOpenOpportunities: () => {
+      clearReadEntityNavigation();
       activeView = 'opportunities';
       renderMvpPropertiesWorkspace(container);
     },

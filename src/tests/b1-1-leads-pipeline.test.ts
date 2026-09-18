@@ -9,6 +9,7 @@ import {
   applyCommercialStage,
   commercialStage,
   completeClientFollowUp,
+  completeClientFollowUpWithDecision,
   filterLeads,
   isTerminalClient,
   normalizeCommercialStage,
@@ -190,6 +191,28 @@ test('reprogramar cambia solo la fecha y completar actualiza contacto y limpia a
   assert.equal(completed.client.nextAction, undefined);
   assert.equal(completed.activity.action, 'Seguimiento completado');
   assert.match(completed.activity.detail, /Confirmar horarios/);
+
+  const scheduled = completeClientFollowUpWithDecision(original, {
+    kind: 'scheduled',
+    nextAction: 'Enviar comparativa',
+    nextFollowUp: '2026-07-28',
+  }, new Date(2026, 6, 27, 12, 0));
+  assert.equal(scheduled.client.lastContact, '2026-07-27');
+  assert.equal(scheduled.client.nextAction, 'Enviar comparativa');
+  assert.equal(scheduled.client.nextFollowUp, '2026-07-28');
+  assert.equal(scheduled.activity.action, 'Seguimiento completado');
+  assert.match(scheduled.activity.detail, /Próximo: Enviar comparativa/);
+
+  const none = completeClientFollowUpWithDecision(original, { kind: 'none' }, new Date(2026, 6, 27, 12, 0));
+  assert.equal(none.client.nextAction, undefined);
+  assert.equal(none.client.nextFollowUp, undefined);
+  assert.equal(none.activity.action, 'Seguimiento completado');
+  assert.match(none.activity.detail, /Sin seguimiento por ahora/);
+  assert.throws(() => completeClientFollowUpWithDecision(original, {
+    kind: 'scheduled',
+    nextAction: 'Fecha vieja',
+    nextFollowUp: '2026-07-26',
+  }, new Date(2026, 6, 27, 12, 0)), /FOLLOW_UP_DATE_INVALID/);
 });
 
 test('activityLog recibe creación, etapa, programación, reprogramación y terminales', () => {

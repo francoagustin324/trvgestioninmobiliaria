@@ -37,5 +37,5 @@ test('la versión publicada conserva compatibilidad histórica y renueva mvp-mai
   const compatibilityVersion = html.match(/cloud-compat-bootstrap\.js\?v=([^"']+)/)?.[1];
   const mainVersion = html.match(/mvp-main\.js\?v=([^"']+)/)?.[1];
   assert.equal(compatibilityVersion, '20260802-1');
-  assert.equal(mainVersion, '20260906-p1-4-a2-2-1');
+  assert.equal(mainVersion, '20260918-trv-daily-use-1');
 });

@@ -29,7 +29,7 @@ function installStyles(): void {
   const link = document.createElement('link');
   link.id = STYLE_ID;
   link.rel = 'stylesheet';
-  link.href = '/src/commercial-close.css?v=20260903-p1-2-a1';
+  link.href = '/src/commercial-close.css?v=20260918-trv-daily-use-1';
   document.head.append(link);
 }
 

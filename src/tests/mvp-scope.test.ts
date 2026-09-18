@@ -198,4 +198,13 @@ test('la cuenta informa sincronización y permite recuperar una copia local', ()
   assert.ok(store.includes('activateStorageForCurrentSession'));
   assert.ok(store.includes('restoreLatestLocalBackup'));
   assert.ok(main.includes('propcontrol-cloud-status'));
+
+  const navigation = readFileSync('src/entity-read-navigation.ts', 'utf8');
+  assert.match(store, /export function resetTransientState\(\): void/);
+  assert.match(store, /registerTransientStateReset/);
+  assert.match(store, /activateStorageForTenant[\s\S]*resetTransientState\(\)/);
+  assert.match(store, /replaceDataForTenant[\s\S]*resetTransientState\(\)/);
+  assert.match(auth, /data-account-logout[\s\S]*resetTransientState\(\)[\s\S]*signOutCloud\(\)/);
+  assert.match(navigation, /registerTransientStateReset\(clearReadEntityNavigation\)/);
+  assert.doesNotMatch(navigation, /localStorage|saveData|queueCloudSave|writeTenantSnapshot/);
 });
