@@ -257,7 +257,14 @@ test('R2.2C reconciliación latest y post-RPC conserva authority=true hasta clou
     writable: true,
     value: new R14MemoryStorage(),
   });
-  const documentTarget = new EventTarget();
+  class R14DocumentTarget extends EventTarget {
+    readonly head = { append: (_node: unknown) => undefined };
+    getElementById(_id: string): null { return null; }
+    createElement(_tag: string): { id: string; rel: string; href: string } {
+      return { id: '', rel: '', href: '' };
+    }
+  }
+  const documentTarget = new R14DocumentTarget();
   Object.defineProperty(globalThis, 'document', {
     configurable: true,
     writable: true,
