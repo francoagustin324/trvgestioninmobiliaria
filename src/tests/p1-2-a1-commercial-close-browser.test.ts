@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import test from 'node:test';
 import { chromium, type Browser, type BrowserContext, type Page } from 'playwright';
 import { initialData, type CrmData } from '../models.js';
-import { tenantStorageNamespace } from '../tenant-storage.js';
+import { tenantFingerprint, tenantStorageNamespace } from '../tenant-storage.js';
 import { installA35H5R1ModernTenantHarness } from './a35-h5-r1-modern-tenant-harness.js';
 
 const repositoryRoot = process.cwd();
@@ -198,6 +199,38 @@ async function createContext(browser: Browser, viewport: { width: number; height
   return context;
 }
 
+async function installAuthoritativeSnapshotProbe(context: BrowserContext): Promise<void> {
+  await context.addInitScript(({ accountStorageKey }) => {
+    type SnapshotProbe = {
+      count: number;
+      localBefore?: unknown;
+      authoritative?: unknown;
+    };
+    type ProbeWindow = Window & {
+      __a35R14SnapshotProbe?: SnapshotProbe;
+      __a35R14OriginalCard?: Element | null;
+      __a35R14OriginalDetails?: Element | null;
+    };
+
+    const probeWindow = window as ProbeWindow;
+    probeWindow.__a35R14SnapshotProbe = { count: 0 };
+    document.addEventListener('propcontrol-cloud-authoritative-snapshot', (event) => {
+      const detail = (event as CustomEvent<{ crm?: unknown }>).detail;
+      const raw = localStorage.getItem(accountStorageKey);
+      const previous = probeWindow.__a35R14SnapshotProbe?.count ?? 0;
+      probeWindow.__a35R14SnapshotProbe = {
+        count: previous + 1,
+        localBefore: raw ? JSON.parse(raw) : null,
+        authoritative: detail?.crm ?? null,
+      };
+    }, true);
+  }, { accountStorageKey: tenantReadbackKey });
+}
+
+function fingerprintSha256(value: string): string {
+  return createHash('sha256').update(value).digest('hex');
+}
+
 async function openApp(page: Page, baseUrl: string): Promise<void> {
   await page.goto(baseUrl, { waitUntil: 'domcontentloaded' });
   await page.waitForSelector('#crm.active .mvp-lead-card[data-client-id="1"]', { state: 'visible', timeout: 20_000 });
@@ -361,6 +394,7 @@ test('P1.2-A1 browser: Lost mobile exige detalle Otro y no deja seguimiento viej
   const server = await startServer(port);
   const browser = await chromium.launch({ executablePath: executable, headless: true, args: ['--no-sandbox'] });
   const context = await createContext(browser, { width: 390, height: 844 });
+  await installAuthoritativeSnapshotProbe(context);
   const page = await context.newPage();
   try {
     await openApp(page, `http://127.0.0.1:${port}`);
@@ -390,8 +424,73 @@ test('P1.2-A1 browser: Lost mobile exige detalle Otro y no deja seguimiento viej
     assert.equal(client.commissionAmount, undefined);
     assert.equal(crm.activityLog.filter((entry) => entry.entityId === 2 && entry.action === 'Operación perdida').length, 1);
 
-    const card = page.locator('.mvp-lead-card[data-client-id="2"]');
-    await openLeadDetails(page, 2);
+    const cardSelector = '.mvp-lead-card[data-client-id="2"]';
+    const actionsSelector = `${cardSelector} .mvp-lead-quick-actions[data-zero-training-actions="true"]`;
+    const menuSelector = `${actionsSelector} .mvp-lead-actions-menu`;
+    const detailsSelector = `${menuSelector}[open] [data-open-lead-details="2"]`;
+    const card = page.locator(cardSelector);
+
+    const authoritativeSnapshotsBeforeMenu = await page.evaluate(() => (
+      (window as Window & { __a35R14SnapshotProbe?: { count: number } }).__a35R14SnapshotProbe?.count ?? 0
+    ));
+    assert.equal(authoritativeSnapshotsBeforeMenu, 0, 'TAP 836 debe abrir el menú antes del authoritative self-ACK.');
+
+    await waitForStableInteractiveNode(page, actionsSelector);
+    await page.locator(`${menuSelector} > summary`).click();
+    await page.waitForFunction((selector) => document.querySelector(selector)?.hasAttribute('open'), menuSelector);
+    await page.evaluate(({ currentCardSelector, currentDetailsSelector }) => {
+      const probeWindow = window as Window & {
+        __a35R14OriginalCard?: Element | null;
+        __a35R14OriginalDetails?: Element | null;
+      };
+      probeWindow.__a35R14OriginalCard = document.querySelector(currentCardSelector);
+      probeWindow.__a35R14OriginalDetails = document.querySelector(currentDetailsSelector);
+    }, { currentCardSelector: cardSelector, currentDetailsSelector: detailsSelector });
+
+    await page.waitForFunction(() => (
+      ((window as Window & { __a35R14SnapshotProbe?: { count: number } }).__a35R14SnapshotProbe?.count ?? 0) >= 1
+    ));
+
+    const continuity = await page.evaluate(({ currentCardSelector, currentMenuSelector, currentDetailsSelector }) => {
+      type ProbeWindow = Window & {
+        __a35R14SnapshotProbe?: { count: number; localBefore?: unknown; authoritative?: unknown };
+        __a35R14OriginalCard?: Element | null;
+        __a35R14OriginalDetails?: Element | null;
+      };
+      const probeWindow = window as ProbeWindow;
+      const currentCard = document.querySelector(currentCardSelector);
+      const currentMenu = document.querySelector(currentMenuSelector);
+      const currentDetails = document.querySelector(currentDetailsSelector);
+      return {
+        count: probeWindow.__a35R14SnapshotProbe?.count ?? 0,
+        localBefore: probeWindow.__a35R14SnapshotProbe?.localBefore ?? null,
+        authoritative: probeWindow.__a35R14SnapshotProbe?.authoritative ?? null,
+        sameCard: currentCard === probeWindow.__a35R14OriginalCard,
+        sameDetails: currentDetails === probeWindow.__a35R14OriginalDetails,
+        menuOpen: currentMenu?.hasAttribute('open') ?? false,
+        detailsConnected: currentDetails?.isConnected ?? false,
+      };
+    }, {
+      currentCardSelector: cardSelector,
+      currentMenuSelector: menuSelector,
+      currentDetailsSelector: detailsSelector,
+    });
+
+    assert.equal(continuity.count, 1);
+    assert.ok(continuity.localBefore);
+    assert.ok(continuity.authoritative);
+    const beforeFingerprint = tenantFingerprint(continuity.localBefore);
+    const authoritativeFingerprint = tenantFingerprint(continuity.authoritative);
+    assert.equal(beforeFingerprint, authoritativeFingerprint, 'El authoritative snapshot de TAP 836 debe ser un self-ACK semánticamente equivalente.');
+    console.log(`R14_TAP836_CRM_BEFORE_SNAPSHOT_FINGERPRINT_SHA256=${fingerprintSha256(beforeFingerprint)}`);
+    console.log(`R14_TAP836_CRM_AUTHORITATIVE_FINGERPRINT_SHA256=${fingerprintSha256(authoritativeFingerprint)}`);
+    assert.equal(continuity.sameCard, true, 'El self-ACK equivalente no debe reemplazar la card activa.');
+    assert.equal(continuity.sameDetails, true, 'El self-ACK equivalente no debe reemplazar Ver detalles.');
+    assert.equal(continuity.menuOpen, true, 'El menú abierto debe sobrevivir al self-ACK equivalente.');
+    assert.equal(continuity.detailsConnected, true, 'Ver detalles debe seguir conectado después del self-ACK equivalente.');
+
+    await page.locator(detailsSelector).click();
+    await page.waitForFunction(() => document.querySelector('[data-lead-full-sheet="2"]')?.hasAttribute('open'));
     await page.waitForSelector('.mvp-lead-card[data-client-id="2"] [data-commercial-close-card].lost');
     assert.match(await card.locator('[data-commercial-close-card]').textContent() || '', /El cliente cambió el alcance/);
     const width = await card.evaluate((element) => ({ card: element.getBoundingClientRect().width, viewport: window.innerWidth, document: document.documentElement.scrollWidth }));
