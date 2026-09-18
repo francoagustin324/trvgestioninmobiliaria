@@ -85,4 +85,17 @@ test('TRV Daily Use Gate mantiene contratos de navegación, actividad, agenda y 
   assert.match(agendaUi, /offer: 'Oferta'/);
   assert.match(agendaUi, /reservation: 'Reserva'/);
   assert.doesNotMatch(agendaUi, /data-complete-agenda="visit"|data-complete-agenda="offer"|data-complete-agenda="reservation"/);
+
+  const closeUi = readFileSync('src/commercial-close-ui.ts', 'utf8');
+  const leadCreate = readFileSync('src/lead-create-reliability.ts', 'utf8');
+  assert.match(closeUi, /won\.dataset\.closeOperationStage = 'Ganado'/);
+  assert.match(closeUi, /lost\.dataset\.closeOperationStage = 'Perdido'/);
+  assert.match(closeUi, /pendingCloseIntent/);
+  assert.match(closeUi, /card\?\.querySelector<HTMLButtonElement>\('\[data-edit-client\]'\)\?\.click\(\)/);
+  assert.match(closeUi, /stage\.dispatchEvent\(new Event\('change', \{ bubbles: true \}\)\)/);
+  assert.match(closeUi, /form\.requestSubmit\(\)/);
+  assert.match(closeUi, /data-reopen-operation/);
+  assert.doesNotMatch(closeUi, /addActivityForAuthenticatedTenant|activityLog\.push|activityLog\.unshift|saveData\(/);
+  assert.match(leadCreate, /activitiesForClientSave/);
+  assert.match(leadCreate, /addActivityForAuthenticatedTenant/);
 });

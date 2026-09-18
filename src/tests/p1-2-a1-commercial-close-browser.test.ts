@@ -325,8 +325,11 @@ test('P1.2-A1 browser: Won desktop, replay visual seguro y reapertura persistent
   const page = await context.newPage();
   try {
     await openApp(page, `http://127.0.0.1:${port}`);
-    await openEditForm(page, 1);
-    await page.locator('#mvp-lead-form select[name="pipeline"]').selectOption('Ganado');
+    await openLeadDetails(page, 1);
+    const wonAction = page.locator('.mvp-lead-card[data-client-id="1"] [data-close-operation-stage="Ganado"]');
+    assert.ok((await wonAction.boundingBox())?.height! >= 43.5);
+    await wonAction.click();
+    await page.waitForSelector('#mvp-lead-form:not(.collapsed)');
     await page.waitForSelector('dialog[data-commercial-close-dialog][open] [data-commercial-close-modal-form="won"]');
     await assertDialogContained(page);
 
@@ -398,8 +401,23 @@ test('P1.2-A1 browser: Lost mobile exige detalle Otro y no deja seguimiento viej
   const page = await context.newPage();
   try {
     await openApp(page, `http://127.0.0.1:${port}`);
-    await openEditForm(page, 2);
-    await page.locator('#mvp-lead-form select[name="pipeline"]').selectOption('Perdido');
+    await openLeadDetails(page, 2);
+    const lostAction = page.locator('.mvp-lead-card[data-client-id="2"] [data-close-operation-stage="Perdido"]');
+    const lostGeometry = await lostAction.evaluate((button) => {
+      const rect = button.getBoundingClientRect();
+      return {
+        height: rect.height,
+        left: rect.left,
+        right: rect.right,
+        viewport: window.innerWidth,
+        documentWidth: document.documentElement.scrollWidth,
+      };
+    });
+    assert.ok(lostGeometry.height >= 43.5, JSON.stringify(lostGeometry));
+    assert.ok(lostGeometry.left >= -1 && lostGeometry.right <= lostGeometry.viewport + 1, JSON.stringify(lostGeometry));
+    assert.ok(lostGeometry.documentWidth <= lostGeometry.viewport + 1, JSON.stringify(lostGeometry));
+    await lostAction.click();
+    await page.waitForSelector('#mvp-lead-form:not(.collapsed)');
     await page.waitForSelector('dialog[data-commercial-close-dialog][open] [data-commercial-close-modal-form="lost"]');
     await assertDialogContained(page);
 
