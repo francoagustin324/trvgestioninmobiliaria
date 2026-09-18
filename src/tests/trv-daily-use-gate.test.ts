@@ -62,4 +62,17 @@ test('TRV Daily Use Gate mantiene contratos de navegación, actividad, agenda y 
   assert.match(followupUi, /data-followup-none/);
   assert.match(followupUi, /event\.preventDefault\(\)/);
   assert.doesNotMatch(followupUi, /localStorage|saveData|addActivity|queueCloudSave|waitForTimeout|setTimeout/);
+
+  const agendaModel = readFileSync('src/agenda.ts', 'utf8');
+  assert.match(agendaModel, /buildCommercialAgendaItems/);
+  assert.match(agendaModel, /visit\.status !== 'Coordinada'/);
+  assert.match(agendaModel, /offer\.status !== 'Pendiente'/);
+  assert.match(agendaModel, /reservation\.status !== 'Activa'/);
+  assert.match(agendaModel, /visit\.scheduledAt/);
+  assert.match(agendaModel, /offer\.validUntil/);
+  assert.match(agendaModel, /reservation\.expiresAt/);
+  assert.match(agendaModel, /assignmentVisible\(input\.actor\.role, input\.actor\.id, visit\.assignedToId\)/);
+  assert.match(agendaModel, /assignmentVisible\(input\.actor\.role, input\.actor\.id, offer\.assignedToId\)/);
+  assert.match(agendaModel, /assignmentVisible\(input\.actor\.role, input\.actor\.id, reservation\.assignedToId\)/);
+  assert.doesNotMatch(agendaModel, /fetch\(|pushCloudData|queueCloudSave|saveData|writeTenantSnapshot/);
 });
