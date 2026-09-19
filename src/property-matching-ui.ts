@@ -1,3 +1,4 @@
+import { PRODUCT_BRAND } from './branding.js';
 import type { Client, Property } from './models.js';
 import { matchClientsForProperty, matchPropertiesForClient, type PropertyMatch } from './property-matching.js';
 import { escapeHtml } from './utils.js';
@@ -51,7 +52,7 @@ export function clientPropertyMatchesHtml(client: Client, properties: Property[]
     : '<p class="match-empty">No hay propiedades suficientemente compatibles. Revisá presupuesto, zona y detalles del inventario.</p>';
   return `<details class="commercial-matches ${visible.length ? 'has-matches' : 'no-matches'}">
     <summary><span>Propiedades sugeridas</span><strong>${matches.length}</strong></summary>
-    <div class="match-body"><p class="match-disclaimer">Sugerencias para revisión humana. PropControl no envía mensajes ni agenda visitas automáticamente.</p>${content}${matches.length > visible.length ? `<small>Se muestran las 3 coincidencias con mayor puntaje de ${matches.length}.</small>` : ''}</div>
+    <div class="match-body"><p class="match-disclaimer">Sugerencias para revisión humana. ${PRODUCT_BRAND.name} no envía mensajes ni agenda visitas automáticamente.</p>${content}${matches.length > visible.length ? `<small>Se muestran las 3 coincidencias con mayor puntaje de ${matches.length}.</small>` : ''}</div>
   </details>`;
 }
 
