@@ -1,3 +1,4 @@
+import { PRODUCT_BRAND } from './branding.js';
 import { commercialStage } from './lead-pipeline.js';
 import type { ActivityEntry, Client, Property } from './models.js';
 import {
@@ -153,7 +154,7 @@ export function renderPropertyOpportunities(container: HTMLElement, onBack: () =
 
   container.innerHTML = `<div class="property-opportunities" data-property-opportunities>
     <div class="opportunity-page-heading">
-      <div><span class="opportunity-eyebrow">OPORTUNIDADES</span><h1>Buscar clientes para una propiedad</h1><p>Elegí una propiedad y PropControl te muestra los clientes compatibles según el matching actual.</p></div>
+      <div><span class="opportunity-eyebrow">OPORTUNIDADES</span><h1>Buscar clientes para una propiedad</h1><p>Elegí una propiedad y ${PRODUCT_BRAND.name} te muestra los clientes compatibles según el matching actual.</p></div>
       <button type="button" class="secondary opportunity-back" data-opportunities-back>Volver a propiedades</button>
     </div>
     ${properties.length ? `<section class="opportunity-property-picker" aria-labelledby="opportunity-property-step-title">
@@ -165,7 +166,7 @@ export function renderPropertyOpportunities(container: HTMLElement, onBack: () =
         <label class="sr-only" for="opportunity-property-select">Seleccionar propiedad</label>
         <select id="opportunity-property-select" data-opportunity-property aria-describedby="opportunity-property-note"><option value="">Seleccioná una propiedad…</option>${properties.map(propertyOption).join('')}</select>
       </div>
-      <p id="opportunity-property-note" class="opportunity-property-note">PropControl reutiliza el matching existente. Elegir una propiedad o seleccionar clientes no envía mensajes ni modifica el CRM.</p>
+      <p id="opportunity-property-note" class="opportunity-property-note">${PRODUCT_BRAND.name} reutiliza el matching existente. Elegir una propiedad o seleccionar clientes no envía mensajes ni modifica el CRM.</p>
     </section>` : `<section class="opportunity-empty" data-opportunity-empty="no-properties"><strong>No hay propiedades disponibles</strong><p>Cargá o habilitá una propiedad visible antes de buscar oportunidades.</p></section>`}
     <div class="opportunity-workspace" data-opportunity-workspace></div>
   </div>`;
