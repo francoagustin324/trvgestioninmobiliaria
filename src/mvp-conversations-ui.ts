@@ -1,4 +1,5 @@
 import { requestLeadQualification } from './lead-qualification-ui.js';
+import { PRODUCT_BRAND } from './branding.js';
 import type { ConversationMessage, WhatsAppConversation } from './models.js';
 import { visibleClients, visibleConversations } from './team-access.js';
 import { state } from './store.js';
@@ -82,7 +83,7 @@ function conversationDetail(conversation: WhatsAppConversation | null): string {
     </div>
     <div class="mvp-message-history">${conversation.messages.map(messageBubble).join('') || '<p class="empty-state">Todavía no hay mensajes.</p>'}</div>
     <div class="mvp-compose-disabled">
-      <textarea rows="2" placeholder="La respuesta desde PropControl se habilitará al conectar Meta oficialmente." disabled></textarea>
+      <textarea rows="2" placeholder="La respuesta desde ${PRODUCT_BRAND.name} se habilitará al conectar Meta oficialmente." disabled></textarea>
       <button type="button" disabled>Enviar</button>
     </div>
   </section>`;
