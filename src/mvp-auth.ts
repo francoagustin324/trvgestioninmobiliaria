@@ -236,7 +236,7 @@ export function restoreLatestLocalBackupRecovery(
 
   dispatchTenantCloudStatus(
     runtimeLease,
-    'Copia anterior recuperada. PropControl la guardará sin sobrescribir cambios más nuevos.',
+    'Copia anterior recuperada. OrdenBroker la guardará sin sobrescribir cambios más nuevos.',
     'success',
   );
   dispatchTenantRender(runtimeLease);
@@ -258,7 +258,7 @@ export async function resolveSyncDifferences(): Promise<void> {
     const result = reconcileCrmSnapshots(originalLocal, inspected.cloud);
     if (!result.canMergeSafely) {
       const conflictNames = result.differences.flatMap((item) => item.conflicts).slice(0, 5).join(', ');
-      throw new Error(`Hay ${result.conflictCount} registros editados de forma diferente en ambos dispositivos${conflictNames ? `: ${conflictNames}` : ''}. PropControl no modificó nada.`);
+      throw new Error(`Hay ${result.conflictCount} registros editados de forma diferente en ambos dispositivos${conflictNames ? `: ${conflictNames}` : ''}. OrdenBroker no modificó nada.`);
     }
 
     const hasDifferences = result.localOnlyCount > 0 || result.cloudOnlyCount > 0;
@@ -273,7 +273,7 @@ export async function resolveSyncDifferences(): Promise<void> {
       throw new Error('No se pudo volver a comprobar la nube. No se modificó ningún dato.');
     }
     if (stableFingerprint(latestInspection.cloud) !== stableFingerprint(inspected.cloud)) {
-      throw new Error('La nube cambió durante la revisión. PropControl frenó la operación para no sobrescribir información.');
+      throw new Error('La nube cambió durante la revisión. OrdenBroker frenó la operación para no sobrescribir información.');
     }
 
     const latestResult = reconcileCrmSnapshots(originalLocal, latestInspection.cloud);

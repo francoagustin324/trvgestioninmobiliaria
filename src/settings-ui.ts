@@ -101,7 +101,7 @@ export function renderSettings(container: HTMLElement): void {
   container.innerHTML = `<div class="mvp-page-heading"><div><h1>Configuración</h1><p>Tu perfil, los datos de la inmobiliaria y las preferencias de la app.</p></div></div>
   <form id="mvp-settings-form" class="mvp-settings">
     <section class="mvp-settings-group">
-      <header><h2>Perfil</h2><p>Cómo te ve el equipo dentro de PropControl.</p></header>
+      <header><h2>Perfil</h2><p>Cómo te ve el equipo dentro de OrdenBroker.</p></header>
       <div class="mvp-settings-avatar">
         <div class="mvp-avatar-preview" id="mvp-avatar-preview">${avatarInner()}</div>
         <div class="mvp-avatar-actions">

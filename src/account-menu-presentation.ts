@@ -66,7 +66,7 @@ function organizationDisplayName(settings: Settings, organization: OrganizationS
   const organizationLooksTechnical = organizationName
     && compactIdentifier(organizationName) === compactIdentifier(organization.id);
   if (organizationLooksTechnical && agencyName) return agencyName;
-  return organizationName || agencyName || normalizedText(organization.id) || 'PropControl';
+  return organizationName || agencyName || normalizedText(organization.id) || 'OrdenBroker';
 }
 
 export function accountIdentityPresentation(input: AccountIdentityInput): AccountIdentityPresentation {
@@ -84,7 +84,7 @@ export function accountIdentityPresentation(input: AccountIdentityInput): Accoun
     || normalizedText(input.email).split('@')[0]
     || normalizedText(input.userId)
     || normalizedText(input.organization.id)
-    || 'Cuenta PropControl';
+    || 'Cuenta OrdenBroker';
   const name = isPresentableName(profileName, technicalIdentifiers)
     ? profileName
     : isPresentableName(memberName, technicalIdentifiers)

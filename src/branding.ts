@@ -1,6 +1,6 @@
 export const PRODUCT_BRAND = {
-  name: 'PropControl',
-  tagline: 'Control comercial para inmobiliarias',
+  name: 'OrdenBroker',
+  tagline: 'Tu inmobiliaria, bajo control',
   phrase: 'Ordená. Seguí. Cerrá.',
   logo: '/src/assets/logo-propcontrol.png',
   wordmark: '/src/assets/propcontrol-logo.svg',

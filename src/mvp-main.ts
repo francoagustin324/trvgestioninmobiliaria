@@ -271,7 +271,7 @@ function bindEvents(): void {
     const deleteButton = target.closest<HTMLElement>('[data-delete]');
     const collection = deleteButton?.dataset.delete;
     const id = Number(deleteButton?.dataset.id);
-    if (collection && id && window.confirm('¿Eliminar este registro? PropControl guardará una copia local anterior.')) removeItem(collection, id);
+    if (collection && id && window.confirm('¿Eliminar este registro? OrdenBroker guardará una copia local anterior.')) removeItem(collection, id);
   });
   window.addEventListener('resize', () => { if (window.innerWidth > 980) setMobileNavigation(false); });
 }
@@ -283,7 +283,7 @@ async function bootstrap(): Promise<void> {
   }
   const shortFichaMatch = location.pathname.match(/^\/ficha\/([a-z0-9-]+)\/?$/i);
   if (shortFichaMatch?.[1]) {
-    document.title = 'Ficha de propiedad | PropControl';
+    document.title = 'Ficha de propiedad | OrdenBroker';
     root.innerHTML = '<main class="public-page"><div class="public-error"><h1>Cargando ficha…</h1><p>Un momento.</p></div></main>';
     try {
       renderPublicMode(root, await loadPublicPropertyFicha(shortFichaMatch[1].toLowerCase()));

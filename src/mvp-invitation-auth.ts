@@ -20,7 +20,7 @@ function invitationShell(content: string): string {
   return `<main class="public-auth-shell">
     <section class="public-auth-brand">
       <img src="${PRODUCT_BRAND.logo}" alt="${PRODUCT_BRAND.name}">
-      <div><span>CRM inmobiliario</span><h1>Activá tu acceso a PropControl.</h1><p>Tu cuenta quedará vinculada únicamente a la inmobiliaria que te invitó.</p></div>
+      <div><span>CRM inmobiliario</span><h1>Activá tu acceso a OrdenBroker.</h1><p>Tu cuenta quedará vinculada únicamente a la inmobiliaria que te invitó.</p></div>
     </section>
     <section class="public-auth-panel">
       <div class="public-auth-card">${content}</div>
