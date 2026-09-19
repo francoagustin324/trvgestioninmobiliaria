@@ -25,7 +25,7 @@ test('P1.4-A2/A2.2 mantiene descubrible el acceso comercial desde Propiedades co
 
 test('P1.4-A2.1 separa Paso 1, selector y propiedad seleccionada con semántica clara', () => {
   assert.match(uiSource, /Buscar clientes para una propiedad/);
-  assert.match(uiSource, /Elegí una propiedad y PropControl te muestra los clientes compatibles según el matching actual\./);
+  assert.ok(uiSource.includes('Elegí una propiedad y ${PRODUCT_BRAND.name} te muestra los clientes compatibles según el matching actual.'));
   assert.match(uiSource, /opportunity-step-kicker">PASO 1/);
   assert.match(uiSource, /opportunity-property-step-title">Elegí la propiedad que querés trabajar/);
   assert.match(uiSource, /class="opportunity-property-field"/);
