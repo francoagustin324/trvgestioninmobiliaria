@@ -83,9 +83,17 @@ function normalizedConversation(value: Partial<WhatsAppConversation>, fallbackId
 function normalizedOrganization(value: Partial<OrganizationSettings> | undefined): OrganizationSettings {
   return {
     id: String(value?.id || initialData.organization.id),
-    name: String(value?.name || initialData.organization.name),
+    name: String(value?.name ?? '').trim(),
     seatLimit: Number.isFinite(value?.seatLimit) && Number(value?.seatLimit) > 0 ? Number(value?.seatLimit) : null,
     planLabel: String(value?.planLabel || initialData.organization.planLabel),
+    commercialPhone: String(value?.commercialPhone ?? '').trim(),
+    commercialEmail: String(value?.commercialEmail ?? '').trim(),
+    address: String(value?.address ?? '').trim(),
+    logoPath: String(value?.logoPath ?? '').trim(),
+    legalText: String(value?.legalText ?? '').trim(),
+    defaultCurrency: String(value?.defaultCurrency || 'USD').trim(),
+    defaultZone: String(value?.defaultZone ?? '').trim(),
+    shareText: String(value?.shareText ?? '').trim(),
   };
 }
 
@@ -188,15 +196,39 @@ function normalizedData(value: Partial<CrmData>): CrmData {
   };
 }
 
-function scopedInitialData(scope: TenantScope): CrmData {
+export function scopedInitialDataForTenant(scope: TenantScope): CrmData {
   const initial = structuredClone(initialData);
-  initial.organization.id = scope.organizationId;
+  initial.organization = {
+    ...initial.organization,
+    id: scope.organizationId,
+    name: '',
+    commercialPhone: '',
+    commercialEmail: '',
+    address: '',
+    logoPath: '',
+    legalText: '',
+    defaultCurrency: 'USD',
+    defaultZone: '',
+    shareText: '',
+  };
+  initial.teamMembers = [{
+    ...initial.teamMembers[0]!,
+    name: 'Usuario',
+    email: '',
+    phone: undefined,
+  }];
+  initial.settings = {
+    ...initial.settings,
+    agencyName: '',
+    agencyWhatsapp: '',
+    agencyLegal: '',
+  };
   return normalizedData(initial);
 }
 
 function loadData(scope: TenantScope): CrmData {
   const local = readTenantSnapshot(scope);
-  return local ? normalizedData(local) : scopedInitialData(scope);
+  return local ? normalizedData(local) : scopedInitialDataForTenant(scope);
 }
 
 function loadActiveMemberId(crm: CrmData): number {

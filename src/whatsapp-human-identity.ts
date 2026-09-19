@@ -1,5 +1,6 @@
 import { getCloudSession } from './cloud-api.js';
 import { isHumanIdentityName, normalizeHumanIdentityName, safeOrganizationName } from './human-identity.js';
+import { resolveTenantCommercialIdentity } from './configuration-domain.js';
 import type { TeamMember } from './models.js';
 import { authenticatedTenantMember, state } from './store.js';
 import { requireCurrentTenantScope } from './tenant-runtime.js';
@@ -94,7 +95,7 @@ function currentContext(): { context: CurrentIdentityContext | null; reason: str
       memberUserId,
       organizationId: scope.organizationId,
       organization: safeOrganizationName(
-        state.crm.settings.agencyName.trim() || state.crm.organization.name.trim(),
+        resolveTenantCommercialIdentity({ organization: state.crm.organization }).name,
       ),
     },
     reason: '',

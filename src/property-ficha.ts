@@ -1,4 +1,4 @@
-import type { FichaPublica, Property } from './models.js';
+import type { FichaPublica, Property, PublicTenantIdentity } from './models.js';
 import { encodePublicFicha } from './public-ficha.js';
 import { safePhotoUrl } from './utils.js';
 
@@ -16,13 +16,17 @@ export type PropertyWithFicha = Property & {
 
 const priceFormatter = new Intl.NumberFormat('es-AR');
 
-export function propertyToPublicFicha(property: PropertyWithFicha): FichaPublica {
+export function propertyToPublicFicha(
+  property: PropertyWithFicha,
+  tenant?: PublicTenantIdentity,
+): FichaPublica {
   const photoUrls = (property.photoUrls ?? [])
     .map(safePhotoUrl)
     .filter((url): url is string => Boolean(url))
     .slice(0, 8);
 
   return {
+    ...(tenant ? { tenant: structuredClone(tenant) } : {}),
     title: property.title,
     propertyType: property.type,
     operation: property.operation,
@@ -49,9 +53,14 @@ export function propertyFichaLink(
   property: PropertyWithFicha,
   origin = location.origin,
   pathname = location.pathname,
+  tenant?: PublicTenantIdentity,
 ): string {
   if (property.publicSlug && /^[a-z0-9][a-z0-9-]{4,79}$/.test(property.publicSlug)) {
     return `${origin.replace(/\/+$/g, '')}/ficha/${encodeURIComponent(property.publicSlug)}`;
   }
-  return `${origin}${pathname}#public=${encodePublicFicha(propertyToPublicFicha(property))}`;
+  return `${origin}${pathname}#public=${encodePublicFicha(propertyToPublicFicha(property, tenant))}`;
+}
+
+export function propertyShareText(title: string, tenant: PublicTenantIdentity): string {
+  return `Te comparto esta propiedad de ${tenant.name}: ${title}`;
 }

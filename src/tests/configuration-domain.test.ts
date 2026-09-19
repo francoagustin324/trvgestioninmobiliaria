@@ -10,6 +10,7 @@ import {
   resolveOrganizationConfiguration,
   resolveOrganizationName,
   resolvePersonalIdentity,
+  resolveTenantCommercialIdentity,
   type OrganizationConfiguration,
   type OrganizationMembership,
   type UserPreferences,
@@ -287,6 +288,11 @@ test('crmToCloudRecords conserva exactamente el resumen de serialización actual
     { type: 'conversation', key: `${context.organizationId}:1`, assignee: 1, payloadId: 1, createdBy: 'user-1' },
   ]);
   assert.equal(records.some((record) => record.payload === crm.settings), false);
+  const organizationRecord = records.find((record) => record.entity_type === 'organization');
+  assert.ok(organizationRecord);
+  assert.equal((organizationRecord.payload as Record<string, unknown>).commercialPhone, initialData.organization.commercialPhone);
+  assert.equal((organizationRecord.payload as Record<string, unknown>).logoPath, initialData.organization.logoPath);
+  assert.equal((organizationRecord.payload as Record<string, unknown>).legalText, initialData.organization.legalText);
 });
 
 test('cloudRecordsToCrm conserva settings desde el fallback actual', () => {
@@ -327,6 +333,25 @@ test('la configuración organizacional nueva tiene prioridad sobre legacy y defa
   assert.equal(result.defaultCurrency, 'EUR');
   assert.equal(result.defaultZone, 'Nueva Córdoba');
   assert.equal(result.shareText, 'Mensaje nuevo');
+
+  const runtime = resolveTenantCommercialIdentity({
+    organization: {
+      id: 'organization-b',
+      name: 'Inmobiliaria Norte Test',
+      seatLimit: null,
+      planLabel: 'Plan',
+      commercialPhone: '5493512222222',
+      logoPath: '',
+      legalText: 'Legal B',
+    },
+  });
+  assert.deepEqual(runtime, {
+    organizationId: 'organization-b',
+    name: 'Inmobiliaria Norte Test',
+    commercialPhone: '5493512222222',
+    logoPath: '',
+    legalText: 'Legal B',
+  });
 });
 
 test('la configuración organizacional usa legacy antes de defaults seguros', () => {

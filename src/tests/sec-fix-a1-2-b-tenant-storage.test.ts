@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import { initialData, STORAGE_KEY } from '../models.js';
+import { scopedInitialDataForTenant } from '../store.js';
 import {
   assertTenantCrmScope,
   hasTenantLocalBackup,
@@ -434,6 +435,20 @@ test('A1.2-B post-cutover guard: runtime autorizado usa tenant-storage y no stor
   assert.match(hydration, /tenantHasPendingLocalChanges\(scope\)/);
   assert.match(auth, /tenantHasPendingLocalChanges\(scope\)/);
   assert.match(auth, /readTenantSyncState\(scope\)/);
+
+  const fresh = scopedInitialDataForTenant({ userId: 'fresh-user', organizationId: 'fresh-org' });
+  assert.equal(fresh.organization.id, 'fresh-org');
+  assert.equal(fresh.organization.name, '');
+  assert.equal(fresh.organization.commercialPhone, '');
+  assert.equal(fresh.organization.logoPath, '');
+  assert.equal(fresh.organization.legalText, '');
+  assert.equal(fresh.settings.agencyName, '');
+  assert.equal(fresh.settings.agencyWhatsapp, '');
+  assert.equal(fresh.settings.agencyLegal, '');
+  assert.equal(fresh.teamMembers[0]?.name, 'Usuario');
+  assert.equal(fresh.teamMembers[0]?.phone, undefined);
+  assert.equal(JSON.stringify(fresh).includes('TRV Gestión Inmobiliaria'), false);
+  assert.equal(JSON.stringify(fresh).includes('5493515110069'), false);
 });
 
 test('A1.2-B.1 B1: scope A + CRM A pasa el boundary exacto', () => {

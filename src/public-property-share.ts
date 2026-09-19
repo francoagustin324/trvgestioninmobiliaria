@@ -1,5 +1,6 @@
 import type { TenantScope } from './active-organization.js';
-import type { FichaPublica } from './models.js';
+import type { FichaPublica, PublicTenantIdentity } from './models.js';
+import { normalizePublicTenantIdentity } from './configuration-domain.js';
 import { getCloudSession } from './cloud-api.js';
 import { propertyToPublicFicha, type PropertyWithFicha } from './property-ficha.js';
 import {
@@ -146,8 +147,19 @@ export async function publishPropertyFicha(
   property: PropertyWithFicha,
   scope: TenantScope,
   runtimeLease: TenantRuntimeLease,
+  tenantIdentity: PublicTenantIdentity = {
+    organizationId: scope.organizationId,
+    name: 'Inmobiliaria',
+    commercialPhone: '',
+    logoPath: '',
+    legalText: '',
+  },
 ): Promise<PublishedPropertyFicha> {
   assertPublishContext(scope, runtimeLease);
+  const tenantSnapshot = normalizePublicTenantIdentity(tenantIdentity);
+  if (tenantSnapshot.organizationId !== scope.organizationId) {
+    throw new Error(PUBLIC_PROPERTY_SHARE_RESPONSE_MISMATCH);
+  }
   const propertySnapshot = structuredClone(property);
   const propertyKey = String(propertySnapshot.id);
   const session = requirePublishSession(scope);
@@ -165,7 +177,7 @@ export async function publishPropertyFicha(
     organization_id: scope.organizationId,
     property_key: propertyKey,
     slug,
-    payload: propertyToPublicFicha(propertySnapshot),
+    payload: propertyToPublicFicha(propertySnapshot, tenantSnapshot),
     published: true,
     created_by: session.userId,
     updated_at: new Date().toISOString(),
@@ -207,6 +219,7 @@ function validPublicFicha(value: unknown): FichaPublica | null {
   if (!ficha.title || !Array.isArray(ficha.photoUrls)) return null;
   return {
     ...ficha,
+    tenant: normalizePublicTenantIdentity(ficha.tenant),
     photoUrls: ficha.photoUrls.map(safePhotoUrl).filter((url): url is string => Boolean(url)).slice(0, 8),
     photoEnhancement: ficha.photoEnhancement === 'soft' ? 'soft' : 'none',
   };

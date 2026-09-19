@@ -1,11 +1,6 @@
-import { AGENCY_BRAND, PRODUCT_BRAND } from './branding.js';
+import { AGENCY_BRAND } from './branding.js';
 
 export const STORAGE_KEY = 'trv-crm-basico';
-export const WHATSAPP_NUMBER = AGENCY_BRAND.whatsapp;
-export const FICHA_LEGAL = AGENCY_BRAND.publicLegal;
-// Logo de la ficha pública: la casita (logo lindo), manteniendo el nombre TRV.
-export const LOGO_PATH = PRODUCT_BRAND.logo;
-
 export type Temperature = 'Caliente' | 'Tibio' | 'Frío';
 export type CommercialStage = 'Nuevo' | 'Contactado' | 'Calificado' | 'Visita coordinada' | 'Negociación' | 'Reservado' | 'Ganado' | 'Perdido';
 export type CommercialOutcome = 'won' | 'lost';
@@ -62,6 +57,22 @@ export interface OrganizationSettings {
   name: string;
   seatLimit: number | null;
   planLabel: string;
+  commercialPhone?: string;
+  commercialEmail?: string;
+  address?: string;
+  logoPath?: string;
+  legalText?: string;
+  defaultCurrency?: string;
+  defaultZone?: string;
+  shareText?: string;
+}
+
+export interface PublicTenantIdentity {
+  organizationId: string;
+  name: string;
+  commercialPhone: string;
+  logoPath: string;
+  legalText: string;
 }
 
 export interface TeamMember {
@@ -239,6 +250,7 @@ export interface WhatsAppConversation extends SyncRecordMetadata {
 }
 
 export interface FichaPublica {
+  tenant?: PublicTenantIdentity;
   title: string; propertyType?: string; operation?: string; zone?: string; approxAddress?: string;
   price?: string; expenses?: string; bedrooms?: string; bathrooms?: string; garage?: string;
   coveredMeters?: string; totalMeters?: string; age?: string; status?: string; amenities?: string;
@@ -296,9 +308,9 @@ export const defaultSettings: Settings = {
   profileEmail: '',
   profilePhone: '',
   avatar: '',
-  agencyName: AGENCY_BRAND.name,
-  agencyWhatsapp: AGENCY_BRAND.displayWhatsapp,
-  agencyLegal: AGENCY_BRAND.publicLegal,
+  agencyName: '',
+  agencyWhatsapp: '',
+  agencyLegal: '',
   currency: 'USD',
   defaultZone: '',
   shareText: '',
@@ -311,6 +323,14 @@ export const initialData: CrmData = {
     name: AGENCY_BRAND.name,
     seatLimit: null,
     planLabel: 'Piloto sin límite',
+    commercialPhone: AGENCY_BRAND.whatsapp,
+    commercialEmail: '',
+    address: '',
+    logoPath: AGENCY_BRAND.logo,
+    legalText: AGENCY_BRAND.publicLegal,
+    defaultCurrency: 'USD',
+    defaultZone: '',
+    shareText: '',
   },
   teamMembers: [{
     id: 1,
@@ -378,5 +398,10 @@ export const initialData: CrmData = {
       transcriptionStatus: 'No requerida',
     }],
   }],
-  settings: { ...defaultSettings },
+  settings: {
+    ...defaultSettings,
+    agencyName: AGENCY_BRAND.name,
+    agencyWhatsapp: AGENCY_BRAND.displayWhatsapp,
+    agencyLegal: AGENCY_BRAND.publicLegal,
+  },
 };

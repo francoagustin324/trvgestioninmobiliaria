@@ -97,7 +97,8 @@ textarea { grid-column: 1 / -1; min-height: 82px; resize: vertical; }
 .public-page { min-height: 100vh; padding: 22px; background: linear-gradient(180deg, #eaf0f5, #f7f9fb); }
 .public-ficha { max-width: 900px; margin: 0 auto; overflow: hidden; border: 1px solid rgba(215,179,91,.45); border-radius: 26px; color: #fff; background: #06364a; box-shadow: 0 24px 60px rgba(6,54,74,.2); }
 .public-header { display: flex; align-items: center; gap: 14px; padding: 18px 20px; background: linear-gradient(135deg, #06364a, #0a2438); }
-.public-header img { width: 78px; height: 78px; object-fit: cover; border-radius: 18px; border: 1px solid #d7b35b; }
+.public-tenant-logo { width: 78px; height: 78px; flex: 0 0 78px; object-fit: cover; border-radius: 18px; border: 1px solid #d7b35b; }
+.public-tenant-logo-placeholder { display: grid; place-items: center; color: #f5d98d; background: rgba(255,255,255,.08); font-weight: 950; letter-spacing: .08em; }
 .public-header span { color: #d7b35b; font-size: .72rem; font-weight: 900; letter-spacing: .1em; text-transform: uppercase; }
 .public-header h1 { margin: 5px 0 0; font-size: clamp(1.45rem, 4vw, 2.5rem); line-height: 1.12; }
 .public-gallery { position: relative; display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 8px; padding: 10px; background: rgba(255,255,255,.06); }
@@ -169,7 +170,7 @@ time { color: #ad7b23; font-weight: 900; }
   .public-page { padding: 0; }
   .public-ficha { min-height: 100vh; border: 0; border-radius: 0; box-shadow: none; }
   .public-header { gap: 11px; padding: 14px; }
-  .public-header img { width: 60px; height: 60px; border-radius: 13px; }
+  .public-tenant-logo { width: 60px; height: 60px; flex-basis: 60px; border-radius: 13px; }
   .public-header h1 { font-size: 1.35rem; }
   .public-gallery { display: flex; gap: 10px; overflow-x: auto; padding: 10px 14px 12px; scroll-padding-inline: 14px; scroll-snap-type: x mandatory; scrollbar-width: thin; }
   .public-gallery img, .gallery-placeholder, .public-gallery img:first-of-type { grid-column: auto; flex: 0 0 calc(100% - 26px); min-width: calc(100% - 26px); min-height: 260px; height: min(72vw, 330px); max-height: 330px; scroll-snap-align: center; }

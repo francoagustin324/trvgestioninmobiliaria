@@ -45,6 +45,11 @@ export interface CloudMembershipRow {
   phone?: string;
   created_at?: string;
   last_active_at?: string;
+  organizations?: {
+    name?: string;
+    seat_limit?: number | null;
+    plan_label?: string;
+  } | null;
 }
 
 export interface CloudMembershipContext {
@@ -52,6 +57,7 @@ export interface CloudMembershipContext {
   currentMemberId: number;
   currentRole: TeamRole;
   members: TeamMember[];
+  organization?: OrganizationSettings;
 }
 
 export const TENANT_LOCAL_AUTHORIZATION_STALE = 'TENANT_LOCAL_AUTHORIZATION_STALE';
@@ -115,10 +121,22 @@ export function membershipContext(rows: CloudMembershipRow[], userId: string): C
     throw new Error('La cuenta no tiene una membresía válida en la inmobiliaria.');
   }
   const organizationRows = rows.filter((row) => row.organization_id === current.organization_id);
+  const officialOrganization = current.organizations && typeof current.organizations === 'object'
+    ? {
+      id: current.organization_id,
+      name: String(current.organizations.name ?? '').trim(),
+      seatLimit: Number.isFinite(current.organizations.seat_limit)
+        && Number(current.organizations.seat_limit) > 0
+        ? Number(current.organizations.seat_limit)
+        : null,
+      planLabel: String(current.organizations.plan_label || 'Piloto'),
+    } satisfies OrganizationSettings
+    : undefined;
   return {
     organizationId: current.organization_id,
     currentMemberId: Number(current.member_id),
     currentRole: normalizedRole(current.role),
+    ...(officialOrganization ? { organization: officialOrganization } : {}),
     members: organizationRows.map((row) => ({
       id: Number(row.member_id),
       userId: row.user_id,
@@ -164,7 +182,15 @@ export function reconcileCrmAssignments(crm: CrmData, context: CloudMembershipCo
 
   return {
     ...crm,
-    organization: { ...crm.organization, id: context.organizationId },
+    organization: {
+      ...crm.organization,
+      id: context.organizationId,
+      ...(context.organization ? {
+        name: context.organization.name,
+        seatLimit: context.organization.seatLimit,
+        planLabel: context.organization.planLabel,
+      } : {}),
+    },
     teamMembers: context.members,
     clients: crm.clients.map(assigned),
     properties: crm.properties.map(assigned),
@@ -260,15 +286,32 @@ function recordsOf<T extends SyncRecordMetadata & { id: number }>(rows: CloudRec
     .sort((left, right) => Number(left.id ?? 0) - Number(right.id ?? 0));
 }
 
-function organizationFromRows(rows: CloudRecordRow[], fallback: OrganizationSettings, organizationId: string): OrganizationSettings {
+function organizationFromRows(
+  rows: CloudRecordRow[],
+  fallback: OrganizationSettings,
+  organizationId: string,
+  authority?: OrganizationSettings,
+): OrganizationSettings {
   const expectedKey = organizationScopedEntityKey(organizationId, 'settings');
   const payload = rows.find((item) => item.entity_type === 'organization' && item.entity_key === expectedKey)?.payload;
   const value = payload && typeof payload === 'object' ? payload as Partial<OrganizationSettings> : {};
   return {
     id: organizationId,
-    name: String(value.name || fallback.name),
-    seatLimit: Number.isFinite(value.seatLimit) && Number(value.seatLimit) > 0 ? Number(value.seatLimit) : null,
-    planLabel: String(value.planLabel || fallback.planLabel),
+    name: String(authority?.name || value.name || fallback.name || '').trim(),
+    seatLimit: authority
+      ? authority.seatLimit
+      : Number.isFinite(value.seatLimit) && Number(value.seatLimit) > 0
+        ? Number(value.seatLimit)
+        : fallback.seatLimit,
+    planLabel: String(authority?.planLabel || value.planLabel || fallback.planLabel || 'Piloto'),
+    commercialPhone: String(value.commercialPhone ?? fallback.commercialPhone ?? '').trim(),
+    commercialEmail: String(value.commercialEmail ?? fallback.commercialEmail ?? '').trim(),
+    address: String(value.address ?? fallback.address ?? '').trim(),
+    logoPath: String(value.logoPath ?? fallback.logoPath ?? '').trim(),
+    legalText: String(value.legalText ?? fallback.legalText ?? '').trim(),
+    defaultCurrency: String(value.defaultCurrency ?? fallback.defaultCurrency ?? 'USD').trim(),
+    defaultZone: String(value.defaultZone ?? fallback.defaultZone ?? '').trim(),
+    shareText: String(value.shareText ?? fallback.shareText ?? '').trim(),
   };
 }
 
@@ -280,7 +323,7 @@ export function cloudRecordsToCrm(
   const canUseFallback = context.currentRole !== 'Corredor' && rows.length === 0;
   if (canUseFallback) return reconcileCrmAssignments(fallback, context);
   return {
-    organization: organizationFromRows(rows, fallback.organization, context.organizationId),
+    organization: organizationFromRows(rows, fallback.organization, context.organizationId, context.organization),
     teamMembers: context.members,
     activityLog: recordsOf<ActivityEntry>(rows, 'activity')
       .sort((left, right) => Number(right.id ?? 0) - Number(left.id ?? 0)),

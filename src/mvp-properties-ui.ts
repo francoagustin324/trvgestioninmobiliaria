@@ -1,5 +1,6 @@
 import type { TenantScope } from './active-organization.js';
 import { getCloudSession } from './cloud-api.js';
+import { resolveTenantCommercialIdentity } from './configuration-domain.js';
 import type { Property } from './models.js';
 import {
   clearReadEntityNavigation,
@@ -9,7 +10,7 @@ import {
   returnToEntityReadOnly,
 } from './entity-read-navigation.js';
 import { MAX_PROPERTY_PHOTOS, uploadPropertyPhoto } from './property-photo-upload.js';
-import type { PropertyWithFicha } from './property-ficha.js';
+import { propertyShareText, type PropertyWithFicha } from './property-ficha.js';
 import { publishPropertyFicha, type PublishedPropertyFicha } from './public-property-share.js';
 import { authenticatedTenantMember, saveData, state } from './store.js';
 import { assertTenantCrmScope } from './tenant-storage.js';
@@ -286,6 +287,20 @@ export function rememberPublishedFicha(
   saveData(reason);
 }
 
+
+function currentTenantCommercialIdentity(
+  scope: TenantScope,
+  runtimeLease: TenantRuntimeLease,
+) {
+  assertPropertyShareOperationCurrent(scope, runtimeLease);
+  assertTenantCrmScope(scope, state.crm);
+  const identity = resolveTenantCommercialIdentity({
+    organization: state.crm.organization,
+  });
+  if (identity.organizationId !== scope.organizationId) throw new Error(TENANT_RUNTIME_STALE);
+  return identity;
+}
+
 export async function publishAndRememberPropertyFicha(
   property: PropertyWithFicha,
   scope: TenantScope,
@@ -294,7 +309,8 @@ export async function publishAndRememberPropertyFicha(
   persistWhenUnchanged = false,
 ): Promise<PublishedPropertyFicha> {
   assertPropertyShareTarget(property, scope, runtimeLease);
-  const published = await publishPropertyFicha(property, scope, runtimeLease);
+  const tenantIdentity = currentTenantCommercialIdentity(scope, runtimeLease);
+  const published = await publishPropertyFicha(property, scope, runtimeLease, tenantIdentity);
   assertPropertyShareOperationCurrent(scope, runtimeLease);
   rememberPublishedFicha(property, published.slug, scope, runtimeLease, reason, persistWhenUnchanged);
   assertPropertyShareOperationCurrent(scope, runtimeLease);
@@ -312,10 +328,11 @@ export async function sharePropertyFicha(property: PropertyWithFicha, button: HT
   try {
     const published = await publishAndRememberPropertyFicha(property, scope, runtimeLease);
     assertPropertyShareOperationCurrent(scope, runtimeLease);
+    const tenantIdentity = currentTenantCommercialIdentity(scope, runtimeLease);
     if (navigator.share) {
       await navigator.share({
         title,
-        text: `Te comparto esta propiedad de TRV Gestión Inmobiliaria: ${title}`,
+        text: propertyShareText(title, tenantIdentity),
         url: published.url,
       });
       assertPropertyShareOperationCurrent(scope, runtimeLease);

@@ -4,13 +4,14 @@ import test from 'node:test';
 import './sec-fix-a1-2-c2-test-setup.js';
 import type { TenantScope } from '../active-organization.js';
 import { signOutCloud } from '../cloud-api.js';
-import { initialData, type CrmData } from '../models.js';
+import { initialData, type CrmData, type PublicTenantIdentity } from '../models.js';
+import { publicFichaHtml } from '../public-ficha.js';
 import {
   openPropertyFicha,
   publishAndRememberPropertyFicha,
   sharePropertyFicha,
 } from '../mvp-properties-ui.js';
-import type { PropertyWithFicha } from '../property-ficha.js';
+import { propertyShareText, type PropertyWithFicha } from '../property-ficha.js';
 import {
   loadPublicPropertyFicha,
   PUBLIC_PROPERTY_SHARE_RESPONSE_INVALID,
@@ -58,6 +59,20 @@ function scope(organizationId: string, userId = USER): TenantScope {
   return Object.freeze({ userId, organizationId });
 }
 
+function identity(
+  tenantScope: TenantScope,
+  name = tenantScope.organizationId === ORG_A ? 'TRV Gestión Inmobiliaria' : 'Inmobiliaria Norte Test',
+): PublicTenantIdentity {
+  const isA = tenantScope.organizationId === ORG_A;
+  return {
+    organizationId: tenantScope.organizationId,
+    name,
+    commercialPhone: isA ? '+54 9 351 1111111' : '+54 9 351 2222222',
+    logoPath: isA ? '/tenant-a.svg' : '',
+    legalText: isA ? 'Legal tenant A' : 'Legal tenant B',
+  };
+}
+
 function property(id = 101, title = 'Casa segura A'): PropertyWithFicha {
   return {
     id,
@@ -82,8 +97,20 @@ function property(id = 101, title = 'Casa segura A'): PropertyWithFicha {
 
 function crmFor(organizationId: string, item: PropertyWithFicha, name = organizationId): CrmData {
   const crm = structuredClone(initialData);
-  crm.organization.id = organizationId;
-  crm.organization.name = name;
+  const tenant = identity(scope(organizationId), name);
+  crm.organization = {
+    ...crm.organization,
+    id: organizationId,
+    name,
+    commercialPhone: tenant.commercialPhone,
+    logoPath: tenant.logoPath,
+    legalText: tenant.legalText,
+  };
+  // Mantener basura legacy deliberada demuestra que el runtime comercial ya no
+  // la usa como autoridad por encima de organization/config tenant.
+  crm.settings.agencyName = 'TRV Gestión Inmobiliaria';
+  crm.settings.agencyWhatsapp = '3515110069';
+  crm.settings.agencyLegal = 'LEGAL LEGACY TRV NO USAR';
   crm.teamMembers[0]!.userId = USER;
   crm.teamMembers[0]!.role = 'Dueño';
   crm.teamMembers[0]!.status = 'Activo';
@@ -264,9 +291,11 @@ test('G1 multi-org A+B con runtime A publica exclusivamente organization_id A', 
   const a = scope(ORG_A);
   installRuntime(a);
   const harness = installFetchHarness();
-  const result = await publishPropertyFicha(property(), a, captureTenantRuntimeLease(a));
+  const result = await publishPropertyFicha(property(), a, captureTenantRuntimeLease(a), identity(a));
   assert.equal(harness.bodies.length, 1);
   assert.equal(harness.bodies[0]!.organization_id, ORG_A);
+  assert.deepEqual(harness.bodies[0]!.payload.tenant, identity(a));
+  assert.equal(propertyShareText('Casa segura A', identity(a)), 'Te comparto esta propiedad de TRV Gestión Inmobiliaria: Casa segura A');
   assert.equal(harness.membershipRequests.length, 0);
   assert.match(result.url, /\/ficha\//);
 });
@@ -277,8 +306,11 @@ test('G2 runtime B publica organization_id B', async () => {
   const b = scope(ORG_B);
   installRuntime(b);
   const harness = installFetchHarness();
-  await publishPropertyFicha(property(102, 'Casa B'), b, captureTenantRuntimeLease(b));
+  await publishPropertyFicha(property(102, 'Casa B'), b, captureTenantRuntimeLease(b), identity(b));
   assert.equal(harness.bodies[0]!.organization_id, ORG_B);
+  assert.deepEqual(harness.bodies[0]!.payload.tenant, identity(b));
+  assert.equal(JSON.stringify(harness.bodies[0]!.payload).includes('3515110069'), false);
+  assert.equal(propertyShareText('Casa B', identity(b)), 'Te comparto esta propiedad de Inmobiliaria Norte Test: Casa B');
 });
 
 test('G3 publish no descubre tenant con limit=1, rows[0] ni organization_members', () => {
@@ -410,6 +442,8 @@ test('G11 A→B publish pendiente conserva request A y completion no afecta runt
   await pending;
 
   assert.equal(harness.bodies[0]!.organization_id, ORG_A);
+  assert.equal((harness.bodies[0]!.payload.tenant as PublicTenantIdentity).name, 'A');
+  assert.equal((harness.bodies[0]!.payload.tenant as PublicTenantIdentity).commercialPhone, '+54 9 351 1111111');
   assert.deepEqual(state.crm, bBefore);
   assert.deepEqual(readTenantSyncState(b), bSyncBefore);
   assert.equal(propertyB.publicSlug, undefined);
@@ -474,6 +508,8 @@ test('G13 logout durante publish pendiente deja completion sin slug, share, copy
 test('G14 share completion stale no invoca navigator.share ni clipboard', () => {
   const body = sourceFunction(uiSource, 'export async function sharePropertyFicha', 'export async function openPropertyFicha');
   assert.match(body, /await publishAndRememberPropertyFicha\(property, scope, runtimeLease\)/);
+  assert.match(body, /propertyShareText\(title, tenantIdentity\)/);
+  assert.doesNotMatch(body, /TRV Gestión Inmobiliaria/);
   assert.match(body, /assertPropertyShareOperationCurrent\(scope, runtimeLease\)/);
   assert.match(body, /if \(!propertyShareOperationIsCurrent\(scope, runtimeLease\)\) return;/);
 });
@@ -561,10 +597,36 @@ test('G19 single-org normal publica correctamente sin lookup de membership', asy
 
 test('G20 carga pública anónima por slug sigue funcionando sin sesión', async () => {
   resetEnvironment();
-  const harness = installFetchHarness({ publicFicha: { title: 'Pública anon', photoUrls: ['javascript:alert(1)', 'https://safe.example.test/a.jpg'] } });
+  const harness = installFetchHarness({
+    publicFicha: {
+      tenant: identity(scope(ORG_B)),
+      title: 'Pública anon',
+      photoUrls: ['javascript:alert(1)', 'https://safe.example.test/a.jpg'],
+    },
+  });
   const ficha = await loadPublicPropertyFicha('publica-anon-1234567');
   assert.equal(ficha?.title, 'Pública anon');
+  assert.deepEqual(ficha?.tenant, identity(scope(ORG_B)));
   assert.deepEqual(ficha?.photoUrls, ['https://safe.example.test/a.jpg']);
+  const html = publicFichaHtml(ficha!);
+  assert.match(html, /Inmobiliaria Norte Test/);
+  assert.match(html, /5493512222222/);
+  assert.doesNotMatch(html, /3515110069|LEGAL LEGACY TRV NO USAR/);
+
+  const incompleteHtml = publicFichaHtml({
+    tenant: {
+      organizationId: ORG_B,
+      name: 'Inmobiliaria Norte Test',
+      commercialPhone: '',
+      logoPath: '',
+      legalText: '',
+    },
+    title: 'Sin datos comerciales',
+    photoUrls: [],
+  });
+  assert.doesNotMatch(incompleteHtml, /class="whatsapp-public"|wa\.me\//);
+  assert.match(incompleteHtml, /public-tenant-logo-placeholder/);
+  assert.doesNotMatch(incompleteHtml, /LEGAL LEGACY TRV NO USAR/);
   assert.equal(harness.bodies.length, 0);
 });
 
@@ -595,7 +657,7 @@ test('G23 payload público continúa excluyendo owner/notes mediante propertyToP
   const publicPayload = harness.bodies[0]!.payload;
   assert.equal('owner' in publicPayload, false);
   assert.equal('notes' in publicPayload, false);
-  assert.match(shareSource, /payload: propertyToPublicFicha\(propertySnapshot\)/);
+  assert.match(shareSource, /payload: propertyToPublicFicha\(propertySnapshot, tenantSnapshot\)/);
 });
 
 test('G24 evidencia negativa: public-property-share no decide tenant por membership order', () => {
@@ -611,7 +673,7 @@ test('G25 property snapshot se congela antes del primer await del publish', () =
   const snapshot = body.indexOf('const propertySnapshot = structuredClone(property)');
   const firstAwait = body.indexOf('await shareConfig()');
   assert.ok(snapshot >= 0 && firstAwait > snapshot);
-  assert.match(body, /propertyToPublicFicha\(propertySnapshot\)/);
+  assert.match(body, /propertyToPublicFicha\(propertySnapshot, tenantSnapshot\)/);
 });
 
 test('G26 response sin identidad suficiente falla cerrado', async () => {

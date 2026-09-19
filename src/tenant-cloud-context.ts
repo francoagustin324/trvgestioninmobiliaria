@@ -141,7 +141,7 @@ export async function tenantCloudTransport(scope: TenantScope): Promise<TenantCl
   const query = new URL(`${config.url}/rest/v1/organization_members`);
   query.searchParams.set(
     'select',
-    'organization_id,member_id,user_id,role,status,display_name,email,phone,created_at,last_active_at',
+    'organization_id,member_id,user_id,role,status,display_name,email,phone,created_at,last_active_at,organizations(name,seat_limit,plan_label)',
   );
   query.searchParams.set('organization_id', `eq.${scope.organizationId}`);
   query.searchParams.set('order', 'member_id.asc');

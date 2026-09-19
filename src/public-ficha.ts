@@ -1,5 +1,6 @@
-import { FICHA_LEGAL, Ficha, FichaPublica, LOGO_PATH, WHATSAPP_NUMBER } from './models.js';
-import { AGENCY_BRAND } from './branding.js';
+import type { Ficha, FichaPublica, PublicTenantIdentity } from './models.js';
+import { normalizePublicTenantIdentity } from './configuration-domain.js';
+import { normalizeWhatsAppPhone } from './whatsapp-contact-core.js';
 import { escapeHtml, hasValue, safePhotoUrl } from './utils.js';
 
 export function encodePublicFicha(ficha: FichaPublica): string {
@@ -18,12 +19,17 @@ export function decodePublicFicha(payload: string): FichaPublica | null {
     if (!parsed.title || !Array.isArray(parsed.photoUrls)) return null;
     parsed.photoUrls = parsed.photoUrls.map(safePhotoUrl).filter((url): url is string => Boolean(url));
     parsed.photoEnhancement = parsed.photoEnhancement === 'soft' ? 'soft' : 'none';
+    parsed.tenant = normalizePublicTenantIdentity(parsed.tenant);
     return parsed;
   } catch { return null; }
 }
 
-export function publicPayload(ficha: Ficha): FichaPublica {
+export function publicPayload(
+  ficha: Ficha,
+  tenantIdentity?: PublicTenantIdentity,
+): FichaPublica {
   return {
+    tenant: normalizePublicTenantIdentity(tenantIdentity ?? ficha.tenant),
     title: ficha.title, propertyType: ficha.propertyType, operation: ficha.operation, zone: ficha.zone,
     approxAddress: ficha.approxAddress, price: ficha.price, expenses: ficha.expenses, bedrooms: ficha.bedrooms,
     bathrooms: ficha.bathrooms, garage: ficha.garage, coveredMeters: ficha.coveredMeters, totalMeters: ficha.totalMeters,
@@ -33,13 +39,14 @@ export function publicPayload(ficha: Ficha): FichaPublica {
   };
 }
 
-export function publicLink(ficha: Ficha): string {
-  return `${location.origin}${location.pathname}#public=${encodePublicFicha(publicPayload(ficha))}`;
+export function publicLink(ficha: Ficha, tenantIdentity?: PublicTenantIdentity): string {
+  return `${location.origin}${location.pathname}#public=${encodePublicFicha(publicPayload(ficha, tenantIdentity))}`;
 }
 
-export function whatsappText(ficha: Ficha): string {
+export function whatsappText(ficha: Ficha, tenantIdentity?: PublicTenantIdentity): string {
+  const tenant = normalizePublicTenantIdentity(tenantIdentity ?? ficha.tenant);
   const features = [ficha.propertyType, ficha.bedrooms && `${ficha.bedrooms} dorm.`, ficha.bathrooms && `${ficha.bathrooms} baños`, ficha.coveredMeters && `${ficha.coveredMeters} m² cubiertos`, ficha.totalMeters && `${ficha.totalMeters} m² totales`].filter(Boolean).join(' · ');
-  return [`Te comparto una propiedad de ${AGENCY_BRAND.name}:`, ficha.title, ficha.zone && `Zona: ${ficha.zone}`, ficha.operation && `Operación: ${ficha.operation}`, ficha.price && `Precio: ${ficha.price}`, features && `Características: ${features}`, `Ver ficha: ${publicLink(ficha)}`, 'Decime si querés que revisemos disponibilidad y condiciones.'].filter(Boolean).join('\n');
+  return [`Te comparto una propiedad de ${tenant.name}:`, ficha.title, ficha.zone && `Zona: ${ficha.zone}`, ficha.operation && `Operación: ${ficha.operation}`, ficha.price && `Precio: ${ficha.price}`, features && `Características: ${features}`, `Ver ficha: ${publicLink(ficha, tenant)}`, 'Decime si querés que revisemos disponibilidad y condiciones.'].filter(Boolean).join('\n');
 }
 
 type PublicDatum = [label: string, value: string];
@@ -88,20 +95,46 @@ function summaryTags(ficha: FichaPublica): string {
     .join('');
 }
 
+
+function safePublicLogo(value: unknown): string | null {
+  const raw = String(value ?? '').trim();
+  if (!raw) return null;
+  if (/^\/(?!\/)/.test(raw)) return raw;
+  return safePhotoUrl(raw);
+}
+
+function tenantInitials(name: string): string {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (!parts.length) return 'IN';
+  return (parts[0]![0]! + (parts[1]?.[0] ?? '')).toUpperCase();
+}
+
 export function publicFichaHtml(ficha: FichaPublica): string {
   const photoUrls = ficha.photoUrls.map(safePhotoUrl).filter((url): url is string => Boolean(url)).slice(0, 8);
   const photos = photoUrls.map((url, index) => {
     const loading = index === 0 ? 'loading="eager" fetchpriority="high"' : 'loading="lazy"';
     return `<img src="${escapeHtml(url)}" alt="Foto ${index + 1} de ${escapeHtml(ficha.title)}" ${loading}>`;
   }).join('');
+  const tenant = normalizePublicTenantIdentity(ficha.tenant);
+  const logoUrl = safePublicLogo(tenant.logoPath);
+  const tenantLogo = logoUrl
+    ? `<img class="public-tenant-logo" src="${escapeHtml(logoUrl)}" alt="Logo de ${escapeHtml(tenant.name)}">`
+    : `<span class="public-tenant-logo public-tenant-logo-placeholder" aria-label="${escapeHtml(tenant.name)}">${escapeHtml(tenantInitials(tenant.name))}</span>`;
+  const phone = normalizeWhatsAppPhone(tenant.commercialPhone);
   const contactText = encodeURIComponent(`Hola, consulto por ${ficha.title}. Quisiera confirmar disponibilidad y condiciones.`);
+  const whatsappCta = phone.valid
+    ? `<a class="whatsapp-public" href="https://wa.me/${phone.normalized}?text=${contactText}" target="_blank" rel="noopener">Consultar por WhatsApp</a>`
+    : '';
+  const legalText = tenant.legalText
+    ? `<small>${escapeHtml(tenant.legalText)}</small>`
+    : '';
   const enhancementClass = ficha.photoEnhancement === 'soft' ? ' enhanced' : '';
   const galleryBadge = photoUrls.length ? `<span class="public-gallery-badge">${photoUrls.length} ${photoUrls.length === 1 ? 'foto' : 'fotos'}</span>` : '';
   const zone = hasValue(ficha.zone) ? String(ficha.zone) : hasValue(ficha.approxAddress) ? String(ficha.approxAddress) : '';
   const details = secondaryDetails(ficha);
 
   return `<article class="public-ficha">
-    <header class="public-header"><img src="${LOGO_PATH}" alt="${AGENCY_BRAND.name}"><div><span>${AGENCY_BRAND.name}</span><h1>${escapeHtml(ficha.title)}</h1></div></header>
+    <header class="public-header">${tenantLogo}<div><span>${escapeHtml(tenant.name)}</span><h1>${escapeHtml(ficha.title)}</h1></div></header>
     <div class="public-gallery${enhancementClass}">${galleryBadge}${photos || '<div class="gallery-placeholder">Fotos disponibles próximamente</div>'}</div>
     <section class="public-summary" aria-label="Resumen comercial">
       <div class="public-summary-tags">${summaryTags(ficha)}</div>
@@ -109,10 +142,10 @@ export function publicFichaHtml(ficha: FichaPublica): string {
       ${zone ? `<p class="public-location">${escapeHtml(zone)}</p>` : ''}
     </section>
     <section class="public-key-facts" aria-label="Características principales">${keyFacts(ficha)}</section>
-    <a class="whatsapp-public" href="https://wa.me/${WHATSAPP_NUMBER}?text=${contactText}" target="_blank" rel="noopener">Consultar por WhatsApp</a>
+    ${whatsappCta}
     ${hasValue(ficha.description) ? `<section class="public-description"><h2>Descripción</h2><p>${escapeHtml(ficha.description)}</p></section>` : ''}
     <details class="public-details"><summary>Ver todos los detalles</summary><section class="public-data">${details}</section></details>
-    <small>${FICHA_LEGAL}</small>
+    ${legalText}
   </article>`;
 }
 

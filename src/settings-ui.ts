@@ -1,4 +1,5 @@
 import { recoveryGuidance } from './account-menu-product.js';
+import { resolveTenantCommercialIdentity } from './configuration-domain.js';
 import { defaultSettings, type Settings } from './models.js';
 import { saveData, state } from './store.js';
 import { canAccessSettings, canUseRecovery } from './team-access.js';
@@ -10,6 +11,12 @@ let avatarDraft: string | null = null;
 
 function currentSettings(): Settings {
   return { ...defaultSettings, ...state.crm.settings };
+}
+
+function currentCommercialIdentity() {
+  return resolveTenantCommercialIdentity({
+    organization: state.crm.organization,
+  });
 }
 
 function currentAvatar(): string {
@@ -74,6 +81,7 @@ export function renderSettings(container: HTMLElement): void {
   }
 
   const s = currentSettings();
+  const commercial = currentCommercialIdentity();
   const currencyOptions = ['USD', 'ARS']
     .map((code) => `<option value="${code}"${s.currency === code ? ' selected' : ''}>${code}</option>`)
     .join('');
@@ -112,10 +120,11 @@ export function renderSettings(container: HTMLElement): void {
     <section class="mvp-settings-group">
       <header><h2>Tu inmobiliaria</h2><p>Estos datos aparecen en las fichas que compartís con tus clientes.</p></header>
       <div class="mvp-settings-grid">
-        <label>Nombre de la inmobiliaria<input name="agencyName" value="${escapeHtml(s.agencyName)}" placeholder="TRV Gestión Inmobiliaria"></label>
-        <label>WhatsApp de contacto<input name="agencyWhatsapp" value="${escapeHtml(s.agencyWhatsapp)}" inputmode="tel" placeholder="Ej. 3515110069"></label>
+        <label>Nombre de la inmobiliaria<input name="agencyName" value="${escapeHtml(commercial.name)}" placeholder="Ej. Inmobiliaria Norte" readonly></label>
+        <label>WhatsApp de contacto<input name="agencyWhatsapp" value="${escapeHtml(commercial.commercialPhone)}" inputmode="tel" placeholder="Ej. +54 9 351 555-0000"></label>
+        <label>Logo público (URL o ruta)<input name="agencyLogoPath" value="${escapeHtml(commercial.logoPath)}" placeholder="Ej. https://.../logo.png"></label>
       </div>
-      <label>Texto legal al pie de la ficha<textarea name="agencyLegal" rows="2" placeholder="Aclaración legal que aparece en cada ficha.">${escapeHtml(s.agencyLegal)}</textarea></label>
+      <label>Texto legal al pie de la ficha<textarea name="agencyLegal" rows="2" placeholder="Aclaración legal que aparece en cada ficha.">${escapeHtml(commercial.legalText)}</textarea></label>
     </section>
 
     <section class="mvp-settings-group">
@@ -171,15 +180,26 @@ export function renderSettings(container: HTMLElement): void {
     }
     const values = formValues(form);
     const parsedDays = Number.parseInt(values.overdueDays ?? '', 10);
+    const agencyName = currentCommercialIdentity().name;
+    const agencyWhatsapp = (values.agencyWhatsapp ?? '').trim();
+    const agencyLogoPath = (values.agencyLogoPath ?? '').trim();
+    const agencyLegal = (values.agencyLegal ?? '').trim();
+    state.crm.organization = {
+      ...state.crm.organization,
+      name: state.crm.organization.name.trim(),
+      commercialPhone: agencyWhatsapp,
+      logoPath: agencyLogoPath,
+      legalText: agencyLegal,
+    };
     state.crm.settings = {
       ...currentSettings(),
       profileName: (values.profileName ?? '').trim(),
       profileEmail: (values.profileEmail ?? '').trim(),
       profilePhone: (values.profilePhone ?? '').trim(),
       avatar: currentAvatar(),
-      agencyName: (values.agencyName ?? '').trim(),
-      agencyWhatsapp: (values.agencyWhatsapp ?? '').trim(),
-      agencyLegal: (values.agencyLegal ?? '').trim(),
+      agencyName,
+      agencyWhatsapp,
+      agencyLegal,
       currency: values.currency === 'ARS' ? 'ARS' : 'USD',
       defaultZone: (values.defaultZone ?? '').trim(),
       shareText: (values.shareText ?? '').trim(),

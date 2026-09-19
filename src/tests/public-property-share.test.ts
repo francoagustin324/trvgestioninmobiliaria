@@ -1,12 +1,24 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import test from 'node:test';
+import { chromium } from 'playwright';
+import { publicFichaHtml } from '../public-ficha.js';
 import { createPropertyPublicSlug, loadPublicPropertyFicha, propertyPublicUrl } from '../public-property-share.js';
 
 const share = readFileSync('src/public-property-share.ts', 'utf8');
 const main = readFileSync('src/mvp-main.ts', 'utf8');
 const server = readFileSync('src/server.ts', 'utf8');
 const migration = readFileSync('supabase/migrations/20260717113000_public_property_fichas.sql', 'utf8');
+const styles = readFileSync('src/styles.css', 'utf8');
+
+function chromeExecutable(): string | undefined {
+  return [
+    '/usr/bin/google-chrome',
+    '/usr/bin/google-chrome-stable',
+    '/usr/bin/chromium',
+    '/usr/bin/chromium-browser',
+  ].find(existsSync);
+}
 
 test('genera un slug legible, corto y sin datos sensibles', () => {
   const slug = createPropertyPublicSlug('Casa Duarte Quirós');
@@ -25,15 +37,68 @@ test('publica por propiedad, conserva el registro editable y usa snapshot tenant
   assert.ok(share.includes("on_conflict', 'organization_id,property_key'"));
   assert.ok(share.includes("Prefer: 'resolution=merge-duplicates,return=representation'"));
   assert.ok(share.includes('propertySnapshot.publicSlug'));
-  assert.ok(share.includes('payload: propertyToPublicFicha(propertySnapshot)'));
+  assert.ok(share.includes('payload: propertyToPublicFicha(propertySnapshot, tenantSnapshot)'));
+  assert.ok(share.includes('tenantSnapshot.organizationId !== scope.organizationId'));
   assert.ok(share.includes('organization_id: scope.organizationId'));
 });
 
-test('la ficha corta se puede abrir sin iniciar sesión', () => {
+test('la ficha corta conserva identidad tenant también en mobile y print sin depender del runtime autenticado', { timeout: 60_000 }, async () => {
   assert.ok(main.includes("location.pathname.match(/^\\/ficha\\/"));
   assert.ok(main.includes('await loadPublicPropertyFicha'));
   assert.ok(share.includes('/rest/v1/rpc/get_public_property_ficha'));
   assert.ok(migration.includes('grant execute on function public.get_public_property_ficha(text) to anon, authenticated'));
+
+  const executablePath = chromeExecutable();
+  assert.ok(executablePath, 'Se requiere Chrome/Chromium para validar mobile/print de ficha pública.');
+  const browser = await chromium.launch({ executablePath, headless: true });
+  const context = await browser.newContext({ viewport: { width: 390, height: 844 } });
+  const page = await context.newPage();
+
+  try {
+    const tenantAHtml = publicFichaHtml({
+      tenant: {
+        organizationId: 'tenant-a',
+        name: 'TRV Gestión Inmobiliaria',
+        commercialPhone: '+54 9 351 1111111',
+        logoPath: '/tenant-a.svg',
+        legalText: 'Legal A',
+      },
+      title: 'Propiedad A',
+      photoUrls: [],
+    });
+    await page.setContent(`<style>${styles}</style>${tenantAHtml}`);
+    assert.equal((await page.locator('.public-header span').innerText()).trim(), 'TRV Gestión Inmobiliaria');
+    assert.match(await page.locator('.whatsapp-public').getAttribute('href') ?? '', /5493511111111/);
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= 390), true);
+    await page.emulateMedia({ media: 'print' });
+    assert.equal((await page.locator('.public-header span').innerText()).trim(), 'TRV Gestión Inmobiliaria');
+    assert.equal(await page.locator('.whatsapp-public').evaluate((node) => getComputedStyle(node).display), 'none');
+
+    await page.emulateMedia({ media: 'screen' });
+    const tenantBHtml = publicFichaHtml({
+      tenant: {
+        organizationId: 'tenant-b',
+        name: 'Inmobiliaria Norte Test',
+        commercialPhone: '+54 9 351 2222222',
+        logoPath: '',
+        legalText: 'Legal B',
+      },
+      title: 'Propiedad B',
+      photoUrls: [],
+    });
+    await page.setContent(`<style>${styles}</style>${tenantBHtml}`);
+    assert.equal((await page.locator('.public-header span').innerText()).trim(), 'Inmobiliaria Norte Test');
+    assert.match(await page.locator('.whatsapp-public').getAttribute('href') ?? '', /5493512222222/);
+    assert.equal(await page.locator('.public-tenant-logo-placeholder').count(), 1);
+    assert.equal((await page.locator('body').innerText()).includes('TRV Gestión Inmobiliaria'), false);
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= 390), true);
+    await page.emulateMedia({ media: 'print' });
+    assert.equal((await page.locator('.public-header span').innerText()).trim(), 'Inmobiliaria Norte Test');
+    assert.equal(await page.locator('.whatsapp-public').evaluate((node) => getComputedStyle(node).display), 'none');
+  } finally {
+    await context.close();
+    await browser.close();
+  }
 });
 
 test('la tabla pública protege escritura y no expone información interna', () => {

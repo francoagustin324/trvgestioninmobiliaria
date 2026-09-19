@@ -1,9 +1,16 @@
+import { resolveTenantCommercialIdentity } from './configuration-domain.js';
 import { Ficha, FichaMode, Property } from './models.js';
 import { publicFichaHtml, publicLink, publicPayload, whatsappText } from './public-ficha.js';
 import { saveData, state } from './store.js';
 import type { ImportedPropertyData, ImportPropertyResponse } from './shared/import-types.js';
 import { newSyncRecordMetadata } from './sync-identity.js';
 import { copyText, escapeHtml, field, formValues, nextId, safePhotoUrl } from './utils.js';
+
+function currentTenantIdentity() {
+  return resolveTenantCommercialIdentity({
+    organization: state.crm.organization,
+  });
+}
 
 function propertyToFicha(property: Property): Partial<Ficha> {
   return {
@@ -60,7 +67,7 @@ function formHtml(): string {
     </section>
     <section class="importer-box external-only" aria-labelledby="importer-title">
       <span class="importer-kicker">Link recibido</span>
-      <h3 id="importer-title">Pegá el enlace y generá una ficha TRV</h3>
+      <h3 id="importer-title">Pegá el enlace y generá una ficha comercial</h3>
       <p>Copiamos los datos y fotos publicados sin reescribir precios, metros, dormitorios ni descripción. Solo quitamos datos de contacto y marca comercial de terceros de la ficha para clientes.</p>
       <div class="provider-badges"><span>MercadoLibre</span><span>Zonaprop</span><span>ficha.info</span><span>Tokko</span><span>Otros portales</span></div>
       <div class="importer-controls"><input name="internalOriginalLink" type="url" class="import-url" placeholder="Pegá acá el enlace que te enviaron" inputmode="url"><button type="button" id="import-property">Crear ficha desde el link</button></div>
@@ -74,7 +81,7 @@ function formHtml(): string {
     <textarea name="description" placeholder="Descripción comercial"></textarea><input name="deed" placeholder="Escritura"><input name="creditReady" placeholder="Apto crédito"><input name="paymentMethod" placeholder="Forma de pago"><textarea name="photoUrls" placeholder="URLs de fotos, una por línea"></textarea>
     <label class="photo-enhancement-toggle"><input type="checkbox" name="photoEnhancement" value="soft"><span><b>Mejora visual suave de fotos</b><small>Ajusta luz, contraste y color en la ficha. No agrega, elimina ni modifica elementos de la propiedad.</small></span></label>
     <textarea name="internalNotes" placeholder="Observaciones internas"></textarea>
-    <button type="submit">Guardar ficha TRV</button>
+    <button type="submit">Guardar ficha</button>
   </form>`;
 }
 
@@ -82,10 +89,10 @@ export function renderFichas(container: HTMLElement): void {
   const selected = state.crm.fichas.find((item) => item.id === state.selectedFichaId) || state.crm.fichas[0] || null;
   if (selected && state.selectedFichaId === null) state.selectedFichaId = selected.id;
   const mode = visibleMode();
-  container.innerHTML = `<div class="panel-heading"><div><span class="eyebrow">Fichas TRV</span><h2>Generador comercial</h2></div><button data-toggle="ficha-form">Nueva ficha</button></div>
+  container.innerHTML = `<div class="panel-heading"><div><span class="eyebrow">Fichas</span><h2>Generador comercial</h2></div><button data-toggle="ficha-form">Nueva ficha</button></div>
     <div class="mode-tabs two-modes"><button data-mode="property" class="${mode === 'property' ? 'active' : ''}">Mis propiedades</button><button data-mode="external" class="${mode === 'external' ? 'active' : ''}">Pegar link recibido</button></div>
     ${formHtml()}
-    <div class="fichas-layout"><section class="panel-card"><h3>Fichas guardadas</h3><div class="ficha-list">${state.crm.fichas.map((ficha) => `<article class="ficha-list-card ${selected?.id === ficha.id ? 'active' : ''}"><div><h4>${escapeHtml(ficha.title)}</h4><p>${escapeHtml([ficha.zone, ficha.price].filter(Boolean).join(' · '))}</p></div><div class="ficha-actions"><button data-ficha-action="view" data-id="${ficha.id}">Ver</button><button data-ficha-action="edit" data-id="${ficha.id}">Editar</button><button data-ficha-action="duplicate" data-id="${ficha.id}">Duplicar</button><button data-ficha-action="copy-link" data-id="${ficha.id}">Copiar link</button><button data-ficha-action="copy-text" data-id="${ficha.id}">Copiar WhatsApp</button><button data-ficha-action="share" data-id="${ficha.id}">Compartir</button><button data-ficha-action="print" data-id="${ficha.id}">PDF</button><button class="delete" data-delete="fichas" data-id="${ficha.id}">×</button></div></article>`).join('') || '<p class="empty-state">Todavía no hay fichas.</p>'}</div></section><section class="panel-card preview-panel"><h3>Vista previa para clientes</h3>${selected ? publicFichaHtml(publicPayload(selected)) : '<p class="empty-state">Elegí o creá una ficha.</p>'}</section></div>`;
+    <div class="fichas-layout"><section class="panel-card"><h3>Fichas guardadas</h3><div class="ficha-list">${state.crm.fichas.map((ficha) => `<article class="ficha-list-card ${selected?.id === ficha.id ? 'active' : ''}"><div><h4>${escapeHtml(ficha.title)}</h4><p>${escapeHtml([ficha.zone, ficha.price].filter(Boolean).join(' · '))}</p></div><div class="ficha-actions"><button data-ficha-action="view" data-id="${ficha.id}">Ver</button><button data-ficha-action="edit" data-id="${ficha.id}">Editar</button><button data-ficha-action="duplicate" data-id="${ficha.id}">Duplicar</button><button data-ficha-action="copy-link" data-id="${ficha.id}">Copiar link</button><button data-ficha-action="copy-text" data-id="${ficha.id}">Copiar WhatsApp</button><button data-ficha-action="share" data-id="${ficha.id}">Compartir</button><button data-ficha-action="print" data-id="${ficha.id}">PDF</button><button class="delete" data-delete="fichas" data-id="${ficha.id}">×</button></div></article>`).join('') || '<p class="empty-state">Todavía no hay fichas.</p>'}</div></section><section class="panel-card preview-panel"><h3>Vista previa para clientes</h3>${selected ? publicFichaHtml(publicPayload(selected, currentTenantIdentity())) : '<p class="empty-state">Elegí o creá una ficha.</p>'}</section></div>`;
   bindFichaForm();
 }
 
@@ -201,9 +208,10 @@ export function handleFichaAction(action: string, id: number): void {
   if (action === 'view') state.selectedFichaId = id;
   if (action === 'edit') { state.selectedFichaId = id; state.editingFichaId = id; state.fichaMode = ficha.mode === 'external' ? 'external' : 'property'; state.openForms.ficha = true; }
   if (action === 'duplicate') { const copy = { ...ficha, ...newSyncRecordMetadata(), id: nextId(state.crm.fichas), title: `${ficha.title} (copia)`, createdAt: new Date().toISOString() }; state.crm.fichas.push(copy); state.selectedFichaId = copy.id; saveData(); }
-  if (action === 'copy-link') copyText(publicLink(ficha));
-  if (action === 'copy-text') copyText(whatsappText(ficha));
-  if (action === 'share') window.open(`https://wa.me/?text=${encodeURIComponent(whatsappText(ficha))}`, '_blank', 'noopener');
+  const tenantIdentity = currentTenantIdentity();
+  if (action === 'copy-link') copyText(publicLink(ficha, tenantIdentity));
+  if (action === 'copy-text') copyText(whatsappText(ficha, tenantIdentity));
+  if (action === 'share') window.open(`https://wa.me/?text=${encodeURIComponent(whatsappText(ficha, tenantIdentity))}`, '_blank', 'noopener');
   if (action === 'print') state.selectedFichaId = id;
   document.dispatchEvent(new CustomEvent('trv-render'));
   if (action === 'edit') window.setTimeout(() => { fillForm(ficha); const form = document.querySelector<HTMLFormElement>('#ficha-form'); if (form) renderPhotoReview(form); }, 0);

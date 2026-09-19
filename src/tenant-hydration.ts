@@ -23,10 +23,10 @@ import {
 import { TENANT_LOCAL_AUTHORIZATION_STALE } from './cloud-records.js';
 import { fetchMembershipCatalog } from './membership-catalog.js';
 import type { CrmData } from './models.js';
-import { initialData } from './models.js';
 import {
   activateStorageForTenant,
   replaceDataForTenant,
+  scopedInitialDataForTenant,
   setActiveMemberId,
   state,
 } from './store.js';
@@ -129,14 +129,8 @@ function emptyOperationalData(crm: CrmData): CrmData {
   };
 }
 
-function scopedInitialData(scope: TenantScope): CrmData {
-  const crm = structuredClone(initialData);
-  crm.organization.id = scope.organizationId;
-  return crm;
-}
-
 function isUntouchedTenantDemoData(scope: TenantScope, crm: CrmData): boolean {
-  return tenantFingerprint(crm) === tenantFingerprint(scopedInitialData(scope));
+  return tenantFingerprint(crm) === tenantFingerprint(scopedInitialDataForTenant(scope));
 }
 
 export async function hydrateTenantAfterAuth(): Promise<TenantScope> {
@@ -149,7 +143,7 @@ export async function hydrateTenantAfterAuth(): Promise<TenantScope> {
   // A3.4 pre-runtime authority proof: exact current user + organization + ACTIVE
   // membership is verified in the cloud before any tenant CRM snapshot can be
   // loaded into state. tenantCloudTransport is itself generation/session fenced.
-  await tenantCloudTransport(scope);
+  const transport = await tenantCloudTransport(scope);
   assertHydrationAuthCurrent(authGeneration, session, scope.userId);
 
   // Legacy inspection/migration may touch tenant-scoped storage, but only after
@@ -163,6 +157,19 @@ export async function hydrateTenantAfterAuth(): Promise<TenantScope> {
   assertHydrationAuthCurrent(authGeneration, session, scope.userId);
   installTenantRuntimeScope(scope, scope.userId);
   const runtimeLease = captureTenantRuntimeLease(scope);
+  const untouchedTenantDemo = isUntouchedTenantDemoData(scope, state.crm);
+  const tenantScoped = structuredClone(state.crm);
+  tenantScoped.organization = {
+    ...tenantScoped.organization,
+    id: scope.organizationId,
+    ...(transport.context.organization ? {
+      name: transport.context.organization.name,
+      seatLimit: transport.context.organization.seatLimit,
+      planLabel: transport.context.organization.planLabel,
+    } : {}),
+  };
+  tenantScoped.teamMembers = structuredClone(transport.context.members);
+  if (!replaceDataForTenant(scope, tenantScoped)) assertTenantRuntimeLeaseCurrent(runtimeLease);
   let localSnapshot = structuredClone(state.crm);
 
   if (tenantHasPendingLocalChanges(scope)) {
@@ -195,7 +202,7 @@ export async function hydrateTenantAfterAuth(): Promise<TenantScope> {
   if (cloud) {
     if (!replaceDataForTenant(scope, cloud)) assertTenantRuntimeLeaseCurrent(runtimeLease);
   } else {
-    const firstData = isUntouchedTenantDemoData(scope, localSnapshot)
+    const firstData = untouchedTenantDemo
       ? emptyOperationalData(localSnapshot)
       : localSnapshot;
     if (firstData !== localSnapshot) {
