@@ -1,4 +1,5 @@
 import type { TenantScope } from './active-organization.js';
+import { PRODUCT_BRAND } from './branding.js';
 import {
   cloudRecordIdentity,
   cloudRecordsToCrm,
@@ -492,7 +493,7 @@ export async function pushCloudDataWithVisitAuthorityV2(
   assertTenantRuntimeLeaseCurrent(runtimeLease);
 
   if (tenantFingerprint(remoteComparableCrm(verified)) !== tenantFingerprint(remoteComparableCrm(crm))) {
-    throw new Error('La verificación remota V2 no coincide con el snapshot tenant que PropControl intentó guardar.');
+    throw new Error(`La verificación remota V2 no coincide con el snapshot tenant que ${PRODUCT_BRAND.name} intentó guardar.`);
   }
 
   assertTenantRuntimeLeaseCurrent(runtimeLease);

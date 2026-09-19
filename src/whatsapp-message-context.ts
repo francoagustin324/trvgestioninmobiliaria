@@ -1,3 +1,4 @@
+import { PRODUCT_BRAND } from './branding.js';
 import type { Client, ConversationMessage, WhatsAppConversation } from './models.js';
 
 export interface ContextualWhatsAppMessage {
@@ -144,8 +145,8 @@ export function buildContextualWhatsAppMessage(input: {
       message: '',
       question: '',
       contextNote: hasConversation
-        ? 'Se analizaron únicamente mensajes entrantes del cliente cargados en PropControl.'
-        : 'No hay historial de conversación cargado en PropControl.',
+        ? `Se analizaron únicamente mensajes entrantes del cliente cargados en ${PRODUCT_BRAND.name}.`
+        : `No hay historial de conversación cargado en ${PRODUCT_BRAND.name}.`,
       blocked: true,
       reason: blockedReason,
       source: hasConversation ? 'conversation' : 'fallback',
@@ -159,7 +160,7 @@ export function buildContextualWhatsAppMessage(input: {
     message: `${greeting}, soy ${input.responsibleFirstName} de ${input.agency}. ${reference} ${question}`,
     question,
     contextNote: hasConversation
-      ? 'Sugerencia basada únicamente en mensajes entrantes del cliente cargados en PropControl y en los datos confirmados del lead.'
+      ? `Sugerencia basada únicamente en mensajes entrantes del cliente cargados en ${PRODUCT_BRAND.name} y en los datos confirmados del lead.`
       : 'No hay historial de conversación cargado. Se usa un mensaje genérico seguro y editable.',
     blocked: false,
     reason: '',

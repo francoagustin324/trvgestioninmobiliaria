@@ -1,4 +1,5 @@
 import type { TenantScope } from './active-organization.js';
+import { PRODUCT_BRAND } from './branding.js';
 import {
   assertLocalWriteAuthorityCompatible,
   cloudRecordsToCrm,
@@ -371,7 +372,7 @@ export async function pushTenantModernCloudData(
   assertCloudWriterLease(scope, runtimeLease);
   const refreshedFingerprint = recordsFingerprint(refreshed);
   if (refreshedFingerprint !== nextFingerprint) {
-    throw new Error('La verificación remota moderna no coincide con el snapshot tenant que PropControl intentó guardar.');
+    throw new Error(`La verificación remota moderna no coincide con el snapshot tenant que ${PRODUCT_BRAND.name} intentó guardar.`);
   }
   assertCloudWriterLease(scope, runtimeLease);
   markTenantCloudSaved(scope, latestRemoteVersion(crmSyncRecords(refreshed)), token);
@@ -442,7 +443,7 @@ export async function pushTenantLegacyCloudData(
   }
   assertTenantCrmScope(scope, verifiedCrm);
   if (tenantFingerprint(verifiedCrm) !== localFingerprint) {
-    throw new Error('La verificación remota legacy no coincide con el snapshot tenant que PropControl intentó guardar.');
+    throw new Error(`La verificación remota legacy no coincide con el snapshot tenant que ${PRODUCT_BRAND.name} intentó guardar.`);
   }
   assertCloudWriterLease(scope, runtimeLease);
   markTenantCloudSaved(scope, refreshed?.updated_at || new Date().toISOString(), token);
