@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
+import './sec-fix-a1-2-c2-test-setup.js';
 import { initialData, STORAGE_KEY } from '../models.js';
 import { scopedInitialDataForTenant } from '../store.js';
 import {

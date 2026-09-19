@@ -67,11 +67,11 @@ test('la ficha corta conserva identidad tenant también en mobile y print sin de
       photoUrls: [],
     });
     await page.setContent(`<style>${styles}</style>${tenantAHtml}`);
-    assert.equal((await page.locator('.public-header span').innerText()).trim(), 'TRV Gestión Inmobiliaria');
+    assert.equal(((await page.locator('.public-header span').textContent()) ?? '').trim(), 'TRV Gestión Inmobiliaria');
     assert.match(await page.locator('.whatsapp-public').getAttribute('href') ?? '', /5493511111111/);
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= 390), true);
     await page.emulateMedia({ media: 'print' });
-    assert.equal((await page.locator('.public-header span').innerText()).trim(), 'TRV Gestión Inmobiliaria');
+    assert.equal(((await page.locator('.public-header span').textContent()) ?? '').trim(), 'TRV Gestión Inmobiliaria');
     assert.equal(await page.locator('.whatsapp-public').evaluate((node) => getComputedStyle(node).display), 'none');
 
     await page.emulateMedia({ media: 'screen' });
@@ -87,13 +87,13 @@ test('la ficha corta conserva identidad tenant también en mobile y print sin de
       photoUrls: [],
     });
     await page.setContent(`<style>${styles}</style>${tenantBHtml}`);
-    assert.equal((await page.locator('.public-header span').innerText()).trim(), 'Inmobiliaria Norte Test');
+    assert.equal(((await page.locator('.public-header span').textContent()) ?? '').trim(), 'Inmobiliaria Norte Test');
     assert.match(await page.locator('.whatsapp-public').getAttribute('href') ?? '', /5493512222222/);
     assert.equal(await page.locator('.public-tenant-logo-placeholder').count(), 1);
     assert.equal((await page.locator('body').innerText()).includes('TRV Gestión Inmobiliaria'), false);
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= 390), true);
     await page.emulateMedia({ media: 'print' });
-    assert.equal((await page.locator('.public-header span').innerText()).trim(), 'Inmobiliaria Norte Test');
+    assert.equal(((await page.locator('.public-header span').textContent()) ?? '').trim(), 'Inmobiliaria Norte Test');
     assert.equal(await page.locator('.whatsapp-public').evaluate((node) => getComputedStyle(node).display), 'none');
   } finally {
     await context.close();
