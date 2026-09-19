@@ -1,3 +1,4 @@
+import { PRODUCT_BRAND } from './branding.js';
 import type {
   OrganizationSettings,
   PublicTenantIdentity,
@@ -261,7 +262,7 @@ export function resolvePersonalIdentity(input: ResolvePersonalIdentityInput): Re
     { value: input.membership?.legacyName, source: 'membership_legacy' },
     { value: input.legacySettings?.profileName, source: 'settings_legacy' },
     { value: emailLocalPart(input.authIdentity?.email), source: 'auth_identity' },
-  ], input.fallbackDisplayName || 'Usuario PropControl');
+  ], input.fallbackDisplayName || `Usuario ${PRODUCT_BRAND.name}`);
 
   const email = selectText([
     { value: input.authIdentity?.email, source: 'auth_identity' },
