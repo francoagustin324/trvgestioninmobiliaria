@@ -29,7 +29,7 @@ test('el módulo principal usa el workspace estable de Propiedades y mantiene el
   assert.ok(main.includes("import { renderMvpPropertiesWorkspace } from './mvp-properties-workspace.js'"));
   assert.ok(main.includes("renderMvpPropertiesWorkspace(qs<HTMLElement>('#propiedades'))"));
   assert.equal(main.includes("import { renderMvpProperties } from './mvp-properties-ui.js'"), false);
-  assert.ok(main.includes("window.confirm('¿Eliminar este registro? PropControl guardará una copia local anterior.')"));
+  assert.ok(main.includes("window.confirm('¿Eliminar este registro? OrdenBroker guardará una copia local anterior.')"));
 });
 
 test('los estilos de propiedades están publicados y contemplan celular', () => {
