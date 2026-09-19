@@ -1,3 +1,4 @@
+import { PRODUCT_BRAND } from './branding.js';
 import type { TenantScope } from './active-organization.js';
 import { getCloudSession } from './cloud-api.js';
 import {
@@ -263,7 +264,7 @@ async function fetchWithRetry(
   } catch {
     assertCurrent();
     throw new PropertyPhotoUploadError(
-      'No se pudo conectar con PropControl para cargar la foto.',
+      `No se pudo conectar con ${PRODUCT_BRAND.name} para cargar la foto.`,
       'NETWORK_ERROR',
     );
   }
@@ -303,7 +304,7 @@ async function serverStorageUpload(
   if (response.ok && record.success && typeof record.url === 'string' && record.url) {
     if (record.organizationId !== context.scope.organizationId) {
       throw new PropertyPhotoUploadError(
-        'PropControl rechazó la foto porque la inmobiliaria de la respuesta no coincide con la operación iniciada.',
+        `${PRODUCT_BRAND.name} rechazó la foto porque la inmobiliaria de la respuesta no coincide con la operación iniciada.`,
         'UPLOAD_FAILED',
       );
     }
