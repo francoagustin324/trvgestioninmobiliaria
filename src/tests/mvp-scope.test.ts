@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import { clientFromFormValues } from '../client-editor.js';
+import { PRODUCT_BRAND } from '../branding.js';
 import { modules, type Client } from '../models.js';
 
 test('la navegación del MVP contiene los módulos aprobados', () => {
@@ -35,17 +36,33 @@ test('index usa solo la entrada MVP y carga las capas visuales aprobadas', () =>
   }
 });
 
-test('OrdenBroker aparece como la única marca principal del software en la barra superior', () => {
+test('Product Brand Authority mantiene OrdenBroker separado de la identidad tenant', () => {
   const source = readFileSync('src/mvp-main.ts', 'utf8');
-  const branding = readFileSync('src/branding.ts', 'utf8');
-  assert.ok(branding.includes("name: 'OrdenBroker'"));
-  assert.ok(branding.includes("tagline: 'Tu inmobiliaria, bajo control'"));
-  assert.equal(branding.includes("name: 'PropControl'"), false);
+  const auth = readFileSync('src/mvp-auth.ts', 'utf8');
+  const invitation = readFileSync('src/mvp-invitation-auth.ts', 'utf8');
+  const account = readFileSync('src/account-menu-presentation.ts', 'utf8');
+  const html = readFileSync('index.html', 'utf8');
+
+  assert.equal(PRODUCT_BRAND.name, 'OrdenBroker');
+  assert.equal(PRODUCT_BRAND.tagline, 'Tu inmobiliaria, bajo control');
+  assert.equal(PRODUCT_BRAND.tagline.endsWith('.'), false);
+
+  assert.match(html, /<title>OrdenBroker \| Sistema comercial inmobiliario<\/title>/);
+  assert.match(html, /<meta name="description" content="OrdenBroker: sistema comercial para corredores e inmobiliarias\." \/>/);
+
   assert.ok(source.includes("import { PRODUCT_BRAND } from './branding.js'"));
   assert.ok(source.includes('class="app-brand"'));
   assert.ok(source.includes('class="app-brand-logo"'));
   assert.ok(source.includes('class="app-brand-copy"'));
-  assert.ok(source.includes('CRM inmobiliario'));
+  assert.ok(source.includes('document.title = `Ficha de propiedad | ${PRODUCT_BRAND.name}`;'));
+
+  assert.ok(auth.includes("import { PRODUCT_BRAND } from './branding.js'"));
+  assert.ok(invitation.includes("import { PRODUCT_BRAND } from './branding.js'"));
+  assert.ok(invitation.includes('Activá tu acceso a ${PRODUCT_BRAND.name}.'));
+  assert.ok(account.includes("import { PRODUCT_BRAND } from './branding.js'"));
+  assert.ok(account.includes('|| PRODUCT_BRAND.name;'));
+  assert.ok(account.includes('|| `Cuenta ${PRODUCT_BRAND.name}`;'));
+
   assert.equal(source.includes('AGENCY_BRAND'), false);
   assert.equal(source.includes('mvp-agency-brand'), false);
   assert.equal(source.includes('mvp-sidebar-footer'), false);

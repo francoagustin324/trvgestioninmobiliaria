@@ -1,3 +1,4 @@
+import { PRODUCT_BRAND } from './branding.js';
 import type { OrganizationSettings, Settings, TeamMember } from './models.js';
 import { syncStatusLabel, type SyncState } from './sync-safety.js';
 
@@ -66,7 +67,7 @@ function organizationDisplayName(settings: Settings, organization: OrganizationS
   const organizationLooksTechnical = organizationName
     && compactIdentifier(organizationName) === compactIdentifier(organization.id);
   if (organizationLooksTechnical && agencyName) return agencyName;
-  return organizationName || agencyName || normalizedText(organization.id) || 'OrdenBroker';
+  return organizationName || agencyName || normalizedText(organization.id) || PRODUCT_BRAND.name;
 }
 
 export function accountIdentityPresentation(input: AccountIdentityInput): AccountIdentityPresentation {
@@ -84,7 +85,7 @@ export function accountIdentityPresentation(input: AccountIdentityInput): Accoun
     || normalizedText(input.email).split('@')[0]
     || normalizedText(input.userId)
     || normalizedText(input.organization.id)
-    || 'Cuenta OrdenBroker';
+    || `Cuenta ${PRODUCT_BRAND.name}`;
   const name = isPresentableName(profileName, technicalIdentifiers)
     ? profileName
     : isPresentableName(memberName, technicalIdentifiers)
