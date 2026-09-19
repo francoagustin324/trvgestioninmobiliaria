@@ -7,6 +7,7 @@ on:
     branches:
       - main
       - validation/a35-r6-ci-hardening
+      - rebrand/ordenbroker-tenant-brand-authority
   schedule:
     - cron: "0 10 * * *"
   workflow_dispatch:
@@ -16,7 +17,54 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  targeted-tenant-authority:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - name: Registrar SHA targeted
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "TARGETED_SOURCE_SHA=$GITHUB_SHA"
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+      - name: Instalar dependencias targeted
+        run: npm ci --silent
+      - name: Verificar browser targeted
+        shell: bash
+        run: |
+          set -euo pipefail
+          if command -v google-chrome >/dev/null 2>&1; then google-chrome --version; exit 0; fi
+          if command -v google-chrome-stable >/dev/null 2>&1; then google-chrome-stable --version; exit 0; fi
+          if command -v chromium >/dev/null 2>&1; then chromium --version; exit 0; fi
+          if command -v chromium-browser >/dev/null 2>&1; then chromium-browser --version; exit 0; fi
+          echo "No supported Chrome/Chromium executable available."
+          exit 1
+      - name: Compilar targeted
+        run: npm run build --silent
+      - name: Ejecutar targeted tenant authority
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --test --test-concurrency=1 \
+            dist/tests/configuration-domain.test.js \
+            dist/tests/sec-fix-a1-2-b-tenant-storage.test.js \
+            dist/tests/property-ficha.test.js \
+            dist/tests/public-property-share.test.js \
+            dist/tests/sec-fix-a1-2-g-public-property-share.test.js \
+            dist/tests/b1-3-whatsapp-contact.test.js \
+            dist/tests/sec-fix-a1-2-c2-tenant-async.test.js \
+            dist/tests/sec-fix-a3-4-pre-runtime-hydration-authority.test.js
+
   build-and-test:
+    needs: targeted-tenant-authority
     runs-on: ubuntu-latest
     timeout-minutes: 120
     env:
