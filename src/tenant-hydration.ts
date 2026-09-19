@@ -20,7 +20,10 @@ import {
   isTenantCloudAuthorityFailure,
   tenantCloudTransport,
 } from './tenant-cloud-context.js';
-import { TENANT_LOCAL_AUTHORIZATION_STALE } from './cloud-records.js';
+import {
+  assertLocalWriteAuthorityCompatible,
+  TENANT_LOCAL_AUTHORIZATION_STALE,
+} from './cloud-records.js';
 import { fetchMembershipCatalog } from './membership-catalog.js';
 import type { CrmData } from './models.js';
 import {
@@ -157,6 +160,22 @@ export async function hydrateTenantAfterAuth(): Promise<TenantScope> {
   assertHydrationAuthCurrent(authGeneration, session, scope.userId);
   installTenantRuntimeScope(scope, scope.userId);
   const runtimeLease = captureTenantRuntimeLease(scope);
+  const pendingLocalChanges = tenantHasPendingLocalChanges(scope);
+
+  // A3.5 fail-closed ordering: fetched membership metadata is not runtime
+  // authority yet. A dirty local snapshot must prove compatibility against the
+  // fetched cloud context before organization/team/member projection can mutate
+  // state or tenant storage.
+  if (pendingLocalChanges) {
+    try {
+      assertLocalWriteAuthorityCompatible(state.crm, transport.context, scope.userId);
+    } catch (error) {
+      const authorityMessage = error instanceof Error ? error.message : TENANT_LOCAL_AUTHORIZATION_STALE;
+      markTenantSyncError(scope, authorityMessage);
+      throw error;
+    }
+  }
+
   const untouchedTenantDemo = isUntouchedTenantDemoData(scope, state.crm);
   const tenantScoped = structuredClone(state.crm);
   tenantScoped.organization = {
@@ -172,7 +191,7 @@ export async function hydrateTenantAfterAuth(): Promise<TenantScope> {
   if (!replaceDataForTenant(scope, tenantScoped)) assertTenantRuntimeLeaseCurrent(runtimeLease);
   let localSnapshot = structuredClone(state.crm);
 
-  if (tenantHasPendingLocalChanges(scope)) {
+  if (pendingLocalChanges) {
     try {
       await pushCloudData(scope, localSnapshot);
       assertTenantRuntimeLeaseCurrent(runtimeLease);

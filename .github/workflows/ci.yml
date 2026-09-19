@@ -61,7 +61,8 @@ jobs:
             dist/tests/sec-fix-a1-2-g-public-property-share.test.js \
             dist/tests/b1-3-whatsapp-contact.test.js \
             dist/tests/sec-fix-a1-2-c2-tenant-async.test.js \
-            dist/tests/sec-fix-a3-4-pre-runtime-hydration-authority.test.js
+            dist/tests/sec-fix-a3-4-pre-runtime-hydration-authority.test.js \
+            dist/tests/sec-fix-a3-5-stale-role-fallback-authority.test.js
 
   build-and-test:
     needs: targeted-tenant-authority
