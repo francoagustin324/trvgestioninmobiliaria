@@ -55,8 +55,11 @@ test('A1.2-C1 static: hydration resuelve tenant antes de inspeccionar o leer sto
   const activate = body.indexOf('activateStorageForTenant(scope)');
   const install = body.indexOf('installTenantRuntimeScope(scope, scope.userId)');
   const lease = body.indexOf('captureTenantRuntimeLease(scope)');
-  const snapshot = body.indexOf('localSnapshot = structuredClone(state.crm)');
   const dirty = body.indexOf('tenantHasPendingLocalChanges(scope)');
+  const compatibilityGuard = body.indexOf('assertLocalWriteAuthorityCompatible(state.crm, transport.context, scope.userId)');
+  const projection = body.indexOf('const tenantScoped = structuredClone(state.crm)');
+  const projectionWrite = body.indexOf('replaceDataForTenant(scope, tenantScoped)');
+  const snapshot = body.indexOf('localSnapshot = structuredClone(state.crm)');
   const pull = body.indexOf('pullCloudData(scope, localSnapshot)');
 
   assert.ok(resolve >= 0);
@@ -64,9 +67,12 @@ test('A1.2-C1 static: hydration resuelve tenant antes de inspeccionar o leer sto
   assert.ok(inspect < activate);
   assert.ok(activate < install);
   assert.ok(install < lease);
-  assert.ok(lease < snapshot);
-  assert.ok(snapshot < dirty);
-  assert.ok(dirty < pull);
+  assert.ok(lease < dirty);
+  assert.ok(dirty < compatibilityGuard);
+  assert.ok(compatibilityGuard < projection);
+  assert.ok(projection < projectionWrite);
+  assert.ok(projectionWrite < snapshot);
+  assert.ok(snapshot < pull);
 });
 
 test('A1.2-C1 static: resolver usa catálogo read-only + preference y no state CRM', () => {
