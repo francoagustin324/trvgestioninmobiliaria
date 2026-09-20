@@ -3,7 +3,7 @@
 .mvp-lead-matches { border-top:1px solid #e3eaee; padding-top:12px; }
 .mvp-lead-matches summary { display:flex; align-items:center; justify-content:space-between; gap:12px; color:#294755; cursor:pointer; font-size:.76rem; font-weight:850; list-style:none; }
 .mvp-lead-matches summary::-webkit-details-marker { display:none; }
-.mvp-lead-matches summary::before { content:'▸'; color:#d0a33c; }
+.mvp-lead-matches summary::before { content:'▸'; color:var(--brand-bright); }
 .mvp-lead-matches[open] summary::before { content:'▾'; }
 .mvp-lead-matches summary span { flex:1; }
 .mvp-lead-matches summary strong { padding:5px 8px; border-radius:999px; color:#173951; background:#edf4f9; font-size:.68rem; }
