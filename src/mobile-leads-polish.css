@@ -70,7 +70,7 @@
     border-color: rgba(255, 255, 255, 0.15);
     background:
       linear-gradient(180deg, rgba(255, 255, 255, 0.055), rgba(255, 255, 255, 0) 48%),
-      rgba(10, 31, 22, 0.9);
+      rgba(15, 27, 53, 0.9);
   }
 
   #crm .mvp-lead-filter-primary {
@@ -134,7 +134,7 @@
     justify-content: space-between;
     gap: 10px;
     padding: 10px 1px 6px;
-    color: #eef4f0;
+    color: var(--ink);
     cursor: pointer;
     list-style: none;
   }
@@ -152,7 +152,7 @@
   #crm .mvp-lead-more-filters > summary small {
     min-width: 0;
     overflow: hidden;
-    color: #9fb2a8;
+    color: var(--ink-soft);
     font-size: 0.68rem;
     text-align: right;
     text-overflow: ellipsis;
@@ -162,7 +162,7 @@
   #crm .mvp-lead-more-filters > summary::after {
     content: '＋';
     flex: 0 0 auto;
-    color: #dec593;
+    color: var(--brand-bright);
     font-weight: 900;
   }
 
@@ -242,7 +242,7 @@
     border-radius: 19px;
     background:
       linear-gradient(180deg, rgba(255, 255, 255, 0.055), rgba(255, 255, 255, 0) 42%),
-      rgba(10, 31, 22, 0.9);
+      rgba(15, 27, 53, 0.9);
     box-shadow:
       inset 0 1px 0 rgba(255, 255, 255, 0.12),
       0 16px 34px -28px rgba(0, 0, 0, 0.9);
@@ -294,8 +294,8 @@
 
   #crm .mvp-stage-badge {
     max-width: 100%;
-    color: #263023;
-    background: linear-gradient(150deg, #dec593, #c6ab78);
+    color: var(--ob-white);
+    background: linear-gradient(150deg, var(--brand-bright), var(--brand));
     overflow: hidden;
     text-overflow: ellipsis;
   }
@@ -406,13 +406,13 @@
   #crm .mvp-lead-critical span,
   #crm .mvp-lead-summary span,
   #crm .mvp-lead-summary-secondary span {
-    color: #91a69a;
+    color: var(--ink-faint);
   }
 
   #crm .mvp-lead-critical strong,
   #crm .mvp-lead-summary strong,
   #crm .mvp-lead-summary-secondary strong {
-    color: #eaf1ed;
+    color: var(--ink);
     font-size: 0.76rem;
     line-height: 1.35;
     word-break: normal;
@@ -449,7 +449,7 @@
 
   #crm .mvp-lead-summary-more > summary::after {
     content: '＋';
-    color: #dec593;
+    color: var(--brand-bright);
   }
 
   #crm .mvp-lead-summary-more[open] > summary::after {
