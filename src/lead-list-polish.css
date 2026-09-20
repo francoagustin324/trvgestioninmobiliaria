@@ -40,7 +40,7 @@
 #crm .mvp-lead-filter-panel :is(input, select, button, summary):focus-visible,
 #crm .mvp-stage-counter:focus-visible,
 #crm .mvp-lead-compact-card :is(button, a, summary, input, select):focus-visible {
-  outline: 3px solid #dec593;
+  outline: 3px solid var(--brand-bright);
   outline-offset: 2px;
 }
 
@@ -59,11 +59,11 @@
 }
 
 #crm .mvp-stage-counters-shell::before {
-  background: linear-gradient(90deg, rgba(10, 31, 22, .98), rgba(10, 31, 22, 0));
+  background: linear-gradient(90deg, rgba(15, 27, 53, .98), rgba(15, 27, 53, 0));
 }
 
 #crm .mvp-stage-counters-shell::after {
-  background: linear-gradient(270deg, rgba(10, 31, 22, .98), rgba(10, 31, 22, 0));
+  background: linear-gradient(270deg, rgba(15, 27, 53, .98), rgba(15, 27, 53, 0));
 }
 
 #crm .mvp-stage-counters {
@@ -90,9 +90,9 @@
   min-width: 0;
   gap: 3px;
   padding: 9px 11px;
-  border: 1px solid rgba(222, 197, 147, .36);
+  border: 1px solid rgba(41, 107, 233, .36);
   border-radius: 11px;
-  background: rgba(222, 197, 147, .11);
+  background: rgba(41, 107, 233, .11);
 }
 
 #crm .mvp-lead-missing-summary strong {
@@ -132,8 +132,8 @@
 
 #crm .mvp-lead-full-sheet > summary:hover,
 #crm .mvp-lead-followup-menu > summary:hover {
-  border-color: rgba(222, 197, 147, .42);
-  background: rgba(222, 197, 147, .10);
+  border-color: rgba(41, 107, 233, .42);
+  background: rgba(41, 107, 233, .10);
 }
 
 @media (min-width: 901px) {
@@ -380,8 +380,8 @@
 
   #crm .mvp-lead-missing-summary {
     color: #e9d8b7;
-    border-color: rgba(222, 197, 147, .30);
-    background: rgba(222, 197, 147, .10);
+    border-color: rgba(41, 107, 233, .30);
+    background: rgba(41, 107, 233, .10);
   }
 
   #crm .mvp-lead-missing-summary strong {
@@ -436,9 +436,9 @@
     min-width: 44px;
     height: 44px;
     place-items: center;
-    border: 1px solid rgba(222, 197, 147, .26);
+    border: 1px solid rgba(41, 107, 233, .26);
     border-radius: 12px;
-    background: rgba(222, 197, 147, .07);
+    background: rgba(41, 107, 233, .07);
   }
 
   #crm .mvp-lead-active-filters {

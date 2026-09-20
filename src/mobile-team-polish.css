@@ -149,7 +149,7 @@
     grid-area: avatar;
     width: 46px;
     height: 46px;
-    color: var(--brand-ink);
+    color: var(--ob-white);
     background: linear-gradient(150deg, var(--brand-bright), var(--brand));
     font-size: 0.82rem;
   }
