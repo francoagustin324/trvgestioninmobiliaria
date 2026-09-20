@@ -1,14 +1,14 @@
 :root {
-  --mvp-deep: #0d1b2a;
-  --mvp-blue: #1e3a5f;
-  --mvp-sidebar: #102737;
-  --mvp-gold: #d4a017;
+  --mvp-deep: var(--ob-navy);
+  --mvp-blue: var(--ob-primary);
+  --mvp-sidebar: var(--ob-deep-blue);
+  --mvp-gold: var(--ob-secondary);
   --mvp-bg: #f4f6f8;
   --mvp-surface: #ffffff;
-  --mvp-border: #dce4e8;
-  --mvp-text: #172d3b;
-  --mvp-muted: #687985;
-  --mvp-shadow: 0 10px 30px rgb(13 27 42 / 6%);
+  --mvp-border: var(--ob-border);
+  --mvp-text: var(--ob-navy);
+  --mvp-muted: var(--ob-slate);
+  --mvp-shadow: 0 10px 30px rgb(15 27 53 / 6%);
 }
 
 body {
@@ -64,7 +64,7 @@ body {
 .mvp-lead-card:hover,
 .mvp-user-row:hover {
   border-color: #c9d6dd;
-  box-shadow: 0 12px 34px rgb(13 27 42 / 8%);
+  box-shadow: 0 12px 34px rgb(15 27 53 / 8%);
   transform: translateY(-1px);
 }
 
@@ -92,7 +92,7 @@ body {
 .mvp-compose-disabled textarea:focus {
   outline: none;
   border-color: var(--mvp-blue);
-  box-shadow: 0 0 0 3px rgb(30 58 95 / 12%);
+  box-shadow: 0 0 0 3px rgb(9 88 237 / 12%);
 }
 
 .mvp-page-heading > button,
@@ -101,15 +101,15 @@ body {
 .public-auth-card button[type='submit'] {
   border-color: var(--mvp-blue);
   color: #fff;
-  background: linear-gradient(145deg, #24476f, var(--mvp-blue));
-  box-shadow: 0 8px 20px rgb(30 58 95 / 16%);
+  background: linear-gradient(145deg, var(--ob-secondary), var(--ob-primary));
+  box-shadow: 0 8px 20px rgb(9 88 237 / 16%);
 }
 
 .mvp-page-heading > button:hover,
 .mvp-lead-form > button:hover,
 .mvp-user-form > button:hover,
 .public-auth-card button[type='submit']:hover {
-  background: linear-gradient(145deg, #294f79, #18344f);
+  background: linear-gradient(145deg, var(--ob-primary), var(--ob-deep-blue));
   transform: translateY(-1px);
 }
 
@@ -119,7 +119,7 @@ summary:focus-visible,
 input:focus-visible,
 select:focus-visible,
 textarea:focus-visible {
-  outline: 3px solid rgb(212 160 23 / 34%);
+  outline: 3px solid rgb(9 88 237 / 34%);
   outline-offset: 2px;
 }
 
@@ -143,7 +143,7 @@ textarea:focus-visible {
 .mvp-conversation-tabs button.active,
 .public-auth-tabs a.active {
   color: var(--mvp-blue);
-  box-shadow: 0 4px 12px rgb(13 27 42 / 8%);
+  box-shadow: 0 4px 12px rgb(15 27 53 / 8%);
 }
 
 .meta-template-filters button.active {
@@ -186,12 +186,12 @@ textarea:focus-visible {
 
 .mvp-account-menu > div {
   border-color: var(--mvp-border);
-  box-shadow: 0 18px 44px rgb(13 27 42 / 16%);
+  box-shadow: 0 18px 44px rgb(15 27 53 / 16%);
 }
 
 .notice {
   border-radius: 12px;
-  box-shadow: 0 10px 28px rgb(13 27 42 / 10%);
+  box-shadow: 0 10px 28px rgb(15 27 53 / 10%);
 }
 
 @keyframes mvp-panel-in {

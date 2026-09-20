@@ -1,30 +1,40 @@
 :root {
-  /* Identidad PropControl — Esmeralda & Champán */
-  --bg-0: #040f0a;          /* fondo principal: verde casi negro */
-  --brand: #c6ab78;         /* champán / acento principal */
-  --brand-bright: #dec593;  /* champán claro (texto de acento) */
-  --brand-deep: #0a271b;    /* esmeralda profundo */
-  --brand-ink: #20291c;     /* texto oscuro sobre champán */
-  --ink: #eaf2ec;           /* texto principal */
-  --ink-soft: #97aca0;      /* texto secundario */
-  --ink-faint: #647a6e;     /* texto tenue */
+  /* OrdenBroker — autoridad visual central */
+  --ob-navy: #0F1B35;
+  --ob-deep-blue: #103676;
+  --ob-primary: #0958ED;
+  --ob-secondary: #296BE9;
+  --ob-slate: #616C7E;
+  --ob-bluish-gray: #98A9C5;
+  --ob-border: #DBDFE4;
+  --ob-white: #FFFFFF;
+
+  /* Aliases activos: mantienen contratos CSS existentes sin duplicar la paleta. */
+  --bg-0: var(--ob-navy);
+  --brand: var(--ob-primary);
+  --brand-bright: var(--ob-secondary);
+  --brand-deep: var(--ob-deep-blue);
+  --brand-ink: var(--ob-navy);
+  --ink: var(--ob-white);
+  --ink-soft: var(--ob-bluish-gray);
+  --ink-faint: var(--ob-slate);
+
+  /* Colores semánticos: no dependen del branding. */
   --ok: #63b98a;
   --warn: #e0a34a;
-
-  /* Estados del cliente */
   --hot: #e07850;
   --warm: #d69a46;
   --cold: #6fa0c4;
 
-  /* Superficies translúcidas (gota de agua) */
-  --glass-bg: rgba(255, 255, 255, 0.035);
-  --glass-brand: rgba(198, 171, 120, 0.12);
-  --glass-stroke: rgba(255, 255, 255, 0.11);
+  /* Superficies translúcidas */
+  --glass-bg: rgba(255, 255, 255, 0.045);
+  --glass-brand: rgba(9, 88, 237, 0.14);
+  --glass-stroke: rgba(255, 255, 255, 0.12);
 
-  /* Profundidad del vidrio (sobrio, poco brillo) */
+  /* Profundidad del vidrio */
   --glass-hi: inset 0 1px 0 rgba(255, 255, 255, 0.26);
   --glass-lo: inset 0 -1px 0 rgba(0, 0, 0, 0.32);
-  --glass-glow: 0 22px 48px -22px rgba(0, 0, 0, 0.75);
+  --glass-glow: 0 22px 48px -22px rgba(0, 0, 0, 0.72);
 
   /* Forma */
   --radius-md: 0.85rem;
@@ -61,7 +71,7 @@ html {
 
 @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
   .glass {
-    background: rgba(10, 26, 19, 0.9);
+    background: rgba(15, 27, 53, 0.94);
   }
 }
 
@@ -72,18 +82,16 @@ html {
   overflow: hidden;
   pointer-events: none;
   background:
-    radial-gradient(54% 48% at 18% 15%, var(--brand-deep), transparent 62%),
-    radial-gradient(30% 26% at 85% 18%, rgba(198, 171, 120, 0.15), transparent 64%),
-    radial-gradient(66% 58% at 50% 99%, #03110b, transparent 62%),
+    radial-gradient(54% 48% at 18% 15%, var(--ob-deep-blue), transparent 62%),
+    radial-gradient(30% 26% at 85% 18%, rgba(9, 88, 237, 0.18), transparent 64%),
+    radial-gradient(66% 58% at 50% 99%, var(--ob-navy), transparent 62%),
     var(--bg-0);
 }
 
-/* Fondo estático (sin animación ni blur en tiempo real): el degradado radial ya se ve
-   suave y no consume GPU. Antes había una capa animada con blur(80px) que corría en
-   todas las pantallas y volvía lenta la app. */
+/* Fondo estático: el degradado evita blur animado permanente y conserva rendimiento. */
 
 :where(a, button, input, select, textarea, summary):focus-visible {
-  outline: 3px solid color-mix(in srgb, var(--brand) 82%, white);
+  outline: 3px solid color-mix(in srgb, var(--ob-primary) 82%, white);
   outline-offset: 3px;
 }
 

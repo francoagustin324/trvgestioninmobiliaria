@@ -1,17 +1,17 @@
-/* Liquid Glass skin — reviste componentes existentes con la paleta Esmeralda & Champán.
+/* Liquid Glass skin — reviste componentes existentes con la paleta OrdenBroker.
    Se carga al final del <head>: sobrescribe por orden de cascada. Solo aspecto visual,
    no toca estructura, lógica ni datos. */
 
 /* ============ Login / Registro ============ */
 
-/* El shell lleva el fondo esmeralda de respaldo (si el video no carga). */
+/* El shell lleva el fondo navy de respaldo (si el video no carga). */
 .public-auth-shell {
   position: relative;
   overflow: hidden;
   background:
     radial-gradient(58% 55% at 16% 14%, var(--brand-deep), transparent 62%),
-    radial-gradient(32% 28% at 86% 16%, rgba(198, 171, 120, 0.14), transparent 64%),
-    radial-gradient(72% 62% at 50% 102%, #03110b, transparent 60%),
+    radial-gradient(32% 28% at 86% 16%, rgba(9, 88, 237, 0.14), transparent 64%),
+    radial-gradient(72% 62% at 50% 102%, #0F1B35, transparent 60%),
     var(--bg-0);
   color: var(--ink);
 }
@@ -29,7 +29,7 @@
   position: absolute;
   inset: 0;
   z-index: 1;
-  background: linear-gradient(90deg, rgba(4, 14, 9, 0.88), rgba(4, 14, 9, 0.5) 52%, rgba(4, 14, 9, 0.62));
+  background: linear-gradient(90deg, rgba(15, 27, 53, 0.88), rgba(15, 27, 53, 0.5) 52%, rgba(15, 27, 53, 0.62));
 }
 .public-auth-brand,
 .public-auth-panel { position: relative; z-index: 2; }
@@ -53,7 +53,7 @@
   letter-spacing: -0.02em;
 }
 
-/* La tarjeta de login: vidrio esmeralda (gota de agua). */
+/* La tarjeta de login: vidrio OrdenBroker (gota de agua). */
 .public-auth-card {
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.07), rgba(255, 255, 255, 0) 40%), var(--glass-bg);
   -webkit-backdrop-filter: blur(22px) saturate(1.45);
@@ -81,7 +81,7 @@
   color: var(--ink);
 }
 .public-auth-card input::placeholder { color: var(--ink-faint); }
-.public-auth-card input:focus { border-color: rgba(198, 171, 120, 0.55); }
+.public-auth-card input:focus { border-color: rgba(9, 88, 237, 0.55); }
 
 .public-auth-card form button[type="submit"] {
   color: var(--brand-ink);
@@ -100,7 +100,7 @@
    incluso frente a los selectores descendentes .mvp-sidebar .nav-button / .mvp-lead-form input. */
 
 /* Layout: barra superior de ancho completo arriba, menú lateral + contenido debajo.
-   Grid de 3 áreas. El fondo esmeralda cubre toda la app. */
+   Grid de 3 áreas. El fondo navy cubre toda la app. */
 .premium-shell {
   color: var(--ink);
   grid-template-columns: 248px minmax(0, 1fr);
@@ -113,8 +113,8 @@
   overflow: hidden;
   background:
     radial-gradient(56% 48% at 12% 6%, var(--brand-deep), transparent 60%),
-    radial-gradient(40% 34% at 92% 10%, rgba(198, 171, 120, 0.10), transparent 62%),
-    radial-gradient(72% 60% at 50% 104%, #03110b, transparent 60%),
+    radial-gradient(40% 34% at 92% 10%, rgba(9, 88, 237, 0.10), transparent 62%),
+    radial-gradient(72% 60% at 50% 104%, #0F1B35, transparent 60%),
     var(--bg-0);
 }
 
@@ -126,7 +126,7 @@
   gap: 16px;
   padding: 11px 26px;
   border-bottom: 1px solid var(--glass-stroke);
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0) 72%), rgba(6, 20, 14, 0.62);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0) 72%), rgba(15, 27, 53, 0.62);
   -webkit-backdrop-filter: blur(18px) saturate(1.35);
   backdrop-filter: blur(18px) saturate(1.35);
 }
@@ -231,7 +231,7 @@
 
 /* --- Barra lateral --- */
 .mvp-sidebar {
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0) 42%), rgba(5, 18, 12, 0.52);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0) 42%), rgba(15, 27, 53, 0.52);
   -webkit-backdrop-filter: blur(20px) saturate(1.4);
   backdrop-filter: blur(20px) saturate(1.4);
   border-right: 1px solid var(--glass-stroke);
@@ -242,7 +242,7 @@
   background: linear-gradient(145deg, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0.03));
 }
 .mvp-product-logo {
-  border-color: rgba(198, 171, 120, 0.32);
+  border-color: rgba(9, 88, 237, 0.32);
   background: linear-gradient(145deg, rgba(255, 255, 255, 0.1), rgba(255, 255, 255, 0.04));
 }
 .mvp-product-copy strong { color: var(--ink); }
@@ -254,8 +254,8 @@
 }
 .mvp-sidebar .nav-button.active {
   color: var(--brand-bright);
-  border-color: rgba(198, 171, 120, 0.28);
-  background: linear-gradient(90deg, rgba(198, 171, 120, 0.18), rgba(255, 255, 255, 0.05));
+  border-color: rgba(9, 88, 237, 0.28);
+  background: linear-gradient(90deg, rgba(9, 88, 237, 0.18), rgba(255, 255, 255, 0.05));
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
 }
 .mvp-sidebar .nav-button.active::before { background: var(--brand); }
@@ -266,7 +266,7 @@
 /* --- Topbar --- */
 .mvp-topbar {
   border-bottom: 1px solid var(--glass-stroke);
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0) 70%), rgba(6, 20, 14, 0.4);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0) 70%), rgba(15, 27, 53, 0.4);
   -webkit-backdrop-filter: blur(16px) saturate(1.3);
   backdrop-filter: blur(16px) saturate(1.3);
 }
@@ -320,8 +320,8 @@
 .premium-content input:focus,
 .premium-content select:focus,
 .premium-content textarea:focus {
-  border-color: rgba(198, 171, 120, 0.55);
-  box-shadow: 0 0 0 3px rgba(198, 171, 120, 0.14);
+  border-color: rgba(9, 88, 237, 0.55);
+  box-shadow: 0 0 0 3px rgba(9, 88, 237, 0.14);
 }
 
 /* --- Botones: champán en toda la app (vence el degradé dorado global de mobile-premium.css). --- */
@@ -430,7 +430,7 @@ button.secondary:not(.delete):not(.nav-button):not(.quiet-button) {
 }
 .mvp-contact-btn:hover { transform: translateY(-1px); filter: brightness(1.12); }
 .mvp-contact-btn.wa { color: #6fd39b; border-color: rgba(111, 211, 155, 0.32); background: rgba(111, 211, 155, 0.12); }
-.mvp-contact-btn.call { color: var(--brand-bright); border-color: rgba(198, 171, 120, 0.32); background: rgba(198, 171, 120, 0.12); }
+.mvp-contact-btn.call { color: var(--brand-bright); border-color: rgba(9, 88, 237, 0.32); background: rgba(9, 88, 237, 0.12); }
 .mvp-contact-btn.mail { color: var(--cold); }
 .mvp-contact-btn[data-disabled] { opacity: 0.4; cursor: not-allowed; pointer-events: none; }
 .mvp-contact-btn.wa svg { fill: currentColor; stroke: none; }
@@ -473,7 +473,7 @@ button.secondary:not(.delete):not(.nav-button):not(.quiet-button) {
 .public-page {
   background:
     radial-gradient(58% 50% at 15% 6%, var(--brand-deep), transparent 60%),
-    radial-gradient(48% 40% at 90% 12%, rgba(198, 171, 120, 0.10), transparent 62%),
+    radial-gradient(48% 40% at 90% 12%, rgba(9, 88, 237, 0.10), transparent 62%),
     var(--bg-0);
 }
 .public-ficha {
@@ -495,12 +495,12 @@ button.secondary:not(.delete):not(.nav-button):not(.quiet-button) {
 .public-header span { color: var(--brand-bright); }
 .public-header h1 { color: var(--ink); }
 .public-gallery { background: rgba(255, 255, 255, 0.03); }
-.public-gallery-badge { color: var(--ink); border-color: var(--glass-stroke); background: rgba(4, 14, 9, 0.72); }
+.public-gallery-badge { color: var(--ink); border-color: var(--glass-stroke); background: rgba(15, 27, 53, 0.72); }
 .gallery-placeholder { color: var(--brand-bright); }
 .public-summary-tags span {
   color: var(--brand-bright);
-  border-color: rgba(198, 171, 120, 0.35);
-  background: rgba(198, 171, 120, 0.12);
+  border-color: rgba(9, 88, 237, 0.35);
+  background: rgba(9, 88, 237, 0.12);
 }
 .public-price { color: var(--ink); }
 .public-location { color: var(--ink-soft); }
@@ -751,7 +751,7 @@ button.secondary:not(.delete):not(.nav-button):not(.quiet-button) {
   background: var(--glass-bg);
   color: var(--ink);
 }
-.agenda-position { color: var(--brand-bright); background: rgba(198, 171, 120, 0.16); }
+.agenda-position { color: var(--brand-bright); background: rgba(9, 88, 237, 0.16); }
 .agenda-source { color: var(--ink-soft); background: rgba(255, 255, 255, 0.06); }
 .agenda-relative-date { color: var(--ink-soft); }
 .agenda-card.overdue .agenda-relative-date { color: #f0a58c; }

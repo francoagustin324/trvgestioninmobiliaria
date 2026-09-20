@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync, statSync } from 'node:fs';
 import test from 'node:test';
 import { clientFromFormValues } from '../client-editor.js';
 import { PRODUCT_BRAND } from '../branding.js';
@@ -46,9 +46,70 @@ test('Product Brand Authority mantiene OrdenBroker separado de la identidad tena
   assert.equal(PRODUCT_BRAND.name, 'OrdenBroker');
   assert.equal(PRODUCT_BRAND.tagline, 'Tu inmobiliaria, bajo control');
   assert.equal(PRODUCT_BRAND.tagline.endsWith('.'), false);
+  assert.equal(PRODUCT_BRAND.phrase, 'Ordená. Seguí. Cerrá.');
+  assert.equal(PRODUCT_BRAND.logo, '/src/assets/ordenbroker-mark.png');
+  assert.equal(PRODUCT_BRAND.wordmark, '/src/assets/ordenbroker-wordmark.png');
+  assert.doesNotMatch(PRODUCT_BRAND.logo, /propcontrol/i);
+  assert.doesNotMatch(PRODUCT_BRAND.wordmark, /propcontrol/i);
+  assert.deepEqual(PRODUCT_BRAND.colors, {
+    navy: '#0F1B35',
+    deepBlue: '#103676',
+    primary: '#0958ED',
+    secondary: '#296BE9',
+    slate: '#616C7E',
+    bluishGray: '#98A9C5',
+    border: '#DBDFE4',
+    white: '#FFFFFF',
+  });
+
+  for (const asset of [
+    'src/assets/ordenbroker-logo-tagline.png',
+    'src/assets/ordenbroker-wordmark.png',
+    'src/assets/ordenbroker-mark.png',
+    'src/assets/ordenbroker-favicon-32.png',
+    'src/assets/ordenbroker-apple-touch-icon.png',
+    'src/assets/ordenbroker-app-icon-512.png',
+  ]) {
+    assert.equal(existsSync(asset), true, asset);
+    assert.ok(statSync(asset).size > 0, asset);
+  }
+  for (const legacyAsset of [
+    'src/assets/logo-propcontrol.png',
+    'src/assets/logo-propcontrol-app.png',
+    'src/assets/propcontrol-logo.svg',
+    'src/assets/propcontrol-mark.svg',
+  ]) assert.equal(existsSync(legacyAsset), true, legacyAsset);
 
   assert.match(html, /<title>OrdenBroker \| Sistema comercial inmobiliario<\/title>/);
   assert.match(html, /<meta name="description" content="OrdenBroker: sistema comercial para corredores e inmobiliarias\." \/>/);
+  assert.match(html, /<meta name="theme-color" content="#0F1B35" \/>/);
+  assert.match(html, /rel="icon" href="\/src\/assets\/ordenbroker-favicon-32\.png\?v=20260920-ob-1"/);
+  assert.match(html, /rel="apple-touch-icon" href="\/src\/assets\/ordenbroker-apple-touch-icon\.png\?v=20260920-ob-1"/);
+  assert.doesNotMatch(html, /(?:icon|apple-touch-icon)[^>]+propcontrol/i);
+
+  const designTokens = readFileSync('src/design-tokens.css', 'utf8');
+  for (const token of [
+    '--ob-navy: #0F1B35',
+    '--ob-deep-blue: #103676',
+    '--ob-primary: #0958ED',
+    '--ob-secondary: #296BE9',
+    '--ob-slate: #616C7E',
+    '--ob-bluish-gray: #98A9C5',
+    '--ob-border: #DBDFE4',
+    '--ob-white: #FFFFFF',
+  ]) assert.ok(designTokens.includes(token), token);
+
+  const publicFicha = readFileSync('src/public-ficha.ts', 'utf8');
+  const settings = readFileSync('src/settings-ui.ts', 'utf8');
+  assert.ok(publicFicha.includes('tenant.logoPath'));
+  assert.ok(publicFicha.includes('tenantInitials(tenant.name)'));
+  assert.equal(publicFicha.includes('PRODUCT_BRAND'), false);
+  assert.ok(settings.includes('commercial.logoPath'));
+  assert.ok(settings.includes('initialsOf(name)'));
+  assert.equal(existsSync('src/assets/trv-logo.svg'), true);
+
+  const activeProductBrandSources = [html, source, auth, invitation, readFileSync('src/branding.ts', 'utf8')].join('\n');
+  assert.doesNotMatch(activeProductBrandSources, /\/src\/assets\/(?:logo-propcontrol|propcontrol-)/i);
 
   assert.ok(source.includes("import { PRODUCT_BRAND } from './branding.js'"));
   assert.ok(source.includes('class="app-brand"'));
@@ -69,7 +130,7 @@ test('Product Brand Authority mantiene OrdenBroker separado de la identidad tena
   assert.equal(source.includes('mvp-company-name'), false);
 });
 
-test('el lateral conserva la paleta anterior azul oscuro y dorado', () => {
+test('el lateral consume la paleta oficial OrdenBroker sin dorado legacy', () => {
   const css = readFileSync('src/sidebar-brand.css', 'utf8');
   for (const marker of [
     '.mvp-product-brand',
@@ -78,10 +139,11 @@ test('el lateral conserva la paleta anterior azul oscuro y dorado', () => {
     '.mvp-sidebar .nav-button.active::before',
     '.mvp-topbar-spacer',
     '.mvp-account-avatar svg',
-    '#102737',
-    '#0d2230',
-    '#d4a017',
+    'var(--ob-deep-blue)',
+    'var(--ob-navy)',
+    'var(--ob-primary)',
   ]) assert.ok(css.includes(marker), marker);
+  for (const legacyColor of ['#102737', '#0d2230', '#d4a017']) assert.equal(css.includes(legacyColor), false, legacyColor);
   assert.equal(css.includes('#0b3346'), false);
   assert.equal(css.includes('.mvp-agency-brand'), false);
   assert.equal(css.includes('.mvp-sidebar-footer'), false);
@@ -91,9 +153,9 @@ test('el lateral conserva la paleta anterior azul oscuro y dorado', () => {
 test('el pulido visual mejora consistencia sin sumar funciones', () => {
   const css = readFileSync('src/mvp-polish.css', 'utf8');
   for (const marker of [
-    '--mvp-deep: #0d1b2a',
-    '--mvp-blue: #1e3a5f',
-    '--mvp-gold: #d4a017',
+    '--mvp-deep: var(--ob-navy)',
+    '--mvp-blue: var(--ob-primary)',
+    '--mvp-gold: var(--ob-secondary)',
     '.mvp-lead-card:hover',
     'button:focus-visible',
     '@media (max-width: 640px)',
