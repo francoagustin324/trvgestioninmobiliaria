@@ -576,7 +576,7 @@ button.secondary:not(.delete):not(.nav-button):not(.quiet-button) {
 /* --- Menú de cuenta --- */
 .mvp-account-menu > div {
   border: 1px solid var(--glass-stroke);
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0) 46%), rgba(8, 26, 18, 0.96);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0) 46%), rgba(15, 27, 53, 0.96);
   -webkit-backdrop-filter: blur(18px) saturate(1.4);
   backdrop-filter: blur(18px) saturate(1.4);
 }
@@ -729,7 +729,7 @@ button.secondary:not(.delete):not(.nav-button):not(.quiet-button) {
 .agenda-related-field > small { color: var(--ink-faint); }
 .agenda-related-options {
   border-color: var(--glass-stroke);
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0) 46%), rgba(8, 26, 18, 0.97);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0) 46%), rgba(15, 27, 53, 0.97);
   -webkit-backdrop-filter: blur(18px);
   backdrop-filter: blur(18px);
 }
@@ -796,7 +796,7 @@ button.secondary:not(.delete):not(.nav-button):not(.quiet-button) {
 .notice {
   color: var(--ink);
   border: 1px solid var(--glass-stroke);
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0) 46%), rgba(10, 39, 27, 0.94);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0) 46%), rgba(15, 27, 53, 0.94);
 }
 .premium-content time,
 .mvp-content time { color: var(--brand-bright); }

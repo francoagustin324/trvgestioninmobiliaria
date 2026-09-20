@@ -180,7 +180,7 @@
   }
 
   .mobile-bottom-nav .nav-button:focus-visible {
-    outline: 3px solid rgba(222, 197, 147, 0.72);
+    outline: 3px solid var(--brand-bright);
     outline-offset: -2px;
   }
 

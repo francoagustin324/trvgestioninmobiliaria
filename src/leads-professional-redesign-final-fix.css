@@ -104,13 +104,13 @@
 
 @media (max-width: 720px) {
   #crm.pc-leads-redesign .pc-lead-controls :is(input, select) {
-    color: #eef4f0;
-    border-color: rgba(222, 197, 147, 0.34);
-    background: #0b3024;
+    color: var(--ink);
+    border-color: rgba(41, 107, 233, 0.34);
+    background: rgba(15, 27, 53, 0.92);
   }
 
   #crm.pc-leads-redesign .pc-lead-controls input::placeholder {
-    color: #b6c8be;
+    color: var(--ink-soft);
     opacity: 1;
   }
 
@@ -220,13 +220,13 @@
 /* PR #137: correcciones causales finales */
 @media (max-width: 720px) {
   #crm .mvp-lead-filter-panel :is(input, select) {
-    color: #eef4f0;
-    border-color: rgba(222, 197, 147, 0.34);
-    background: #0b3024;
+    color: var(--ink);
+    border-color: rgba(41, 107, 233, 0.34);
+    background: rgba(15, 27, 53, 0.92);
   }
 
   #crm .mvp-lead-filter-panel input::placeholder {
-    color: #b6c8be;
+    color: var(--ink-soft);
     opacity: 1;
   }
 
