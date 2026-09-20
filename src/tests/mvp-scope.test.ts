@@ -120,6 +120,23 @@ test('Product Brand Authority mantiene OrdenBroker separado de la identidad tena
   assert.ok(auth.includes("import { PRODUCT_BRAND } from './branding.js'"));
   assert.ok(invitation.includes("import { PRODUCT_BRAND } from './branding.js'"));
   assert.ok(invitation.includes('Activá tu acceso a ${PRODUCT_BRAND.name}.'));
+
+  const mvpCss = readFileSync('src/mvp.css', 'utf8');
+  const skinCss = readFileSync('src/liquid-glass-skin.css', 'utf8');
+  const stylesCss = readFileSync('src/styles.css', 'utf8');
+  assert.match(mvpCss, /\.public-auth-brand img \{ width:auto; height:54px; max-width:54px; object-fit:contain; \}/);
+  assert.match(skinCss, /\.public-auth-lockup img \{ width: auto; height: 54px; max-width: 54px; object-fit: contain; \}/);
+  assert.match(skinCss, /button:not\([\s\S]*color: var\(--ob-white\);[\s\S]*background: linear-gradient\(150deg, var\(--brand-bright\), var\(--brand\)\)/);
+  assert.match(skinCss, /\.public-auth-card input:focus-visible[\s\S]*border-color: var\(--ob-primary\);[\s\S]*outline: 3px solid var\(--ob-secondary\);/);
+  assert.doesNotMatch(skinCss, /rgba\(9,\s*33,\s*23|#06140e/i);
+  assert.match(skinCss, /Ficha pública tenant-first/);
+  assert.match(publicFicha, /const logoUrl = safePublicLogo\(tenant\.logoPath\)/);
+  assert.match(publicFicha, /public-tenant-logo-placeholder/);
+  assert.doesNotMatch(publicFicha, /PRODUCT_BRAND/);
+  assert.match(stylesCss, /\.preview-panel, \.preview-panel \*,\s*\.public-page, \.public-page \* \{ visibility: visible !important; \}/);
+  assert.match(stylesCss, /\.preview-panel \{ position: absolute; inset: 0; padding: 0; border: 0; box-shadow: none; \}/);
+  assert.match(stylesCss, /\.public-page \{ position: absolute; inset: 0; padding: 0 !important; background: #fff !important; \}/);
+
   assert.ok(account.includes("import { PRODUCT_BRAND } from './branding.js'"));
   assert.ok(account.includes('|| PRODUCT_BRAND.name;'));
   assert.ok(account.includes('|| `Cuenta ${PRODUCT_BRAND.name}`;'));

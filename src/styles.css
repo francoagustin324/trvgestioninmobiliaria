@@ -195,8 +195,10 @@ time { color: #ad7b23; font-weight: 900; }
 
 @media print {
   body * { visibility: hidden !important; }
-  .preview-panel, .preview-panel * { visibility: visible !important; }
+  .preview-panel, .preview-panel *,
+  .public-page, .public-page * { visibility: visible !important; }
   .preview-panel { position: absolute; inset: 0; padding: 0; border: 0; box-shadow: none; }
+  .public-page { position: absolute; inset: 0; padding: 0 !important; background: #fff !important; }
   .preview-panel > h3 { display: none; }
   .public-ficha { max-width: none; border-radius: 0; box-shadow: none; }
   .whatsapp-public { display: none; }

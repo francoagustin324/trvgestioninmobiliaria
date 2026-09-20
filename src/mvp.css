@@ -83,7 +83,7 @@ body { background:#f5f7f9; }
 
 .public-auth-shell { display:grid; grid-template-columns:minmax(0,1.1fr) minmax(360px,.9fr); min-height:100vh; background:#f3f6f8; }
 .public-auth-brand { display:flex; flex-direction:column; justify-content:space-between; padding:54px; color:#fff; background:linear-gradient(145deg,var(--ob-navy),var(--ob-deep-blue)); }
-.public-auth-brand img { width:54px; height:54px; }
+.public-auth-brand img { width:auto; height:54px; max-width:54px; object-fit:contain; }
 .public-auth-brand div { max-width:650px; }
 .public-auth-brand span { font-size:.75rem; font-weight:900; letter-spacing:.12em; text-transform:uppercase; opacity:.75; }
 .public-auth-brand h1 { margin:14px 0; font-size:clamp(2.2rem,5vw,4.7rem); line-height:1.02; }
