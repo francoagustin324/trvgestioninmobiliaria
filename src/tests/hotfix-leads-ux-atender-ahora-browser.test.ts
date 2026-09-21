@@ -41,6 +41,20 @@ interface StageContrastMetric {
   brown: boolean;
 }
 
+interface PriorityLeadContrastMetric {
+  backgroundImage: string;
+  backgroundColor: string;
+  nameColor: string;
+  reasonColor: string;
+  actionColor: string;
+  nameBackground: string;
+  reasonBackground: string;
+  actionBackground: string;
+  nameRatio: number;
+  reasonRatio: number;
+  actionRatio: number;
+}
+
 interface HorizontalMetrics {
   viewport: number;
   document: number;
@@ -721,6 +735,135 @@ function assertContrast(metric: StageContrastMetric, label: string): void {
   assert.equal(metric.stage, 'Todas', `${label}: stage debe seguir siendo Todas.`);
 }
 
+function parseRgb(value: string): { r: number; g: number; b: number } {
+  const match = value.match(/rgba?\(([^)]+)\)/);
+  const captured = match?.[1];
+  if (!captured) throw new Error(`Color no interpretable: ${value}`);
+  const parts = captured.split(/[ ,/]+/).filter(Boolean).map(Number);
+  return { r: parts[0] ?? 0, g: parts[1] ?? 0, b: parts[2] ?? 0 };
+}
+
+function contrastRatio(foreground: { r: number; g: number; b: number }, background: { r: number; g: number; b: number }): number {
+  const channel = (value: number): number => {
+    const normalized = value / 255;
+    return normalized <= 0.04045 ? normalized / 12.92 : ((normalized + 0.055) / 1.055) ** 2.4;
+  };
+  const luminance = (color: { r: number; g: number; b: number }): number => (
+    0.2126 * channel(color.r) + 0.7152 * channel(color.g) + 0.0722 * channel(color.b)
+  );
+  const lighter = Math.max(luminance(foreground), luminance(background));
+  const darker = Math.min(luminance(foreground), luminance(background));
+  return (lighter + 0.05) / (darker + 0.05);
+}
+
+async function priorityLeadContrastMetric(page: Page): Promise<PriorityLeadContrastMetric> {
+  const button = page.locator('#crm button.pc-supervised-attention-item[data-attention-client-id]').first();
+  const geometry = await button.evaluate((element) => {
+    const buttonRect = element.getBoundingClientRect();
+    const sample = (selector: string) => {
+      const node = element.querySelector<HTMLElement>(selector);
+      if (!node) throw new Error(`No existe ${selector} en lead prioritario.`);
+      const rect = node.getBoundingClientRect();
+      return {
+        color: getComputedStyle(node).color,
+        x: rect.left - buttonRect.left + rect.width / 2,
+        y: rect.top - buttonRect.top + rect.height / 2,
+      };
+    };
+    const style = getComputedStyle(element);
+    return {
+      width: buttonRect.width,
+      height: buttonRect.height,
+      backgroundImage: style.backgroundImage,
+      backgroundColor: style.backgroundColor,
+      name: sample('.pc-supervised-attention-name'),
+      reason: sample('.pc-supervised-attention-reason'),
+      action: sample('.pc-supervised-attention-action'),
+    };
+  });
+
+  const selectors = ['.pc-supervised-attention-name', '.pc-supervised-attention-reason', '.pc-supervised-attention-action'];
+  const previousVisibility = await button.evaluate((element, selectors) => selectors.map((selector) => {
+    const node = element.querySelector<HTMLElement>(selector);
+    if (!node) throw new Error(`No existe ${selector} para captura de contraste.`);
+    const previous = node.style.visibility;
+    node.style.visibility = 'hidden';
+    return previous;
+  }), selectors);
+
+  let png: Buffer;
+  try {
+    png = await button.screenshot({ animations: 'disabled' });
+  } finally {
+    await button.evaluate((element, payload) => {
+      payload.selectors.forEach((selector, index) => {
+        const node = element.querySelector<HTMLElement>(selector);
+        if (node) node.style.visibility = payload.previous[index] ?? '';
+      });
+    }, { selectors, previous: previousVisibility });
+  }
+
+  const sampled = await page.evaluate(async ({ dataUrl, width, height, points }) => {
+    const image = await new Promise<HTMLImageElement>((resolve, reject) => {
+      const current = new Image();
+      current.onload = () => resolve(current);
+      current.onerror = () => reject(new Error('No se pudo decodificar screenshot PNG del lead prioritario.'));
+      current.src = dataUrl;
+    });
+    const canvas = document.createElement('canvas');
+    canvas.width = image.naturalWidth;
+    canvas.height = image.naturalHeight;
+    const context = canvas.getContext('2d', { willReadFrequently: true });
+    if (!context) throw new Error('Canvas 2D no disponible para contraste.');
+    context.drawImage(image, 0, 0);
+    const scaleX = image.naturalWidth / width;
+    const scaleY = image.naturalHeight / height;
+    const read = (point: { x: number; y: number }) => {
+      const x = Math.max(0, Math.min(image.naturalWidth - 1, Math.round(point.x * scaleX)));
+      const y = Math.max(0, Math.min(image.naturalHeight - 1, Math.round(point.y * scaleY)));
+      const pixel = context.getImageData(x, y, 1, 1).data;
+      return { r: pixel[0] ?? 0, g: pixel[1] ?? 0, b: pixel[2] ?? 0 };
+    };
+    return {
+      name: read(points.name),
+      reason: read(points.reason),
+      action: read(points.action),
+    };
+  }, {
+    dataUrl: `data:image/png;base64,${png.toString('base64')}`,
+    width: geometry.width,
+    height: geometry.height,
+    points: {
+      name: geometry.name,
+      reason: geometry.reason,
+      action: geometry.action,
+    },
+  });
+
+  const serialize = (color: { r: number; g: number; b: number }): string => `rgb(${color.r}, ${color.g}, ${color.b})`;
+  return {
+    backgroundImage: geometry.backgroundImage,
+    backgroundColor: geometry.backgroundColor,
+    nameColor: geometry.name.color,
+    reasonColor: geometry.reason.color,
+    actionColor: geometry.action.color,
+    nameBackground: serialize(sampled.name),
+    reasonBackground: serialize(sampled.reason),
+    actionBackground: serialize(sampled.action),
+    nameRatio: contrastRatio(parseRgb(geometry.name.color), sampled.name),
+    reasonRatio: contrastRatio(parseRgb(geometry.reason.color), sampled.reason),
+    actionRatio: contrastRatio(parseRgb(geometry.action.color), sampled.action),
+  };
+}
+
+function assertPriorityLeadContrast(metric: PriorityLeadContrastMetric, label: string): void {
+  assert.equal(metric.backgroundImage, 'none', `${label}: el card prioritario no debe heredar el gradient del botón primario.`);
+  assert.match(metric.backgroundColor, /rgba\(255,\s*255,\s*255,\s*0\.035\)/, `${label}: debe conservar el fondo translúcido previsto.`);
+  assert.ok(metric.nameRatio >= 4.5, `${label}: contraste nombre ${metric.nameRatio.toFixed(2)} < 4.5.`);
+  assert.ok(metric.reasonRatio >= 4.5, `${label}: contraste motivo ${metric.reasonRatio.toFixed(2)} < 4.5.`);
+  assert.ok(metric.actionRatio >= 4.5, `${label}: contraste próximo paso ${metric.actionRatio.toFixed(2)} < 4.5.`);
+}
+
 async function horizontalMetrics(page: Page, clientId?: number): Promise<HorizontalMetrics> {
   return page.evaluate((id) => {
     const rect = (element: Element | null): { x: number; width: number } | null => {
@@ -787,7 +930,11 @@ test('HOTFIX UX POST-B1.4.2 R3 — mobile tap, target y contraste accesible exac
           const hover = await stageContrastMetric(page);
           assert.match(hover.backgroundColor, /41\s*,\s*107\s*,\s*233/, 'desktop hover: debe usar azul OrdenBroker.');
           assertContrast(hover, 'desktop hover');
+          const priority = await priorityLeadContrastMetric(page);
+          assertPriorityLeadContrast(priority, 'desktop priority');
+          assertHorizontal(await horizontalMetrics(page), 'desktop priority', false);
           console.log(`R3_CONTRAST desktop ${JSON.stringify({ normal, hover })}`);
+          console.log(`R3_PRIORITY_CONTRAST desktop ${JSON.stringify(priority)}`);
         } finally {
           await context.close();
         }
@@ -896,10 +1043,11 @@ test('HOTFIX UX POST-B1.4.2 R3 — mobile tap, target y contraste accesible exac
         }
       });
 
-      await t.test('E targets: desktop, 390x844 y 320x568 miden >=44px en todas las recomendaciones visibles', async () => {
+      await t.test('E targets: desktop, 390x844, 360x740 y 320x568 miden >=44px en todas las recomendaciones visibles', async () => {
         const specs = [
           { name: 'desktop', viewport: { width: 1366, height: 768 }, mobile: false },
           { name: '390x844', viewport: { width: 390, height: 844 }, mobile: true },
+          { name: '360x740', viewport: { width: 360, height: 740 }, mobile: true },
           { name: '320x568', viewport: { width: 320, height: 568 }, mobile: true },
         ];
         const collected: Array<{ name: string; metrics: TargetMetrics }> = [];
@@ -919,26 +1067,42 @@ test('HOTFIX UX POST-B1.4.2 R3 — mobile tap, target y contraste accesible exac
         });
       });
 
-      await t.test('F contraste mobile: 390x844 y 320x568 label/contador >=4.5, centrados y sin marrón', async () => {
+      await t.test('F contraste mobile: 390x844, 360x740 y 320x568 conservan stage y cards prioritarias >=4.5 sin overflow', async () => {
         const specs = [
           { name: '390x844', viewport: { width: 390, height: 844 } },
+          { name: '360x740', viewport: { width: 360, height: 740 } },
           { name: '320x568', viewport: { width: 320, height: 568 } },
         ];
-        const collected: Array<{ name: string; visual: Awaited<ReturnType<typeof todosMetrics>>; contrast: StageContrastMetric }> = [];
+        const collected: Array<{
+          name: string;
+          visual: Awaited<ReturnType<typeof todosMetrics>>;
+          contrast: StageContrastMetric;
+          priority: PriorityLeadContrastMetric;
+          horizontal: HorizontalMetrics;
+        }> = [];
         for (const spec of specs) {
           const context = await createContext(browser, spec.viewport, true);
           try {
             const page = await context.newPage();
             await load(page, url);
-            collected.push({ name: spec.name, visual: await todosMetrics(page), contrast: await stageContrastMetric(page) });
+            collected.push({
+              name: spec.name,
+              visual: await todosMetrics(page),
+              contrast: await stageContrastMetric(page),
+              priority: await priorityLeadContrastMetric(page),
+              horizontal: await horizontalMetrics(page),
+            });
           } finally {
             await context.close();
           }
         }
-        collected.forEach(({ name, visual, contrast }) => {
+        collected.forEach(({ name, visual, contrast, priority, horizontal }) => {
           assertTodosMetrics(visual, name);
           assertContrast(contrast, name);
+          assertPriorityLeadContrast(priority, `${name} priority`);
+          assertHorizontal(horizontal, `${name} priority`, false);
           console.log(`R3_CONTRAST ${name} ${JSON.stringify(contrast)}`);
+          console.log(`R3_PRIORITY_CONTRAST ${name} ${JSON.stringify(priority)}`);
         });
       });
 
