@@ -1,16 +1,26 @@
 {
   "manifest_version": 3,
-  "name": "PropControl Fichas Inmobiliarias",
-  "version": "1.1.0",
-  "description": "Copia datos y fotos de una publicación abierta en Chrome y los envía al generador de fichas de PropControl.",
+  "name": "OrdenBroker — Importador de propiedades",
+  "version": "1.2.0",
+  "description": "Importá datos y fotos desde publicaciones inmobiliarias directamente a OrdenBroker.",
   "permissions": ["activeTab", "scripting", "tabs"],
   "optional_host_permissions": ["http://*/*", "https://*/*"],
   "host_permissions": ["https://trvgestioninmobiliaria-production.up.railway.app/*"],
   "background": {
     "service_worker": "background.js"
   },
+  "icons": {
+    "16": "icon16.png",
+    "48": "icon48.png",
+    "128": "icon128.png"
+  },
   "action": {
-    "default_title": "Crear ficha con PropControl",
-    "default_popup": "popup.html"
+    "default_title": "Importar propiedad a OrdenBroker",
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icon16.png",
+      "48": "icon48.png",
+      "128": "icon128.png"
+    }
   }
 }

@@ -3,32 +3,32 @@
   <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>PropControl Fichas</title>
+    <title>OrdenBroker — Importador inmobiliario</title>
     <link rel="stylesheet" href="popup.css">
   </head>
   <body>
     <main>
-      <header>
-        <div class="brand-mark">PC</div>
+      <header class="brand-header">
+        <img class="brand-mark" src="icon48.png" alt="" aria-hidden="true">
         <div>
-          <strong>PropControl</strong>
+          <strong>OrdenBroker</strong>
           <span>Importador inmobiliario</span>
         </div>
       </header>
 
       <section class="primary-card">
-        <span class="kicker">Opción recomendada</span>
-        <h1>Usar la publicación abierta</h1>
-        <p>Abrí el aviso completo, esperá a que carguen las fotos y tocá el botón.</p>
-        <button id="import-current" type="button">Crear ficha con esta página</button>
+        <span class="kicker">IMPORTACIÓN RÁPIDA</span>
+        <h1>Importar publicación abierta</h1>
+        <p>Abrí el aviso completo, esperá a que carguen los datos y las fotos, y después importalo a OrdenBroker.</p>
+        <button id="import-current" type="button">Importar esta publicación</button>
       </section>
 
-      <div class="separator"><span>o pegá el link</span></div>
+      <div class="separator"><span>o pegá el enlace</span></div>
 
       <section class="link-card">
         <label for="property-url">Enlace de Zonaprop, MercadoLibre, Tokko u otro portal</label>
         <input id="property-url" type="url" placeholder="https://..." autocomplete="off">
-        <button id="open-import" type="button" class="secondary">Abrir link y crear ficha</button>
+        <button id="open-import" type="button" class="secondary">Abrir enlace e importar</button>
         <small>Chrome puede pedir autorización una sola vez para leer ese portal.</small>
       </section>
 

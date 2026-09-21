@@ -11,12 +11,12 @@ export function renderExtensionInstallHelp(): void {
   const title = document.createElement('strong');
   title.textContent = `Extensión gratuita de ${PRODUCT_BRAND.name}`;
   const description = document.createElement('p');
-  description.textContent = 'Abrí la publicación en Chrome, esperá que carguen las fotos y tocá “Crear ficha con esta página”. Es la opción más confiable para Zonaprop, MercadoLibre, Tokko y otros portales.';
+  description.textContent = `Importá datos y fotos desde una publicación abierta en Chrome directamente a ${PRODUCT_BRAND.name}. Revisá la información antes de guardarla.`;
   content.append(title, description);
 
   const link = document.createElement('a');
-  link.href = '/extension/trv-fichas-chrome.zip';
-  link.download = 'propcontrol-fichas-chrome.zip';
+  link.href = '/extension/ordenbroker-fichas-chrome.zip';
+  link.download = 'ordenbroker-fichas-chrome.zip';
   link.textContent = `Descargar extensión ${PRODUCT_BRAND.name}`;
 
   card.append(content, link);

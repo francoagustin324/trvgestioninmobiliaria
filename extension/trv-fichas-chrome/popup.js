@@ -21,7 +21,7 @@ function sendMessage(message) {
         return;
       }
       if (!response?.success) {
-        reject(new Error(response?.error || 'No se pudo crear la ficha.'));
+        reject(new Error(response?.error || 'No se pudo importar la propiedad.'));
         return;
       }
       resolve(response);
@@ -34,7 +34,7 @@ currentButton.addEventListener('click', async () => {
   setStatus('loading', 'Leyendo datos y fotos de la publicación abierta…');
   try {
     await sendMessage({ type: 'TRV_IMPORT_CURRENT' });
-    setStatus('success', 'Ficha enviada a TRV.');
+    setStatus('success', 'Propiedad enviada a OrdenBroker.');
   } catch (error) {
     setStatus('error', error instanceof Error ? error.message : 'No se pudo leer esta página.');
     setBusy(false);
@@ -58,7 +58,7 @@ openButton.addEventListener('click', async () => {
     const granted = await chrome.permissions.request({ origins: [`${url.protocol}//${url.host}/*`] });
     if (!granted) throw new Error('Chrome necesita permiso para leer ese portal.');
     await sendMessage({ type: 'TRV_OPEN_AND_IMPORT', url: url.toString() });
-    setStatus('success', 'Ficha enviada a TRV.');
+    setStatus('success', 'Propiedad enviada a OrdenBroker.');
   } catch (error) {
     setStatus('error', error instanceof Error ? error.message : 'No se pudo abrir la publicación.');
     setBusy(false);

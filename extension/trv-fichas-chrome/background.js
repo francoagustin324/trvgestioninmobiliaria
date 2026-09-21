@@ -17,7 +17,7 @@ async function waitForComplete(tabId, timeoutMs = 45000) {
   return new Promise((resolve, reject) => {
     const timeout = setTimeout(() => {
       chrome.tabs.onUpdated.removeListener(listener);
-      reject(new Error('La publicación tardó demasiado en cargar. Abrila manualmente y usá “Crear ficha con esta página”.'));
+      reject(new Error('La publicación tardó demasiado en cargar. Abrila manualmente y usá “Importar esta publicación”.'));
     }, timeoutMs);
     const listener = (updatedId, changeInfo, tab) => {
       if (updatedId !== tabId || changeInfo.status !== 'complete') return;
@@ -31,7 +31,7 @@ async function waitForComplete(tabId, timeoutMs = 45000) {
 
 async function extractFromTab(tabId) {
   const tab = await chrome.tabs.get(tabId);
-  if (!tab.url || !isWebUrl(tab.url)) throw new Error('Abrí una publicación inmobiliaria antes de crear la ficha.');
+  if (!tab.url || !isWebUrl(tab.url)) throw new Error('Abrí una publicación inmobiliaria antes de importarla.');
   const results = await chrome.scripting.executeScript({
     target: { tabId },
     func: globalThis.trvExtractProperty,
@@ -56,7 +56,7 @@ async function sendToTrv(extracted) {
     body: JSON.stringify(extracted),
   });
   const payload = await response.json();
-  if (!response.ok || !payload.success || !payload.token) throw new Error(payload.error || 'TRV no pudo recibir la publicación.');
+  if (!response.ok || !payload.success || !payload.token) throw new Error(payload.error || 'OrdenBroker no pudo recibir la publicación.');
   return payload.token;
 }
 
@@ -88,7 +88,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   };
 
   run().then(sendResponse).catch(async (error) => {
-    const messageText = error instanceof Error ? error.message : 'No se pudo crear la ficha.';
+    const messageText = error instanceof Error ? error.message : 'No se pudo importar la propiedad.';
     sendResponse({ success: false, error: messageText });
     if (message?.type === 'TRV_OPEN_AND_IMPORT') {
       await chrome.tabs.create({ url: `${APP_URL}/#extension-error=${encodeURIComponent(messageText)}` });

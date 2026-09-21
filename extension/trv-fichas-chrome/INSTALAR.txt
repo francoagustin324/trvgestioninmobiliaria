@@ -1,22 +1,28 @@
-EXTENSIÓN PROPCONTROL FICHAS INMOBILIARIAS
+EXTENSIÓN ORDENBROKER
+IMPORTADOR DE PROPIEDADES
 
 INSTALACIÓN EN GOOGLE CHROME
 
-1. Descomprimí el archivo propcontrol-fichas-chrome.zip.
-2. Abrí Chrome y escribí en la barra: chrome://extensions
-3. Activá “Modo de desarrollador” arriba a la derecha.
-4. Tocá “Cargar descomprimida”.
-5. Elegí la carpeta descomprimida de la extensión.
-6. Fijá el ícono de PropControl desde el botón de extensiones de Chrome.
+1. Descomprimí ordenbroker-fichas-chrome.zip.
+2. Abrí Chrome.
+3. Ingresá a chrome://extensions
+4. Activá “Modo de desarrollador”.
+5. Elegí “Cargar descomprimida”.
+6. Seleccioná la carpeta de OrdenBroker.
+7. Fijá el ícono de OrdenBroker desde el menú de extensiones.
 
 USO RECOMENDADO
 
-1. Abrí el link de Zonaprop, MercadoLibre, Tokko, ficha.info u otro portal.
-2. Esperá a que se vean los datos y las fotos.
-3. Tocá la extensión PropControl.
-4. Tocá “Crear ficha con esta página”.
-5. Se abrirá el generador con los datos y las fotos cargados para revisar.
+1. Abrí una publicación inmobiliaria.
+2. Esperá a que carguen los datos y las fotos.
+3. Tocá la extensión OrdenBroker.
+4. Elegí “Importar esta publicación”.
+5. OrdenBroker abrirá la propiedad importada para que puedas revisarla antes de continuar.
 
-También podés pegar un link directamente dentro de la extensión y tocar “Abrir link y crear ficha”.
+También podés pegar directamente el enlace de una publicación.
 
-La extensión solo lee la pestaña cuando vos la activás. No revisa otras páginas ni funciona en segundo plano sin tu acción.
+PRIVACIDAD
+
+La extensión solamente lee la pestaña cuando el usuario ejecuta una importación.
+
+No monitorea la navegación en segundo plano.

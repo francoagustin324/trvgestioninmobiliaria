@@ -7,7 +7,7 @@ function providerLabel(provider: ImportProvider): string {
 
 function fillForm(payload: ImportPropertyResponse): void {
   const form = document.querySelector<HTMLFormElement>('#ficha-form');
-  if (!form) throw new Error('No se pudo abrir el formulario de Fichas TRV.');
+  if (!form) throw new Error('No se pudo abrir el formulario de propiedades de OrdenBroker.');
 
   for (const [key, value] of Object.entries(payload.data)) {
     if (value === undefined || value === null || value === '') continue;
