@@ -2,7 +2,11 @@ import { readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 const sourceDir = 'extension/trv-fichas-chrome';
-const outputPath = 'extension/trv-fichas-chrome.zip';
+const archiveRoot = 'ordenbroker-fichas-chrome';
+const outputPaths = [
+  'extension/ordenbroker-fichas-chrome.zip',
+  'extension/trv-fichas-chrome.zip',
+];
 const files = readdirSync(sourceDir, { withFileTypes: true })
   .filter((entry) => entry.isFile() && !entry.name.endsWith('.zip'))
   .map((entry) => entry.name)
@@ -33,7 +37,7 @@ const centralParts = [];
 let offset = 0;
 
 for (const file of files) {
-  const archiveName = `trv-fichas-chrome/${file}`;
+  const archiveName = `${archiveRoot}/${file}`;
   const name = Buffer.from(archiveName, 'utf8');
   const data = readFileSync(join(sourceDir, file));
   const crc = crc32(data);
@@ -86,5 +90,6 @@ end.writeUInt32LE(centralDirectory.length, 12);
 end.writeUInt32LE(offset, 16);
 end.writeUInt16LE(0, 20);
 
-writeFileSync(outputPath, Buffer.concat([...localParts, centralDirectory, end]));
-console.log(`Extensión TRV generada: ${outputPath}`);
+const archive = Buffer.concat([...localParts, centralDirectory, end]);
+for (const outputPath of outputPaths) writeFileSync(outputPath, archive);
+console.log(`Extensión OrdenBroker generada: ${outputPaths.join(', ')}`);
