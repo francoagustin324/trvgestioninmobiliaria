@@ -607,7 +607,7 @@ function assertTodosMetrics(metrics: Awaited<ReturnType<typeof todosMetrics>>, l
   assert.ok(metrics.display === 'flex' || metrics.display === 'inline-flex', `${label}: display inesperado ${metrics.display}.`);
   assert.equal(metrics.alignItems, 'center', `${label}: align-items debe ser center.`);
   assert.equal(metrics.justifyContent, 'center', `${label}: justify-content debe ser center.`);
-  assert.match(metrics.background, /62\s*,\s*105\s*,\s*84/, `${label}: debe conservar fondo verde sutil.`);
+  assert.match(metrics.background, /41\s*,\s*107\s*,\s*233/, `${label}: debe usar fondo azul OrdenBroker sutil.`);
   assert.doesNotMatch(metrics.background, /110\s*,\s*90\s*,\s*36/, `${label}: no debe volver el fondo marrón anterior.`);
   assert.ok(metrics.buttonTextDelta <= 1.5, `${label}: texto Todos descentrado ${metrics.buttonTextDelta}px.`);
   assert.ok(metrics.buttonCountDelta <= 1.5, `${label}: contador descentrado ${metrics.buttonCountDelta}px.`);
@@ -785,6 +785,7 @@ test('HOTFIX UX POST-B1.4.2 R3 — mobile tap, target y contraste accesible exac
           const todos = page.locator('#crm .mvp-stage-counter[data-stage-quick="Todas"]');
           await todos.hover();
           const hover = await stageContrastMetric(page);
+          assert.match(hover.backgroundColor, /41\s*,\s*107\s*,\s*233/, 'desktop hover: debe usar azul OrdenBroker.');
           assertContrast(hover, 'desktop hover');
           console.log(`R3_CONTRAST desktop ${JSON.stringify({ normal, hover })}`);
         } finally {

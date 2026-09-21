@@ -81,14 +81,15 @@ test('HOTFIX UX F: Todos sigue stage=Todas, default recent y Limpiar restaura PR
   assert.match(reset, /assignee:\s*'Todos'/);
 });
 
-test('HOTFIX UX G: selección activa queda centrada, verde sutil y con foreground claro accesible', () => {
+test('HOTFIX UX G: selección activa queda centrada, azul OrdenBroker sutil y con foreground claro accesible', () => {
   assert.match(css, /#crm\.pc-leads-redesign \.mvp-stage-counter\.active/);
   assert.match(css, /display: inline-flex/);
   assert.match(css, /align-items: center/);
   assert.match(css, /justify-content: center/);
-  assert.match(css, /background: rgba\(62, 105, 84, \.09\)/);
-  assert.match(css, /color: #eaf2ec/);
+  assert.match(css, /background: rgba\(41, 107, 233, \.09\)/);
+  assert.match(css, /color: var\(--ink\)/);
   assert.match(css, /#crm\.pc-leads-redesign \.mvp-stage-counter\.active:hover/);
+  assert.match(css, /background: rgba\(41, 107, 233, \.13\)/);
   assert.match(css, /#crm\.pc-leads-redesign \.mvp-stage-counter\.active b/);
   assert.equal(css.includes('!important'), false);
 });
