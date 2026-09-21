@@ -555,6 +555,11 @@ async function handlePhotoSelection(form: HTMLFormElement, input: HTMLInputEleme
 
 function bindPhotoManager(form: HTMLFormElement, propertyId: number): void {
   const input = form.querySelector<HTMLInputElement>('[data-property-photo-input]');
+  const storage = form.querySelector<HTMLTextAreaElement>('textarea[name="photoUrls"]');
+  storage?.addEventListener('change', () => {
+    const urls = formPhotoUrls(form);
+    updatePhotoManager(form, urls, urls.length ? `${urls.length} fotos importadas. Revisalas antes de guardar.` : 'No se importaron fotos.');
+  });
   form.querySelector<HTMLButtonElement>('[data-property-photo-picker]')?.addEventListener('click', () => input?.click());
   input?.addEventListener('change', () => { void handlePhotoSelection(form, input, propertyId); });
 
@@ -607,6 +612,7 @@ export function renderMvpProperties(container: HTMLElement, options: MvpProperti
       <div><h2>${editing ? `Editar ${escapeHtml(editing.title)}` : 'Nueva propiedad'}</h2><p>Los datos comerciales se muestran en la ficha. Los datos internos nunca se comparten.</p></div>
       <button type="button" class="quiet-button" data-cancel-property-edit>Cerrar</button>
     </div>
+    <div class="mvp-property-form-section mvp-property-wide" data-property-import-status hidden></div>
 
     <div class="mvp-property-form-section"><strong>Información comercial</strong><span>Visible para el cliente</span></div>
     <label>Título comercial<input name="title" value="${textValue(editing, 'title')}" placeholder="Ej. Dúplex de 2 dormitorios en Docta" required></label>
@@ -640,6 +646,7 @@ export function renderMvpProperties(container: HTMLElement, options: MvpProperti
 
     <div class="mvp-property-form-section mvp-property-form-section-internal"><strong>Información interna</strong><span>No aparece en la ficha del cliente</span></div>
     <label>Propietario o colega<input name="owner" value="${textValue(editing, 'owner')}" required></label>
+    <input type="hidden" name="sourceLink" value="${textValue(editing, 'sourceLink')}">
     <label class="mvp-property-wide">Notas internas<textarea name="notes" placeholder="Datos privados, comisión, condiciones o información del colega.">${textValue(editing, 'notes')}</textarea></label>
 
     <div data-property-error class="form-error" hidden></div>
@@ -712,6 +719,7 @@ export function renderMvpProperties(container: HTMLElement, options: MvpProperti
       features: field(values, 'features').trim(),
       description: field(values, 'description').trim(),
       photoUrls: formPhotoUrls(form),
+      sourceLink: field(values, 'sourceLink').trim() || undefined,
       notes: field(values, 'notes').trim(),
       assignedToId: editing?.assignedToId ?? writeContext.member.id,
       createdById: editing?.createdById ?? writeContext.member.id,

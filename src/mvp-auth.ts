@@ -325,6 +325,13 @@ export function isLoginPage(): boolean {
   return location.pathname.replace(/\/+$/g, '') === '/login';
 }
 
+function authenticatedDestination(): string {
+  const hash = location.hash;
+  return hash.startsWith('#extension-import=') || hash.startsWith('#extension-error=')
+    ? '/' + hash
+    : '/';
+}
+
 export function renderPublicAuth(root: HTMLElement): void {
   const register = isRegisterPage();
   root.innerHTML = `<main class="public-auth-shell">
@@ -364,11 +371,11 @@ export function renderPublicAuth(root: HTMLElement): void {
             return;
           }
           await hydrateAfterAuth();
-          location.assign('/');
+          location.assign(authenticatedDestination());
         })
       : signInCloud(formValue(form, 'email'), formValue(form, 'password')).then(async () => {
           await hydrateAfterAuth();
-          location.assign('/');
+          location.assign(authenticatedDestination());
         });
     void task.catch((error) => {
       if (message) {

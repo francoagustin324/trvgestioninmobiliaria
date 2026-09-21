@@ -26,6 +26,9 @@ const extractor = readFileSync(`${extensionDir}/extractor.js`, 'utf8');
 const installer = readFileSync(`${extensionDir}/INSTALAR.txt`, 'utf8');
 const installUi = readFileSync('src/extension-install-ui.ts', 'utf8');
 const importUi = readFileSync('src/extension-import-ui.ts', 'utf8');
+const mvpMain = readFileSync('src/mvp-main.ts', 'utf8');
+const mvpProperties = readFileSync('src/mvp-properties-ui.ts', 'utf8');
+const mvpAuth = readFileSync('src/mvp-auth.ts', 'utf8');
 const builder = readFileSync('scripts/build-extension-zip.mjs', 'utf8');
 
 function pngDimensions(path: string): { width: number; height: number } {
@@ -119,7 +122,17 @@ test('Bloque 4: extensión visible OrdenBroker conserva paquetes y contratos té
   assert.doesNotMatch(installUi, /propcontrol-fichas-chrome\.zip/);
   assert.match(importUi, /OrdenBroker/);
   assert.match(importUi, /CustomEvent\('trv-render'\)/);
+  assert.match(importUi, /consumeExtensionPropertyImport/);
+  assert.match(importUi, /#mvp-property-form/);
   assert.doesNotMatch(importUi, /Fichas TRV/);
+  assert.match(mvpMain, /consumeExtensionPropertyImport/);
+  assert.match(mvpMain, /state\.activeModule = 'propiedades'/);
+  assert.match(mvpMain, /state\.openForms\.property = true/);
+  assert.match(mvpProperties, /name="sourceLink"/);
+  assert.match(mvpProperties, /data-property-import-status/);
+  assert.match(mvpProperties, /fotos importadas/);
+  assert.match(mvpAuth, /#extension-import=/);
+  assert.match(mvpAuth, /authenticatedDestination/);
 
   assert.match(builder, /const sourceDir = 'extension\/trv-fichas-chrome'/);
   assert.match(builder, /const archiveRoot = 'ordenbroker-fichas-chrome'/);

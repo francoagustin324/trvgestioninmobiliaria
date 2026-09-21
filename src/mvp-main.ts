@@ -6,6 +6,7 @@ import { PRODUCT_BRAND } from './branding.js';
 import { renderAgenda } from './agenda-ui.js';
 import { decodePublicFicha, renderPublicMode } from './public-ficha.js';
 import { loadPublicPropertyFicha } from './public-property-share.js';
+import { consumeExtensionPropertyImport } from './extension-import-ui.js';
 import { renderMvpLeads } from './mvp-leads-ui.js';
 import { enhanceLeadForm } from './lead-create-reliability.js';
 import { renderMvpPropertiesWorkspace } from './mvp-properties-workspace.js';
@@ -277,6 +278,9 @@ function bindEvents(): void {
 }
 
 async function bootstrap(): Promise<void> {
+  const extensionToken = location.hash.startsWith('#extension-import=') ? location.hash.slice('#extension-import='.length) : '';
+  const extensionError = location.hash.startsWith('#extension-error=') ? location.hash.slice('#extension-error='.length) : '';
+
   if (isInvitationPage()) {
     await renderInvitationAuth(root);
     return;
@@ -297,19 +301,50 @@ async function bootstrap(): Promise<void> {
     return;
   }
   if (!hasAuthenticatedSession()) {
-    if (!isLoginPage() && !isRegisterPage()) history.replaceState(null, '', '/login');
+    const pendingExtensionHash = extensionToken || extensionError ? location.hash : '';
+    if (!isLoginPage() && !isRegisterPage()) history.replaceState(null, '', '/login' + pendingExtensionHash);
     renderPublicAuth(root);
     return;
   }
-  if (isLoginPage() || isRegisterPage()) history.replaceState(null, '', '/');
+  if (isLoginPage() || isRegisterPage()) {
+    history.replaceState(null, '', extensionToken || extensionError ? '/' + location.hash : '/');
+  }
+
   try {
     await hydrateAuthenticatedSession();
-    renderShell();
-    bindEvents();
-    render();
   } catch (error) {
     invalidateTenantRuntimeScope();
     renderSafeBootstrapFailure(error instanceof Error ? error.message : 'No se pudo cargar la cuenta.');
+    return;
+  }
+
+  if (extensionToken) {
+    state.activeModule = 'propiedades';
+    state.editingPropertyId = null;
+    state.openForms.property = true;
+  }
+
+  renderShell();
+  bindEvents();
+  render();
+
+  if (extensionError) {
+    let message = 'La extensión no pudo leer esta publicación.';
+    try { message = decodeURIComponent(extensionError); } catch { /* mantener mensaje seguro */ }
+    history.replaceState(null, '', location.pathname + location.search);
+    showNotice(message);
+  }
+
+  if (extensionToken) {
+    try {
+      const payload = await consumeExtensionPropertyImport(extensionToken);
+      const provider = ({ mercadolibre: 'MercadoLibre', zonaprop: 'Zonaprop', 'ficha-info': 'ficha.info', tokko: 'Tokko', generic: 'otro portal' })[payload.provider];
+      showNotice('Datos importados desde ' + provider + '. Revisá la propiedad y guardala.');
+      window.requestAnimationFrame(() => document.querySelector('#mvp-property-form')?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
+    } catch (error) {
+      history.replaceState(null, '', location.pathname + location.search);
+      showNotice(error instanceof Error ? error.message : 'No se pudo recibir la propiedad desde la extensión.');
+    }
   }
 }
 
