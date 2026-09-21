@@ -2,7 +2,11 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { extractPropertyFromJson } from '../server/json-extractor.js';
 import { normalizeImportedData } from '../server/normalizer.js';
-import { storeExtensionImport, takeExtensionImport } from '../server/extension-import-store.js';
+import {
+  hasSufficientExtensionPropertyData,
+  storeExtensionImport,
+  takeExtensionImport,
+} from '../server/extension-import-store.js';
 import { isPrivateIp, validateSafeUrl } from '../server/utils/safe-url.js';
 import { cleanText, uniquePhotos } from '../server/utils/sanitize.js';
 
@@ -70,11 +74,26 @@ test('extrae datos y fotos desde respuestas JSON de portales', () => {
 });
 
 test('guarda y consume una importación enviada por la extensión', () => {
-  const token = storeExtensionImport('https://www.zonaprop.com.ar/propiedades/departamento.html', {
+  const rejected = [
+    { title: 'Departamento aislado', photoUrls: [] },
+    { title: 'www.zonaprop.com.ar', photoUrls: [] },
+    { title: 'Just a moment...', description: 'Checking your browser before accessing the site.', photoUrls: [] },
+    { title: 'CAPTCHA', photoUrls: [] },
+    { title: 'Access denied', photoUrls: [] },
+    { title: 'Cloudflare verification', photoUrls: [] },
+  ];
+  for (const candidate of rejected) {
+    assert.equal(hasSufficientExtensionPropertyData(candidate), false, JSON.stringify(candidate));
+    assert.throws(() => storeExtensionImport('https://www.zonaprop.com.ar/propiedades/departamento.html', candidate), /información inmobiliaria suficiente/);
+  }
+  const realProperty = {
     title: 'Departamento en Nueva Córdoba',
     price: 'USD 120000',
+    zone: 'Nueva Córdoba',
     photoUrls: ['https://img.example.com/depto.webp'],
-  });
+  };
+  assert.equal(hasSufficientExtensionPropertyData(realProperty), true);
+  const token = storeExtensionImport('https://www.zonaprop.com.ar/propiedades/departamento.html', realProperty);
   const payload = takeExtensionImport(token);
   assert.equal(payload?.success, true);
   assert.equal(payload?.provider, 'zonaprop');

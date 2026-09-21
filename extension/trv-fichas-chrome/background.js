@@ -29,6 +29,30 @@ async function waitForComplete(tabId, timeoutMs = 45000) {
   });
 }
 
+function suspiciousPropertyTitle(value) {
+  const title = String(value || '').trim();
+  if (!title) return false;
+  if (/^(?:https?:\/\/)?(?:www\.)?[a-z0-9.-]+\.[a-z]{2,}\/?$/i.test(title)) return true;
+  return /(?:captcha|access denied|acceso denegado|cloudflare|verification|verificaci[oó]n|verify you are human|verifica que eres humano|just a moment|checking your browser|challenge)/i.test(title);
+}
+
+function hasSufficientPropertyData(data) {
+  const title = String(data?.title || '').trim();
+  if (title && suspiciousPropertyTitle(title)) return false;
+  const meaningfulTitle = title.length >= 4;
+  const secondarySignals = [
+    data?.price,
+    data?.zone || data?.approxAddress,
+    data?.propertyType,
+    data?.operation,
+    data?.bedrooms || data?.bathrooms,
+    data?.coveredMeters || data?.totalMeters,
+    String(data?.description || '').trim().length >= 20 ? data.description : '',
+    Array.isArray(data?.photoUrls) && data.photoUrls.length ? 'photos' : '',
+  ].filter(Boolean).length;
+  return meaningfulTitle ? secondarySignals >= 1 : secondarySignals >= 2;
+}
+
 async function extractFromTab(tabId) {
   const tab = await chrome.tabs.get(tabId);
   if (!tab.url || !isWebUrl(tab.url)) throw new Error('Abrí una publicación inmobiliaria antes de importarla.');
@@ -39,9 +63,8 @@ async function extractFromTab(tabId) {
   const extracted = results?.[0]?.result;
   if (!extracted?.sourceUrl || !extracted?.data) throw new Error('No se pudieron leer los datos de esta página.');
   const data = extracted.data;
-  const useful = [data.title, data.price, data.zone, data.description, data.bedrooms, data.totalMeters].filter(Boolean).length;
-  if (!data.title && !data.photoUrls?.length && useful < 2) {
-    throw new Error('No encontramos datos suficientes. Esperá a que cargue la publicación completa y volvé a tocar la extensión.');
+  if (!hasSufficientPropertyData(data)) {
+    throw new Error('No encontramos información inmobiliaria suficiente en esta página. Puede ser una pantalla de acceso o verificación. Abrí una publicación inmobiliaria completa y volvé a intentar.');
   }
   return extracted;
 }

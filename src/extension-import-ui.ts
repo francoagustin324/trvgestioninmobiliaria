@@ -25,12 +25,13 @@ function importedNumber(value: string | undefined): number | undefined {
   return Number.isFinite(parsed) ? parsed : undefined;
 }
 
-function importedUsdPrice(value: string | undefined): number | undefined {
+export function importedUsdPrice(value: string | undefined): number | undefined {
   const raw = String(value ?? '').trim();
   if (!raw) return undefined;
-  const explicitUsd = /\bUSD\b|U\$S|US\$/i.test(raw);
-  const explicitArs = /\bARS\b/i.test(raw) || (!explicitUsd && /[$]/.test(raw));
-  return explicitArs ? undefined : importedNumber(raw);
+  const explicitUsd = /(?:^|[^A-Z0-9])(?:USD|U\$S|US\$)(?=\s|[\d.,])/i.test(raw);
+  const conflictingCurrency = /\b(?:ARS|EUR|BRL)\b|(?:^|\s)GS\.?\s/i.test(raw);
+  if (!explicitUsd || conflictingCurrency) return undefined;
+  return importedNumber(raw);
 }
 
 function setImportedValue(form: HTMLFormElement, name: string, value: string | number | undefined): void {
@@ -62,6 +63,7 @@ function fillMvpPropertyForm(payload: ImportPropertyResponse): void {
   setImportedValue(form, 'address', data.zone || data.approxAddress);
   setImportedSelect(form, 'type', data.propertyType);
   setImportedSelect(form, 'operation', data.operation);
+  setImportedSelect(form, 'status', data.status);
 
   const price = importedUsdPrice(data.price);
   setImportedValue(form, 'price', price);

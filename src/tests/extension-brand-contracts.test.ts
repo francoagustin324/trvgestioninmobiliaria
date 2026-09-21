@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { existsSync, readFileSync } from 'node:fs';
 import test from 'node:test';
+import { runExtensionImportHardening } from './extension-import-hardening-helper.js';
 
 const extensionDir = 'extension/trv-fichas-chrome';
 const manifest = JSON.parse(readFileSync(`${extensionDir}/manifest.json`, 'utf8')) as {
@@ -60,7 +61,7 @@ function zipStoreEntries(bytes: Buffer): Map<string, Buffer> {
   return entries;
 }
 
-test('Bloque 4: extensión visible OrdenBroker conserva paquetes y contratos técnicos históricos', () => {
+test('Bloque 4: extensión visible OrdenBroker conserva paquetes y contratos técnicos históricos', { timeout: 180_000 }, async (t) => {
   assert.equal(manifest.manifest_version, 3);
   assert.equal(manifest.version, '1.2.0');
   assert.match(manifest.name, /OrdenBroker/);
@@ -174,4 +175,14 @@ test('Bloque 4: extensión visible OrdenBroker conserva paquetes y contratos té
   assert.ok(zippedManifestBytes, 'El ZIP debe contener manifest.json.');
   const zippedManifest = JSON.parse(zippedManifestBytes.toString('utf8'));
   assert.deepEqual(zippedManifest, manifest);
+  assert.match(importUi, /export function importedUsdPrice/);
+  assert.match(importUi, /setImportedSelect\(form, 'status', data\.status\)/);
+  assert.match(background, /function hasSufficientPropertyData/);
+  assert.match(background, /No encontramos información inmobiliaria suficiente/);
+  assert.match(mvpProperties, /requireCurrentTenantScope\(\)/);
+  assert.match(mvpProperties, /captureTenantRuntimeLease\(scope\)/);
+  assert.match(mvpProperties, /assertTenantRuntimeLeaseCurrent/);
+  assert.match(mvpProperties, /assertTenantCrmScope/);
+  assert.match(mvpProperties, /authenticatedTenantMember/);
+  await runExtensionImportHardening(t);
 });

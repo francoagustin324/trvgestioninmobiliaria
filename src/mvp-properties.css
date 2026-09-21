@@ -58,6 +58,30 @@
 
 .mvp-property-form select,
 .mvp-property-form textarea { min-height:44px; border:1px solid #ccd9e0; border-radius:10px; background:#fff; }
+#propiedades .mvp-property-form select {
+  color:var(--ob-navy);
+  border-color:#ccd9e0;
+  background:#fff;
+  color-scheme:light;
+}
+#propiedades .mvp-property-form select option {
+  color:var(--ob-navy);
+  background:#fff;
+}
+#propiedades .mvp-property-form select:focus,
+#propiedades .mvp-property-form select:focus-visible {
+  color:var(--ob-navy);
+  border-color:var(--ob-primary);
+  outline:3px solid var(--ob-secondary);
+  outline-offset:2px;
+  box-shadow:0 0 0 4px rgba(9,88,237,.18);
+}
+#propiedades .mvp-property-form select:disabled {
+  color:var(--ob-slate);
+  border-color:#cbd5e1;
+  background:#f1f5f9;
+  opacity:1;
+}
 .mvp-property-form textarea { min-height:92px; resize:vertical; }
 .mvp-property-form .mvp-property-wide { grid-column:1 / -1; }
 .mvp-property-form > button,

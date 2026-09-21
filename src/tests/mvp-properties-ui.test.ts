@@ -36,5 +36,9 @@ test('los estilos de propiedades están publicados y contemplan celular', () => 
   assert.ok(css.includes('.mvp-property-form'));
   assert.ok(css.includes('.mvp-property-card'));
   assert.ok(css.includes('@media (max-width:640px)'));
-  assert.ok(html.includes('/src/mvp-properties.css?v='));
+  assert.match(css, /#propiedades \.mvp-property-form select \{[\s\S]*color:var\(--ob-navy\)[\s\S]*background:#fff/);
+  assert.match(css, /#propiedades \.mvp-property-form select option \{[\s\S]*color:var\(--ob-navy\)[\s\S]*background:#fff/);
+  assert.match(css, /#propiedades \.mvp-property-form select:focus-visible \{[\s\S]*outline:3px solid var\(--ob-secondary\)/);
+  assert.match(css, /#propiedades \.mvp-property-form select:disabled \{[\s\S]*color:var\(--ob-slate\)[\s\S]*opacity:1/);
+  assert.ok(html.includes('/src/mvp-properties.css?v=20260921-block4-hardening-1'));
 });
