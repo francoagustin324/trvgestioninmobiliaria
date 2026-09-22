@@ -216,12 +216,12 @@ async function startServer(): Promise<ChildProcess> {
     server.stderr?.setEncoding('utf8');
     server.stdout?.on('data', (chunk: string) => {
       stdout += chunk;
-      if (stdout.includes('PropControl listo en')) resolve();
+      if (stdout.includes('OrdenBroker listo en')) resolve();
     });
     server.stderr?.on('data', (chunk: string) => { stderr += chunk; });
     server.once('error', reject);
     server.once('exit', (code, signal) => {
-      if (!stdout.includes('PropControl listo en')) {
+      if (!stdout.includes('OrdenBroker listo en')) {
         reject(new Error(`Servidor R2 finalizó antes de estar listo: code=${code} signal=${signal} stderr=${stderr}`));
       }
     });

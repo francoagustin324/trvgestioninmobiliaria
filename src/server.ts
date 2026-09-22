@@ -288,5 +288,5 @@ const server = createServer(async (request, response) => {
 });
 
 server.listen(port, host, () => {
-  console.log(`PropControl listo en http://${host}:${port} · nube ${cloudConfigured ? 'configurada' : 'pendiente'} · invitaciones ${invitationsConfigured ? 'configuradas' : 'pendientes'} · calificación inteligente ${leadQualificationAiEnabled ? 'disponible' : 'determinística'}`);
+  console.log(`OrdenBroker listo en http://${host}:${port} · nube ${cloudConfigured ? 'configurada' : 'pendiente'} · invitaciones ${invitationsConfigured ? 'configuradas' : 'pendientes'} · calificación inteligente ${leadQualificationAiEnabled ? 'disponible' : 'determinística'}`);
 });

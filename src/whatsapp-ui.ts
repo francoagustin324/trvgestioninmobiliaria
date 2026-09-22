@@ -141,7 +141,7 @@ function safeSuggestionHtml(client: Client, conversation: WhatsAppConversation, 
     return `<section class="wa-suggestion paused"><div><span class="eyebrow">Seguimiento pausado</span><strong>Esperar</strong></div><textarea id="wa-suggested-reply" readonly>No realizar seguimiento inmediato. Revisar nuevamente cuando exista una actualización sobre la venta previa.</textarea><p>Puede crearse un recordatorio interno a 30 días, sin enviar mensajes automáticos.</p></section>`;
   }
   if (audit.decision === 'Revisión manual') {
-    return `<section class="wa-suggestion needs-human"><div><span class="eyebrow">Respuesta retenida</span><strong>Revisión humana obligatoria</strong></div><textarea id="wa-suggested-reply" readonly>El historial no permite determinar con seguridad si corresponde contactar.</textarea><p>Ante la duda, PropControl no prepara ni registra una respuesta automática.</p></section>`;
+    return `<section class="wa-suggestion needs-human"><div><span class="eyebrow">Respuesta retenida</span><strong>Revisión humana obligatoria</strong></div><textarea id="wa-suggested-reply" readonly>El historial no permite determinar con seguridad si corresponde contactar.</textarea><p>Ante la duda, OrdenBroker no prepara ni registra una respuesta automática.</p></section>`;
   }
 
   const suggestion = suggestAssistantReply(client, conversation);
@@ -188,7 +188,7 @@ export function renderWhatsApp(container: HTMLElement): void {
   const audit = currentAudit(conversation, client);
   const lastInbound = lastInboundMessage(conversation);
   container.innerHTML = `<div class="panel-heading"><div><span class="eyebrow">WhatsApp + IA</span><h2>Bandeja supervisada</h2></div><span class="wa-status pending">Coexistencia pendiente</span></div>
-    <div class="wa-preflight"><b>Modo auditoría segura</b><p>PropControl clasifica el historial, pausa casos dudosos y no envía nada hasta conectar Meta.</p></div>
+    <div class="wa-preflight"><b>Modo auditoría segura</b><p>OrdenBroker clasifica el historial, pausa casos dudosos y no envía nada hasta conectar Meta.</p></div>
     ${auditOverviewHtml()}
     <div class="wa-layout">
       <aside class="wa-sidebar"><div class="wa-sidebar-head"><b>Conversaciones</b><span>${state.crm.conversations.length}</span></div>${conversationListHtml(conversation.id)}${createConversationFormHtml()}</aside>
