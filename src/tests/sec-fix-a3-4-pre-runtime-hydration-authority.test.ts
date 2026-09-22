@@ -284,14 +284,32 @@ test('A3.4 R4: bootstrap hydration failure path contains no product render/bind 
   const source = readFileSync('src/mvp-main.ts', 'utf8');
   const hydrate = source.indexOf('await hydrateAuthenticatedSession();');
   assert.ok(hydrate >= 0);
-  const catchStart = source.indexOf('} catch (error) {', hydrate);
+
+  const catchMarker = '} catch (error) {';
+  const catchStart = source.indexOf(catchMarker, hydrate);
   assert.ok(catchStart >= 0);
-  const catchEnd = source.indexOf('\n  }\n}\n\nvoid bootstrap();', catchStart);
-  assert.ok(catchEnd > catchStart);
-  const failurePath = source.slice(catchStart, catchEnd);
-  assert.equal(/\brenderShell\(\)|\bbindEvents\(\)|\brender\(\)/.test(failurePath), false);
+  const openingBrace = catchStart + catchMarker.lastIndexOf('{');
+
+  let depth = 0;
+  let catchEnd = -1;
+  for (let index = openingBrace; index < source.length; index += 1) {
+    const char = source[index];
+    if (char === '{') depth += 1;
+    if (char === '}') {
+      depth -= 1;
+      if (depth === 0) {
+        catchEnd = index;
+        break;
+      }
+    }
+  }
+  assert.ok(catchEnd > openingBrace);
+
+  const failurePath = source.slice(openingBrace + 1, catchEnd);
   assert.match(failurePath, /invalidateTenantRuntimeScope\(\)/);
   assert.match(failurePath, /renderSafeBootstrapFailure\(/);
+  assert.match(failurePath, /\breturn;/);
+  assert.equal(/\brenderShell\(\)|\bbindEvents\(\)|\brender\(\)/.test(failurePath), false);
 });
 
 test('A3.4 R5: A->B->A stale catalog cannot reach activateStorageForTenant', async () => {
