@@ -26,6 +26,6 @@ test('la entrada principal usa A2.2 y la compatibilidad conserva su versión his
   const html = readFileSync('index.html', 'utf8');
   const mainVersion = html.match(/\/dist\/mvp-main\.js\?v=([^"']+)/)?.[1];
   const compatibilityVersion = html.match(/\/dist\/cloud-compat-bootstrap\.js\?v=([^"']+)/)?.[1];
-  assert.equal(mainVersion, '20260918-trv-daily-use-1');
+  assert.equal(mainVersion, '20260922-block4-extension-import-1');
   assert.equal(compatibilityVersion, '20260802-1');
 });

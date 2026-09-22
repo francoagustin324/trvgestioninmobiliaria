@@ -60,5 +60,5 @@ test('Propiedades conserva el contrato A2.2 sin tutorial permanente y mantiene e
   assert.ok(css.includes('@media (max-width:640px)'));
   assert.ok(html.includes('/src/mvp-properties.css?v=20260921-block4-hardening-1'));
   assert.ok(html.includes('/src/mobile-properties-polish.css?v=20260906-p1-4-a2-2-1'));
-  assert.ok(html.includes('/dist/mvp-main.js?v=20260918-trv-daily-use-1'));
+  assert.ok(html.includes('/dist/mvp-main.js?v=20260922-block4-extension-import-1'));
 });

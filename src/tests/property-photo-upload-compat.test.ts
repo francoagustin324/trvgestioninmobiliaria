@@ -69,6 +69,6 @@ test('los bloqueos RLS se consideran estructurales y no se repiten', () => {
 });
 
 test('la versión nueva fuerza la actualización en celular', () => {
-  assert.ok(html.includes('/dist/mvp-main.js?v=20260918-trv-daily-use-1'));
+  assert.ok(html.includes('/dist/mvp-main.js?v=20260922-block4-extension-import-1'));
   assert.ok(html.includes('/dist/invitation-link-ux.js?v=20260802-1'));
 });
