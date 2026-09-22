@@ -67,7 +67,11 @@ export async function runExtensionImportHardening(_t:TestContext):Promise<void>{
       try{await up.goto(base+'/#extension-import=auth-token',{waitUntil:'domcontentloaded'});await up.waitForSelector('#public-auth-form',{state:'visible',timeout:20000});const u=new URL(up.url());assert.equal(u.pathname,'/login');assert.equal(u.hash,'#extension-import=auth-token');}finally{await up.close();await unauth.close();}
 
       const auth=await createAuthedContext(browser,{width:390,height:844});await installImportRoute(auth);const ap=await auth.newPage();
-      try{await ap.goto(base+'/login#extension-import=auth-token',{waitUntil:'domcontentloaded'});await ap.waitForFunction(()=>document.querySelector('[data-property-import-status] strong')?.textContent?.includes('Propiedad importada'));let u=new URL(ap.url());assert.equal(u.pathname,'/');assert.equal(u.hash,'');await ap.goto(base+'/#extension-import=error-token',{waitUntil:'domcontentloaded'});await ap.waitForFunction(()=>location.hash==='');u=new URL(ap.url());assert.equal(u.hash,'');}finally{await ap.close();await auth.close();}
+      try{
+        await ap.goto(base+'/login#extension-import=auth-token',{waitUntil:'domcontentloaded'});await ap.waitForFunction(()=>document.querySelector('[data-property-import-status] strong')?.textContent?.includes('Propiedad importada'));const u=new URL(ap.url());assert.equal(u.pathname,'/');assert.equal(u.hash,'');
+        const errorPage=await auth.newPage();
+        try{await errorPage.goto(base+'/#extension-import=error-token',{waitUntil:'domcontentloaded'});await errorPage.waitForFunction(()=>location.hash==='');const errorUrl=new URL(errorPage.url());assert.equal(errorUrl.hash,'');const notice=errorPage.locator('#notice');await notice.waitFor({state:'visible',timeout:20000});assert.match((await notice.textContent())||'',/Importación sintética rechazada\./);assert.equal((await errorPage.locator('#propiedades').getAttribute('class'))?.includes('active'),true);assert.equal(await errorPage.locator('#mvp-property-form:not(.collapsed)').count(),1);}finally{await errorPage.close();}
+      }finally{await ap.close();await auth.close();}
     }finally{await browser.close();}
   }finally{await stopServer(server);}
 }
