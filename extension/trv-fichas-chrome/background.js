@@ -1,6 +1,4 @@
-importScripts('extractor.js');
-
-const APP_URL = 'https://trvgestioninmobiliaria-production.up.railway.app';
+importScripts('staging-destination.js', 'extractor.js');
 
 function isWebUrl(value) {
   try {
@@ -9,6 +7,16 @@ function isWebUrl(value) {
   } catch {
     return false;
   }
+}
+
+async function configuredStagingOrigin() {
+  const destination = globalThis.ordenbrokerStagingDestination;
+  const saved = await chrome.storage.local.get(destination.storageKey);
+  const origin = destination.parse(saved[destination.storageKey]);
+  if (!origin) throw new Error('Configurá primero la URL HTTPS de OrdenBroker staging en la extensión.');
+  const granted = await chrome.permissions.contains({ origins: [origin + '/*'] });
+  if (!granted) throw new Error('Autorizá el destino OrdenBroker staging desde la extensión antes de importar.');
+  return origin;
 }
 
 async function waitForComplete(tabId, timeoutMs = 45000) {
@@ -69,9 +77,10 @@ async function extractFromTab(tabId) {
   return extracted;
 }
 
-async function sendToTrv(extracted) {
-  const response = await fetch(`${APP_URL}/api/extension-import`, {
+async function sendToStaging(extracted, appUrl) {
+  const response = await fetch(`${appUrl}/api/extension-import`, {
     method: 'POST',
+    redirect: 'error',
     headers: {
       'Content-Type': 'application/json',
       'X-TRV-Extension': '1',
@@ -84,13 +93,15 @@ async function sendToTrv(extracted) {
 }
 
 async function createFichaFromTab(tabId) {
+  const appUrl = await configuredStagingOrigin();
   const extracted = await extractFromTab(tabId);
-  const token = await sendToTrv(extracted);
-  await chrome.tabs.create({ url: `${APP_URL}/#extension-import=${encodeURIComponent(token)}` });
+  const token = await sendToStaging(extracted, appUrl);
+  await chrome.tabs.create({ url: `${appUrl}/#extension-import=${encodeURIComponent(token)}` });
   return { success: true };
 }
 
 async function openAndCreate(url) {
+  await configuredStagingOrigin();
   if (!isWebUrl(url)) throw new Error('Pegá un enlace válido que empiece con http:// o https://.');
   const tab = await chrome.tabs.create({ url, active: true });
   if (!tab.id) throw new Error('Chrome no pudo abrir la publicación.');
@@ -114,7 +125,8 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     const messageText = error instanceof Error ? error.message : 'No se pudo importar la propiedad.';
     sendResponse({ success: false, error: messageText });
     if (message?.type === 'TRV_OPEN_AND_IMPORT') {
-      await chrome.tabs.create({ url: `${APP_URL}/#extension-error=${encodeURIComponent(messageText)}` });
+      const appUrl = await configuredStagingOrigin().catch(() => null);
+      if (appUrl) await chrome.tabs.create({ url: `${appUrl}/#extension-error=${encodeURIComponent(messageText)}` });
     }
   });
   return true;

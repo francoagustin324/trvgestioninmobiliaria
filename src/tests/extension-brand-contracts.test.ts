@@ -23,6 +23,7 @@ const popupHtml = readFileSync(`${extensionDir}/popup.html`, 'utf8');
 const popupCss = readFileSync(`${extensionDir}/popup.css`, 'utf8');
 const popupJs = readFileSync(`${extensionDir}/popup.js`, 'utf8');
 const background = readFileSync(`${extensionDir}/background.js`, 'utf8');
+const stagingDestination = readFileSync(`${extensionDir}/staging-destination.js`, 'utf8');
 const extractor = readFileSync(`${extensionDir}/extractor.js`, 'utf8');
 const installer = readFileSync(`${extensionDir}/INSTALAR.txt`, 'utf8');
 const installUi = readFileSync('src/extension-install-ui.ts', 'utf8');
@@ -63,20 +64,22 @@ function zipStoreEntries(bytes: Buffer): Map<string, Buffer> {
 
 test('Bloque 4: extensión visible OrdenBroker conserva paquetes y contratos técnicos históricos', { timeout: 180_000 }, async (t) => {
   assert.equal(manifest.manifest_version, 3);
-  assert.equal(manifest.version, '1.2.0');
+  assert.equal(manifest.version, '1.3.0');
   assert.match(manifest.name, /OrdenBroker/);
   assert.doesNotMatch(manifest.description, /PropControl/i);
   assert.match(manifest.description, /OrdenBroker/);
   assert.match(manifest.action.default_title, /OrdenBroker/);
   assert.equal(manifest.action.default_popup, 'popup.html');
-  assert.deepEqual(manifest.permissions, ['activeTab', 'scripting', 'tabs']);
+  assert.deepEqual(manifest.permissions, ['activeTab', 'scripting', 'tabs', 'storage']);
   assert.deepEqual(manifest.optional_host_permissions, ['http://*/*', 'https://*/*']);
-  assert.deepEqual(manifest.host_permissions, ['https://trvgestioninmobiliaria-production.up.railway.app/*']);
+  assert.deepEqual(manifest.host_permissions, []);
   assert.deepEqual(manifest.icons, { '16': 'icon16.png', '48': 'icon48.png', '128': 'icon128.png' });
   assert.deepEqual(manifest.action.default_icon, { '16': 'icon16.png', '48': 'icon48.png', '128': 'icon128.png' });
 
   assert.match(popupHtml, /OrdenBroker/);
-  assert.match(popupHtml, /Importador inmobiliario/);
+  assert.match(popupHtml, /Tu inmobiliaria, bajo control/);
+  assert.match(popupHtml, /staging-destination\.js/);
+  assert.match(popupHtml, /save-staging-origin/);
   assert.match(popupHtml, /IMPORTACIÓN RÁPIDA/);
   assert.match(popupHtml, /Importar esta publicación/);
   assert.match(popupHtml, /Abrir enlace e importar/);
@@ -98,7 +101,12 @@ test('Bloque 4: extensión visible OrdenBroker conserva paquetes y contratos té
   assert.doesNotMatch(popupJs, /Ficha enviada a TRV/);
   assert.doesNotMatch(popupJs, /PropControl/i);
 
-  assert.match(background, /const APP_URL = 'https:\/\/trvgestioninmobiliaria-production\.up\.railway\.app'/);
+  assert.match(background, /importScripts\('staging-destination\.js', 'extractor\.js'\)/);
+  assert.match(background, /configuredStagingOrigin\(\)/);
+  assert.match(background, /redirect:\s*'error'/);
+  assert.doesNotMatch(background, /trvgestioninmobiliaria-production\.up\.railway\.app/);
+  assert.doesNotMatch(background, /const APP_URL\s*=/);
+  assert.match(stagingDestination, /ordenbrokerStagingDestination/);
   assert.match(background, /'X-TRV-Extension': '1'/);
   assert.match(background, /TRV_IMPORT_CURRENT/);
   assert.match(background, /TRV_OPEN_AND_IMPORT/);
@@ -114,6 +122,7 @@ test('Bloque 4: extensión visible OrdenBroker conserva paquetes y contratos té
   assert.match(installer, /ordenbroker-fichas-chrome\.zip/);
   assert.match(installer, /chrome:\/\/extensions/);
   assert.match(installer, /La extensión solamente lee la pestaña cuando el usuario ejecuta una importación\./);
+  assert.match(installer, /CONFIGURACIÓN OBLIGATORIA DE PRUEBA/);
   assert.match(installer, /No monitorea la navegación en segundo plano\./);
   assert.doesNotMatch(installer, /PropControl/i);
   assert.doesNotMatch(installer, /\bTRV\b/);
@@ -168,6 +177,7 @@ test('Bloque 4: extensión visible OrdenBroker conserva paquetes y contratos té
     'popup.css',
     'popup.html',
     'popup.js',
+    'staging-destination.js',
   ];
   for (const name of expectedEntries) assert.equal(entries.has(`${root}${name}`), true, `Falta ${root}${name} en ZIP oficial.`);
 
@@ -175,6 +185,8 @@ test('Bloque 4: extensión visible OrdenBroker conserva paquetes y contratos té
   assert.ok(zippedManifestBytes, 'El ZIP debe contener manifest.json.');
   const zippedManifest = JSON.parse(zippedManifestBytes.toString('utf8'));
   assert.deepEqual(zippedManifest, manifest);
+  assert.equal(entries.get(`${root}background.js`)?.toString('utf8'), background);
+  assert.equal(entries.get(`${root}staging-destination.js`)?.toString('utf8'), stagingDestination);
   assert.match(importUi, /export function importedUsdPrice/);
   assert.match(importUi, /setImportedSelect\(form, 'status', data\.status\)/);
   assert.match(background, /function hasSufficientPropertyData/);

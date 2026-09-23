@@ -11,6 +11,14 @@ INSTALACIÓN EN GOOGLE CHROME
 6. Seleccioná la carpeta de OrdenBroker.
 7. Fijá el ícono de OrdenBroker desde el menú de extensiones.
 
+CONFIGURACIÓN OBLIGATORIA DE PRUEBA
+
+1. Abrí la extensión OrdenBroker.
+2. En “Destino OrdenBroker staging”, pegá la URL HTTPS real del entorno de prueba.
+3. Tocá “Guardar destino de prueba” y autorizá ese dominio en Chrome.
+4. Si el destino falta, no es staging o perdió permisos, la extensión bloqueará la importación.
+5. Nunca uses una URL de producción: la extensión de prueba no admite dominios de TRV.
+
 USO RECOMENDADO
 
 1. Abrí una publicación inmobiliaria.

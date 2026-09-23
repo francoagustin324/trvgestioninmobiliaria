@@ -12,9 +12,18 @@
         <img class="brand-mark" src="icon48.png" alt="" aria-hidden="true">
         <div>
           <strong>OrdenBroker</strong>
-          <span>Importador inmobiliario</span>
+          <span>Tu inmobiliaria, bajo control</span>
         </div>
       </header>
+
+      <section class="link-card">
+        <label for="staging-origin">Destino OrdenBroker staging</label>
+        <input id="staging-origin" type="url" placeholder="URL HTTPS de OrdenBroker staging" autocomplete="off" spellcheck="false">
+        <button id="save-staging-origin" type="button" class="secondary">Guardar destino de prueba</button>
+        <small>Solo se admiten dominios HTTPS de OrdenBroker staging. Sin destino autorizado no se envían datos.</small>
+      </section>
+
+      <div class="separator"><span>importar publicación</span></div>
 
       <section class="primary-card">
         <span class="kicker">IMPORTACIÓN RÁPIDA</span>
@@ -34,6 +43,7 @@
 
       <div id="status" role="status" aria-live="polite"></div>
     </main>
+    <script src="staging-destination.js"></script>
     <script src="popup.js"></script>
   </body>
 </html>
