@@ -339,7 +339,7 @@ export function renderPublicAuth(root: HTMLElement): void {
     <div class="public-auth-overlay" aria-hidden="true"></div>
     <section class="public-auth-brand">
       <div class="public-auth-lockup"><img src="${PRODUCT_BRAND.logo}" alt=""><strong>${PRODUCT_BRAND.name}</strong></div>
-      <div><span>CRM inmobiliario</span><h1>Ordená cada consulta y cada seguimiento.</h1><p>Una herramienta simple para responder mejor, no perder oportunidades y trabajar en equipo.</p></div>
+      <div><span>${PRODUCT_BRAND.tagline}</span><h1>Ordená cada consulta y cada seguimiento.</h1><p>Una herramienta simple para responder mejor, no perder oportunidades y trabajar en equipo.</p></div>
     </section>
     <section class="public-auth-panel">
       <div class="public-auth-card">

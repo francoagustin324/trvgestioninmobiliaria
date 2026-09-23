@@ -122,6 +122,10 @@ test('Product Brand Authority mantiene OrdenBroker separado de la identidad tena
   assert.ok(source.includes('class="app-brand"'));
   assert.ok(source.includes('class="app-brand-logo"'));
   assert.ok(source.includes('class="app-brand-copy"'));
+  assert.ok(source.includes('<small>${PRODUCT_BRAND.tagline}</small>'));
+  assert.ok(auth.includes('<span>${PRODUCT_BRAND.tagline}</span>'));
+  assert.ok(invitation.includes('<span>${PRODUCT_BRAND.tagline}</span>'));
+  assert.doesNotMatch([source, auth, invitation].join('\n'), /CRM inmobiliario/);
   assert.ok(source.includes('document.title = `Ficha de propiedad | ${PRODUCT_BRAND.name}`;'));
 
   assert.ok(auth.includes("import { PRODUCT_BRAND } from './branding.js'"));

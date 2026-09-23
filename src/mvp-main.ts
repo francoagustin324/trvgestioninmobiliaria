@@ -76,7 +76,7 @@ function renderShell(): void {
       <button type="button" class="mobile-nav-trigger" data-mobile-nav-toggle aria-controls="app-sidebar" aria-expanded="false"><span>Menú</span></button>
       <div class="app-brand" aria-label="${PRODUCT_BRAND.name}">
         <img class="app-brand-logo" src="${PRODUCT_BRAND.logo}" alt="">
-        <span class="app-brand-copy"><strong>${PRODUCT_BRAND.name}</strong><small>CRM inmobiliario</small></span>
+        <span class="app-brand-copy"><strong>${PRODUCT_BRAND.name}</strong><small>${PRODUCT_BRAND.tagline}</small></span>
       </div>
       <div class="app-topbar-spacer" aria-hidden="true"></div>
       <div id="cloud-account"></div>
