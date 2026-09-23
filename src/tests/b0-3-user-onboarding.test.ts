@@ -65,9 +65,67 @@ test('el registro autónomo solo envía el nombre de su propia inmobiliaria', ()
   const signup = cloudApi.slice(signupStart, signupEnd);
   assert.ok(signupStart >= 0 && signupEnd > signupStart);
   assert.match(signup, /\/auth\/v1\/signup/i);
-  assert.match(signup, /data:\s*\{\s*company_name:/i);
+  assert.match(signup, /data:\s*\{\s*organization_name:/i);
   assert.doesNotMatch(signup, /organization_id|organization_role|\brole\b|\bstatus\b/i);
   assert.doesNotMatch(signup, /service_role|SUPABASE_SECRET_KEY/i);
+});
+
+test('registro envía organization_name y conserva el nombre elegido en el contrato de alta', async () => {
+  const handlerBaseline = readFileSync(
+    'supabase/baselines/sec_fix_a2_5/20260910150000_pre_a2_1_core.sql',
+    'utf8',
+  );
+  assert.match(handlerBaseline, /new\.raw_user_meta_data\s*->>\s*'organization_name'/i);
+
+  const previousFetch = globalThis.fetch;
+  const previousStorage = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');
+  const storageValues = new Map<string, string>();
+  Object.defineProperty(globalThis, 'localStorage', {
+    configurable: true,
+    value: {
+      getItem: (key: string) => storageValues.get(key) ?? null,
+      setItem: (key: string, value: string) => { storageValues.set(key, value); },
+      removeItem: (key: string) => { storageValues.delete(key); },
+    },
+  });
+
+  let submitted: unknown;
+  try {
+    globalThis.fetch = async (input, init) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+      if (url === '/api/cloud-config') {
+        return new Response(JSON.stringify({
+          configured: true,
+          url: 'https://supabase.synthetic.test',
+          publishableKey: 'sb_publishable_synthetic',
+        }), { status: 200 });
+      }
+      if (url === 'https://supabase.synthetic.test/auth/v1/signup') {
+        assert.equal(init?.method, 'POST');
+        submitted = JSON.parse(String(init?.body || '{}')) as unknown;
+        return new Response('{}', { status: 200 });
+      }
+      throw new Error(`Solicitud inesperada en registro sintético: ${url}`);
+    };
+
+    const { signUpCloud } = await import('../cloud-api.js');
+    const result = await signUpCloud(
+      '  dueña@example.test  ',
+      'clave-sintetica-1234',
+      '  Inmobiliaria Sintética Córdoba  ',
+    );
+
+    assert.equal(result.session, null);
+    assert.deepEqual(submitted, {
+      email: 'dueña@example.test',
+      password: 'clave-sintetica-1234',
+      data: { organization_name: 'Inmobiliaria Sintética Córdoba' },
+    });
+  } finally {
+    globalThis.fetch = previousFetch;
+    if (previousStorage) Object.defineProperty(globalThis, 'localStorage', previousStorage);
+    else Reflect.deleteProperty(globalThis, 'localStorage');
+  }
 });
 
 test('la ruta de Equipo usa organización explícita validada y rol en el servidor', () => {
@@ -217,7 +275,7 @@ test('registro, invitación y reintentos funcionan en PostgreSQL 17 aislado', { 
       set search_path = ''
       as $fixture$
       declare
-        company_name text;
+        organization_name text;
       begin
         if exists (
           select 1
@@ -227,13 +285,13 @@ test('registro, invitación y reintentos funcionan en PostgreSQL 17 aislado', { 
           return new;
         end if;
 
-        company_name := nullif(pg_catalog.btrim(new.raw_user_meta_data ->> 'company_name'), '');
-        if company_name is null then
+        organization_name := nullif(pg_catalog.btrim(new.raw_user_meta_data ->> 'organization_name'), '');
+        if organization_name is null then
           return new;
         end if;
 
         insert into public.organizations (id, name)
-        values (new.id, company_name)
+        values (new.id, organization_name)
         on conflict (id) do nothing;
 
         insert into public.organization_members (organization_id, user_id, role, status)
@@ -344,7 +402,7 @@ test('registro, invitación y reintentos funcionan en PostgreSQL 17 aislado', { 
         '${autonomousUser}',
         'owner@example.test',
         null,
-        '{"company_name":"Autónoma"}'::jsonb
+        '{"organization_name":"Inmobiliaria Sintética Córdoba"}'::jsonb
       );
 
       insert into auth.users (id, email, invited_at, raw_user_meta_data)
@@ -352,7 +410,7 @@ test('registro, invitación y reintentos funcionan en PostgreSQL 17 aislado', { 
         '00000000-0000-0000-0000-000000000099',
         'owner@example.test',
         null,
-        '{"company_name":"Duplicada"}'::jsonb
+        '{"organization_name":"Duplicada"}'::jsonb
       )
       on conflict (email) do nothing;
 
@@ -393,6 +451,9 @@ test('registro, invitación y reintentos funcionan en PostgreSQL 17 aislado', { 
     const result = parseLastJson(runPsql(`
       select pg_catalog.jsonb_build_object(
         'organization_count', (select pg_catalog.count(*) from public.organizations),
+        'autonomous_organization_name', (
+          select name from public.organizations where id = '${autonomousUser}'
+        ),
         'autonomous_owner_count', (
           select pg_catalog.count(*)
           from public.organization_members
@@ -429,6 +490,7 @@ test('registro, invitación y reintentos funcionan en PostgreSQL 17 aislado', { 
 
     assert.equal(result.organization_count, 2);
     assert.equal(result.autonomous_owner_count, 1);
+    assert.equal(result.autonomous_organization_name, 'Inmobiliaria Sintética Córdoba');
     assert.equal(result.invited_own_organization_count, 0);
     assert.equal(result.invited_membership_count, 1);
     assert.equal(result.invited_organization, inviterOrg);

@@ -215,7 +215,7 @@ export async function signUpCloud(email: string, password: string, companyName: 
     body: JSON.stringify({
       email: email.trim().toLowerCase(),
       password,
-      data: { company_name: companyName.trim() || 'Mi inmobiliaria' },
+      data: { organization_name: companyName.trim() || 'Mi inmobiliaria' },
     }),
   })) as AuthResponse;
   const session = toSession(payload);
