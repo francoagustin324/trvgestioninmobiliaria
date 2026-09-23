@@ -17,7 +17,7 @@ CONFIGURACIÓN OBLIGATORIA DE PRUEBA
 2. En “Destino OrdenBroker staging”, pegá la URL HTTPS real del entorno de prueba.
 3. Tocá “Guardar destino de prueba” y autorizá ese dominio en Chrome.
 4. Si el destino falta, no es staging o perdió permisos, la extensión bloqueará la importación.
-5. Nunca uses una URL de producción: la extensión de prueba no admite dominios de TRV.
+5. Nunca uses una URL de producción: la extensión de prueba no admite destinos de producción.
 
 USO RECOMENDADO
 
