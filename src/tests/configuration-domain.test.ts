@@ -174,10 +174,23 @@ test('agencyName funciona como fallback legacy', () => {
   assert.deepEqual(resolved, { name: 'Inmobiliaria legacy', source: 'settings_legacy' });
 });
 
-test('overdueDays queda marcado como legacy sin efecto actual', () => {
+test('preferencias legacy sin efecto se ocultan sin borrar su valor y siguen visibles los datos efectivos del tenant', () => {
   assert.equal(classifyLegacySettingField('overdueDays').ownership, 'legacy_only');
   assert.equal(legacySettingFieldEffect('overdueDays'), 'no_effect');
   assert.equal(isLegacySettingFieldCurrentlyConsumed('overdueDays'), false);
+
+  const ui = readFileSync('src/settings-ui.ts', 'utf8');
+  for (const field of ['profileEmail', 'profilePhone', 'currency', 'defaultZone', 'shareText', 'overdueDays']) {
+    assert.equal(ui.includes(`name="${field}"`), false, field);
+  }
+  for (const field of ['profileName', 'agencyName', 'agencyWhatsapp', 'agencyLogoPath', 'agencyLegal']) {
+    assert.equal(ui.includes(`name="${field}"`), true, field);
+  }
+  assert.ok(ui.includes('...currentSettings(),'));
+  assert.ok(ui.includes('...state.crm.organization,'));
+  assert.ok(ui.includes('data-avatar-input'));
+  assert.ok(ui.includes('canAccessSettings()'));
+  assert.ok(ui.includes("saveData('Configuración actualizada')"));
 });
 
 test('las resoluciones no mutan los objetos recibidos', () => {

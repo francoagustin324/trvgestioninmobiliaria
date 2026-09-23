@@ -106,6 +106,13 @@ test('Product Brand Authority mantiene OrdenBroker separado de la identidad tena
   assert.equal(publicFicha.includes('PRODUCT_BRAND'), false);
   assert.ok(settings.includes('commercial.logoPath'));
   assert.ok(settings.includes('initialsOf(name)'));
+  for (const field of ['profileName', 'agencyName', 'agencyWhatsapp', 'agencyLogoPath', 'agencyLegal']) {
+    assert.ok(settings.includes(`name="${field}"`), field);
+  }
+  assert.ok(settings.includes('data-avatar-input'));
+  assert.ok(settings.includes('data-settings-recovery-action'));
+  assert.ok(settings.includes('canAccessSettings()'));
+  assert.ok(settings.includes('...state.crm.organization,'));
   assert.equal(existsSync('src/assets/trv-logo.svg'), true);
 
   const activeProductBrandSources = [html, source, auth, invitation, readFileSync('src/branding.ts', 'utf8')].join('\n');
@@ -266,8 +273,8 @@ test('conversaciones usa una bandeja limpia y no la pantalla avanzada anterior',
   const source = readFileSync('src/mvp-conversations-ui.ts', 'utf8');
   assert.ok(main.includes('renderMvpConversations'));
   assert.equal(main.includes('renderWhatsApp'), false);
-  for (const marker of ['Bandeja', 'Plantillas de Meta', 'Abrir WhatsApp', 'Interés', 'Presupuesto']) assert.ok(source.includes(marker));
-  for (const hidden of ['Auditoría masiva', 'Simular mensaje entrante', 'IA supervisada']) assert.equal(source.includes(hidden), false);
+  for (const marker of ['<h1>Conversaciones</h1>', 'historiales guardados', 'Abrir WhatsApp', 'Interés', 'Presupuesto', 'visibleConversations()', 'visibleClients()', 'data-conversation-search']) assert.ok(source.includes(marker), marker);
+  for (const hidden of ['Auditoría masiva', 'Simular mensaje entrante', 'IA supervisada', 'mvp-compose-disabled', '<textarea', '>Enviar</button>', 'data-conversations-tab', 'renderMessageTemplates', 'Plantillas de Meta']) assert.equal(source.includes(hidden), false, hidden);
 });
 
 test('plantillas Meta incluyen organización profesional y no simulan envío', () => {

@@ -15,10 +15,10 @@ test('carga el pulido móvil de Conversaciones después de las capas existentes'
   assert.ok(html.indexOf('mobile-conversations-polish.css') > html.indexOf('mobile-properties-polish.css'));
 });
 
-test('conserva título, pestañas, búsqueda, contador y lista de conversaciones', () => {
+test('conserva título, búsqueda, contador y lista sin pestañas de plantillas simuladas', () => {
   assert.ok(ui.includes('<h1>Conversaciones</h1>'));
-  assert.ok(ui.includes('data-conversations-tab="bandeja"'));
-  assert.ok(ui.includes('data-conversations-tab="plantillas"'));
+  assert.equal(ui.includes('data-conversations-tab='), false);
+  assert.equal(ui.includes('renderMessageTemplates'), false);
   assert.ok(ui.includes('class="mvp-conversation-list"'));
   assert.ok(ui.includes('class="mvp-conversation-count"'));
   assert.ok(ui.includes('data-conversation-search'));
@@ -59,14 +59,13 @@ test('conserva historial, orden actual, contenido y hora de los mensajes', () =>
   assert.ok(css.includes('overflow-x: hidden'));
 });
 
-test('conserva el compositor deshabilitado y no agrega lógica de envío', () => {
-  assert.ok(ui.includes('class="mvp-compose-disabled"'));
-  assert.ok(ui.includes('<textarea rows="2"'));
-  assert.ok(ui.includes('disabled></textarea>'));
-  assert.ok(ui.includes('<button type="button" disabled>Enviar</button>'));
-  assert.equal(ui.includes("mvp-compose-disabled')?.addEventListener"), false);
+test('informa lectura de historial y no muestra compositor ni envío imposible', () => {
+  assert.ok(ui.includes('historiales guardados'));
+  assert.ok(ui.includes('las respuestas enviadas allí no se incorporan automáticamente'));
+  assert.equal(ui.includes('mvp-compose-disabled'), false);
+  assert.equal(ui.includes('<textarea'), false);
+  assert.equal(ui.includes('>Enviar</button>'), false);
   assert.equal(ui.includes('sendMessage('), false);
-  assert.ok(css.includes('min-height: 48px'));
   assert.ok(css.includes('min-height: 44px'));
 });
 
@@ -82,7 +81,8 @@ test('mantiene alcance móvil, dos columnas en 720 px y una columna en teléfono
 });
 
 test('respeta la navegación inferior y safe area sin modificar la capa global', () => {
-  assert.ok(css.includes('scroll-margin-bottom: calc(var(--pc-mobile-nav-height, 76px) + 24px + env(safe-area-inset-bottom))'));
+  assert.ok(css.includes('#whatsapp .mvp-conversations-layout'));
+  assert.ok(css.includes('margin-bottom: 12px;'));
   assert.ok(shellCss.includes('--pc-mobile-nav-clearance: calc(var(--pc-mobile-nav-height) + var(--pc-mobile-nav-edge) + 56px + env(safe-area-inset-bottom))'));
   assert.ok(shellCss.includes('padding: 12px 14px var(--pc-mobile-nav-clearance)'));
   assert.ok(shellCss.includes('grid-template-columns: repeat(5, minmax(0, 1fr))'));

@@ -29,10 +29,10 @@ test('Leads mantiene búsqueda comercial con placeholder móvil legible', () => 
 
 test('las descripciones de los demás módulos permanecen disponibles', () => {
   assert.ok(properties.includes('Gestioná tu inventario y encontrá clientes compatibles.'));
-  assert.ok(conversations.includes('Atendé consultas y revisá las plantillas aprobadas para iniciar contactos.'));
+  assert.ok(conversations.includes('Consultá los historiales guardados. Para responder, abrí WhatsApp; las respuestas enviadas allí no se incorporan automáticamente al historial de OrdenBroker.'));
   assert.ok(agenda.includes('Resolvé primero los vencidos, completá cada gestión y reprogramá el próximo contacto sin perder información.'));
   assert.ok(users.includes('Administrá accesos y roles de la inmobiliaria.'));
-  assert.ok(settings.includes('Tu perfil, los datos de la inmobiliaria y las preferencias de la app.'));
+  assert.ok(settings.includes('Actualizá tu nombre de perfil y los datos de contacto que aparecen en las fichas públicas.'));
 });
 
 test('el cambio conserva búsqueda, matching, visibilidad y guardado canónico de Leads', () => {

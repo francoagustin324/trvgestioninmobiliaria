@@ -1,13 +1,10 @@
 import { requestLeadQualification } from './lead-qualification-ui.js';
-import { PRODUCT_BRAND } from './branding.js';
 import type { ConversationMessage, WhatsAppConversation } from './models.js';
 import { visibleClients, visibleConversations } from './team-access.js';
 import { state } from './store.js';
 import { escapeHtml } from './utils.js';
-import { renderMessageTemplates } from './message-templates-ui.js';
 import { appIcons } from './icons.js';
 
-let activeTab: 'bandeja' | 'plantillas' = 'bandeja';
 let conversationSearch = '';
 
 const timeFormatter = new Intl.DateTimeFormat('es-AR', {
@@ -82,10 +79,6 @@ function conversationDetail(conversation: WhatsAppConversation | null): string {
       <div><span>Presupuesto</span><strong>${escapeHtml(client?.budget || 'Sin información')}</strong></div>
     </div>
     <div class="mvp-message-history">${conversation.messages.map(messageBubble).join('') || '<p class="empty-state">Todavía no hay mensajes.</p>'}</div>
-    <div class="mvp-compose-disabled">
-      <textarea rows="2" placeholder="La respuesta desde ${PRODUCT_BRAND.name} se habilitará al conectar Meta oficialmente." disabled></textarea>
-      <button type="button" disabled>Enviar</button>
-    </div>
   </section>`;
 }
 
@@ -124,20 +117,10 @@ function renderInbox(container: HTMLElement): void {
 }
 
 export function renderMvpConversations(container: HTMLElement): void {
-  container.innerHTML = `<div class="mvp-page-heading"><div><h1>Conversaciones</h1><p>Atendé consultas y revisá las plantillas aprobadas para iniciar contactos.</p></div></div>
-    <div class="mvp-conversation-tabs" role="tablist">
-      <button type="button" class="${activeTab === 'bandeja' ? 'active' : ''}" data-conversations-tab="bandeja">Bandeja</button>
-      <button type="button" class="${activeTab === 'plantillas' ? 'active' : ''}" data-conversations-tab="plantillas">Plantillas de Meta</button>
-    </div>
+  container.innerHTML = `<div class="mvp-page-heading"><div><h1>Conversaciones</h1><p>Consultá los historiales guardados. Para responder, abrí WhatsApp; las respuestas enviadas allí no se incorporan automáticamente al historial de OrdenBroker.</p></div></div>
     <div data-conversations-content></div>`;
 
   const content = container.querySelector<HTMLElement>('[data-conversations-content]');
   if (!content) return;
-  if (activeTab === 'plantillas') renderMessageTemplates(content);
-  else renderInbox(content);
-
-  container.querySelectorAll<HTMLButtonElement>('[data-conversations-tab]').forEach((button) => button.addEventListener('click', () => {
-    activeTab = button.dataset.conversationsTab === 'plantillas' ? 'plantillas' : 'bandeja';
-    renderMvpConversations(container);
-  }));
+  renderInbox(content);
 }

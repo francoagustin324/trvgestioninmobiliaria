@@ -82,9 +82,6 @@ export function renderSettings(container: HTMLElement): void {
 
   const s = currentSettings();
   const commercial = currentCommercialIdentity();
-  const currencyOptions = ['USD', 'ARS']
-    .map((code) => `<option value="${code}"${s.currency === code ? ' selected' : ''}>${code}</option>`)
-    .join('');
   const recoverySection = canUseRecovery()
     ? `<section class="mvp-settings-group" data-settings-security-recovery>
       <header><h2>Seguridad y recuperación</h2><p>Herramientas de contingencia para proteger la información de la inmobiliaria.</p></header>
@@ -98,10 +95,10 @@ export function renderSettings(container: HTMLElement): void {
     </section>`
     : '';
 
-  container.innerHTML = `<div class="mvp-page-heading"><div><h1>Configuración</h1><p>Tu perfil, los datos de la inmobiliaria y las preferencias de la app.</p></div></div>
+  container.innerHTML = `<div class="mvp-page-heading"><div><h1>Configuración</h1><p>Actualizá tu nombre de perfil y los datos de contacto que aparecen en las fichas públicas.</p></div></div>
   <form id="mvp-settings-form" class="mvp-settings">
     <section class="mvp-settings-group">
-      <header><h2>Perfil</h2><p>Cómo te ve el equipo dentro de OrdenBroker.</p></header>
+      <header><h2>Perfil</h2><p>El nombre se muestra en tu menú de cuenta. El correo de acceso no se modifica acá.</p></header>
       <div class="mvp-settings-avatar">
         <div class="mvp-avatar-preview" id="mvp-avatar-preview">${avatarInner()}</div>
         <div class="mvp-avatar-actions">
@@ -112,8 +109,6 @@ export function renderSettings(container: HTMLElement): void {
       </div>
       <div class="mvp-settings-grid">
         <label>Nombre<input name="profileName" value="${escapeHtml(s.profileName)}" placeholder="Tu nombre"></label>
-        <label>Email<input name="profileEmail" type="email" value="${escapeHtml(s.profileEmail)}" placeholder="tucorreo@ejemplo.com"></label>
-        <label>Teléfono<input name="profilePhone" value="${escapeHtml(s.profilePhone)}" inputmode="tel" placeholder="Ej. 351 555-0000"></label>
       </div>
     </section>
 
@@ -125,16 +120,6 @@ export function renderSettings(container: HTMLElement): void {
         <label>Logo público (URL o ruta)<input name="agencyLogoPath" value="${escapeHtml(commercial.logoPath)}" placeholder="Ej. https://.../logo.png"></label>
       </div>
       <label>Texto legal al pie de la ficha<textarea name="agencyLegal" rows="2" placeholder="Aclaración legal que aparece en cada ficha.">${escapeHtml(commercial.legalText)}</textarea></label>
-    </section>
-
-    <section class="mvp-settings-group">
-      <header><h2>Preferencias</h2><p>Ajustes que cambian cómo trabaja la app.</p></header>
-      <div class="mvp-settings-grid">
-        <label>Moneda por defecto<select name="currency">${currencyOptions}</select></label>
-        <label>Zona por defecto<input name="defaultZone" value="${escapeHtml(s.defaultZone)}" placeholder="Ej. Nueva Córdoba"></label>
-        <label>Días para marcar un seguimiento como vencido<input name="overdueDays" type="number" min="1" max="60" value="${escapeHtml(String(s.overdueDays))}"></label>
-      </div>
-      <label>Mensaje al compartir una ficha por WhatsApp<textarea name="shareText" rows="2" placeholder="Hola, te comparto esta propiedad que puede interesarte:">${escapeHtml(s.shareText)}</textarea><small>Se usa como texto sugerido cuando compartís una ficha.</small></label>
     </section>
 
     ${recoverySection}
@@ -179,7 +164,6 @@ export function renderSettings(container: HTMLElement): void {
       return;
     }
     const values = formValues(form);
-    const parsedDays = Number.parseInt(values.overdueDays ?? '', 10);
     const agencyName = currentCommercialIdentity().name;
     const agencyWhatsapp = (values.agencyWhatsapp ?? '').trim();
     const agencyLogoPath = (values.agencyLogoPath ?? '').trim();
@@ -194,16 +178,10 @@ export function renderSettings(container: HTMLElement): void {
     state.crm.settings = {
       ...currentSettings(),
       profileName: (values.profileName ?? '').trim(),
-      profileEmail: (values.profileEmail ?? '').trim(),
-      profilePhone: (values.profilePhone ?? '').trim(),
       avatar: currentAvatar(),
       agencyName,
       agencyWhatsapp,
       agencyLegal,
-      currency: values.currency === 'ARS' ? 'ARS' : 'USD',
-      defaultZone: (values.defaultZone ?? '').trim(),
-      shareText: (values.shareText ?? '').trim(),
-      overdueDays: Number.isFinite(parsedDays) && parsedDays > 0 ? Math.min(parsedDays, 60) : defaultSettings.overdueDays,
     };
     avatarDraft = null;
     saveData('Configuración actualizada');
