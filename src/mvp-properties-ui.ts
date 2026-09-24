@@ -699,7 +699,7 @@ export function renderMvpProperties(container: HTMLElement, options: MvpProperti
         <div class="mvp-property-photo-heading">
           <div><strong id="property-photo-title">Fotos de la ficha</strong><span data-property-photo-count>${editingPhotos.length} de ${MAX_PROPERTY_PHOTOS} fotos</span></div>
           <button type="button" data-property-photo-picker>Agregar fotos</button>
-          <input type="file" accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp" multiple hidden data-property-photo-input>
+          <input type="file" accept="image/*" multiple hidden data-property-photo-input>
         </div>
         <textarea name="photoUrls" hidden>${escapeHtml(editingPhotos.join('\n'))}</textarea>
         <div class="mvp-property-photo-grid" data-property-photo-preview>${photoPreviewHtml(editingPhotos)}</div>

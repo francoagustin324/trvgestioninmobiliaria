@@ -213,7 +213,7 @@ test('Bloque 2B crea rápido en móvil, valida esenciales, entra a matching y pe
     await form.locator('input[name="price"]').fill('120000');
     await form.locator('[type="submit"]').click();
     await page.locator('#propiedades #mvp-property-form.collapsed').waitFor({ state: 'attached' });
-    await page.getByText('Dúplex rápido Docta', { exact: true }).waitFor({ state: 'visible' });
+    await page.locator('#propiedades .mvp-property-title h3').getByText('Dúplex rápido Docta', { exact: true }).waitFor({ state: 'visible' });
 
     let crm = await crmState(page);
     const created = crm.properties.find((property) => property.title === 'Dúplex rápido Docta');
