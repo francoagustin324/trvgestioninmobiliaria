@@ -709,6 +709,7 @@ export function renderMvpProperties(container: HTMLElement, options: MvpProperti
 
     <details class="mvp-property-progressive mvp-property-wide mvp-property-progressive-internal"${editing ? ' open' : ''}>
       <summary>Información interna</summary>
+      <p class="mvp-property-internal-note">No aparece en la ficha del cliente.</p>
       <div class="mvp-property-progressive-grid">
         <label>Propietario o colega<input name="owner" value="${textValue(editing, 'owner')}" placeholder="Opcional"></label>
         <label>Estado interno<select name="status">${statuses.map((item) => option(item, item, editing?.status ?? 'Activa')).join('')}</select><small>“Activa” permite trabajarla en matching; no publica la propiedad.</small></label>
