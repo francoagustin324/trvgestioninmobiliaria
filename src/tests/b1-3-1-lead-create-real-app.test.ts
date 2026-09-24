@@ -500,8 +500,8 @@ test('Bloque 2A alta progresiva permite email-only, valida contacto, evita dupli
     const commercial = form.locator('details.lead-form-commercial');
 
     assert.equal(await commercial.getAttribute('open'), null);
-    assert.equal(await form.locator('input[name="interest"]').isVisible(), false);
-    assert.equal(await form.locator('select[name="temperature"]').isVisible(), false);
+    assert.equal(await commercial.locator('input[name="interest"]').count(), 1);
+    assert.equal(await commercial.locator('select[name="temperature"]').count(), 1);
     assert.ok(await commercial.locator('summary').evaluate((node) => node.getBoundingClientRect().height >= 44));
 
     await form.locator('input[name="name"]').fill('SIN CONTACTO');

@@ -102,7 +102,7 @@ function showDuplicate(
   clearDuplicateActions(form);
   form.dataset[DUPLICATE] = String(duplicate.id);
   const visible = visibleClients().some((client) => client.id === duplicate.id);
-  const contactLabel = kind === 'phone' ? 'WhatsApp/teléfono' : 'email';
+  const contactLabel = kind === 'phone' ? 'WhatsApp' : 'email';
   const message = visible
     ? `Este ${contactLabel} ya pertenece al lead ${duplicate.name}.`
     : `Ya existe un lead con este ${contactLabel} en esta inmobiliaria.`;
@@ -558,7 +558,7 @@ export function submitLeadForm(event: SubmitEvent): void {
     return;
   }
   if (phone && !isPlausiblePhone(phone)) {
-    showError(form, 'Ingresá un WhatsApp/teléfono válido con código de área, o dejalo vacío y usá email.', phoneInput);
+    showError(form, 'Ingresá un WhatsApp válido con código de área.', phoneInput);
     return;
   }
 

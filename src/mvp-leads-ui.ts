@@ -309,7 +309,7 @@ function leadForm(editing: Client | null): string {
   return `<form id="mvp-lead-form" class="mvp-lead-form ${state.openForms.client ? '' : 'collapsed'}">
     <div class="mvp-form-heading"><h2>${editing ? `Editar ${escapeHtml(editing.name)}` : 'Nuevo lead'}</h2><button type="button" class="quiet-button" data-cancel-client-edit>Cerrar</button></div>
     <label>Nombre<input name="name" value="${value(editing, 'name')}" required autocomplete="name"></label>
-    <label>WhatsApp / teléfono<input name="phone" value="${value(editing, 'phone')}" inputmode="tel" autocomplete="tel" placeholder="Ej. 351 511 0069"></label>
+    <label>Número de WhatsApp o teléfono<input name="phone" value="${value(editing, 'phone')}" inputmode="tel" autocomplete="tel" placeholder="Ej. 351 511 0069"></label>
     <label>Email<input name="email" type="email" value="${value(editing, 'email')}" autocomplete="email" placeholder="cliente@correo.com"></label>
     <small class="lead-contact-hint">Ingresá al menos WhatsApp/teléfono o email.</small>
     <details class="lead-form-commercial"${editing ? ' open' : ''}>
