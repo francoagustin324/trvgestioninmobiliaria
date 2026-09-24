@@ -18,7 +18,7 @@ interface ClientMergeBackup {
 }
 
 const CLIENT_MERGE_BACKUP_KEY = 'propcontrol-client-merge-backup-v1';
-const temperatureOrder: Record<Temperature, number> = { Frío: 0, Tibio: 1, Caliente: 2 };
+const temperatureOrder: Record<Temperature, number> = { 'Sin definir': 0, Frío: 1, Tibio: 2, Caliente: 3 };
 
 const fillableKeys: Array<keyof Client> = [
   'email',
@@ -78,7 +78,7 @@ function earliestDate(values: Array<string | undefined>): string | undefined {
 }
 
 function hottestTemperature(clients: Client[]): Temperature {
-  return [...clients].sort((a, b) => temperatureOrder[b.temperature] - temperatureOrder[a.temperature])[0]?.temperature ?? 'Tibio';
+  return [...clients].sort((a, b) => temperatureOrder[b.temperature] - temperatureOrder[a.temperature])[0]?.temperature ?? 'Sin definir';
 }
 
 function auditEntry(client: Client): string {

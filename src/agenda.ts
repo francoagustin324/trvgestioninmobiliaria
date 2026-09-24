@@ -37,7 +37,7 @@ export interface AgendaRelatedOption {
 
 const urgencyOrder: Record<AgendaUrgency, number> = { overdue: 0, today: 1, upcoming: 2 };
 const reminderPriority: Record<string, number> = { Alta: 0, Media: 1, Baja: 2 };
-const clientPriority: Record<Client['temperature'], number> = { Caliente: 0, Tibio: 1, Frío: 2 };
+const clientPriority: Record<Client['temperature'], number> = { Caliente: 0, Tibio: 1, Frío: 2, 'Sin definir': 3 };
 
 function normalizedSearch(value: string): string {
   return value

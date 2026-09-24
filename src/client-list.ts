@@ -12,7 +12,7 @@ export interface ClientListFilters {
   sort: ClientSort;
 }
 
-const temperatureOrder: Record<Temperature, number> = { Caliente: 0, Tibio: 1, Frío: 2 };
+const temperatureOrder: Record<Temperature, number> = { Caliente: 0, Tibio: 1, Frío: 2, 'Sin definir': 3 };
 const terminalPipelines = new Set(['Cerrado', 'Perdido']);
 
 export function defaultClientListFilters(): ClientListFilters {
