@@ -1,7 +1,7 @@
 import { AGENCY_BRAND } from './branding.js';
 
 export const STORAGE_KEY = 'trv-crm-basico';
-export type Temperature = 'Caliente' | 'Tibio' | 'Frío';
+export type Temperature = 'Sin definir' | 'Caliente' | 'Tibio' | 'Frío';
 export type CommercialStage = 'Nuevo' | 'Contactado' | 'Calificado' | 'Visita coordinada' | 'Negociación' | 'Reservado' | 'Ganado' | 'Perdido';
 export type CommercialOutcome = 'won' | 'lost';
 export type DealCurrency = 'USD' | 'ARS';

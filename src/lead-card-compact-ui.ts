@@ -34,6 +34,7 @@ function text(value: string | undefined, fallback = 'No confirmado'): string {
 }
 
 function temperatureIcon(temperature: string): string {
+  if (temperature === 'Sin definir') return '';
   const slug = temperature === 'Caliente' ? 'cliente-caliente'
     : temperature === 'Frío' ? 'cliente-frio'
       : 'cliente-tibio';
@@ -48,9 +49,12 @@ function creditDetail(client: Client): string {
 
 function quickActions(client: Client): string {
   const digits = client.phone.replace(/\D/g, '');
+  const phoneActions = digits
+    ? `<a class="mvp-contact-btn wa" href="https://wa.me/${digits}" target="_blank" rel="noopener noreferrer" title="WhatsApp · ${escapeHtml(formatPhone(client.phone))}" aria-label="Enviar WhatsApp">${appIcons.whatsapp}</a>
+    <a class="mvp-contact-btn call" href="tel:+${digits}" title="Llamar · ${escapeHtml(formatPhone(client.phone))}" aria-label="Llamar">${appIcons.phone}</a>`
+    : '';
   return `<div class="mvp-lead-quick-actions" aria-label="Acciones rápidas de ${escapeHtml(client.name)}">
-    <a class="mvp-contact-btn wa" href="https://wa.me/${digits}" target="_blank" rel="noopener noreferrer" title="WhatsApp · ${escapeHtml(formatPhone(client.phone))}" aria-label="Enviar WhatsApp">${appIcons.whatsapp}</a>
-    <a class="mvp-contact-btn call" href="tel:+${digits}" title="Llamar · ${escapeHtml(formatPhone(client.phone))}" aria-label="Llamar">${appIcons.phone}</a>
+    ${phoneActions}
     ${client.email ? `<a class="mvp-contact-btn mail" href="mailto:${escapeHtml(client.email)}" title="${escapeHtml(client.email)}" aria-label="Enviar email">${appIcons.mail}</a>` : ''}
     <button type="button" class="secondary mvp-auto-qualify-button" data-auto-qualify-client="${client.id}">Calificar automáticamente</button>
   </div>`;

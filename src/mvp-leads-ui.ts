@@ -305,18 +305,25 @@ function stageOptions(current: CommercialStage): string {
 
 function leadForm(editing: Client | null): string {
   const stage = editing ? commercialStage(editing) : 'Nuevo';
+  const temperature = editing?.temperature ?? 'Sin definir';
   return `<form id="mvp-lead-form" class="mvp-lead-form ${state.openForms.client ? '' : 'collapsed'}">
     <div class="mvp-form-heading"><h2>${editing ? `Editar ${escapeHtml(editing.name)}` : 'Nuevo lead'}</h2><button type="button" class="quiet-button" data-cancel-client-edit>Cerrar</button></div>
-    <label>Nombre<input name="name" value="${value(editing, 'name')}" required></label>
-    <label>Número de WhatsApp<input name="phone" value="${value(editing, 'phone')}" inputmode="tel" required></label>
-    <label>Email<input name="email" type="email" value="${value(editing, 'email')}" placeholder="cliente@correo.com"></label>
-    <label>Temperatura<select name="temperature">${(['Caliente', 'Tibio', 'Frío'] as Temperature[]).map((temperature) => `<option value="${temperature}"${selected(editing?.temperature ?? 'Tibio', temperature)}>${temperature}</option>`).join('')}</select></label>
-    <label class="lead-form-wide">Lugar o propiedad de interés<input name="interest" value="${value(editing, 'interest')}" placeholder="Ej. Dúplex en Manantiales" required></label>
-    <label>Etapa comercial<select name="pipeline" data-commercial-stage>${stageOptions(stage)}</select></label>
-    <label>Próxima acción<input name="nextAction" value="${value(editing, 'nextAction')}" placeholder="Ej. Confirmar entrega y financiación"></label>
-    <label>Fecha del próximo seguimiento<input name="nextFollowUp" type="date" value="${value(editing, 'nextFollowUp')}"></label>
-    ${renderEssentialQualificationFields(editing)}
-    ${renderSecondaryQualificationFields(editing)}
+    <label>Nombre<input name="name" value="${value(editing, 'name')}" required autocomplete="name"></label>
+    <label>WhatsApp / teléfono<input name="phone" value="${value(editing, 'phone')}" inputmode="tel" autocomplete="tel" placeholder="Ej. 351 511 0069"></label>
+    <label>Email<input name="email" type="email" value="${value(editing, 'email')}" autocomplete="email" placeholder="cliente@correo.com"></label>
+    <small class="lead-contact-hint">Ingresá al menos WhatsApp/teléfono o email.</small>
+    <details class="lead-form-commercial"${editing ? ' open' : ''}>
+      <summary>Completar datos comerciales</summary>
+      <div class="lead-form-more-grid">
+        <label class="lead-form-wide">Lugar o propiedad de interés<input name="interest" value="${value(editing, 'interest')}" placeholder="Ej. Dúplex en Docta"></label>
+        <label>Temperatura<select name="temperature">${(['Sin definir', 'Caliente', 'Tibio', 'Frío'] as Temperature[]).map((item) => `<option value="${item}"${selected(temperature, item)}>${item}</option>`).join('')}</select></label>
+        <label>Etapa comercial<select name="pipeline" data-commercial-stage>${stageOptions(stage)}</select></label>
+        <label>Próxima acción<input name="nextAction" value="${value(editing, 'nextAction')}" placeholder="Ej. Confirmar visita"></label>
+        <label>Fecha del próximo seguimiento<input name="nextFollowUp" type="date" value="${value(editing, 'nextFollowUp')}"></label>
+      </div>
+      ${renderEssentialQualificationFields(editing)}
+      ${renderSecondaryQualificationFields(editing)}
+    </details>
     <div data-lead-error class="form-error" hidden></div>
     <button type="submit">${editing ? 'Guardar cambios' : 'Guardar lead'}</button>
   </form>`;
@@ -356,7 +363,7 @@ function filterPanel(): string {
       <summary><span>Más filtros</span><small>${escapeHtml(active.length ? active.join(' · ') : 'Etapa, temperatura, responsable y orden')}</small></summary>
       <div class="mvp-lead-filter-grid">
         <label><span>Etapa</span><select id="mvp-lead-stage-filter"><option value="Todas">Todas</option>${COMMERCIAL_STAGES.map((stage) => `<option value="${stage}"${selected(filters.stage, stage)}>${stage}</option>`).join('')}</select></label>
-        <label><span>Temperatura</span><select id="mvp-lead-temperature-filter"><option value="Todas">Todas</option>${(['Caliente', 'Tibio', 'Frío'] as Temperature[]).map((temperature) => `<option value="${temperature}"${selected(filters.temperature, temperature)}>${temperature}</option>`).join('')}</select></label>
+        <label><span>Temperatura</span><select id="mvp-lead-temperature-filter"><option value="Todas">Todas</option>${(['Sin definir', 'Caliente', 'Tibio', 'Frío'] as Temperature[]).map((temperature) => `<option value="${temperature}"${selected(filters.temperature, temperature)}>${temperature}</option>`).join('')}</select></label>
         ${assignees.length > 1 ? `<label><span>Responsable</span><select id="mvp-lead-assignee-filter"><option value="Todos">Todos</option>${assignees.map((member) => `<option value="${member.id}"${selected(filters.assignee, member.id)}>${escapeHtml(member.name)}</option>`).join('')}</select></label>` : ''}
         <label><span>Ordenar por</span><select id="mvp-lead-order"><option value="priority"${selected(filters.order, 'priority')}>Prioridad</option><option value="follow-up"${selected(filters.order, 'follow-up')}>Seguimiento</option><option value="recent"${selected(filters.order, 'recent')}>Más recientes</option><option value="name"${selected(filters.order, 'name')}>Nombre</option></select></label>
       </div>

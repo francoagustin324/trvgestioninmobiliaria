@@ -208,3 +208,43 @@
     order: 2;
   }
 }
+
+
+/* Bloque 2A — alta rápida y progresiva de leads. */
+.b131-lead-form-fields > .lead-contact-hint {
+  grid-column: 1 / -1;
+  margin: -4px 0 2px;
+  color: rgba(235, 244, 241, 0.76);
+  font-size: 0.78rem;
+}
+
+.lead-form-commercial {
+  border: 1px solid rgba(215, 180, 104, 0.24);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.lead-form-commercial > summary {
+  min-height: 46px;
+  display: flex;
+  align-items: center;
+  padding: 10px 12px;
+  cursor: pointer;
+  font-weight: 800;
+  touch-action: manipulation;
+}
+
+.lead-form-commercial > .lead-form-more-grid,
+.lead-form-commercial > .lead-form-more {
+  margin: 0 12px 12px;
+}
+
+@media (max-width: 720px) {
+  .b131-lead-form-fields {
+    align-content: start;
+  }
+
+  .lead-form-commercial > summary {
+    min-height: 48px;
+  }
+}

@@ -5,7 +5,7 @@ import { Client, Temperature } from './models.js';
 import { normalizePhone } from './phone-normalizer.js';
 import { newSyncRecordMetadata } from './sync-identity.js';
 
-const temperatures: Temperature[] = ['Caliente', 'Tibio', 'Frío'];
+const temperatures: Temperature[] = ['Sin definir', 'Caliente', 'Tibio', 'Frío'];
 const essentialKeys: Array<keyof Client> = [
   'budget',
   'currency',
@@ -33,7 +33,7 @@ function valueOrCurrent(values: Record<string, string>, key: keyof Client, curre
 }
 
 function temperatureValue(value: string): Temperature {
-  return temperatures.includes(value as Temperature) ? value as Temperature : 'Tibio';
+  return temperatures.includes(value as Temperature) ? value as Temperature : 'Sin definir';
 }
 
 function optional(value: string): string | undefined {
@@ -60,7 +60,7 @@ export function clientFromFormValues(id: number, values: Record<string, string>,
     email: optional(valueOrCurrent(values, 'email', current ?? undefined)),
     interest: clean(values, 'interest'),
     status: valueOrCurrent(values, 'status', current ?? undefined) || 'Lead',
-    temperature: temperatureValue(valueOrCurrent(values, 'temperature', current ?? undefined) || 'Tibio'),
+    temperature: temperatureValue(valueOrCurrent(values, 'temperature', current ?? undefined) || 'Sin definir'),
     pipeline: normalizeCommercialStage(valueOrCurrent(values, 'pipeline', current ?? undefined) || 'Nuevo'),
     lastContact: optional(valueOrCurrent(values, 'lastContact', current ?? undefined)),
     nextFollowUp: optional(valueOrCurrent(values, 'nextFollowUp', current ?? undefined)),

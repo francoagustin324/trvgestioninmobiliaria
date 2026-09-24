@@ -205,7 +205,11 @@ async function fillRequired(
   await form.locator('input[name="name"]').fill(values.name);
   await form.locator('input[name="phone"]').fill(values.phone);
   if (values.email !== undefined) await form.locator('input[name="email"]').fill(values.email);
-  await form.locator('input[name="interest"]').fill(values.interest);
+  if (values.interest) {
+    const commercial = form.locator('details.lead-form-commercial');
+    if (await commercial.getAttribute('open') === null) await commercial.locator('summary').click();
+    await form.locator('input[name="interest"]').fill(values.interest);
+  }
 }
 
 async function crmFromStorage(page: Page, role: TeamRole): Promise<CrmData> {
@@ -255,15 +259,17 @@ test('B1.3.1 guarda el lead exacto en móvil y crea un único seguimiento en Age
     const page = await context.newPage();
     await load(page, url);
     const form = await openLeadForm(page);
-    const fieldsGeometry = await form.locator('.b131-lead-form-fields').evaluate((node) => ({
-      clientHeight: node.clientHeight,
-      scrollHeight: node.scrollHeight,
-      overflowY: getComputedStyle(node).overflowY,
-    }));
-    assert.ok(fieldsGeometry.scrollHeight > fieldsGeometry.clientHeight, JSON.stringify(fieldsGeometry));
-    assert.equal(fieldsGeometry.overflowY, 'auto');
-    await page.screenshot({ path: `${artifactDir}/01-mobile-formulario-completo.png`, fullPage: true });
+    const commercial = form.locator('details.lead-form-commercial');
+    assert.equal(await commercial.getAttribute('open'), null, 'Alta nueva inicia con datos comerciales cerrados.');
+    assert.equal(await form.locator('input[name="name"]').isVisible(), true);
+    assert.equal(await form.locator('input[name="phone"]').isVisible(), true);
+    assert.equal(await form.locator('input[name="email"]').isVisible(), true);
+    const compactGeometry = await saveButtonGeometry(page);
+    assert.ok(compactGeometry.height >= 44, JSON.stringify(compactGeometry));
+    assert.ok(compactGeometry.top >= 0 && compactGeometry.bottom <= compactGeometry.navigationTop - 8, JSON.stringify(compactGeometry));
+    await page.screenshot({ path: `${artifactDir}/01-mobile-formulario-rapido.png`, fullPage: true });
 
+    await commercial.locator('summary').click();
     await form.locator('select[name="knowsArea"]').focus();
     await page.setViewportSize({ width: 390, height: 430 });
     await page.waitForTimeout(200);
@@ -331,7 +337,7 @@ test('B1.3.1 guarda el lead exacto en móvil y crea un único seguimiento en Age
   }
 });
 
-test('B1.3.1 conserva datos ante error y completa Agenda automática sin abrir WhatsApp', { timeout: 150_000 }, async () => {
+test('Bloque 2A conserva datos ante error y no inventa Agenda automática', { timeout: 150_000 }, async () => {
   const executablePath = chromeExecutable();
   assert.ok(executablePath, 'Chrome/Chromium no disponible para B1.3.1.');
   const port = 62200 + Math.floor(Math.random() * 120);
@@ -364,15 +370,14 @@ test('B1.3.1 conserva datos ante error y completa Agenda automática sin abrir W
     await form.locator('input[name="nextFollowUp"]').fill('');
     await form.locator('[data-save-lead]').click();
     await page.locator('#mvp-lead-results').getByText('AUTO WHATSAPP B1.3.1', { exact: true }).waitFor({ state: 'visible' });
-    const today = await localToday(page);
     const saved = await crmFromStorage(page, 'Dueño');
     assert.equal(saved.clients.length, 1);
-    assert.equal(saved.clients[0]?.nextAction, 'Contactar por WhatsApp');
-    assert.equal(saved.clients[0]?.nextFollowUp, today);
+    assert.equal(saved.clients[0]?.nextAction, undefined);
+    assert.equal(saved.clients[0]?.nextFollowUp, undefined);
     assert.equal(saved.activityLog.filter((entry) => entry.action === 'Contacto por WhatsApp').length, 0);
     assert.equal(await page.evaluate(() => (window as unknown as B131Window).__b131OpenedUrl), undefined);
     await page.locator('[data-module="agenda"]:visible').first().click();
-    assert.equal(await page.locator('#agenda.active .agenda-card').filter({ hasText: 'AUTO WHATSAPP B1.3.1' }).count(), 1);
+    assert.equal(await page.locator('#agenda.active .agenda-card').filter({ hasText: 'AUTO WHATSAPP B1.3.1' }).count(), 0);
   } finally {
     await context.close();
     await browser.close();
@@ -441,7 +446,7 @@ test('B1.3.1 valida Dueño Administrador Corredor escritorio y referencias obsol
         assert.equal(saved.clients.length, 1, `${role} crea un único lead.`);
         assert.equal(saved.clients[0]?.assignedToId, identity(role).memberId);
         assert.equal(saved.clients[0]?.createdById, identity(role).memberId);
-        assert.equal(saved.clients[0]?.nextAction, 'Contactar por WhatsApp');
+        assert.equal(saved.clients[0]?.nextAction, undefined);
         await assertNoHorizontalScroll(page);
       } finally {
         await context.close();
@@ -474,6 +479,109 @@ test('B1.3.1 valida Dueño Administrador Corredor escritorio y referencias obsol
       await staleContext.close();
     }
   } finally {
+    await browser.close();
+    await stopServer(server);
+  }
+});
+
+
+test('Bloque 2A alta progresiva permite email-only, valida contacto, evita duplicados y completa luego', { timeout: 180_000 }, async () => {
+  const executablePath = chromeExecutable();
+  assert.ok(executablePath, 'Chrome/Chromium no disponible para Bloque 2A.');
+  const port = 62800 + Math.floor(Math.random() * 120);
+  const url = `http://127.0.0.1:${port}`;
+  const server = await startServer(port);
+  const browser = await chromium.launch({ executablePath, headless: true });
+  const context = await contextFor(browser, 'Dueño', { width: 390, height: 844 }, 'block2a-progressive');
+  try {
+    const page = await context.newPage();
+    await load(page, url);
+    let form = await openLeadForm(page);
+    const commercial = form.locator('details.lead-form-commercial');
+
+    assert.equal(await commercial.getAttribute('open'), null);
+    assert.equal(await form.locator('input[name="interest"]').isVisible(), false);
+    assert.equal(await form.locator('select[name="temperature"]').isVisible(), false);
+    assert.ok(await commercial.locator('summary').evaluate((node) => node.getBoundingClientRect().height >= 44));
+
+    await form.locator('input[name="name"]').fill('SIN CONTACTO');
+    await form.locator('[data-save-lead]').click();
+    await form.locator('[data-lead-error]').waitFor({ state: 'visible' });
+    assert.match(await form.locator('[data-lead-error]').innerText(), /al menos un WhatsApp\/teléfono o un email/i);
+    assert.equal((await crmFromStorage(page, 'Dueño')).clients.length, 0);
+
+    await form.locator('input[name="email"]').fill('email-invalido');
+    await form.locator('[data-save-lead]').click();
+    assert.match(await form.locator('[data-lead-error]').innerText(), /email válido/i);
+    assert.equal((await crmFromStorage(page, 'Dueño')).clients.length, 0);
+
+    await form.locator('input[name="name"]').fill('JUAN EMAIL ONLY');
+    await form.locator('input[name="email"]').fill('Juan.Perez@Example.COM');
+    await form.locator('[data-save-lead]').click();
+    await page.locator('#mvp-lead-results').getByText('JUAN EMAIL ONLY', { exact: true }).waitFor({ state: 'visible' });
+
+    let saved = await crmFromStorage(page, 'Dueño');
+    assert.equal(saved.clients.length, 1);
+    assert.equal(saved.clients[0]?.phone, '');
+    assert.equal(saved.clients[0]?.email, 'Juan.Perez@Example.COM');
+    assert.equal(saved.clients[0]?.interest, '');
+    assert.equal(saved.clients[0]?.temperature, 'Sin definir');
+    assert.equal(saved.clients[0]?.nextAction, undefined);
+    assert.equal(saved.clients[0]?.nextFollowUp, undefined);
+    assert.equal(await page.locator('.mvp-contact-btn.wa').count(), 0);
+    assert.equal(await page.locator('.mvp-contact-btn.call').count(), 0);
+    assert.equal(await page.locator('a[href^="mailto:"]').count() > 0, true);
+
+    await page.locator('[data-edit-client]').first().click();
+    form = page.locator('#mvp-lead-form.b131-lead-form:not(.collapsed)');
+    await form.waitFor({ state: 'visible' });
+    assert.notEqual(await form.locator('details.lead-form-commercial').getAttribute('open'), null, 'Edición abre datos comerciales.');
+    await form.locator('input[name="interest"]').fill('Dúplex en Docta');
+    await form.locator('input[name="budget"]').fill('USD 120.000');
+    await form.locator('select[name="creditPossible"]').selectOption('Preaprobado');
+    await form.locator('input[name="nextAction"]').fill('Seguimiento viernes');
+    const today = await localToday(page);
+    await form.locator('input[name="nextFollowUp"]').fill(today);
+    await form.locator('[data-save-lead]').click();
+    await page.locator('#mvp-lead-form.collapsed').waitFor({ state: 'attached' });
+
+    saved = await crmFromStorage(page, 'Dueño');
+    assert.equal(saved.clients.length, 1);
+    assert.equal(saved.clients[0]?.email, 'Juan.Perez@Example.COM');
+    assert.equal(saved.clients[0]?.interest, 'Dúplex en Docta');
+    assert.equal(saved.clients[0]?.budget, 'USD 120.000');
+    assert.equal(saved.clients[0]?.creditPossible, 'Preaprobado');
+    assert.equal(saved.clients[0]?.nextAction, 'Seguimiento viernes');
+    assert.equal(saved.clients[0]?.nextFollowUp, today);
+
+    form = await openLeadForm(page);
+    await form.locator('input[name="name"]').fill('DUPLICADO EMAIL');
+    await form.locator('input[name="email"]').fill('juan.perez@example.com');
+    await form.locator('[data-save-lead]').click();
+    await form.locator('[data-lead-error]').waitFor({ state: 'visible' });
+    assert.match(await form.locator('[data-lead-error]').innerText(), /ya pertenece al lead JUAN EMAIL ONLY/i);
+    assert.equal(await form.locator('[data-open-existing-lead]').count(), 1);
+    assert.equal((await crmFromStorage(page, 'Dueño')).clients.length, 1);
+
+    await form.locator('[data-cancel-duplicate-lead]').click();
+    form = await openLeadForm(page);
+    await form.locator('input[name="name"]').fill('SOLO TELEFONO');
+    await form.locator('input[name="phone"]').fill('351 555 8899');
+    await form.locator('[data-save-lead]').click();
+    await page.locator('#mvp-lead-results').getByText('SOLO TELEFONO', { exact: true }).waitFor({ state: 'visible' });
+    saved = await crmFromStorage(page, 'Dueño');
+    const phoneOnly = saved.clients.find((client) => client.name === 'SOLO TELEFONO');
+    assert.ok(phoneOnly);
+    assert.equal(phoneOnly.phone, '5493515558899');
+    assert.equal(phoneOnly.email, undefined);
+    assert.equal(phoneOnly.interest, '');
+    assert.equal(phoneOnly.temperature, 'Sin definir');
+    assert.equal(phoneOnly.nextAction, undefined);
+    assert.equal(phoneOnly.nextFollowUp, undefined);
+
+    await assertNoHorizontalScroll(page);
+  } finally {
+    await context.close();
     await browser.close();
     await stopServer(server);
   }

@@ -34,7 +34,7 @@ test('clientFromFormValues normaliza los campos y conserva el id', () => {
 
 test('clientFromFormValues usa una temperatura segura ante valores inválidos', () => {
   const client = clientFromFormValues(1, { ...baseValues, temperature: 'Desconocida' });
-  assert.equal(client.temperature, 'Tibio');
+  assert.equal(client.temperature, 'Sin definir');
 });
 
 test('upsertClient reemplaza un cliente sin duplicarlo', () => {
@@ -54,4 +54,21 @@ test('upsertClient agrega un cliente cuando el id no existe', () => {
 
   assert.equal(result.length, 2);
   assert.equal(result[1]?.name, 'Segundo cliente');
+});
+
+
+test('alta mínima conserva contacto por email sin inventar teléfono, interés ni temperatura', () => {
+  const client = clientFromFormValues(88, {
+    name: '  Lead rápido  ',
+    phone: '',
+    email: ' rapido@example.com ',
+    interest: '',
+  });
+  assert.equal(client.name, 'Lead rápido');
+  assert.equal(client.phone, '');
+  assert.equal(client.email, 'rapido@example.com');
+  assert.equal(client.interest, '');
+  assert.equal(client.temperature, 'Sin definir');
+  assert.equal(client.nextAction, undefined);
+  assert.equal(client.nextFollowUp, undefined);
 });

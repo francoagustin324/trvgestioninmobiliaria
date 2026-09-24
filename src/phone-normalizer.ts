@@ -61,3 +61,21 @@ export function findDuplicateClient(clients: Client[], phone: string, excludeId:
   if (!identity || !isPlausiblePhone(phone)) return null;
   return clients.find((client) => client.id !== excludeId && phoneIdentity(client.phone) === identity) ?? null;
 }
+
+export function emailIdentity(value: string): string {
+  return value.trim().toLowerCase();
+}
+
+export function findDuplicateClientByEmail(
+  clients: Client[],
+  email: string,
+  excludeId: number | null = null,
+): Client | null {
+  const identity = emailIdentity(email);
+  if (!identity) return null;
+  return clients.find((client) => (
+    client.id !== excludeId
+    && Boolean(client.email)
+    && emailIdentity(client.email || '') === identity
+  )) ?? null;
+}

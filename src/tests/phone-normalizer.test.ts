@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { Client } from '../models.js';
-import { argentinaNationalNumber, findDuplicateClient, formatPhone, isPlausiblePhone, normalizePhone, phoneIdentity } from '../phone-normalizer.js';
+import { argentinaNationalNumber, emailIdentity, findDuplicateClient, findDuplicateClientByEmail, formatPhone, isPlausiblePhone, normalizePhone, phoneIdentity } from '../phone-normalizer.js';
 
 const client = (id: number, phone: string): Client => ({
   id,
@@ -44,4 +44,18 @@ test('valida longitudes plausibles y conserva números internacionales desconoci
 
 test('muestra los números argentinos en formato legible', () => {
   assert.equal(formatPhone('5493515110069'), '+54 9 3515110069');
+});
+
+
+test('normaliza email para identidad exacta sin distinguir mayúsculas ni espacios', () => {
+  assert.equal(emailIdentity('  JUAN.PEREZ@Example.COM '), 'juan.perez@example.com');
+  const existing = { ...client(8, ''), email: 'Juan.Perez@Example.com' };
+  assert.equal(findDuplicateClientByEmail([existing], ' juan.perez@example.COM ')?.id, 8);
+  assert.equal(findDuplicateClientByEmail([existing], 'juan.perez@example.com', 8), null);
+});
+
+test('email duplicado exige coincidencia exacta normalizada y no usa coincidencias débiles', () => {
+  const existing = { ...client(9, ''), email: 'juan+piso@example.com' };
+  assert.equal(findDuplicateClientByEmail([existing], 'juan+duplex@example.com'), null);
+  assert.equal(findDuplicateClientByEmail([existing], 'juan@example.com'), null);
 });

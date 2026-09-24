@@ -1,5 +1,3 @@
-import { isPlausiblePhone } from './phone-normalizer.js';
-
 export interface LeadScheduleInput {
   nextAction?: string;
   nextFollowUp?: string;
@@ -64,14 +62,20 @@ export function resolveLeadSchedule(input: LeadScheduleInput): LeadScheduleResol
     };
   }
 
-  const hasWhatsApp = isPlausiblePhone(input.phone || '');
-  const nextAction = manualAction || (hasWhatsApp ? 'Contactar por WhatsApp' : 'Contactar por primera vez');
-  const nextFollowUp = manualDate || today;
+  if (Boolean(manualAction) !== Boolean(manualDate)) {
+    return {
+      nextAction: manualAction,
+      nextFollowUp: manualDate,
+      actionSuggested: false,
+      dateSuggested: false,
+      error: 'Completá la próxima acción y su fecha, o dejá ambos campos vacíos.',
+    };
+  }
 
   return {
-    nextAction,
-    nextFollowUp,
-    actionSuggested: !manualAction,
-    dateSuggested: !manualDate,
+    nextAction: manualAction,
+    nextFollowUp: manualDate,
+    actionSuggested: false,
+    dateSuggested: false,
   };
 }

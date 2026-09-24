@@ -4,7 +4,7 @@ import { clientFromFormValues, upsertClient } from './client-editor.js';
 import { resolveLeadSchedule } from './lead-create-schedule.js';
 import { activitiesForClientSave, localIsoDate } from './lead-pipeline.js';
 import type { Client, TeamMember } from './models.js';
-import { findDuplicateClient, isPlausiblePhone } from './phone-normalizer.js';
+import { findDuplicateClient, findDuplicateClientByEmail, isPlausiblePhone } from './phone-normalizer.js';
 import { authenticatedTenantMember, state } from './store.js';
 import {
   assertTenantCrmScope,
@@ -93,33 +93,45 @@ function showError(
   focusField(field);
 }
 
-function showDuplicate(form: HTMLFormElement, duplicate: Client, phoneField: HTMLInputElement | null): void {
+function showDuplicate(
+  form: HTMLFormElement,
+  duplicate: Client,
+  field: HTMLInputElement | null,
+  kind: 'phone' | 'email',
+): void {
   clearDuplicateActions(form);
   form.dataset[DUPLICATE] = String(duplicate.id);
-  const message = `Este WhatsApp ya pertenece al lead ${duplicate.name}.`;
+  const visible = visibleClients().some((client) => client.id === duplicate.id);
+  const contactLabel = kind === 'phone' ? 'WhatsApp/teléfono' : 'email';
+  const message = visible
+    ? `Este ${contactLabel} ya pertenece al lead ${duplicate.name}.`
+    : `Ya existe un lead con este ${contactLabel} en esta inmobiliaria.`;
   const error = formError(form);
   if (error) {
     error.textContent = message;
     error.hidden = false;
   }
   setStatus(form, message, 'duplicate');
-  focusField(phoneField);
+  focusField(field);
 
   const actions = document.createElement('div');
   actions.dataset.leadDuplicateActions = '';
   actions.className = 'b132-duplicate-actions';
 
-  const open = document.createElement('button');
-  open.type = 'button';
-  open.className = 'secondary';
-  open.dataset.openExistingLead = String(duplicate.id);
-  open.textContent = 'Abrir lead existente';
+  if (visible) {
+    const open = document.createElement('button');
+    open.type = 'button';
+    open.className = 'secondary';
+    open.dataset.openExistingLead = String(duplicate.id);
+    open.textContent = 'Abrir lead existente';
+    actions.append(open);
+  }
 
   const correct = document.createElement('button');
   correct.type = 'button';
   correct.className = 'secondary';
-  correct.dataset.correctDuplicatePhone = '';
-  correct.textContent = 'Corregir número';
+  correct.dataset.correctDuplicateContact = kind;
+  correct.textContent = kind === 'phone' ? 'Corregir número' : 'Corregir email';
 
   const cancel = document.createElement('button');
   cancel.type = 'button';
@@ -127,7 +139,7 @@ function showDuplicate(form: HTMLFormElement, duplicate: Client, phoneField: HTM
   cancel.dataset.cancelDuplicateLead = '';
   cancel.textContent = 'Cancelar';
 
-  actions.append(open, correct, cancel);
+  actions.append(correct, cancel);
   formStatus(form)?.after(actions);
 }
 
@@ -189,24 +201,9 @@ function formStillAuthorized(form: HTMLFormElement): boolean {
   return true;
 }
 
-function updateSuggestedSchedule(form: HTMLFormElement): void {
-  if (capturedEditingId(form) !== null) return;
-  const phone = form.elements.namedItem('phone');
-  const action = form.elements.namedItem('nextAction');
+function configureScheduleConstraints(form: HTMLFormElement): void {
   const date = form.elements.namedItem('nextFollowUp');
-  if (!(phone instanceof HTMLInputElement)
-    || !(action instanceof HTMLInputElement)
-    || !(date instanceof HTMLInputElement)) return;
-
-  date.min = localIsoDate();
-  if (date.dataset.b131Manual !== 'true' && (!date.value || date.dataset.b131Suggested === 'true')) {
-    date.value = localIsoDate();
-    date.dataset.b131Suggested = 'true';
-  }
-  if (action.dataset.b131Manual !== 'true' && (!action.value || action.dataset.b131Suggested === 'true')) {
-    action.value = isPlausiblePhone(phone.value) ? 'Contactar por WhatsApp' : 'Contactar por primera vez';
-    action.dataset.b131Suggested = 'true';
-  }
+  if (date instanceof HTMLInputElement) date.min = localIsoDate();
 }
 
 function markManualInput(event: Event): void {
@@ -279,17 +276,19 @@ function bindDuplicateActions(form: HTMLFormElement): void {
       openExistingLead(form, Number(open.dataset.openExistingLead));
       return;
     }
-    if (target.closest('[data-correct-duplicate-phone]')) {
+    const correct = target.closest<HTMLButtonElement>('[data-correct-duplicate-contact]');
+    if (correct) {
       event.preventDefault();
+      const fieldName = correct.dataset.correctDuplicateContact === 'email' ? 'email' : 'phone';
       clearDuplicateActions(form);
       const error = formError(form);
       if (error) { error.hidden = true; error.textContent = ''; }
-      setStatus(form, 'Corregí el número y volvé a guardar.', 'idle');
-      const phone = form.elements.namedItem('phone');
-      if (phone instanceof HTMLInputElement) {
-        phone.removeAttribute('aria-invalid');
-        phone.focus({ preventScroll: false });
-        phone.select();
+      setStatus(form, fieldName === 'email' ? 'Corregí el email y volvé a guardar.' : 'Corregí el número y volvé a guardar.', 'idle');
+      const field = form.elements.namedItem(fieldName);
+      if (field instanceof HTMLInputElement) {
+        field.removeAttribute('aria-invalid');
+        field.focus({ preventScroll: false });
+        field.select();
       }
       return;
     }
@@ -338,11 +337,9 @@ export function enhanceLeadForm(): void {
   });
   form.before(backdrop);
 
-  const phone = form.elements.namedItem('phone');
-  if (phone instanceof HTMLInputElement) phone.addEventListener('input', () => updateSuggestedSchedule(form));
   form.addEventListener('input', markManualInput);
   bindDuplicateActions(form);
-  updateSuggestedSchedule(form);
+  configureScheduleConstraints(form);
 
   requestAnimationFrame(() => {
     if (form.isConnected) form.scrollIntoView({ block: 'start', behavior: 'auto' });
@@ -388,15 +385,10 @@ function validateAndResolveSchedule(
 
   const action = values.nextAction?.trim() || '';
   const date = values.nextFollowUp?.trim() || '';
-  if (editingId !== null && !action && !date) return true;
-  if (editingId !== null && Boolean(action) !== Boolean(date)) {
-    const target = action ? form.elements.namedItem('nextFollowUp') : form.elements.namedItem('nextAction');
-    showError(
-      form,
-      'Completá la próxima acción y su fecha, o dejá ambos campos vacíos.',
-      target instanceof HTMLInputElement ? target : null,
-    );
-    return false;
+  if (!action && !date) {
+    values.nextAction = '';
+    values.nextFollowUp = '';
+    return true;
   }
 
   const schedule = resolveLeadSchedule({
@@ -459,10 +451,18 @@ function persistLead(
   }
 
   const phoneField = form.elements.namedItem('phone');
+  const emailField = form.elements.namedItem('email');
   const phoneInput = phoneField instanceof HTMLInputElement ? phoneField : null;
-  const duplicate = findDuplicateClient(state.crm.clients, values.phone || '', editingId);
-  if (duplicate) {
-    showDuplicate(form, duplicate, phoneInput);
+  const emailInput = emailField instanceof HTMLInputElement ? emailField : null;
+  const phoneDuplicate = values.phone ? findDuplicateClient(state.crm.clients, values.phone, editingId) : null;
+  if (phoneDuplicate) {
+    showDuplicate(form, phoneDuplicate, phoneInput, 'phone');
+    restoreSubmit(form);
+    return;
+  }
+  const emailDuplicate = values.email ? findDuplicateClientByEmail(state.crm.clients, values.email, editingId) : null;
+  if (emailDuplicate) {
+    showDuplicate(form, emailDuplicate, emailInput, 'email');
     restoreSubmit(form);
     return;
   }
@@ -547,15 +547,29 @@ export function submitLeadForm(event: SubmitEvent): void {
   const values = formValues(form);
   const editingId = capturedEditingId(form);
   const phoneField = form.elements.namedItem('phone');
+  const emailField = form.elements.namedItem('email');
   const phoneInput = phoneField instanceof HTMLInputElement ? phoneField : null;
-  if (!isPlausiblePhone(values.phone || '')) {
-    showError(form, 'Ingresá un WhatsApp válido con código de área.', phoneInput);
+  const emailInput = emailField instanceof HTMLInputElement ? emailField : null;
+  const phone = values.phone?.trim() || '';
+  const email = values.email?.trim() || '';
+
+  if (!phone && !email) {
+    showError(form, 'Ingresá al menos un WhatsApp/teléfono o un email.', phoneInput);
+    return;
+  }
+  if (phone && !isPlausiblePhone(phone)) {
+    showError(form, 'Ingresá un WhatsApp/teléfono válido con código de área, o dejalo vacío y usá email.', phoneInput);
     return;
   }
 
-  const duplicate = findDuplicateClient(state.crm.clients, values.phone || '', editingId);
-  if (duplicate) {
-    showDuplicate(form, duplicate, phoneInput);
+  const phoneDuplicate = phone ? findDuplicateClient(state.crm.clients, phone, editingId) : null;
+  if (phoneDuplicate) {
+    showDuplicate(form, phoneDuplicate, phoneInput, 'phone');
+    return;
+  }
+  const emailDuplicate = email ? findDuplicateClientByEmail(state.crm.clients, email, editingId) : null;
+  if (emailDuplicate) {
+    showDuplicate(form, emailDuplicate, emailInput, 'email');
     return;
   }
 
