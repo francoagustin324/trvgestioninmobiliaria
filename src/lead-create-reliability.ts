@@ -1,6 +1,7 @@
 import type { TenantScope } from './active-organization.js';
 import { queueCloudSave } from './cloud-api-compatible.js';
 import { clientFromFormValues, upsertClient } from './client-editor.js';
+import { findDuplicateClientByEmail } from './lead-contact-identity.js';
 import { resolveLeadSchedule } from './lead-create-schedule.js';
 import { activitiesForClientSave, localIsoDate } from './lead-pipeline.js';
 import type { Client, TeamMember } from './models.js';
@@ -93,17 +94,24 @@ function showError(
   focusField(field);
 }
 
-function showDuplicate(form: HTMLFormElement, duplicate: Client, phoneField: HTMLInputElement | null): void {
+function showDuplicate(
+  form: HTMLFormElement,
+  duplicate: Client,
+  kind: 'phone' | 'email',
+  field: HTMLInputElement | null,
+): void {
   clearDuplicateActions(form);
   form.dataset[DUPLICATE] = String(duplicate.id);
-  const message = `Este WhatsApp ya pertenece al lead ${duplicate.name}.`;
+  const message = kind === 'email'
+    ? `Este email ya pertenece al lead ${duplicate.name}.`
+    : `Este WhatsApp ya pertenece al lead ${duplicate.name}.`;
   const error = formError(form);
   if (error) {
     error.textContent = message;
     error.hidden = false;
   }
   setStatus(form, message, 'duplicate');
-  focusField(phoneField);
+  focusField(field);
 
   const actions = document.createElement('div');
   actions.dataset.leadDuplicateActions = '';
@@ -118,8 +126,8 @@ function showDuplicate(form: HTMLFormElement, duplicate: Client, phoneField: HTM
   const correct = document.createElement('button');
   correct.type = 'button';
   correct.className = 'secondary';
-  correct.dataset.correctDuplicatePhone = '';
-  correct.textContent = 'Corregir número';
+  correct.dataset.correctDuplicateContact = kind;
+  correct.textContent = kind === 'email' ? 'Corregir email' : 'Corregir número';
 
   const cancel = document.createElement('button');
   cancel.type = 'button';
@@ -189,34 +197,6 @@ function formStillAuthorized(form: HTMLFormElement): boolean {
   return true;
 }
 
-function updateSuggestedSchedule(form: HTMLFormElement): void {
-  if (capturedEditingId(form) !== null) return;
-  const phone = form.elements.namedItem('phone');
-  const action = form.elements.namedItem('nextAction');
-  const date = form.elements.namedItem('nextFollowUp');
-  if (!(phone instanceof HTMLInputElement)
-    || !(action instanceof HTMLInputElement)
-    || !(date instanceof HTMLInputElement)) return;
-
-  date.min = localIsoDate();
-  if (date.dataset.b131Manual !== 'true' && (!date.value || date.dataset.b131Suggested === 'true')) {
-    date.value = localIsoDate();
-    date.dataset.b131Suggested = 'true';
-  }
-  if (action.dataset.b131Manual !== 'true' && (!action.value || action.dataset.b131Suggested === 'true')) {
-    action.value = isPlausiblePhone(phone.value) ? 'Contactar por WhatsApp' : 'Contactar por primera vez';
-    action.dataset.b131Suggested = 'true';
-  }
-}
-
-function markManualInput(event: Event): void {
-  const field = event.target;
-  if (!(field instanceof HTMLInputElement)) return;
-  if (field.name !== 'nextAction' && field.name !== 'nextFollowUp') return;
-  field.dataset.b131Manual = 'true';
-  delete field.dataset.b131Suggested;
-}
-
 function createStatus(): HTMLElement {
   const status = document.createElement('div');
   status.dataset.leadStatus = '';
@@ -279,17 +259,19 @@ function bindDuplicateActions(form: HTMLFormElement): void {
       openExistingLead(form, Number(open.dataset.openExistingLead));
       return;
     }
-    if (target.closest('[data-correct-duplicate-phone]')) {
+    const correct = target.closest<HTMLButtonElement>('[data-correct-duplicate-contact]');
+    if (correct) {
       event.preventDefault();
       clearDuplicateActions(form);
       const error = formError(form);
       if (error) { error.hidden = true; error.textContent = ''; }
-      setStatus(form, 'Corregí el número y volvé a guardar.', 'idle');
-      const phone = form.elements.namedItem('phone');
-      if (phone instanceof HTMLInputElement) {
-        phone.removeAttribute('aria-invalid');
-        phone.focus({ preventScroll: false });
-        phone.select();
+      const kind = correct.dataset.correctDuplicateContact === 'email' ? 'email' : 'phone';
+      setStatus(form, kind === 'email' ? 'Corregí el email y volvé a guardar.' : 'Corregí el número y volvé a guardar.', 'idle');
+      const field = form.elements.namedItem(kind);
+      if (field instanceof HTMLInputElement) {
+        field.removeAttribute('aria-invalid');
+        field.focus({ preventScroll: false });
+        field.select();
       }
       return;
     }
@@ -338,11 +320,9 @@ export function enhanceLeadForm(): void {
   });
   form.before(backdrop);
 
-  const phone = form.elements.namedItem('phone');
-  if (phone instanceof HTMLInputElement) phone.addEventListener('input', () => updateSuggestedSchedule(form));
-  form.addEventListener('input', markManualInput);
+  const date = form.elements.namedItem('nextFollowUp');
+  if (date instanceof HTMLInputElement) date.min = localIsoDate();
   bindDuplicateActions(form);
-  updateSuggestedSchedule(form);
 
   requestAnimationFrame(() => {
     if (form.isConnected) form.scrollIntoView({ block: 'start', behavior: 'auto' });
@@ -388,8 +368,12 @@ function validateAndResolveSchedule(
 
   const action = values.nextAction?.trim() || '';
   const date = values.nextFollowUp?.trim() || '';
-  if (editingId !== null && !action && !date) return true;
-  if (editingId !== null && Boolean(action) !== Boolean(date)) {
+  if (!action && !date) {
+    values.nextAction = '';
+    values.nextFollowUp = '';
+    return true;
+  }
+  if (Boolean(action) !== Boolean(date)) {
     const target = action ? form.elements.namedItem('nextFollowUp') : form.elements.namedItem('nextAction');
     showError(
       form,
@@ -459,10 +443,18 @@ function persistLead(
   }
 
   const phoneField = form.elements.namedItem('phone');
+  const emailField = form.elements.namedItem('email');
   const phoneInput = phoneField instanceof HTMLInputElement ? phoneField : null;
-  const duplicate = findDuplicateClient(state.crm.clients, values.phone || '', editingId);
-  if (duplicate) {
-    showDuplicate(form, duplicate, phoneInput);
+  const emailInput = emailField instanceof HTMLInputElement ? emailField : null;
+  const phoneDuplicate = findDuplicateClient(state.crm.clients, values.phone || '', editingId);
+  if (phoneDuplicate) {
+    showDuplicate(form, phoneDuplicate, 'phone', phoneInput);
+    restoreSubmit(form);
+    return;
+  }
+  const emailDuplicate = findDuplicateClientByEmail(state.crm.clients, values.email || '', editingId);
+  if (emailDuplicate) {
+    showDuplicate(form, emailDuplicate, 'email', emailInput);
     restoreSubmit(form);
     return;
   }
@@ -547,15 +539,28 @@ export function submitLeadForm(event: SubmitEvent): void {
   const values = formValues(form);
   const editingId = capturedEditingId(form);
   const phoneField = form.elements.namedItem('phone');
+  const emailField = form.elements.namedItem('email');
   const phoneInput = phoneField instanceof HTMLInputElement ? phoneField : null;
-  if (!isPlausiblePhone(values.phone || '')) {
-    showError(form, 'Ingresá un WhatsApp válido con código de área.', phoneInput);
+  const emailInput = emailField instanceof HTMLInputElement ? emailField : null;
+  const phone = values.phone?.trim() || '';
+  const email = values.email?.trim() || '';
+  if (!phone && !email) {
+    showError(form, 'Ingresá al menos un medio de contacto: WhatsApp/teléfono o email.', phoneInput ?? emailInput);
+    return;
+  }
+  if (phone && !isPlausiblePhone(phone)) {
+    showError(form, 'Ingresá un WhatsApp válido con código de área o dejalo vacío y usá un email.', phoneInput);
     return;
   }
 
-  const duplicate = findDuplicateClient(state.crm.clients, values.phone || '', editingId);
-  if (duplicate) {
-    showDuplicate(form, duplicate, phoneInput);
+  const phoneDuplicate = phone ? findDuplicateClient(state.crm.clients, phone, editingId) : null;
+  if (phoneDuplicate) {
+    showDuplicate(form, phoneDuplicate, 'phone', phoneInput);
+    return;
+  }
+  const emailDuplicate = email ? findDuplicateClientByEmail(state.crm.clients, email, editingId) : null;
+  if (emailDuplicate) {
+    showDuplicate(form, emailDuplicate, 'email', emailInput);
     return;
   }
 

@@ -6,6 +6,7 @@ import {
   mergeDuplicateClients,
   recommendedPrimaryClient,
 } from '../client-duplicates.js';
+import { findDuplicateClientByEmail, normalizeLeadEmail } from '../lead-contact-identity.js';
 import type { Client } from '../models.js';
 
 function client(overrides: Partial<Client>): Client {
@@ -43,6 +44,16 @@ test('detecta como duplicados formatos telefónicos equivalentes', () => {
   const groups = findHistoricalDuplicateGroups(clients);
   assert.equal(groups.length, 1);
   assert.deepEqual(groups[0]?.clients.map((item) => item.id), [1, 2, 3]);
+});
+
+test('detecta duplicado por email con normalización case-insensitive exacta', () => {
+  const existing = client({ id: 7, name: 'Juan Existente', phone: '', email: ' Juan.Perez@Ejemplo.COM ' });
+  const other = client({ id: 8, name: 'Otra persona', phone: '', email: 'otro@ejemplo.com' });
+
+  assert.equal(normalizeLeadEmail(' Juan.Perez@Ejemplo.COM '), 'juan.perez@ejemplo.com');
+  assert.equal(findDuplicateClientByEmail([existing, other], 'JUAN.PEREZ@ejemplo.com')?.id, 7);
+  assert.equal(findDuplicateClientByEmail([existing, other], 'juan.perez+otro@ejemplo.com'), null);
+  assert.equal(findDuplicateClientByEmail([existing, other], 'JUAN.PEREZ@ejemplo.com', 7), null);
 });
 
 test('recomienda conservar el registro más completo', () => {

@@ -550,6 +550,26 @@
   font-weight: 700;
 }
 
+#crm.pc-leads-redesign .pc-lead-form-commercial-progressive > summary small {
+  margin-left: auto;
+  margin-right: 10px;
+  color: var(--pc-leads-muted);
+  font-size: 0.72rem;
+  font-weight: 650;
+}
+
+#crm.pc-leads-redesign .lead-form-commercial-progressive-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 11px;
+  padding: 0 14px 14px;
+}
+
+#crm.pc-leads-redesign .lead-form-commercial-progressive-grid > .lead-form-wide,
+#crm.pc-leads-redesign .lead-form-commercial-progressive-grid > details {
+  grid-column: 1 / -1;
+}
+
 #crm.pc-leads-redesign .pc-lead-dialog .b131-lead-form-footer {
   margin: 0;
   padding: 12px 18px;
@@ -844,7 +864,8 @@
   }
 
   #crm.pc-leads-redesign .pc-lead-form-section-grid,
-  #crm.pc-leads-redesign .pc-lead-form-section .lead-form-more-grid {
+  #crm.pc-leads-redesign .pc-lead-form-section .lead-form-more-grid,
+  #crm.pc-leads-redesign .lead-form-commercial-progressive-grid {
     grid-template-columns: minmax(0, 1fr);
     gap: 10px;
   }

@@ -202,13 +202,15 @@ test('la cuenta usa icono genérico y no repite la inicial de TRV', () => {
   assert.equal(source.includes('const initials'), false);
 });
 
-test('el formulario de lead separa calificación esencial y preferencias opcionales', () => {
+test('el formulario de lead prioriza contacto rápido y conserva calificación comercial progresiva', () => {
   const leads = readFileSync('src/mvp-leads-ui.ts', 'utf8');
   const essential = readFileSync('src/lead-essential-ui.ts', 'utf8');
   const source = `${leads}\n${essential}`;
   for (const label of [
     'Nombre',
-    'Número de WhatsApp',
+    'WhatsApp / teléfono',
+    'Email',
+    'Completar datos comerciales',
     'Lugar o propiedad de interés',
     'Presupuesto o rango',
     'Etapa comercial',
@@ -222,6 +224,9 @@ test('el formulario de lead separa calificación esencial y preferencias opciona
     'Posibilidad actual de avanzar',
     'Preferencias y datos opcionales',
   ]) assert.ok(source.includes(label), label);
+  assert.ok(leads.includes('data-lead-commercial-details'));
+  assert.doesNotMatch(leads, /name="phone"[^>]*required/);
+  assert.doesNotMatch(leads, /name="interest"[^>]*required/);
   assert.ok(source.includes('lead-form-essential'));
   assert.ok(source.includes('lead-form-secondary'));
 });

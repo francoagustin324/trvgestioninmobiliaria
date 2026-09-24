@@ -200,12 +200,16 @@ async function previousLocalDay(page: Page): Promise<string> {
 async function fillRequired(
   page: Page,
   form: ReturnType<Page['locator']>,
-  values: { name: string; phone: string; email?: string; interest: string },
+  values: { name: string; phone?: string; email?: string; interest?: string },
 ): Promise<void> {
   await form.locator('input[name="name"]').fill(values.name);
-  await form.locator('input[name="phone"]').fill(values.phone);
+  if (values.phone !== undefined) await form.locator('input[name="phone"]').fill(values.phone);
   if (values.email !== undefined) await form.locator('input[name="email"]').fill(values.email);
-  await form.locator('input[name="interest"]').fill(values.interest);
+  if (values.interest !== undefined) {
+    const progressive = form.locator('[data-lead-commercial-details]');
+    if ((await progressive.getAttribute('open')) === null) await progressive.locator(':scope > summary').click();
+    await form.locator('input[name="interest"]').fill(values.interest);
+  }
 }
 
 async function crmFromStorage(page: Page, role: TeamRole): Promise<CrmData> {
@@ -242,87 +246,95 @@ async function saveButtonGeometry(page: Page): Promise<{
   });
 }
 
-test('B1.3.1 guarda el lead exacto en móvil y crea un único seguimiento en Agenda', { timeout: 180_000 }, async () => {
+test('B2A alta rápida móvil crea con nombre + teléfono y permite completar después sin perder datos', { timeout: 180_000 }, async () => {
   mkdirSync(artifactDir, { recursive: true });
   const executablePath = chromeExecutable();
-  assert.ok(executablePath, 'Chrome/Chromium no disponible para B1.3.1.');
+  assert.ok(executablePath, 'Chrome/Chromium no disponible para B2A.');
   const port = 62000 + Math.floor(Math.random() * 120);
   const url = `http://127.0.0.1:${port}`;
   const server = await startServer(port);
   const browser = await chromium.launch({ executablePath, headless: true });
-  const context = await contextFor(browser, 'Dueño', { width: 390, height: 844 }, 'mobile-exact');
+  const context = await contextFor(browser, 'Dueño', { width: 390, height: 844 }, 'mobile-fast-create');
   try {
     const page = await context.newPage();
     await load(page, url);
-    const form = await openLeadForm(page);
+    let form = await openLeadForm(page);
+    const progressive = form.locator('[data-lead-commercial-details]');
+    assert.equal(await progressive.getAttribute('open'), null);
+    assert.equal(await form.locator('input[name="name"]').isVisible(), true);
+    assert.equal(await form.locator('input[name="phone"]').isVisible(), true);
+    assert.equal(await form.locator('input[name="email"]').isVisible(), true);
+    assert.equal(await form.locator('input[name="interest"]').isVisible(), false);
+    assert.match(await progressive.locator(':scope > summary').innerText(), /Completar datos comerciales/);
+
     const fieldsGeometry = await form.locator('.b131-lead-form-fields').evaluate((node) => ({
       clientHeight: node.clientHeight,
       scrollHeight: node.scrollHeight,
       overflowY: getComputedStyle(node).overflowY,
     }));
-    assert.ok(fieldsGeometry.scrollHeight > fieldsGeometry.clientHeight, JSON.stringify(fieldsGeometry));
+    assert.ok(fieldsGeometry.scrollHeight <= fieldsGeometry.clientHeight + 24, JSON.stringify(fieldsGeometry));
     assert.equal(fieldsGeometry.overflowY, 'auto');
-    await page.screenshot({ path: `${artifactDir}/01-mobile-formulario-completo.png`, fullPage: true });
 
-    await form.locator('select[name="knowsArea"]').focus();
+    await form.locator('input[name="phone"]').focus();
     await page.setViewportSize({ width: 390, height: 430 });
-    await page.waitForTimeout(200);
+    await page.waitForTimeout(150);
     const keyboardGeometry = await saveButtonGeometry(page);
     assert.ok(keyboardGeometry.height >= 44, JSON.stringify(keyboardGeometry));
     assert.ok(keyboardGeometry.top >= 0, JSON.stringify(keyboardGeometry));
     assert.ok(keyboardGeometry.bottom <= keyboardGeometry.navigationTop - 8, JSON.stringify(keyboardGeometry));
-    await page.screenshot({ path: `${artifactDir}/02-mobile-teclado-guardar-visible.png`, fullPage: true });
-
     await page.setViewportSize({ width: 390, height: 844 });
-    await fillRequired(page, form, {
-      name: 'PRUEBA B1.3',
-      phone: '03515110069',
-      email: 'prueba-b13@example.com',
-      interest: 'Balcones del Chateau, departamento',
-    });
-    await form.locator('select[name="temperature"]').selectOption('Tibio');
-    await form.locator('select[name="pipeline"]').selectOption('Nuevo');
-    await form.locator('input[name="nextAction"]').fill('Confirmar visita');
-    const today = await localToday(page);
-    await form.locator('input[name="nextFollowUp"]').fill(today);
 
+    await fillRequired(page, form, { name: 'JUAN PÉREZ B2A', phone: '03515110069' });
     await form.evaluate((node) => {
       node.dispatchEvent(new SubmitEvent('submit', { bubbles: true, cancelable: true, submitter: node.querySelector('[data-save-lead]') }));
       node.dispatchEvent(new SubmitEvent('submit', { bubbles: true, cancelable: true, submitter: node.querySelector('[data-save-lead]') }));
     });
-    await page.locator('#mvp-lead-results').getByText('PRUEBA B1.3', { exact: true }).waitFor({ state: 'visible' });
+    await page.locator('#mvp-lead-results').getByText('JUAN PÉREZ B2A', { exact: true }).waitFor({ state: 'visible' });
 
     let saved = await crmFromStorage(page, 'Dueño');
     assert.equal(saved.clients.length, 1, 'Doble submit crea un solo lead.');
-    assert.equal(saved.clients[0]?.name, 'PRUEBA B1.3');
-    assert.equal(saved.clients[0]?.phone, '5493515110069');
-    assert.equal(saved.clients[0]?.email, 'prueba-b13@example.com');
-    assert.equal(saved.clients[0]?.temperature, 'Tibio');
-    assert.equal(saved.clients[0]?.interest, 'Balcones del Chateau, departamento');
-    assert.equal(saved.clients[0]?.pipeline, 'Nuevo');
-    assert.equal(saved.clients[0]?.nextAction, 'Confirmar visita');
-    assert.equal(saved.clients[0]?.nextFollowUp, today);
-    assert.equal(saved.activityLog.filter((entry) => entry.action === 'Contacto por WhatsApp').length, 0);
-    assert.equal(await page.evaluate(() => (window as unknown as B131Window).__b131OpenedUrl), undefined);
-    assert.equal(await page.locator(`[data-contact-whatsapp="${saved.clients[0]?.id}"]`).count(), 1);
-    await page.screenshot({ path: `${artifactDir}/03-lead-creado.png`, fullPage: true });
+    const created = saved.clients[0];
+    assert.ok(created);
+    assert.equal(created.name, 'JUAN PÉREZ B2A');
+    assert.equal(created.phone, '5493515110069');
+    assert.equal(created.email, undefined);
+    assert.equal(created.interest, '');
+    assert.equal(created.nextAction, undefined);
+    assert.equal(created.nextFollowUp, undefined);
+    assert.equal(saved.activityLog.filter((entry) => entry.action === 'Próxima acción programada').length, 0);
+    assert.equal(await page.locator(`[data-contact-whatsapp="${created.id}"]`).count(), 1);
 
-    await page.evaluate(() => document.dispatchEvent(new CustomEvent('trv-render')));
-    await page.waitForTimeout(100);
+    await page.locator(`[data-edit-client="${created.id}"]`).first().click();
+    form = page.locator('#mvp-lead-form.b131-lead-form:not(.collapsed)');
+    await form.waitFor({ state: 'visible' });
+    assert.notEqual(await form.locator('[data-lead-commercial-details]').getAttribute('open'), null);
+    assert.equal(await form.locator('input[name="phone"]').inputValue(), '5493515110069');
+    await form.locator('input[name="interest"]').fill('Dúplex en Docta');
+    await form.locator('input[name="budget"]').fill('USD 120.000');
+    await form.locator('select[name="creditPossible"]').selectOption('Preaprobado');
+    await form.locator('input[name="nextAction"]').fill('Enviar opciones de Docta');
+    const today = await localToday(page);
+    await form.locator('input[name="nextFollowUp"]').fill(today);
+    await form.locator('[data-save-lead]').click();
+    await page.locator('#mvp-lead-results').getByText('JUAN PÉREZ B2A', { exact: true }).waitFor({ state: 'visible' });
+
     saved = await crmFromStorage(page, 'Dueño');
-    assert.equal(saved.clients.length, 1, 'Rerender no duplica el lead.');
-    await page.reload({ waitUntil: 'domcontentloaded' });
-    await page.waitForSelector('#crm.active', { state: 'visible' });
-    saved = await crmFromStorage(page, 'Dueño');
-    assert.equal(saved.clients.length, 1, 'Recarga no duplica el lead.');
-    assert.equal(saved.clients[0]?.nextFollowUp, today, 'Hoy local permanece igual después de recargar.');
+    const completed = saved.clients[0];
+    assert.ok(completed);
+    assert.equal(completed.name, 'JUAN PÉREZ B2A');
+    assert.equal(completed.phone, '5493515110069');
+    assert.equal(completed.interest, 'Dúplex en Docta');
+    assert.equal(completed.budget, 'USD 120.000');
+    assert.equal(completed.creditPossible, 'Preaprobado');
+    assert.equal(completed.nextAction, 'Enviar opciones de Docta');
+    assert.equal(completed.nextFollowUp, today);
+    assert.equal(saved.clients.length, 1, 'Editar completa el mismo lead y no crea otro.');
 
     await page.locator('[data-module="agenda"]:visible').first().click();
-    const agendaCard = page.locator('#agenda.active .agenda-card').filter({ hasText: 'PRUEBA B1.3' });
+    const agendaCard = page.locator('#agenda.active .agenda-card').filter({ hasText: 'JUAN PÉREZ B2A' });
     await agendaCard.waitFor({ state: 'visible' });
-    assert.equal(await agendaCard.count(), 1, 'Agenda recibe un único seguimiento.');
-    assert.match(await agendaCard.innerText(), /Confirmar visita/);
-    await page.screenshot({ path: `${artifactDir}/04-seguimiento-visible-agenda.png`, fullPage: true });
+    assert.equal(await agendaCard.count(), 1);
+    assert.match(await agendaCard.innerText(), /Enviar opciones de Docta/);
     await assertNoHorizontalScroll(page);
   } finally {
     await context.close();
@@ -331,48 +343,51 @@ test('B1.3.1 guarda el lead exacto en móvil y crea un único seguimiento en Age
   }
 });
 
-test('B1.3.1 conserva datos ante error y completa Agenda automática sin abrir WhatsApp', { timeout: 150_000 }, async () => {
+test('B2A permite email sin teléfono, valida contacto/email y bloquea email duplicado exacto', { timeout: 150_000 }, async () => {
   const executablePath = chromeExecutable();
-  assert.ok(executablePath, 'Chrome/Chromium no disponible para B1.3.1.');
+  assert.ok(executablePath, 'Chrome/Chromium no disponible para B2A.');
   const port = 62200 + Math.floor(Math.random() * 120);
   const url = `http://127.0.0.1:${port}`;
   const server = await startServer(port);
   const browser = await chromium.launch({ executablePath, headless: true });
-  const context = await contextFor(browser, 'Dueño', { width: 390, height: 844 }, 'validation-auto');
+  const context = await contextFor(browser, 'Dueño', { width: 390, height: 844 }, 'email-fast-create');
   try {
     const page = await context.newPage();
     await load(page, url);
-    const form = await openLeadForm(page);
-    await fillRequired(page, form, {
-      name: 'AUTO WHATSAPP B1.3.1',
-      phone: '+54 9 351 511-0069',
-      email: 'auto-b131@example.com',
-      interest: 'Departamento en General Paz',
-    });
-    const past = await previousLocalDay(page);
-    await form.locator('input[name="nextAction"]').fill('Contactar por WhatsApp');
-    await form.locator('input[name="nextFollowUp"]').fill(past);
+    let form = await openLeadForm(page);
+
+    await form.locator('input[name="name"]').fill('SOLO NOMBRE B2A');
     await form.locator('[data-save-lead]').click();
     await form.locator('[data-lead-error]').waitFor({ state: 'visible' });
-    assert.match(await form.locator('[data-lead-error]').innerText(), /no puede estar en el pasado/i);
-    assert.equal(await form.locator('input[name="name"]').inputValue(), 'AUTO WHATSAPP B1.3.1');
-    assert.equal(await form.locator('input[name="phone"]').inputValue(), '+54 9 351 511-0069');
-    assert.equal(await form.locator('input[name="interest"]').inputValue(), 'Departamento en General Paz');
+    assert.match(await form.locator('[data-lead-error]').innerText(), /al menos un medio de contacto/i);
     assert.equal((await crmFromStorage(page, 'Dueño')).clients.length, 0);
 
-    await form.locator('input[name="nextAction"]').fill('');
-    await form.locator('input[name="nextFollowUp"]').fill('');
+    await form.locator('input[name="email"]').fill('email-invalido');
     await form.locator('[data-save-lead]').click();
-    await page.locator('#mvp-lead-results').getByText('AUTO WHATSAPP B1.3.1', { exact: true }).waitFor({ state: 'visible' });
-    const today = await localToday(page);
-    const saved = await crmFromStorage(page, 'Dueño');
+    await form.locator('[data-lead-error]').waitFor({ state: 'visible' });
+    assert.match(await form.locator('[data-lead-error]').innerText(), /email válido/i);
+    assert.equal((await crmFromStorage(page, 'Dueño')).clients.length, 0);
+
+    await form.locator('input[name="email"]').fill('Juan.Email@Ejemplo.com');
+    await form.locator('[data-save-lead]').click();
+    await page.locator('#mvp-lead-results').getByText('SOLO NOMBRE B2A', { exact: true }).waitFor({ state: 'visible' });
+    let saved = await crmFromStorage(page, 'Dueño');
     assert.equal(saved.clients.length, 1);
-    assert.equal(saved.clients[0]?.nextAction, 'Contactar por WhatsApp');
-    assert.equal(saved.clients[0]?.nextFollowUp, today);
-    assert.equal(saved.activityLog.filter((entry) => entry.action === 'Contacto por WhatsApp').length, 0);
-    assert.equal(await page.evaluate(() => (window as unknown as B131Window).__b131OpenedUrl), undefined);
-    await page.locator('[data-module="agenda"]:visible').first().click();
-    assert.equal(await page.locator('#agenda.active .agenda-card').filter({ hasText: 'AUTO WHATSAPP B1.3.1' }).count(), 1);
+    assert.equal(saved.clients[0]?.phone, '');
+    assert.equal(saved.clients[0]?.email, 'Juan.Email@Ejemplo.com');
+    assert.equal(saved.clients[0]?.interest, '');
+    assert.equal(saved.clients[0]?.nextAction, undefined);
+    assert.equal(saved.clients[0]?.nextFollowUp, undefined);
+    assert.equal(await page.locator('[data-module="agenda"]:visible').first().count(), 1);
+
+    form = await openLeadForm(page);
+    await fillRequired(page, form, { name: 'DUPLICADO EMAIL B2A', email: '  juan.email@ejemplo.COM ' });
+    await form.locator('[data-save-lead]').click();
+    await form.locator('[data-lead-error]').waitFor({ state: 'visible' });
+    assert.match(await form.locator('[data-lead-error]').innerText(), /email ya pertenece al lead SOLO NOMBRE B2A/i);
+    assert.equal(await form.getByRole('button', { name: 'Abrir lead existente' }).count(), 1);
+    saved = await crmFromStorage(page, 'Dueño');
+    assert.equal(saved.clients.length, 1, 'Email duplicado no crea un segundo lead.');
   } finally {
     await context.close();
     await browser.close();
@@ -441,7 +456,7 @@ test('B1.3.1 valida Dueño Administrador Corredor escritorio y referencias obsol
         assert.equal(saved.clients.length, 1, `${role} crea un único lead.`);
         assert.equal(saved.clients[0]?.assignedToId, identity(role).memberId);
         assert.equal(saved.clients[0]?.createdById, identity(role).memberId);
-        assert.equal(saved.clients[0]?.nextAction, 'Contactar por WhatsApp');
+        assert.equal(saved.clients[0]?.nextAction, undefined);
         await assertNoHorizontalScroll(page);
       } finally {
         await context.close();

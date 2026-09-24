@@ -258,6 +258,8 @@ async function fillLead(
   await form.locator('input[name="name"]').fill(values.name);
   await form.locator('input[name="phone"]').fill(values.phone);
   if (values.email !== undefined) await form.locator('input[name="email"]').fill(values.email);
+  const progressive = form.locator('[data-lead-commercial-details]');
+  if ((await progressive.getAttribute('open')) === null) await progressive.locator(':scope > summary').click();
   await form.locator('input[name="interest"]').fill(values.interest ?? 'Balcones del Chateau, departamento');
   await form.locator('select[name="temperature"]').selectOption('Tibio');
   await form.locator('select[name="pipeline"]').selectOption('Nuevo');

@@ -593,15 +593,17 @@ async function verifyDesktop(page: Page, url: string): Promise<void> {
   await form.waitFor({ state: 'visible' });
   assert.equal(await form.getAttribute('role'), 'dialog');
   assert.equal(await form.locator('.pc-lead-dialog-close').innerText(), '×');
-  assert.equal(await form.locator('.pc-lead-form-primary h3').innerText(), 'Datos principales');
-  assert.equal(await form.locator('.pc-lead-form-commercial h3').innerText(), 'Estado comercial');
-  assert.equal(await form.locator('.pc-lead-form-qualification > summary').innerText(), 'Calificación comercial');
-  assert.equal(await form.locator('.pc-lead-form-optional').getAttribute('open'), null);
+  assert.equal(await form.locator('.pc-lead-form-primary h3').innerText(), 'Contacto rápido');
+  const progressive = form.locator('[data-lead-commercial-details]');
+  assert.equal(await progressive.getAttribute('open'), null);
+  assert.match(await progressive.locator(':scope > summary').innerText(), /Completar datos comerciales/);
+  assert.equal(await form.locator('input[name="interest"]').isVisible(), false);
   await assertFullyVisible(page, form.locator('.b131-lead-form-actions'));
   await screenshot(page, '06-nuevo-lead-desktop-superior.png');
 
+  await progressive.locator(':scope > summary').click();
+  assert.notEqual(await progressive.getAttribute('open'), null);
   await form.locator('.b131-lead-form-fields').evaluate((element) => { element.scrollTop = element.scrollHeight; });
-  await form.locator('.pc-lead-form-optional > summary').click();
   await screenshot(page, '07-nuevo-lead-desktop-inferior.png');
   await assertNoHorizontalScroll(page);
 
@@ -658,6 +660,10 @@ async function verifyMobile(page: Page, url: string): Promise<void> {
   await screenshot(page, '08-nuevo-lead-mobile-superior.png');
 
   const fields = form.locator('.b131-lead-form-fields');
+  const progressive = form.locator('[data-lead-commercial-details]');
+  assert.equal(await progressive.getAttribute('open'), null);
+  assert.equal(await form.locator('input[name="interest"]').isVisible(), false);
+  await progressive.locator(':scope > summary').click();
   await form.locator('.pc-lead-form-qualification').scrollIntoViewIfNeeded();
   await screenshot(page, '09-nuevo-lead-mobile-calificacion.png');
 
@@ -715,8 +721,8 @@ test('rediseño de Leads permanece aislado de la lógica comercial aprobada', ()
   assert.match(redesign, /Buscar por nombre, WhatsApp o interés/);
   assert.match(redesign, /Atención requerida/);
   assert.match(redesign, /Resumen por etapa/);
-  assert.match(redesign, /Calificación comercial/);
-  assert.match(redesign, /Preferencias y datos opcionales/);
+  assert.match(redesign, /Contacto rápido/);
+  assert.match(redesign, /Completar datos comerciales/);
   assert.doesNotMatch(redesign, /saveData|queueCloudSave|upsertClient|openWhatsApp/);
   assert.match(guards, /Cerrar formulario/);
   assert.match(css, /interactive-widget|safe-area-inset-bottom|100dvh/);

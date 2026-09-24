@@ -69,36 +69,23 @@ function organizeLeadForm(): void {
   fields.dataset.pcOrganized = 'true';
   fields.setAttribute('aria-label', 'Campos del lead');
 
-  const primary = createFormSection('Datos principales', 'pc-lead-form-primary');
-  const commercial = createFormSection('Estado comercial', 'pc-lead-form-commercial');
-  appendFields(primary, fields, ['name', 'phone', 'email', 'interest']);
-  appendFields(commercial, fields, ['temperature', 'pipeline', 'nextAction', 'nextFollowUp']);
+  const primary = createFormSection('Contacto rápido', 'pc-lead-form-primary');
+  appendFields(primary, fields, ['name', 'phone', 'email']);
 
-  const qualification = fields.querySelector<HTMLDetailsElement>('.lead-form-essential');
-  if (qualification) {
-    qualification.classList.add('pc-lead-form-section', 'pc-lead-form-qualification');
-    qualification.open = true;
-    text(qualification.querySelector('summary'), 'Calificación comercial');
-  }
-
-  const optional = fields.querySelector<HTMLDetailsElement>('.lead-form-secondary');
-  if (optional) {
-    optional.classList.add('pc-lead-form-section', 'pc-lead-form-optional');
-    optional.open = false;
-    const summary = optional.querySelector<HTMLElement>('summary');
+  const progressive = fields.querySelector<HTMLDetailsElement>('[data-lead-commercial-details]');
+  if (progressive) {
+    progressive.classList.add('pc-lead-form-section', 'pc-lead-form-commercial-progressive');
+    progressive.open = form.dataset.leadFormMode === 'edit';
+    const summary = progressive.querySelector<HTMLElement>(':scope > summary');
     if (summary) {
-      summary.textContent = '';
-      const label = document.createElement('span');
-      label.textContent = 'Preferencias y datos opcionales';
-      const badge = document.createElement('small');
-      badge.textContent = 'Opcional';
-      summary.append(label, badge);
+      summary.setAttribute('aria-label', 'Completar datos comerciales');
     }
+    progressive.querySelector<HTMLDetailsElement>('.lead-form-essential')?.classList.add('pc-lead-form-qualification');
+    progressive.querySelector<HTMLDetailsElement>('.lead-form-secondary')?.classList.add('pc-lead-form-optional');
   }
 
-  fields.prepend(primary, commercial);
-  if (qualification) fields.append(qualification);
-  if (optional) fields.append(optional);
+  fields.prepend(primary);
+  if (progressive) fields.append(progressive);
 }
 
 function activeFilterCount(container: HTMLElement): number {

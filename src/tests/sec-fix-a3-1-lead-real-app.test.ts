@@ -307,6 +307,8 @@ async function openLeadForm(page: Page): Promise<ReturnType<Page['locator']>> {
 async function fillLead(form: ReturnType<Page['locator']>, name: string, phone: string): Promise<void> {
   await form.locator('input[name="name"]').fill(name);
   await form.locator('input[name="phone"]').fill(phone);
+  const progressive = form.locator('[data-lead-commercial-details]');
+  if ((await progressive.getAttribute('open')) === null) await progressive.locator(':scope > summary').click();
   await form.locator('input[name="interest"]').fill('A3.1 tenant security');
 }
 
