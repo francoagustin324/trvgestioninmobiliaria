@@ -13,7 +13,7 @@ import { MAX_PROPERTY_PHOTOS, uploadPropertyPhoto } from './property-photo-uploa
 import { propertyShareText, type PropertyWithFicha } from './property-ficha.js';
 import { publishPropertyFicha, type PublishedPropertyFicha } from './public-property-share.js';
 import { authenticatedTenantMember, saveData, state } from './store.js';
-import { assertTenantCrmScope } from './tenant-storage.js';
+import { assertTenantCrmScope, writeTenantSnapshot } from './tenant-storage.js';
 import { newSyncRecordMetadata } from './sync-identity.js';
 import {
   assertTenantRuntimeLeaseCurrent,
@@ -441,6 +441,60 @@ function optionalNumber(value: string): number | undefined {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined;
 }
 
+function showPropertyFormError(
+  form: HTMLFormElement,
+  message: string,
+  fieldElement?: HTMLInputElement | HTMLSelectElement | null,
+): void {
+  const error = form.querySelector<HTMLElement>('[data-property-error]');
+  if (error) {
+    error.textContent = message;
+    error.hidden = false;
+  }
+  form.querySelectorAll<HTMLElement>('[aria-invalid="true"]').forEach((node) => node.removeAttribute('aria-invalid'));
+  if (fieldElement) {
+    fieldElement.setAttribute('aria-invalid', 'true');
+    fieldElement.focus({ preventScroll: false });
+  }
+}
+
+function clearPropertyFormError(form: HTMLFormElement): void {
+  const error = form.querySelector<HTMLElement>('[data-property-error]');
+  if (error) {
+    error.textContent = '';
+    error.hidden = true;
+  }
+  form.querySelectorAll<HTMLElement>('[aria-invalid="true"]').forEach((node) => node.removeAttribute('aria-invalid'));
+}
+
+function rollbackPropertySave(
+  form: HTMLFormElement,
+  context: { scope: TenantScope; runtimeLease: TenantRuntimeLease },
+  previousCrm: typeof state.crm,
+): void {
+  if (!tenantRuntimeLeaseIsCurrent(context.runtimeLease)) {
+    showPropertyFormError(form, 'El tenant o runtime activo cambió durante el guardado. La propiedad no se confirmó.');
+    return;
+  }
+  try {
+    assertTenantRuntimeLeaseCurrent(context.runtimeLease);
+    assertTenantCrmScope(context.scope, previousCrm);
+    state.crm = previousCrm;
+    assertTenantCrmScope(context.scope, state.crm);
+    writeTenantSnapshot(context.scope, previousCrm, {
+      markDirty: true,
+      reason: 'Reversión de propiedad no persistida',
+      backup: false,
+    });
+  } catch {
+    // Nunca se intenta completar un rollback sobre otro tenant o runtime.
+  }
+  showPropertyFormError(
+    form,
+    'No se pudo guardar la propiedad. Los datos y fotos siguen en el formulario para reintentar.',
+  );
+}
+
 function photoPreviewHtml(urls: string[]): string {
   if (!urls.length) {
     return '<div class="mvp-property-photo-empty"><strong>Todavía no cargaste fotos</strong><span>La primera foto será la portada de la ficha.</span></div>';
@@ -607,49 +661,63 @@ export function renderMvpProperties(container: HTMLElement, options: MvpProperti
     </div>
   </div>
   ${propertyReadOnlySheet()}
-  <form id="mvp-property-form" class="mvp-lead-form mvp-property-form ${state.openForms.property ? '' : 'collapsed'}">
+  <form id="mvp-property-form" class="mvp-lead-form mvp-property-form ${state.openForms.property ? '' : 'collapsed'}" novalidate>
     <div class="mvp-form-heading">
-      <div><h2>${editing ? `Editar ${escapeHtml(editing.title)}` : 'Nueva propiedad'}</h2><p>Los datos comerciales se muestran en la ficha. Los datos internos nunca se comparten.</p></div>
+      <div><h2>${editing ? `Editar ${escapeHtml(editing.title)}` : 'Nueva propiedad'}</h2><p>Guardá lo esencial ahora y completá el resto cuando tengas la información.</p></div>
       <button type="button" class="quiet-button" data-cancel-property-edit>Cerrar</button>
     </div>
     <div class="mvp-property-form-section mvp-property-wide" data-property-import-status hidden></div>
 
-    <div class="mvp-property-form-section"><strong>Información comercial</strong><span>Visible para el cliente</span></div>
-    <label>Título comercial<input name="title" value="${textValue(editing, 'title')}" placeholder="Ej. Dúplex de 2 dormitorios en Docta" required></label>
-    <label>Zona o ubicación aproximada<input name="address" value="${textValue(editing, 'address')}" placeholder="Ej. Docta Urbanización, Córdoba" required></label>
-    <label>Tipo<select name="type">${types.map((item) => option(item, item, editing?.type)).join('')}</select></label>
-    <label>Operación<select name="operation">${operations.map((item) => option(item, item, editing?.operation)).join('')}</select></label>
-    <label>Precio USD<input name="price" type="number" min="0" value="${textValue(editing, 'price')}" required></label>
-    <label>Estado<select name="status">${statuses.map((item) => option(item, item, editing?.status)).join('')}</select></label>
-    <label>Dormitorios<input name="bedrooms" type="number" min="0" value="${textValue(editing, 'bedrooms')}"></label>
-    <label>Baños<input name="bathrooms" type="number" min="0" value="${textValue(editing, 'bathrooms')}"></label>
-    <label>Cochera<input name="garage" value="${textValue(editing, 'garage')}" placeholder="Ej. 1 cochera cubierta"></label>
-    <label>Metros cubiertos<input name="coveredMeters" type="number" min="0" value="${textValue(editing, 'coveredMeters')}"></label>
-    <label>Metros totales<input name="totalMeters" type="number" min="0" value="${textValue(editing, 'totalMeters')}"></label>
-    <label>Antigüedad<input name="age" value="${textValue(editing, 'age')}" placeholder="Ej. A estrenar"></label>
-    <label>Escritura<select name="deed">${['', 'Sí', 'No', 'En trámite', 'A confirmar'].map((item) => option(item, item || 'No informado', editing?.deed)).join('')}</select></label>
-    <label>Apto crédito<select name="creditReady">${['', 'Sí', 'No', 'A confirmar'].map((item) => option(item, item || 'No informado', editing?.creditReady)).join('')}</select></label>
-    <label>Forma de pago<input name="paymentMethod" value="${textValue(editing, 'paymentMethod')}" placeholder="Contado, crédito, financiación..."></label>
-    <label class="mvp-property-wide">Características<textarea name="features" placeholder="Balcón, cochera, pileta, patio, seguridad...">${textValue(editing, 'features')}</textarea></label>
-    <label class="mvp-property-wide">Descripción comercial<textarea name="description" placeholder="Descripción clara y breve para presentar la propiedad al cliente.">${textValue(editing, 'description')}</textarea></label>
+    <div class="mvp-property-quick-grid mvp-property-wide" aria-label="Datos esenciales de la propiedad">
+      <label>Título comercial<input name="title" value="${textValue(editing, 'title')}" placeholder="Ej. Dúplex en Docta" autocomplete="off"></label>
+      <label>Zona o ubicación aproximada<input name="address" value="${textValue(editing, 'address')}" placeholder="Ej. Docta Urbanización, Córdoba" autocomplete="off"></label>
+      <label>Tipo<select name="type"><option value="">Seleccionar tipo</option>${types.map((item) => option(item, item, editing?.type)).join('')}</select></label>
+      <label>Operación<select name="operation"><option value="">Seleccionar operación</option>${operations.map((item) => option(item, item, editing?.operation)).join('')}</select></label>
+      <label>Precio USD<input name="price" type="number" min="1" inputmode="decimal" value="${textValue(editing, 'price')}" placeholder="Ej. 120000"></label>
+    </div>
 
-    <section class="mvp-property-photo-manager mvp-property-wide" aria-labelledby="property-photo-title">
-      <div class="mvp-property-photo-heading">
-        <div><strong id="property-photo-title">Fotos de la ficha</strong><span data-property-photo-count>${editingPhotos.length} de ${MAX_PROPERTY_PHOTOS} fotos</span></div>
-        <button type="button" data-property-photo-picker>Agregar fotos</button>
-        <input type="file" accept="image/*" multiple hidden data-property-photo-input>
+    <details class="mvp-property-progressive mvp-property-wide"${editing ? ' open' : ''}>
+      <summary>Completar características</summary>
+      <div class="mvp-property-progressive-grid">
+        <label>Dormitorios<input name="bedrooms" type="number" min="0" value="${textValue(editing, 'bedrooms')}"></label>
+        <label>Baños<input name="bathrooms" type="number" min="0" value="${textValue(editing, 'bathrooms')}"></label>
+        <label>Cochera<input name="garage" value="${textValue(editing, 'garage')}" placeholder="Ej. 1 cochera cubierta"></label>
+        <label>Metros cubiertos<input name="coveredMeters" type="number" min="0" value="${textValue(editing, 'coveredMeters')}"></label>
+        <label>Metros totales<input name="totalMeters" type="number" min="0" value="${textValue(editing, 'totalMeters')}"></label>
+        <label>Antigüedad<input name="age" value="${textValue(editing, 'age')}" placeholder="Ej. A estrenar"></label>
+        <label>Escritura<select name="deed">${['', 'Sí', 'No', 'En trámite', 'A confirmar'].map((item) => option(item, item || 'No informado', editing?.deed)).join('')}</select></label>
+        <label>Apto crédito<select name="creditReady">${['', 'Sí', 'No', 'A confirmar'].map((item) => option(item, item || 'No informado', editing?.creditReady)).join('')}</select></label>
+        <label>Forma de pago<input name="paymentMethod" value="${textValue(editing, 'paymentMethod')}" placeholder="Contado, crédito, financiación..."></label>
+        <label class="mvp-property-wide">Características<textarea name="features" placeholder="Balcón, cochera, pileta, patio, seguridad...">${textValue(editing, 'features')}</textarea></label>
+        <label class="mvp-property-wide">Descripción comercial<textarea name="description" placeholder="Descripción clara y breve para presentar la propiedad al cliente.">${textValue(editing, 'description')}</textarea></label>
       </div>
-      <textarea name="photoUrls" hidden>${escapeHtml(editingPhotos.join('\n'))}</textarea>
-      <div class="mvp-property-photo-grid" data-property-photo-preview>${photoPreviewHtml(editingPhotos)}</div>
-      <p class="mvp-property-photo-status" data-property-photo-status>Elegí fotos desde la galería o la cámara. Se comprimen automáticamente.</p>
-    </section>
+    </details>
 
-    <div class="mvp-property-form-section mvp-property-form-section-internal"><strong>Información interna</strong><span>No aparece en la ficha del cliente</span></div>
-    <label>Propietario o colega<input name="owner" value="${textValue(editing, 'owner')}" required></label>
-    <input type="hidden" name="sourceLink" value="${textValue(editing, 'sourceLink')}">
-    <label class="mvp-property-wide">Notas internas<textarea name="notes" placeholder="Datos privados, comisión, condiciones o información del colega.">${textValue(editing, 'notes')}</textarea></label>
+    <details class="mvp-property-progressive mvp-property-wide"${editing ? ' open' : ''}>
+      <summary>Fotos</summary>
+      <section class="mvp-property-photo-manager" aria-labelledby="property-photo-title">
+        <div class="mvp-property-photo-heading">
+          <div><strong id="property-photo-title">Fotos de la ficha</strong><span data-property-photo-count>${editingPhotos.length} de ${MAX_PROPERTY_PHOTOS} fotos</span></div>
+          <button type="button" data-property-photo-picker>Agregar fotos</button>
+          <input type="file" accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp" multiple hidden data-property-photo-input>
+        </div>
+        <textarea name="photoUrls" hidden>${escapeHtml(editingPhotos.join('\n'))}</textarea>
+        <div class="mvp-property-photo-grid" data-property-photo-preview>${photoPreviewHtml(editingPhotos)}</div>
+        <p class="mvp-property-photo-status" data-property-photo-status>JPG, PNG o WEBP. Máximo ${MAX_PROPERTY_PHOTOS} fotos. Se comprimen automáticamente.</p>
+      </section>
+    </details>
 
-    <div data-property-error class="form-error" hidden></div>
+    <details class="mvp-property-progressive mvp-property-wide mvp-property-progressive-internal"${editing ? ' open' : ''}>
+      <summary>Información interna</summary>
+      <div class="mvp-property-progressive-grid">
+        <label>Propietario o colega<input name="owner" value="${textValue(editing, 'owner')}" placeholder="Opcional"></label>
+        <label>Estado interno<select name="status">${statuses.map((item) => option(item, item, editing?.status ?? 'Activa')).join('')}</select><small>“Activa” permite trabajarla en matching; no publica la propiedad.</small></label>
+        <input type="hidden" name="sourceLink" value="${textValue(editing, 'sourceLink')}">
+        <label class="mvp-property-wide">Notas internas<textarea name="notes" placeholder="Datos privados, comisión, condiciones o información del colega.">${textValue(editing, 'notes')}</textarea></label>
+      </div>
+    </details>
+
+    <div data-property-error class="form-error" role="alert" aria-live="polite" hidden></div>
     <button type="submit">${editing ? 'Guardar cambios' : 'Guardar propiedad'}</button>
   </form>
   <div class="mvp-lead-toolbar">
@@ -685,28 +753,59 @@ export function renderMvpProperties(container: HTMLElement, options: MvpProperti
   form?.addEventListener('submit', async (event) => {
     event.preventDefault();
     if (currentPhotoUploadInProgress()) return;
-    const writeContext = propertyFormWriteContext(form);
+    clearPropertyFormError(form);
+
+    let writeContext: ReturnType<typeof propertyFormWriteContext>;
+    try {
+      writeContext = propertyFormWriteContext(form);
+    } catch {
+      showPropertyFormError(form, 'El tenant o runtime activo cambió. Volvé a abrir el formulario antes de guardar.');
+      return;
+    }
+
     const values = formValues(form);
+    const title = field(values, 'title').trim();
+    const address = field(values, 'address').trim();
+    const type = field(values, 'type').trim();
+    const operation = field(values, 'operation').trim();
     const price = Number(field(values, 'price'));
-    const error = form.querySelector<HTMLElement>('[data-property-error]');
-    if (!Number.isFinite(price) || price < 0) {
-      if (error) {
-        error.textContent = 'Ingresá un precio válido.';
-        error.hidden = false;
-      }
+    const titleField = form.elements.namedItem('title');
+    const addressField = form.elements.namedItem('address');
+    const typeField = form.elements.namedItem('type');
+    const operationField = form.elements.namedItem('operation');
+    const priceField = form.elements.namedItem('price');
+
+    if (!title) {
+      showPropertyFormError(form, 'Ingresá un título comercial.', titleField instanceof HTMLInputElement ? titleField : null);
+      return;
+    }
+    if (!address) {
+      showPropertyFormError(form, 'Ingresá una zona o ubicación aproximada.', addressField instanceof HTMLInputElement ? addressField : null);
+      return;
+    }
+    if (!type) {
+      showPropertyFormError(form, 'Seleccioná el tipo de propiedad.', typeField instanceof HTMLSelectElement ? typeField : null);
+      return;
+    }
+    if (!operation) {
+      showPropertyFormError(form, 'Seleccioná la operación.', operationField instanceof HTMLSelectElement ? operationField : null);
+      return;
+    }
+    if (!Number.isFinite(price) || price <= 0) {
+      showPropertyFormError(form, 'Ingresá un precio válido mayor a cero.', priceField instanceof HTMLInputElement ? priceField : null);
       return;
     }
 
     const property: PropertyWithFicha = {
       ...(editing || newSyncRecordMetadata()),
       id: editing?.id ?? formPropertyId,
-      title: field(values, 'title').trim(),
-      address: field(values, 'address').trim(),
-      type: field(values, 'type'),
-      operation: field(values, 'operation'),
+      title,
+      address,
+      type,
+      operation,
       price,
       owner: field(values, 'owner').trim(),
-      status: field(values, 'status'),
+      status: field(values, 'status').trim() || editing?.status || 'Activa',
       bedrooms: optionalNumber(field(values, 'bedrooms')),
       bathrooms: optionalNumber(field(values, 'bathrooms')),
       garage: field(values, 'garage').trim(),
@@ -725,16 +824,27 @@ export function renderMvpProperties(container: HTMLElement, options: MvpProperti
       createdById: editing?.createdById ?? writeContext.member.id,
     };
 
-    assertTenantRuntimeLeaseCurrent(writeContext.runtimeLease);
-    assertTenantCrmScope(writeContext.scope, state.crm);
-    if (editing) {
-      const index = state.crm.properties.findIndex((item) => item.id === editing.id);
-      if (index >= 0) state.crm.properties[index] = property as Property;
-    } else {
-      state.crm.properties.push(property as Property);
-    }
+    const previousCrm = structuredClone(state.crm);
+    try {
+      assertTenantRuntimeLeaseCurrent(writeContext.runtimeLease);
+      assertTenantCrmScope(writeContext.scope, state.crm);
+      if (editing) {
+        const index = state.crm.properties.findIndex((item) => item.id === editing.id);
+        if (index < 0) throw new Error('PROPERTY_EDIT_TARGET_MISSING');
+        state.crm.properties[index] = property as Property;
+      } else {
+        state.crm.properties.push(property as Property);
+      }
 
-    saveData(editing ? 'Propiedad editada' : 'Propiedad creada');
+      assertTenantRuntimeLeaseCurrent(writeContext.runtimeLease);
+      assertTenantCrmScope(writeContext.scope, state.crm);
+      saveData(editing ? 'Propiedad editada' : 'Propiedad creada');
+      assertTenantRuntimeLeaseCurrent(writeContext.runtimeLease);
+      assertTenantCrmScope(writeContext.scope, state.crm);
+    } catch {
+      rollbackPropertySave(form, writeContext, previousCrm);
+      return;
+    }
 
     if (property.publicSlug) {
       const scope = writeContext.scope;

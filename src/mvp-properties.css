@@ -176,3 +176,70 @@
   .mvp-property-photo-card-actions,
   .mvp-property-card-actions { grid-template-columns:repeat(2, minmax(0, 1fr)); }
 }
+
+
+/* Bloque 2B — alta rápida y progresiva de propiedades. */
+.mvp-property-quick-grid,
+.mvp-property-progressive-grid {
+  display:grid;
+  grid-template-columns:repeat(2,minmax(0,1fr));
+  gap:14px;
+  min-width:0;
+}
+.mvp-property-quick-grid > *,
+.mvp-property-progressive-grid > * { min-width:0; }
+.mvp-property-progressive {
+  overflow:hidden;
+  border:1px solid #d7e2e8;
+  border-radius:14px;
+  background:#fff;
+}
+.mvp-property-progressive > summary {
+  display:flex;
+  align-items:center;
+  min-height:46px;
+  padding:10px 12px;
+  color:#173951;
+  font-weight:850;
+  cursor:pointer;
+  touch-action:manipulation;
+}
+.mvp-property-progressive[open] > summary {
+  border-bottom:1px solid #e2e8ed;
+  background:#f7fafc;
+}
+.mvp-property-progressive-grid {
+  padding:14px;
+}
+.mvp-property-progressive-internal > summary {
+  color:#6f4d08;
+  background:#fffaf0;
+}
+.mvp-property-progressive .mvp-property-photo-manager {
+  margin:14px;
+}
+#mvp-property-form > button[type="submit"] {
+  min-height:48px;
+}
+#mvp-property-form [aria-invalid="true"] {
+  border-color:#b42318 !important;
+  outline:3px solid rgba(180,35,24,.14);
+  outline-offset:1px;
+}
+
+@media (max-width:640px) {
+  .mvp-property-quick-grid,
+  .mvp-property-progressive-grid {
+    grid-template-columns:minmax(0,1fr);
+    gap:10px;
+  }
+  .mvp-property-progressive > summary {
+    min-height:48px;
+  }
+  .mvp-property-progressive-grid {
+    padding:12px;
+  }
+  .mvp-property-progressive .mvp-property-photo-manager {
+    margin:12px;
+  }
+}

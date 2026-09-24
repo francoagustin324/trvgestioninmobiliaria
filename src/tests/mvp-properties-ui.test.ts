@@ -40,5 +40,28 @@ test('los estilos de propiedades están publicados y contemplan celular', () => 
   assert.match(css, /#propiedades \.mvp-property-form select option \{[\s\S]*color:var\(--ob-navy\)[\s\S]*background:#fff/);
   assert.match(css, /#propiedades \.mvp-property-form select:focus-visible \{[\s\S]*outline:3px solid var\(--ob-secondary\)/);
   assert.match(css, /#propiedades \.mvp-property-form select:disabled \{[\s\S]*color:var\(--ob-slate\)[\s\S]*opacity:1/);
-  assert.ok(html.includes('/src/mvp-properties.css?v=20260921-block4-hardening-1'));
+  assert.ok(html.includes('/src/mvp-properties.css?v=20260924-block2b-1'));
+});
+
+
+test('Bloque 2B usa alta esencial progresiva y rollback visible sin exigir datos secundarios', () => {
+  for (const marker of [
+    'mvp-property-quick-grid',
+    'Título comercial',
+    'Zona o ubicación aproximada',
+    'Seleccionar tipo',
+    'Seleccionar operación',
+    'Precio USD',
+    'Completar características',
+    '<summary>Fotos</summary>',
+    '<summary>Información interna</summary>',
+    'rollbackPropertySave(form, writeContext, previousCrm)',
+    'Los datos y fotos siguen en el formulario para reintentar',
+  ]) assert.ok(propertiesUi.includes(marker), marker);
+
+  assert.doesNotMatch(propertiesUi, /name="owner"[^>]*required/);
+  assert.doesNotMatch(propertiesUi, /name="bedrooms"[^>]*required/);
+  assert.doesNotMatch(propertiesUi, /name="bathrooms"[^>]*required/);
+  assert.match(propertiesUi, /status: field\(values, 'status'\)\.trim\(\) \|\| editing\?\.status \|\| 'Activa'/);
+  assert.match(propertiesUi, /price <= 0/);
 });
