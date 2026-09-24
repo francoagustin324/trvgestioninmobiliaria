@@ -27,13 +27,6 @@ function normalizeLeadSourceIntegration(): void {
   const container = document.querySelector<HTMLElement>('#crm.active');
   if (!container) return;
 
-  const form = container.querySelector<HTMLFormElement>('#mvp-lead-form:not(.collapsed)');
-  const source = form?.elements.namedItem('leadSource');
-  if (form && source instanceof HTMLSelectElement && !form.dataset.b131Editing && !source.value) {
-    // Un alta manual nace como captación propia; el usuario puede cambiar el origen antes de guardar.
-    source.value = 'Captación propia';
-  }
-
   const results = container.querySelector<HTMLElement>('#mvp-lead-results');
   const summary = container.querySelector<HTMLElement>('[data-lead-source-summary]');
   const reactivation = container.querySelector<HTMLElement>('[data-reactivation-section]');

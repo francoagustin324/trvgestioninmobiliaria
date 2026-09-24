@@ -458,7 +458,7 @@ test('B1.3.2 mantiene errores visibles, conserva datos y bloquea formularios obs
     let form = await openLeadForm(page);
     await fillLead(form, { name: 'VALIDACIONES B1.3.2', phone: '123', date: await localToday(page) });
     await form.locator('[data-save-lead]').click();
-    await form.locator('[data-lead-status]').getByText('Ingresá un WhatsApp válido con código de área.', { exact: true }).waitFor({ state: 'visible' });
+    await form.locator('[data-lead-status]').getByText(/Ingresá un WhatsApp válido con código de área/).waitFor({ state: 'visible' });
     assert.equal(await form.locator('input[name="name"]').inputValue(), 'VALIDACIONES B1.3.2');
 
     await form.locator('input[name="phone"]').fill('03515110068');

@@ -316,6 +316,7 @@ test('B2A alta rápida móvil crea con nombre + teléfono y permite completar de
     const today = await localToday(page);
     await form.locator('input[name="nextFollowUp"]').fill(today);
     await form.locator('[data-save-lead]').click();
+    await page.waitForFunction(() => document.querySelector('#mvp-lead-form')?.classList.contains('collapsed'));
     await page.locator('#mvp-lead-results').getByText('JUAN PÉREZ B2A', { exact: true }).waitFor({ state: 'visible' });
 
     saved = await crmFromStorage(page, 'Dueño');

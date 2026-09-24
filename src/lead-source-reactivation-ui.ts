@@ -58,7 +58,7 @@ function formValues(form: HTMLFormElement): Record<string, string> {
 }
 
 function sourceOptions(current: string | undefined, allowMissing: boolean): string {
-  const missingLabel = allowMissing ? 'Origen no informado' : 'Elegir origen';
+  const missingLabel = allowMissing ? 'Origen no informado' : 'Sin informar por ahora';
   const first = `<option value=""${current ? '' : ' selected'}>${missingLabel}</option>`;
   return first + LEAD_SOURCES.map((source) => (
     `<option value="${escapeHtml(source)}"${current === source ? ' selected' : ''}>${escapeHtml(source)}</option>`
@@ -90,7 +90,7 @@ function enhanceLeadForm(container: HTMLElement): void {
   const wrapper = document.createElement('div');
   wrapper.className = 'pc-lead-source-fields';
   wrapper.dataset.leadSourceFields = '';
-  wrapper.innerHTML = `<label><span>Origen</span><select name="leadSource"${editing ? '' : ' required'}>${sourceOptions(editing?.leadSource, Boolean(editing))}</select></label>
+  wrapper.innerHTML = `<label><span>Origen</span><select name="leadSource">${sourceOptions(editing?.leadSource, Boolean(editing))}</select></label>
     <label><span>Detalle</span><input name="leadSourceDetail" maxlength="120" value="${escapeHtml(editing?.leadSourceDetail || '')}" placeholder="Contexto opcional"></label>
     <label><span>Campaña</span><input name="leadCampaign" maxlength="100" value="${escapeHtml(editing?.leadCampaign || '')}" placeholder="Ej. Docta Septiembre"></label>`;
   const stage = form.querySelector<HTMLElement>('[name="pipeline"]')?.closest('label');

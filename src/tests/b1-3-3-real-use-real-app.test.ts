@@ -321,6 +321,8 @@ test('B1.3.3 mantiene selectores legibles y lead nuevo visible en Android', { ti
     const page = await context.newPage();
     await load(page, url);
     const form = await openLeadForm(page);
+    const progressive = form.locator('[data-lead-commercial-details]');
+    await progressive.locator(':scope > summary').click();
     const temperature = form.locator('select[name="temperature"]');
     const pipeline = form.locator('select[name="pipeline"]');
     await assertReadableSelect(temperature);
@@ -491,6 +493,7 @@ test('B1.3.3 mantiene roles, bloqueo sin configuración y escritorio', { timeout
         const page = await context.newPage();
         await load(page, url);
         const form = await openLeadForm(page);
+        await form.locator('[data-lead-commercial-details] > summary').click();
         await assertReadableSelect(form.locator('select[name="temperature"]'));
         await assertReadableSelect(form.locator('select[name="pipeline"]'));
         await form.getByRole('button', { name: 'Cancelar', exact: true }).click();

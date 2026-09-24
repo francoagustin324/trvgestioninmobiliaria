@@ -53,12 +53,13 @@ const minimalForm = {
   pipeline: 'Nuevo',
 };
 
-test('Source: nuevo lead requiere origen y las fuentes V1 quedan cerradas', () => {
+test('Source: alta rápida permite origen no informado y conserva fuentes V1 cuando se completan', () => {
   assert.equal(LEAD_SOURCES.length, 14);
-  assert.equal(validateLeadSourceSelection({ ...minimalForm, leadSource: '' }, null).ok, false);
+  assert.equal(validateLeadSourceSelection({ ...minimalForm, leadSource: '' }, null).ok, true);
   assert.equal(validateLeadSourceSelection({ ...minimalForm, leadSource: 'Meta Ads' }, null).ok, true);
-  assert.throws(() => clientFromFormValues(90, { ...minimalForm, leadSource: '' }));
-  const created = clientFromFormValues(90, {
+  const withoutSource = clientFromFormValues(90, { ...minimalForm, leadSource: '' });
+  assert.equal(withoutSource.leadSource, undefined);
+  const created = clientFromFormValues(91, {
     ...minimalForm,
     leadSource: 'Meta Ads',
     leadCampaign: 'Docta Septiembre',

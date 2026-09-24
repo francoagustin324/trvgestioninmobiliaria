@@ -480,6 +480,8 @@ async function verifyLeadModal(page: Page, mobile: boolean, screenshotName?: str
 
   await form.locator('input[name="name"]').fill('Lead duplicado de prueba');
   await form.locator('input[name="phone"]').fill('03515110069');
+  const progressive = form.locator('[data-lead-commercial-details]');
+  if ((await progressive.getAttribute('open')) === null) await progressive.locator(':scope > summary').click();
   await form.locator('input[name="interest"]').fill('Dúplex en Docta');
   await save.click();
   await form.locator('[data-lead-status][data-kind="duplicate"]').waitFor({ state: 'visible' });
