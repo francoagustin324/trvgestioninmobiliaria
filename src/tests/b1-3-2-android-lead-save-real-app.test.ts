@@ -258,6 +258,8 @@ async function fillLead(
   await form.locator('input[name="name"]').fill(values.name);
   await form.locator('input[name="phone"]').fill(values.phone);
   if (values.email !== undefined) await form.locator('input[name="email"]').fill(values.email);
+  const commercial = form.locator('details.lead-form-commercial');
+  if (await commercial.getAttribute('open') === null) await commercial.locator('summary').click();
   await form.locator('input[name="interest"]').fill(values.interest ?? 'Balcones del Chateau, departamento');
   await form.locator('select[name="temperature"]').selectOption('Tibio');
   await form.locator('select[name="pipeline"]').selectOption('Nuevo');
@@ -477,7 +479,7 @@ test('B1.3.2 mantiene errores visibles, conserva datos y bloquea formularios obs
     assert.notEqual(spoofedLead.createdById, 999);
 
     form = await openLeadForm(page);
-    await fillLead(form, { name: 'ERROR TECNICO B1.3.2', phone: '03515110067', date: await localToday(page) });
+    await fillLead(form, { name: 'ERROR TECNICO B1.3.2', phone: '03515110067', action: 'Confirmar visita', date: await localToday(page) });
     await page.evaluate(() => {
       const target = window as unknown as B132Window;
       target.__b132OriginalSetItem = Storage.prototype.setItem;

@@ -70,35 +70,43 @@ function organizeLeadForm(): void {
   fields.setAttribute('aria-label', 'Campos del lead');
 
   const primary = createFormSection('Datos principales', 'pc-lead-form-primary');
-  const commercial = createFormSection('Estado comercial', 'pc-lead-form-commercial');
-  appendFields(primary, fields, ['name', 'phone', 'email', 'interest']);
-  appendFields(commercial, fields, ['temperature', 'pipeline', 'nextAction', 'nextFollowUp']);
+  appendFields(primary, fields, ['name', 'phone', 'email']);
 
-  const qualification = fields.querySelector<HTMLDetailsElement>('.lead-form-essential');
-  if (qualification) {
-    qualification.classList.add('pc-lead-form-section', 'pc-lead-form-qualification');
-    qualification.open = true;
-    text(qualification.querySelector('summary'), 'Calificación comercial');
-  }
+  const progressiveCommercial = fields.querySelector<HTMLDetailsElement>('.lead-form-commercial');
+  if (progressiveCommercial) {
+    progressiveCommercial.classList.add('pc-lead-form-section', 'pc-lead-form-commercial');
 
-  const optional = fields.querySelector<HTMLDetailsElement>('.lead-form-secondary');
-  if (optional) {
-    optional.classList.add('pc-lead-form-section', 'pc-lead-form-optional');
-    optional.open = false;
-    const summary = optional.querySelector<HTMLElement>('summary');
-    if (summary) {
-      summary.textContent = '';
-      const label = document.createElement('span');
-      label.textContent = 'Preferencias y datos opcionales';
-      const badge = document.createElement('small');
-      badge.textContent = 'Opcional';
-      summary.append(label, badge);
+    const qualification = progressiveCommercial.querySelector<HTMLDetailsElement>('.lead-form-essential');
+    if (qualification) {
+      qualification.classList.add('pc-lead-form-section', 'pc-lead-form-qualification');
+      qualification.open = true;
+      text(qualification.querySelector('summary'), 'Calificación comercial');
     }
+
+    const optional = progressiveCommercial.querySelector<HTMLDetailsElement>('.lead-form-secondary');
+    if (optional) {
+      optional.classList.add('pc-lead-form-section', 'pc-lead-form-optional');
+      optional.open = false;
+      const summary = optional.querySelector<HTMLElement>('summary');
+      if (summary) {
+        summary.textContent = '';
+        const label = document.createElement('span');
+        label.textContent = 'Preferencias y datos opcionales';
+        const badge = document.createElement('small');
+        badge.textContent = 'Opcional';
+        summary.append(label, badge);
+      }
+    }
+
+    fields.prepend(primary);
+    return;
   }
 
+  // Compatibilidad defensiva para cualquier formulario histórico sin disclosure progresivo.
+  const commercial = createFormSection('Estado comercial', 'pc-lead-form-commercial');
+  appendFields(primary, fields, ['interest']);
+  appendFields(commercial, fields, ['temperature', 'pipeline', 'nextAction', 'nextFollowUp']);
   fields.prepend(primary, commercial);
-  if (qualification) fields.append(qualification);
-  if (optional) fields.append(optional);
 }
 
 function activeFilterCount(container: HTMLElement): number {
