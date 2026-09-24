@@ -232,12 +232,13 @@ test('Bloque 2B crea rápido en móvil, valida esenciales, entra a matching y pe
 
     const matching = await page.evaluate(async (propertyId) => {
       const store = await import('/dist/store.js');
-      const matchingModule = await import('/dist/property-matching.js');
-      const opportunityModule = await import('/dist/property-opportunities.js');
+      const dynamicImport = (path: string): Promise<any> => import(path);
+      const matchingModule = await dynamicImport('/dist/property-matching.js');
+      const opportunityModule = await dynamicImport('/dist/property-opportunities.js');
       const property = store.state.crm.properties.find((item) => item.id === propertyId)!;
       return {
         issues: opportunityModule.propertyMatchingDataIssues(property),
-        clientIds: matchingModule.matchClientsForProperty(property, store.state.crm.clients).map((match) => match.client.id),
+        clientIds: (matchingModule.matchClientsForProperty(property, store.state.crm.clients) as Array<{ client: { id: number } }>).map((match) => match.client.id),
       };
     }, created.id);
     assert.deepEqual(matching.issues, []);
@@ -331,7 +332,8 @@ test('Bloque 2B falla cerrado ante persistencia o tenant obsoleto y conserva fot
     });
 
     await page.evaluate(async ({ userId, organizationId }) => {
-      const runtime = await import('/dist/tenant-runtime.js');
+      const dynamicImport = (path: string): Promise<any> => import(path);
+      const runtime = await dynamicImport('/dist/tenant-runtime.js');
       const store = await import('/dist/store.js');
       const other = structuredClone(store.state.crm);
       other.organization = { ...other.organization, id: organizationId, name: 'Otra inmobiliaria sintética' };

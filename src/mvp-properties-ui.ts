@@ -846,6 +846,7 @@ export function renderMvpProperties(container: HTMLElement, options: MvpProperti
       return;
     }
 
+    const error = form.querySelector<HTMLElement>('[data-property-error]');
     if (property.publicSlug) {
       const scope = writeContext.scope;
       const runtimeLease = writeContext.runtimeLease;
