@@ -321,6 +321,9 @@ test('B1.3.3 mantiene selectores legibles y lead nuevo visible en Android', { ti
     const page = await context.newPage();
     await load(page, url);
     const form = await openLeadForm(page);
+    const commercial = form.locator('details.lead-form-commercial');
+    assert.equal(await commercial.getAttribute('open'), null, 'El alta rápida inicia con datos comerciales cerrados.');
+    await commercial.locator(':scope > summary').click();
     const temperature = form.locator('select[name="temperature"]');
     const pipeline = form.locator('select[name="pipeline"]');
     await assertReadableSelect(temperature);

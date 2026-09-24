@@ -594,7 +594,10 @@ async function verifyDesktop(page: Page, url: string): Promise<void> {
   assert.equal(await form.getAttribute('role'), 'dialog');
   assert.equal(await form.locator('.pc-lead-dialog-close').innerText(), '×');
   assert.equal(await form.locator('.pc-lead-form-primary h3').innerText(), 'Datos principales');
-  assert.equal(await form.locator('.pc-lead-form-commercial h3').innerText(), 'Estado comercial');
+  const progressiveCommercial = form.locator('details.pc-lead-form-commercial');
+  assert.equal(await progressiveCommercial.getAttribute('open'), null, 'Alta nueva mantiene datos comerciales cerrados.');
+  assert.equal(await progressiveCommercial.locator(':scope > summary').innerText(), 'Completar datos comerciales');
+  await progressiveCommercial.locator(':scope > summary').click();
   assert.equal(await form.locator('.pc-lead-form-qualification > summary').innerText(), 'Calificación comercial');
   assert.equal(await form.locator('.pc-lead-form-optional').getAttribute('open'), null);
   await assertFullyVisible(page, form.locator('.b131-lead-form-actions'));
@@ -658,6 +661,9 @@ async function verifyMobile(page: Page, url: string): Promise<void> {
   await screenshot(page, '08-nuevo-lead-mobile-superior.png');
 
   const fields = form.locator('.b131-lead-form-fields');
+  const progressiveCommercial = form.locator('details.pc-lead-form-commercial');
+  assert.equal(await progressiveCommercial.getAttribute('open'), null, 'Mobile inicia con datos comerciales cerrados.');
+  await progressiveCommercial.locator(':scope > summary').click();
   await form.locator('.pc-lead-form-qualification').scrollIntoViewIfNeeded();
   await screenshot(page, '09-nuevo-lead-mobile-calificacion.png');
 
@@ -709,7 +715,7 @@ test('rediseño de Leads permanece aislado de la lógica comercial aprobada', ()
   const whatsapp = readFileSync('src/whatsapp-contact.ts', 'utf8');
 
   assert.match(index, /leads-professional-redesign\.css\?v=20260805-1/);
-  assert.match(index, /leads-professional-redesign\.js\?v=20260908-1/);
+  assert.match(index, /leads-professional-redesign\.js\?v=20260924-block2a-1/);
   assert.match(index, /leads-professional-redesign-guards\.js\?v=20260816-1/);
   assert.match(redesign, /Contactá primero a los leads que requieren atención/);
   assert.match(redesign, /Buscar por nombre, WhatsApp o interés/);

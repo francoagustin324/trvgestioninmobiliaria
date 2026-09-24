@@ -735,7 +735,7 @@ test('PR143 cache bust: todo runtime modificado cambia URL servida', () => {
   assert.match(index, /\/src\/leads-desktop-zero-training\.css\?v=20260811-1/);
   assert.match(index, /\/dist\/leads-professional-redesign-blocking-fix\.js\?v=20260816-1/);
   assert.doesNotMatch(index, /\/dist\/leads-professional-redesign-blocking-fix\.js\?v=20260805-1/);
-  assert.match(index, /\/dist\/leads-professional-redesign\.js\?v=20260908-1/);
+  assert.match(index, /\/dist\/leads-professional-redesign\.js\?v=20260924-block2a-1/);
   assert.doesNotMatch(index, /\/dist\/leads-professional-redesign\.js\?v=20260805-1/);
   assert.match(index, /\/dist\/mvp-main\.js\?v=20260922-block4-extension-import-1/);
 });

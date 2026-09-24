@@ -207,7 +207,7 @@ async function fillRequired(
   if (values.email !== undefined) await form.locator('input[name="email"]').fill(values.email);
   if (values.interest) {
     const commercial = form.locator('details.lead-form-commercial');
-    if (await commercial.getAttribute('open') === null) await commercial.locator('summary').click();
+    if (await commercial.getAttribute('open') === null) await commercial.locator(':scope > summary').click();
     await form.locator('input[name="interest"]').fill(values.interest);
   }
 }
@@ -269,7 +269,7 @@ test('B1.3.1 guarda el lead exacto en móvil y crea un único seguimiento en Age
     assert.ok(compactGeometry.top >= 0 && compactGeometry.bottom <= compactGeometry.navigationTop - 8, JSON.stringify(compactGeometry));
     await page.screenshot({ path: `${artifactDir}/01-mobile-formulario-rapido.png`, fullPage: true });
 
-    await commercial.locator('summary').click();
+    await commercial.locator(':scope > summary').click();
     await form.locator('select[name="knowsArea"]').focus();
     await page.setViewportSize({ width: 390, height: 430 });
     await page.waitForTimeout(200);
@@ -502,7 +502,7 @@ test('Bloque 2A alta progresiva permite email-only, valida contacto, evita dupli
     assert.equal(await commercial.getAttribute('open'), null);
     assert.equal(await commercial.locator('input[name="interest"]').count(), 1);
     assert.equal(await commercial.locator('select[name="temperature"]').count(), 1);
-    assert.ok(await commercial.locator('summary').evaluate((node) => node.getBoundingClientRect().height >= 44));
+    assert.ok(await commercial.locator(':scope > summary').evaluate((node) => node.getBoundingClientRect().height >= 44));
 
     await form.locator('input[name="name"]').fill('SIN CONTACTO');
     await form.locator('[data-save-lead]').click();

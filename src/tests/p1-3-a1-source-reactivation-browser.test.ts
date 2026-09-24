@@ -274,8 +274,12 @@ test('P1.3-A1 browser desktop: filtro de origen, Para reactivar y seguimiento ca
     assert.equal(crm.activityLog.filter((entry) => entry.entityId === 1 && entry.action === 'Seguimiento reprogramado').length, 1);
 
     await page.locator('[data-toggle="client-form"]').click();
+    const quickForm = page.locator('#mvp-lead-form:not(.collapsed)');
+    const commercial = quickForm.locator('details.lead-form-commercial');
+    assert.equal(await commercial.getAttribute('open'), null, 'Origen queda en datos comerciales secundarios.');
+    await commercial.locator(':scope > summary').click();
     await page.waitForSelector('#mvp-lead-form:not(.collapsed) [name="leadSource"]', { state: 'visible' });
-    assert.equal(await page.locator('#mvp-lead-form [name="leadSource"]').getAttribute('required'), '');
+    assert.equal(await page.locator('#mvp-lead-form [name="leadSource"]').getAttribute('required'), null);
     await page.locator('#mvp-lead-form [name="leadSource"]').selectOption('Otro');
     assert.equal(await page.locator('#mvp-lead-form [name="leadSourceDetail"]').getAttribute('required'), '');
 

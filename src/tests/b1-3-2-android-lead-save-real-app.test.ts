@@ -259,7 +259,7 @@ async function fillLead(
   await form.locator('input[name="phone"]').fill(values.phone);
   if (values.email !== undefined) await form.locator('input[name="email"]').fill(values.email);
   const commercial = form.locator('details.lead-form-commercial');
-  if (await commercial.getAttribute('open') === null) await commercial.locator('summary').click();
+  if (await commercial.getAttribute('open') === null) await commercial.locator(':scope > summary').click();
   await form.locator('input[name="interest"]').fill(values.interest ?? 'Balcones del Chateau, departamento');
   await form.locator('select[name="temperature"]').selectOption('Tibio');
   await form.locator('select[name="pipeline"]').selectOption('Nuevo');
