@@ -8,8 +8,10 @@ import type {
 import {
   latestPropertyDiffusionSent,
   propertyDiffusionActivityData,
+  propertyDiffusionStatus,
   type ConfirmedPropertyDiffusionStatus,
 } from './property-diffusion.js';
+import { applyPropertyDiffusionActivityToLedger } from './property-diffusion-ledger.js';
 import {
   authenticatedTenantMember,
   saveData,
@@ -99,32 +101,43 @@ export function recordPropertyDiffusionEvent(
   const { property, client } = currentAuthorizedPair(input);
   if (
     input.status === 'RESPONDIO'
-    && !latestPropertyDiffusionSent(state.crm.activityLog, property, client)
+    && !latestPropertyDiffusionSent(client, property)
   ) {
     throw new Error('PROPERTY_DIFFUSION_RESPONSE_WITHOUT_SEND');
   }
 
   const previousCrm = structuredClone(state.crm);
+  let entry: ActivityEntry | null = null;
   try {
     assertTenantRuntimeLeaseCurrent(input.runtimeLease);
     addActivityForAuthenticatedTenant(
       input.scope,
       propertyDiffusionActivityData(property, client, input.channel, input.status),
     );
+    entry = state.crm.activityLog[0] ?? null;
+    if (!entry || entry.activityKind !== 'property-diffusion') {
+      throw new Error('PROPERTY_DIFFUSION_ACTIVITY_MISSING');
+    }
+
     assertTenantRuntimeLeaseCurrent(input.runtimeLease);
+    applyPropertyDiffusionActivityToLedger(client, property, entry);
     assertTenantCrmScope(input.scope, state.crm);
+
     persist(input.status === 'ENVIADO' ? 'Difusión de propiedad registrada' : 'Respuesta a difusión registrada');
     assertTenantRuntimeLeaseCurrent(input.runtimeLease);
     assertTenantCrmScope(input.scope, state.crm);
+
+    const durableStatus = propertyDiffusionStatus(client, property);
+    if (
+      (input.status === 'ENVIADO' && durableStatus === 'PENDIENTE')
+      || (input.status === 'RESPONDIO' && durableStatus !== 'RESPONDIO')
+    ) {
+      throw new Error('PROPERTY_DIFFUSION_LEDGER_MISSING');
+    }
   } catch (error) {
     rollbackDiffusion(input, previousCrm);
     throw error;
   }
 
-  const entry = state.crm.activityLog[0];
-  if (!entry || entry.activityKind !== 'property-diffusion') {
-    rollbackDiffusion(input, previousCrm);
-    throw new Error('PROPERTY_DIFFUSION_ACTIVITY_MISSING');
-  }
   return entry;
 }
