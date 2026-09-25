@@ -336,8 +336,9 @@ export function renderPropertyOpportunities(container: HTMLElement, onBack: () =
 
   container.querySelector<HTMLElement>('[data-opportunities-back]')?.addEventListener('click', onBack);
   const propertySelect = container.querySelector<HTMLSelectElement>('[data-opportunity-property]');
-  const workspace = container.querySelector<HTMLElement>('[data-opportunity-workspace]');
-  if (!propertySelect || !workspace) return;
+  const workspaceNode = container.querySelector<HTMLElement>('[data-opportunity-workspace]');
+  if (!propertySelect || !workspaceNode) return;
+  const workspace: HTMLElement = workspaceNode;
 
   let allOpportunities: PropertyOpportunity[] = [];
   let terminalClients: Client[] = [];
