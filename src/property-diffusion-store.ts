@@ -20,6 +20,7 @@ import { assignmentVisible } from './team-policy.js';
 import { assertTenantCrmScope, writeTenantSnapshot } from './tenant-storage.js';
 import {
   assertTenantRuntimeLeaseCurrent,
+  TENANT_RUNTIME_STALE,
   tenantRuntimeLeaseIsCurrent,
   tenantScopesEqual,
   type TenantRuntimeLease,
@@ -46,7 +47,7 @@ function identityMatches(
 }
 
 function currentAuthorizedPair(input: RecordPropertyDiffusionInput): { property: Property; client: Client } {
-  if (!tenantScopesEqual(input.scope, input.runtimeLease.scope)) throw new Error('TENANT_RUNTIME_STALE');
+  if (!tenantScopesEqual(input.scope, input.runtimeLease.scope)) throw new Error(TENANT_RUNTIME_STALE);
   assertTenantRuntimeLeaseCurrent(input.runtimeLease);
   assertTenantCrmScope(input.scope, state.crm);
   const member = authenticatedTenantMember(input.scope);
