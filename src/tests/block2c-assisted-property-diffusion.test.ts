@@ -440,8 +440,9 @@ test('U. clientes email-only siguen participando del matching y del contacto asi
   assert.match(uiSource, /Preparar email/);
 });
 
-test('V. FULL CI queda configurado para esta rama y cardinalidad del Bloque 2C', () => {
+test('V. FULL CI conserva Bloque 2C y extiende cardinalidad para el ledger durable 2C.1', () => {
   assert.match(workflowSource, /ux\/ordenbroker-block2c-assisted-property-diffusion/);
-  assert.match(workflowSource, /EXPECTED_TEST_TOTAL: "1457"/);
-  assert.match(workflowSource, /expected = 1457/);
+  assert.match(workflowSource, /fix\/ordenbroker-block2c1-durable-diffusion-ledger/);
+  assert.match(workflowSource, /EXPECTED_TEST_TOTAL: "1468"/);
+  assert.match(workflowSource, /expected = 1468/);
 });
