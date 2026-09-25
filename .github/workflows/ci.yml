@@ -2,7 +2,9 @@ name: TRV CI
 
 on:
   pull_request:
-    branches: [main]
+    branches:
+      - main
+      - ux/ordenbroker-block2b-quick-properties
   push:
     branches:
       - main
