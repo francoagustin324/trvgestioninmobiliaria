@@ -13,6 +13,7 @@ import {
   propertyDiffusionWhatsAppUrl,
 } from './property-diffusion.js';
 import { recordPropertyDiffusionEvent } from './property-diffusion-store.js';
+import type { PropertyDiffusionLedgerMoment } from './property-diffusion-ledger.js';
 import {
   buildPropertyOpportunities,
   DEFAULT_OPPORTUNITY_FILTERS,
@@ -201,14 +202,14 @@ function selectionText(): string {
   return `${count} ${count === 1 ? 'cliente seleccionado' : 'clientes seleccionados'}`;
 }
 
-function responseAfterLatestSend(property: Property, client: Client): ActivityEntry | null {
+function responseAfterLatestSend(property: Property, client: Client): PropertyDiffusionLedgerMoment | null {
   const sent = latestPropertyDiffusionSent(client, property);
   if (!sent) return null;
   const response = latestPropertyDiffusionResponse(client, property);
   return response && response.createdAt >= sent.createdAt ? response : null;
 }
 
-function diffusionChannelRows(property: Property, client: Client, priorSent: ActivityEntry | null): string {
+function diffusionChannelRows(property: Property, client: Client, priorSent: PropertyDiffusionLedgerMoment | null): string {
   if (!preparedDiffusion || preparedDiffusion.propertyId !== property.id) return '';
   const whatsapp = propertyDiffusionWhatsAppUrl(client.phone, preparedDiffusion.message);
   const email = propertyDiffusionEmailUrl(client.email, property.title, preparedDiffusion.message);
