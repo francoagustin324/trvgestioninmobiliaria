@@ -11,7 +11,9 @@ import {
   type PropertyOpportunity,
 } from './property-opportunities.js';
 import { propertyMatchReasonsHtml } from './property-matching-ui.js';
-import { openEntityReadOnly } from './entity-read-navigation.js';
+import { latestPropertyDiffusion } from './property-diffusion.js';
+import { prepareAndRenderPropertyDiffusion } from './property-diffusion-ui.js';
+import { clearReadEntityNavigation, openEntityReadOnly } from './entity-read-navigation.js';
 import { state } from './store.js';
 import { visibleClients, visibleProperties } from './team-access.js';
 import { escapeHtml } from './utils.js';
@@ -67,6 +69,10 @@ function opportunityCard(
   const client = match.client;
   const selected = selectedClientIds.has(client.id);
   const stage = commercialStage(client);
+  const diffusion = latestPropertyDiffusion(state.crm.activityLog, match.property, client);
+  const diffusionLabel = diffusion
+    ? `<div class="opportunity-diffusion-warning">✓ Ya difundida ${formattedDate(diffusion.sentAt)}${diffusion.status === 'RESPONDIO' ? ' · Respondió' : ''}</div>`
+    : '';
   return `<article class="property-opportunity-card" data-opportunity-client="${client.id}">
     <label class="opportunity-selector">
       <input type="checkbox" data-opportunity-select="${client.id}"${selected ? ' checked' : ''}>
@@ -91,6 +97,7 @@ function opportunityCard(
         ${followUpHtml(client)}
         ${activityHtml(latestActivities.get(client.id))}
       </div>
+      ${diffusionLabel}
       <div class="opportunity-card-actions">
         <button type="button" class="secondary opportunity-open-client" data-open-opportunity-client="${client.id}">Abrir ficha</button>
       </div>
@@ -183,6 +190,13 @@ export function renderPropertyOpportunities(container: HTMLElement, onBack: () =
   const updateSelectionCount = (): void => {
     const counter = workspace.querySelector<HTMLElement>('[data-opportunity-selection-count]');
     if (counter) counter.textContent = selectionText();
+    const prepare = workspace.querySelector<HTMLButtonElement>('[data-prepare-diffusion]');
+    if (prepare) prepare.disabled = selectedClientIds.size === 0;
+  };
+
+  const clearDiffusionReview = (): void => {
+    const host = workspace.querySelector<HTMLElement>('[data-property-diffusion-review]');
+    if (host) host.innerHTML = '';
   };
 
   const bindReadNavigation = (): void => {
@@ -213,6 +227,7 @@ export function renderPropertyOpportunities(container: HTMLElement, onBack: () =
         if (!clientId) return;
         if (checkbox.checked) selectedClientIds.add(clientId);
         else selectedClientIds.delete(clientId);
+        clearDiffusionReview();
         updateSelectionCount();
       });
     });
@@ -256,6 +271,32 @@ export function renderPropertyOpportunities(container: HTMLElement, onBack: () =
     });
   };
 
+  const bindPrepareDiffusion = (): void => {
+    const button = workspace.querySelector<HTMLButtonElement>('[data-prepare-diffusion]');
+    const host = workspace.querySelector<HTMLElement>('[data-property-diffusion-review]');
+    if (!button || !host) return;
+    button.addEventListener('click', () => {
+      const property = properties.find((item) => item.id === selectedPropertyId);
+      if (!property) return;
+      const selected = allOpportunities.filter(({ match }) => selectedClientIds.has(match.client.id));
+      if (!selected.length) return;
+      void prepareAndRenderPropertyDiffusion(host, property, selected, {
+        onRecorded: () => {
+          renderResults();
+          updateSelectionCount();
+        },
+        onFollowUp: (clientId) => {
+          if (!clients.some((client) => client.id === clientId)) return;
+          clearReadEntityNavigation();
+          state.activeModule = 'crm';
+          state.editingClientId = clientId;
+          state.openForms.client = true;
+          document.dispatchEvent(new CustomEvent('trv-render'));
+        },
+      });
+    });
+  };
+
   const renderSelectedProperty = (): void => {
     const property = properties.find((item) => item.id === selectedPropertyId);
     if (!property) {
@@ -279,12 +320,21 @@ export function renderPropertyOpportunities(container: HTMLElement, onBack: () =
       <section class="opportunity-review">
         <div class="opportunity-section-heading"><span>2</span><div><strong>Revisá los clientes compatibles</strong><small>Filtrá la lista, entendé por qué coinciden y abrí la ficha del cliente cuando necesites más contexto.</small></div></div>
         ${filtersHtml()}
-        <div class="opportunity-results-summary"><strong>${allOpportunities.length} ${allOpportunities.length === 1 ? 'cliente compatible' : 'clientes compatibles'}</strong><span data-opportunity-selection-count>${selectionText()}</span></div>
+        <div class="opportunity-results-summary">
+          <strong>${allOpportunities.length} ${allOpportunities.length === 1 ? 'cliente compatible' : 'clientes compatibles'}</strong>
+          <div class="opportunity-selection-actions">
+            <span data-opportunity-selection-count>${selectionText()}</span>
+            <button type="button" data-prepare-diffusion disabled>Preparar difusión</button>
+          </div>
+        </div>
         <div class="opportunity-results" data-opportunity-results></div>
         <div data-opportunity-terminal></div>
+        <section class="property-diffusion-host" data-property-diffusion-review aria-live="polite"></section>
       </section>`;
     bindFilters();
+    bindPrepareDiffusion();
     renderResults();
+    updateSelectionCount();
   };
 
   propertySelect.addEventListener('change', () => {
