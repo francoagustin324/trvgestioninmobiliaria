@@ -24,7 +24,7 @@ import {
 } from './property-opportunities.js';
 import { propertyMatchReasonsHtml } from './property-matching-ui.js';
 import type { PropertyWithFicha } from './property-ficha.js';
-import { openEntityReadOnly } from './entity-read-navigation.js';
+import { clearReadEntityNavigation, openEntityReadOnly } from './entity-read-navigation.js';
 import { authenticatedTenantMember, registerTransientStateReset, state } from './store.js';
 import { visibleClients, visibleProperties } from './team-access.js';
 import { assignmentVisible } from './team-policy.js';
@@ -274,7 +274,7 @@ function diffusionReviewCard(opportunity: PropertyOpportunity, property: Propert
       ${responded
         ? '<span class="diffusion-response-confirmed">Respuesta registrada</span>'
         : `<button type="button" class="secondary" data-mark-diffusion-response="${client.id}" data-diffusion-channel="${escapeHtml(priorSent.diffusionChannel)}">Respondió</button>`}
-      <button type="button" class="secondary" data-edit-client="${client.id}">Agregar seguimiento</button>
+      <button type="button" class="secondary" data-add-diffusion-followup="${client.id}">Agregar seguimiento</button>
     </div>` : ''}
   </article>`;
 }
@@ -524,6 +524,17 @@ export function renderPropertyOpportunities(container: HTMLElement, onBack: () =
         const channel = button.dataset.diffusionChannel as PropertyDiffusionChannel;
         if (!clientId || (channel !== 'WhatsApp' && channel !== 'Email')) return;
         recordDiffusionStatus(property, clientId, channel, 'RESPONDIO');
+      });
+    });
+    workspace.querySelectorAll<HTMLButtonElement>('[data-add-diffusion-followup]').forEach((button) => {
+      button.addEventListener('click', () => {
+        const clientId = Number(button.dataset.addDiffusionFollowup);
+        if (!clientId || !clients.some((client) => client.id === clientId)) return;
+        clearReadEntityNavigation();
+        state.activeModule = 'crm';
+        state.editingClientId = clientId;
+        state.openForms.client = true;
+        document.dispatchEvent(new CustomEvent('trv-render'));
       });
     });
   }
