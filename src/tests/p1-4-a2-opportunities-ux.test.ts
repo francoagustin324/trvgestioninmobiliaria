@@ -101,7 +101,7 @@ test('P1.4-A2 mantiene las regresiones browser que cubren filtros, selección, d
 });
 
 test('P1.4-A2.2 mantiene cache-busting vigente y retira el bootstrap de reinyección', () => {
-  assert.match(indexSource, /property-opportunities\.css\?v=20260918-trv-daily-use-1/);
+  assert.match(indexSource, /property-opportunities\.css\?v=20260925-block2c-1/);
   assert.match(indexSource, /mvp-main\.js\?v=20260922-block4-extension-import-1/);
   assert.doesNotMatch(indexSource, /property-opportunities-bootstrap\.js/);
 });

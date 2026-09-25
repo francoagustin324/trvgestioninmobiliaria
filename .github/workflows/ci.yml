@@ -2,7 +2,9 @@ name: TRV CI
 
 on:
   pull_request:
-    branches: [main]
+    branches:
+      - main
+      - ux/ordenbroker-block2b-quick-properties
   push:
     branches:
       - main
@@ -11,6 +13,7 @@ on:
       - security/ordenbroker-staging-extension-brand
       - ux/ordenbroker-block2a-quick-leads
       - ux/ordenbroker-block2b-quick-properties
+      - ux/ordenbroker-block2c-assisted-property-diffusion
   schedule:
     - cron: "0 10 * * *"
   workflow_dispatch:
@@ -25,21 +28,26 @@ jobs:
     timeout-minutes: 120
     env:
       PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
-      EXPECTED_TEST_TOTAL: "1435"
+      EXPECTED_TEST_TOTAL: "1457"
     steps:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
       - uses: actions/setup-node@v7
         with:
           node-version: 22
       - name: Registrar evidencia de source SHA
         shell: bash
+        env:
+          EXPECTED_SOURCE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
         run: |
           set -euo pipefail
-          printf '%s\n' "$GITHUB_SHA" > ci-source-sha.txt
+          SOURCE_SHA="$(git rev-parse HEAD)"
+          test "$SOURCE_SHA" = "$EXPECTED_SOURCE_SHA"
+          printf '%s\n' "$SOURCE_SHA" > ci-source-sha.txt
           test -s ci-source-sha.txt
-          echo "FULL_CI_HEAD=$GITHUB_SHA"
+          echo "FULL_CI_HEAD=$SOURCE_SHA"
       - name: Verificar invariantes R6
         shell: bash
         run: |
@@ -173,7 +181,7 @@ jobs:
           from pathlib import Path
 
           text = Path('test.log').read_text(encoding='utf-8', errors='replace')
-          expected = 1435
+          expected = 1457
 
           def terminal_metric(name: str) -> int:
               matches = re.findall(rf'^# {re.escape(name)}\s+(\d+)\s*$', text, flags=re.MULTILINE)

@@ -227,3 +227,70 @@
   .opportunity-section-heading { gap:10px; }
   .opportunity-section-heading > span { flex-basis:28px; width:28px; height:28px; }
 }
+
+
+/* Bloque 2C — difusión asistida */
+.opportunity-email { display:block; margin-top:3px; color:var(--ink-soft); font-size:.76rem; text-decoration:none; overflow-wrap:anywhere; }
+.opportunity-email:hover { color:var(--brand-bright); text-decoration:underline; }
+.opportunity-diffusion-history { display:flex; flex-wrap:wrap; gap:7px; min-width:0; }
+.opportunity-diffusion-state { display:inline-flex; align-items:center; max-width:100%; min-height:28px; padding:5px 8px; border-radius:999px; font-size:.68rem; font-weight:850; overflow-wrap:anywhere; }
+.opportunity-diffusion-state.is-pending { border:1px solid rgba(255,255,255,.1); background:rgba(255,255,255,.04); color:var(--ink-soft); }
+.opportunity-diffusion-state.is-sent { border:1px solid rgba(99,185,138,.26); background:rgba(99,185,138,.12); color:#9be0ba; }
+.opportunity-diffusion-state.is-responded { border:1px solid rgba(9,88,237,.28); background:rgba(9,88,237,.12); color:#9bc1ff; }
+
+.opportunity-selection-actions { display:flex; align-items:center; justify-content:flex-end; gap:9px; min-width:0; }
+.opportunity-selection-actions > span { flex:0 1 auto; }
+.opportunity-selection-actions > button { min-height:44px; white-space:nowrap; }
+.opportunity-selection-actions > button:disabled { cursor:not-allowed; opacity:.5; }
+
+.diffusion-review { display:grid; gap:16px; min-width:0; padding:20px; border:1px solid rgba(9,88,237,.26); border-radius:16px; background:rgba(9,88,237,.045); box-shadow:0 16px 40px -34px rgba(0,0,0,.85); }
+.diffusion-preparation-state { padding:11px 12px; border:1px solid rgba(9,88,237,.2); border-radius:11px; background:rgba(9,88,237,.08); color:var(--ink); font-size:.78rem; font-weight:780; line-height:1.45; overflow-wrap:anywhere; }
+.diffusion-preparation-state.is-ready { border-color:rgba(99,185,138,.24); background:rgba(99,185,138,.1); color:#b9ebcf; }
+.diffusion-preparation-state.is-error { border-color:rgba(224,92,92,.28); background:rgba(224,92,92,.1); color:#ffc1c1; }
+.diffusion-message-preview { display:grid; gap:8px; min-width:0; }
+.diffusion-message-preview > span { color:var(--ink); font-size:.78rem; font-weight:850; }
+.diffusion-message-preview textarea { width:100%; min-width:0; max-width:100%; resize:vertical; padding:11px 12px; border:1px solid var(--glass-stroke); border-radius:11px; background:rgba(255,255,255,.035); color:var(--ink); font:inherit; line-height:1.45; overflow-wrap:anywhere; box-sizing:border-box; }
+.diffusion-review-list { display:grid; gap:12px; min-width:0; }
+.diffusion-review-card { display:grid; gap:12px; min-width:0; padding:15px; border:1px solid rgba(255,255,255,.11); border-radius:13px; background:rgba(255,255,255,.035); }
+.diffusion-review-heading { display:flex; align-items:flex-start; justify-content:space-between; gap:12px; min-width:0; }
+.diffusion-review-heading > div { display:grid; gap:4px; min-width:0; }
+.diffusion-review-heading > div > strong { color:var(--ink); font-size:.94rem; overflow-wrap:anywhere; }
+.diffusion-review-heading > div > small { color:var(--ink-soft); font-size:.72rem; line-height:1.4; overflow-wrap:anywhere; }
+.diffusion-review-reasons { display:grid; gap:7px; min-width:0; }
+.diffusion-review-reasons > strong { color:var(--ink); font-size:.74rem; }
+.diffusion-review-reasons .match-reasons,
+.diffusion-review-reasons .match-warnings { display:flex; flex-wrap:wrap; gap:6px; min-width:0; }
+.diffusion-review-reasons .match-reasons span,
+.diffusion-review-reasons .match-warnings span { max-width:100%; padding:5px 8px; border-radius:9px; font-size:.69rem; overflow-wrap:anywhere; }
+.diffusion-review-history { display:flex; flex-wrap:wrap; gap:7px; min-width:0; }
+.diffusion-channel-list { display:grid; gap:9px; min-width:0; }
+.diffusion-channel-row { display:grid; grid-template-columns:minmax(140px,.7fr) minmax(0,1.3fr); align-items:center; gap:12px; min-width:0; padding:11px; border:1px solid rgba(255,255,255,.09); border-radius:11px; background:rgba(255,255,255,.025); }
+.diffusion-channel-row > div:first-child { display:grid; gap:3px; min-width:0; }
+.diffusion-channel-row strong { color:var(--ink); font-size:.75rem; }
+.diffusion-channel-row small { color:var(--ink-soft); font-size:.7rem; overflow-wrap:anywhere; }
+.diffusion-channel-actions { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; min-width:0; }
+.diffusion-open-channel,
+.diffusion-channel-actions button,
+.diffusion-after-send-actions button { display:flex; align-items:center; justify-content:center; min-width:0; min-height:44px; padding:9px 11px; border-radius:10px; font-size:.73rem; font-weight:850; text-align:center; text-decoration:none; box-sizing:border-box; overflow-wrap:anywhere; }
+.diffusion-no-channel { margin:0; padding:10px 11px; border:1px solid rgba(224,163,74,.2); border-radius:10px; background:rgba(224,163,74,.09); color:#f0c67f; font-size:.73rem; line-height:1.4; }
+.diffusion-after-send-actions { display:flex; align-items:center; justify-content:flex-end; flex-wrap:wrap; gap:8px; min-width:0; }
+.diffusion-response-confirmed { color:#9be0ba; font-size:.72rem; font-weight:850; }
+
+@media (max-width:640px) {
+  .opportunity-selection-actions { width:100%; align-items:stretch; flex-direction:column; }
+  .opportunity-selection-actions > span { width:max-content; max-width:100%; }
+  .opportunity-selection-actions > button { width:100%; }
+  .diffusion-review { width:100%; max-width:100%; padding:14px; overflow-x:clip; box-sizing:border-box; }
+  .diffusion-review-heading { flex-direction:column; }
+  .diffusion-channel-row { grid-template-columns:1fr; align-items:stretch; }
+  .diffusion-channel-actions { grid-template-columns:1fr; }
+  .diffusion-after-send-actions { display:grid; grid-template-columns:1fr; }
+  .diffusion-open-channel,
+  .diffusion-channel-actions button,
+  .diffusion-after-send-actions button { width:100%; min-height:44px; }
+}
+
+@media (max-width:400px) {
+  .diffusion-review { padding:12px; }
+  .diffusion-review-card { padding:12px; }
+}
