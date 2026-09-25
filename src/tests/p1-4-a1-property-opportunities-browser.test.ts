@@ -482,6 +482,7 @@ test('Bloque 2C mobile 390: preparar no envía, confirmación manual registra y 
     await page.waitForSelector('#propiedades [data-diffusion-client="3"] .diffusion-status.responded', { state: 'visible' });
     assert.match(await page.locator('#propiedades [data-opportunity-client="3"]').textContent() || '', /Respondió/);
     assert.match(await page.locator('#propiedades [data-opportunity-client="3"]').textContent() || '', /Sin próximo seguimiento/);
+    assert.match(await page.locator('#propiedades [data-diffusion-client="3"]').textContent() || '', /Agregar seguimiento/);
 
     const metrics = await page.locator('#propiedades [data-diffusion-review]').evaluate((node) => {
       const rect = node.getBoundingClientRect();
@@ -500,6 +501,13 @@ test('Bloque 2C mobile 390: preparar no envía, confirmación manual registra y 
     assert.ok(metrics.right <= metrics.viewport + 1, JSON.stringify(metrics));
     assert.ok(metrics.documentWidth <= metrics.viewport + 1, JSON.stringify(metrics));
     assert.ok(metrics.minActionHeight >= 43.5, JSON.stringify(metrics));
+
+    const propertySelector = page.locator('#propiedades [data-opportunity-property]');
+    await propertySelector.selectOption('');
+    await propertySelector.selectOption('1');
+    await page.waitForSelector('#propiedades [data-opportunity-client="3"] .opportunity-diffusion-warning', { state: 'visible' });
+    assert.match(await page.locator('#propiedades [data-opportunity-client="3"]').textContent() || '', /Ya difundida/);
+    assert.match(await page.locator('#propiedades [data-opportunity-client="3"]').textContent() || '', /Respondió/);
     assert.deepEqual(pageErrors, []);
   } finally {
     await page.close();
