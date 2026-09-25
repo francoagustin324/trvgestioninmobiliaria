@@ -158,6 +158,7 @@ function normalizedData(value: Partial<CrmData>): CrmData {
       createdById: Number(client.createdById ?? ownerId),
     };
     const propertyDiffusions = hydrateLegacyPropertyDiffusionLedger(normalizedClient, activityLog);
+    if (!propertyDiffusions.length) delete normalizedClient.propertyDiffusions;
     return {
       ...normalizedClient,
       ...(propertyDiffusions.length ? { propertyDiffusions } : {}),
