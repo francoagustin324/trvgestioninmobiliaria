@@ -53,34 +53,13 @@ export function propertyDiffusionHistory(
     .sort((left, right) => right.createdAt.localeCompare(left.createdAt));
 }
 
-export function latestPropertyDiffusionSent(
-  entries: ActivityEntry[],
-  property: Pick<Property, 'id' | 'uid'>,
-  client: Pick<Client, 'id' | 'uid'>,
-): PropertyDiffusionActivity | null {
-  return propertyDiffusionHistory(entries, property, client)
-    .find((entry) => entry.diffusionStatus === 'ENVIADO') ?? null;
-}
-
-export function latestPropertyDiffusionResponse(
-  entries: ActivityEntry[],
-  property: Pick<Property, 'id' | 'uid'>,
-  client: Pick<Client, 'id' | 'uid'>,
-): PropertyDiffusionActivity | null {
-  return propertyDiffusionHistory(entries, property, client)
-    .find((entry) => entry.diffusionStatus === 'RESPONDIO') ?? null;
-}
-
-export function propertyDiffusionStatus(
-  entries: ActivityEntry[],
-  property: Pick<Property, 'id' | 'uid'>,
-  client: Pick<Client, 'id' | 'uid'>,
-): PropertyDiffusionStatus {
-  const sent = latestPropertyDiffusionSent(entries, property, client);
-  if (!sent) return 'PENDIENTE';
-  const response = latestPropertyDiffusionResponse(entries, property, client);
-  return response && response.createdAt >= sent.createdAt ? 'RESPONDIO' : 'ENVIADO';
-}
+export {
+  latestPropertyDiffusionResponse,
+  latestPropertyDiffusionSent,
+  propertyDiffusionLedgerRecord,
+  propertyDiffusionSendCount,
+  propertyDiffusionStatus,
+} from './property-diffusion-ledger.js';
 
 export function buildPropertyDiffusionMessage(
   property: Pick<Property, 'title' | 'address' | 'price' | 'bedrooms'>,
