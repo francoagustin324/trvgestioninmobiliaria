@@ -107,8 +107,25 @@ export interface ActivityEntry extends SyncRecordMetadata {
   diffusionStatus?: PropertyDiffusionStatus;
 }
 
+export interface PropertyDiffusionLedgerRecord {
+  clientId: number;
+  clientUid?: string;
+  propertyId: number;
+  propertyUid?: string;
+  sendCount: number;
+  firstSentAt: string;
+  lastSentAt: string;
+  lastSentChannel: PropertyDiffusionChannel;
+  lastSentActorId: number;
+  lastResponseAt?: string;
+  lastResponseChannel?: PropertyDiffusionChannel;
+  lastResponseActorId?: number;
+  updatedAt: string;
+}
+
 export interface Client extends SyncRecordMetadata {
   id: number; name: string; phone: string; email?: string; interest: string; status: string;
+  propertyDiffusions?: PropertyDiffusionLedgerRecord[];
   temperature: Temperature; pipeline: CommercialStage | string; lastContact?: string; nextFollowUp?: string;
   nextAction?: string; budget?: string; paymentMethod?: string; purchaseTimeframe?: string; purpose?: string;
   knowsArea?: string; canMoveForward?: string; objections?: string; notes?: string;
