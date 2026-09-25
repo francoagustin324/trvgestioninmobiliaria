@@ -186,7 +186,7 @@ function structuredLegacyDiffusion(
     || (entry.diffusionStatus !== 'ENVIADO' && entry.diffusionStatus !== 'RESPONDIO')
     || !validTimestamp(entry.createdAt)
   ) return false;
-  if (!sameEntity(entry.diffusionClientId, entry.diffusionClientUid, client.id, client.uid)) return false;
+  if (!sameEntity(entry.diffusionClientId!, entry.diffusionClientUid, client.id, client.uid)) return false;
   return true;
 }
 
