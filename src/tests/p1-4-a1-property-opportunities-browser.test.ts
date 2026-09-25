@@ -403,3 +403,108 @@ test('P1.4-A1 browser mobile 390: sin overflow y controles táctiles', { timeout
     await stopServer(server);
   }
 });
+
+test('Bloque 2C mobile 390: preparar no envía, confirmación manual registra y respuesta no inventa seguimiento', { timeout: 120_000 }, async (t) => {
+  const executable = launchP14Browser(t);
+  if (!executable) return;
+  const server = await startServer(4333);
+  const browser = await chromium.launch({ executablePath: executable, headless: true, args: ['--no-sandbox'] });
+  const context = await createContext(browser, { width: 390, height: 844 });
+  const page = await context.newPage();
+  const pageErrors: string[] = [];
+  page.on('pageerror', (error) => pageErrors.push(error.message));
+  try {
+    await openOpportunities(page, 'http://127.0.0.1:4333');
+    await selectTestProperty(page);
+
+    await page.route('**/api/cloud-config', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          configured: true,
+          url: 'https://block2c-supabase.test',
+          publishableKey: 'block2c-publishable-key',
+          publicUrl: 'http://127.0.0.1:4333',
+        }),
+      });
+    });
+    await page.route('https://block2c-supabase.test/**', async (route) => {
+      const request = route.request();
+      const url = new URL(request.url());
+      if (url.pathname.endsWith('/rest/v1/public_property_fichas') && request.method() === 'POST') {
+        const payload = JSON.parse(request.postData() || '{}') as Record<string, unknown>;
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify([{
+            organization_id: payload.organization_id,
+            property_key: payload.property_key,
+            slug: payload.slug,
+            payload: payload.payload,
+          }]),
+        });
+        return;
+      }
+      await route.fulfill({ status: 200, contentType: 'application/json', body: '[]' });
+    });
+
+    const target = page.locator('#propiedades [data-opportunity-client="3"]');
+    assert.match(await target.textContent() || '', /Sin próximo seguimiento/);
+    await page.locator('#propiedades [data-opportunity-select="3"]').check();
+    const prepare = page.locator('#propiedades [data-prepare-diffusion]');
+    assert.equal(await prepare.isEnabled(), true);
+    await prepare.click();
+
+    const review = page.locator('#propiedades [data-property-diffusion-review] [data-diffusion-review]');
+    await review.waitFor({ state: 'visible', timeout: 10_000 });
+    assert.match(await review.textContent() || '', /Pendiente · no enviado/);
+    assert.match(await review.textContent() || '', /Abrir WhatsApp/);
+    assert.match(await review.textContent() || '', /Marcar como enviado/);
+    assert.equal(await target.locator('.opportunity-diffusion-warning').count(), 0);
+
+    const whatsapp = review.locator('[data-diffusion-open-whatsapp]').first();
+    assert.match(await whatsapp.getAttribute('href') || '', /^https:\/\/wa\.me\/549/);
+    await whatsapp.evaluate((node) => {
+      node.addEventListener('click', (event) => event.preventDefault(), { once: true });
+      (node as HTMLAnchorElement).click();
+    });
+    assert.equal(await page.locator('#propiedades [data-opportunity-client="3"] .opportunity-diffusion-warning').count(), 0);
+    assert.match(await review.textContent() || '', /Pendiente · no enviado/);
+
+    await review.locator('[data-diffusion-mark-sent="3"][data-diffusion-channel="WhatsApp"]').click();
+    await page.waitForSelector('#propiedades [data-diffusion-client="3"] .diffusion-status.sent', { state: 'visible' });
+    assert.match(await page.locator('#propiedades [data-opportunity-client="3"]').textContent() || '', /Ya difundida/);
+    assert.match(await page.locator('#propiedades [data-opportunity-client="3"]').textContent() || '', /Sin próximo seguimiento/);
+    assert.match(await page.locator('#propiedades [data-diffusion-client="3"]').textContent() || '', /Marcar reenvío como enviado/);
+
+    await page.locator('#propiedades [data-diffusion-client="3"] [data-diffusion-responded]').click();
+    await page.waitForSelector('#propiedades [data-diffusion-client="3"] .diffusion-status.responded', { state: 'visible' });
+    assert.match(await page.locator('#propiedades [data-opportunity-client="3"]').textContent() || '', /Respondió/);
+    assert.match(await page.locator('#propiedades [data-opportunity-client="3"]').textContent() || '', /Sin próximo seguimiento/);
+
+    const metrics = await page.locator('#propiedades [data-diffusion-review]').evaluate((node) => {
+      const rect = node.getBoundingClientRect();
+      const controls = [...node.querySelectorAll<HTMLElement>('button, a, textarea')]
+        .filter((control) => control.offsetParent !== null)
+        .map((control) => control.getBoundingClientRect());
+      return {
+        left: rect.left,
+        right: rect.right,
+        viewport: window.innerWidth,
+        documentWidth: document.documentElement.scrollWidth,
+        minActionHeight: Math.min(...controls.filter((rect) => rect.height > 0 && rect.width > 0).map((rect) => rect.height)),
+      };
+    });
+    assert.ok(metrics.left >= -1, JSON.stringify(metrics));
+    assert.ok(metrics.right <= metrics.viewport + 1, JSON.stringify(metrics));
+    assert.ok(metrics.documentWidth <= metrics.viewport + 1, JSON.stringify(metrics));
+    assert.ok(metrics.minActionHeight >= 43.5, JSON.stringify(metrics));
+    assert.deepEqual(pageErrors, []);
+  } finally {
+    await page.close();
+    await context.close();
+    await browser.close();
+    await stopServer(server);
+  }
+});
