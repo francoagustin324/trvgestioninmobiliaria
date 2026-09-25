@@ -131,15 +131,27 @@ test('2C: marcar enviado persiste actor/par/fecha/canal; abrir/preparar no es pa
   } finally { invalidateTenantRuntimeScope(); }
 });
 
-test('2C: cambio de tenant entre preparación y confirmación falla cerrado', () => {
+test('2C: tenant B no ve historial de A y un lease A obsoleto falla cerrado', () => {
   const scopeA: TenantScope = { userId: 'user-a', organizationId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa' };
   const scopeB: TenantScope = { userId: 'user-b', organizationId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb' };
   const storage = new MemoryStorage();
   install(scopeA, storage);
   const leaseA = captureTenantRuntimeLease(scopeA);
+  const sentA = recordPropertyDiffusionSent(
+    { scope: scopeA, runtimeLease: leaseA, propertyId: 21, clientId: 11, channel: 'WhatsApp' },
+    new Date('2026-09-25T15:30:00.000Z'),
+  );
+  assert.equal(readTenantSnapshot(scopeA, storage)?.activityLog.some((entry) => entry.metadata?.attemptId === sentA.metadata?.attemptId), true);
+
   state.crm = fixture(scopeB);
   installTenantRuntimeScope(scopeB, scopeB.userId);
   try {
+    assert.equal(
+      latestPropertyDiffusion(state.crm.activityLog, state.crm.properties[0]!, state.crm.clients[0]!),
+      null,
+      'el historial tenant A no puede aparecer al cambiar a tenant B',
+    );
+    assert.equal(readTenantSnapshot(scopeB, storage), null, 'la difusión A no puede crear un snapshot B');
     assert.throws(() => recordPropertyDiffusionSent({ scope: scopeA, runtimeLease: leaseA, propertyId: 21, clientId: 11, channel: 'WhatsApp' }), /TENANT_RUNTIME_STALE/);
     assert.equal(state.crm.organization.id, scopeB.organizationId);
     assert.equal(state.crm.activityLog.length, 0);
