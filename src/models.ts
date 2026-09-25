@@ -29,6 +29,8 @@ export type ConversationStatus = 'Sigue buscando' | 'Esperando vender' | 'Ya com
 export type FollowUpDecision = 'Seguimiento supervisado' | 'Pausar' | 'No contactar' | 'Revisión manual';
 export type AuditSource = 'Automático' | 'Manual';
 export type AuditEngine = 'Reglas de seguridad' | 'Comprensión por conceptos' | 'Manual';
+export type PropertyDiffusionChannel = 'WhatsApp' | 'Email';
+export type PropertyDiffusionStatus = 'PENDIENTE' | 'ENVIADO' | 'RESPONDIO';
 export type TeamRole = 'Dueño' | 'Administrador' | 'Corredor';
 export type TeamMemberStatus = 'Activo' | 'Pendiente de acceso' | 'Suspendido';
 export type AssignmentEntity = 'Cliente' | 'Propiedad' | 'Conversación' | 'Tarea';
@@ -96,6 +98,13 @@ export interface ActivityEntry extends SyncRecordMetadata {
   entityUid?: string;
   detail: string;
   createdAt: string;
+  activityKind?: 'property-diffusion';
+  diffusionPropertyId?: number;
+  diffusionPropertyUid?: string;
+  diffusionClientId?: number;
+  diffusionClientUid?: string;
+  diffusionChannel?: PropertyDiffusionChannel;
+  diffusionStatus?: PropertyDiffusionStatus;
 }
 
 export interface Client extends SyncRecordMetadata {
