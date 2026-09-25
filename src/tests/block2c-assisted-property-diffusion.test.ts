@@ -214,13 +214,14 @@ test('E. propietario, notas internas y sourceLink nunca aparecen en el mensaje n
   }
 });
 
-test('F. WhatsApp sólo se prepara cuando existe un teléfono válido y no inventa prefijos', () => {
+test('F. WhatsApp sólo se prepara con teléfono canónico válido y reutiliza la normalización existente', () => {
   assert.equal(normalizedWhatsAppPhone('sin teléfono'), null);
   assert.equal(propertyDiffusionWhatsAppUrl('', 'Hola'), null);
   assert.equal(propertyDiffusionWhatsAppUrl('123', 'Hola'), null);
-  assert.equal(normalizedWhatsAppPhone('351 555 0101'), '3515550101');
-  assert.match(propertyDiffusionWhatsAppUrl('351 555 0101', 'Hola') ?? '', /^https:\/\/wa\.me\/3515550101\?text=/);
-  assert.equal(propertyDiffusionWhatsAppUrl('351 555 0101', 'Hola')?.includes('549351'), false);
+  assert.equal(normalizedWhatsAppPhone('351 555 0101'), '5493515550101');
+  assert.match(propertyDiffusionWhatsAppUrl('351 555 0101', 'Hola') ?? '', /^https:\/\/wa\.me\/5493515550101\?text=/);
+  assert.equal(normalizedWhatsAppPhone('+54 9 351 555 0101'), '5493515550101');
+  assert.equal(normalizedWhatsAppPhone('351555010'), null);
 });
 
 test('G. un cliente email-only conserva alternativa mailto sin necesitar teléfono', () => {
