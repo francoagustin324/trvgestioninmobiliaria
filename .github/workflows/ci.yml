@@ -26,7 +26,7 @@ jobs:
     timeout-minutes: 120
     env:
       PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
-      EXPECTED_TEST_TOTAL: "1446"
+      EXPECTED_TEST_TOTAL: "1447"
     steps:
       - uses: actions/checkout@v7
         with:
@@ -174,7 +174,7 @@ jobs:
           from pathlib import Path
 
           text = Path('test.log').read_text(encoding='utf-8', errors='replace')
-          expected = 1446
+          expected = 1447
 
           def terminal_metric(name: str) -> int:
               matches = re.findall(rf'^# {re.escape(name)}\s+(\d+)\s*$', text, flags=re.MULTILINE)
