@@ -45,7 +45,6 @@ const dateFormatter = new Intl.DateTimeFormat('es-AR', { day: '2-digit', month: 
 type PreparedDiffusion = {
   propertyId: number;
   propertyUid?: string;
-  publicUrl: string;
   message: string;
 };
 
@@ -468,7 +467,6 @@ export function renderPropertyOpportunities(container: HTMLElement, onBack: () =
       preparedDiffusion = {
         propertyId: currentProperty.id,
         propertyUid: currentProperty.uid,
-        publicUrl: published.url,
         message: buildPropertyDiffusionMessage(currentProperty, tenantIdentity, published.url),
       };
     } catch (error) {
