@@ -7,6 +7,7 @@ import type {
   PublicTenantIdentity,
 } from './models.js';
 import { propertyShareText } from './property-ficha.js';
+import { normalizeWhatsAppPhone, whatsappUrl } from './whatsapp-contact-core.js';
 
 export type ConfirmedPropertyDiffusionStatus = Exclude<PropertyDiffusionStatus, 'PENDIENTE'>;
 
@@ -102,19 +103,16 @@ export function buildPropertyDiffusionMessage(
 }
 
 export function normalizedWhatsAppPhone(value: string | undefined): string | null {
-  const raw = String(value ?? '').trim();
-  if (!raw || !/^[+\d\s().-]+$/.test(raw)) return null;
-  const digits = raw.replace(/\D/g, '');
-  return digits.length >= 8 && digits.length <= 15 ? digits : null;
+  const normalized = normalizeWhatsAppPhone(String(value ?? ''));
+  return normalized.valid ? normalized.normalized : null;
 }
 
 export function propertyDiffusionWhatsAppUrl(
   phone: string | undefined,
   message: string,
 ): string | null {
-  const digits = normalizedWhatsAppPhone(phone);
-  if (!digits) return null;
-  return `https://wa.me/${digits}?text=${encodeURIComponent(message)}`;
+  const normalized = normalizedWhatsAppPhone(phone);
+  return normalized ? whatsappUrl(normalized, message) : null;
 }
 
 export function normalizedEmail(value: string | undefined): string | null {
