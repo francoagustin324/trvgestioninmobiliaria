@@ -335,7 +335,10 @@ test('M. Respondió se registra sin alterar pipeline, temperatura ni resultado c
 });
 
 test('N. el seguimiento es opcional y reutiliza Leads sin inventar acción ni fecha', () => {
-  assert.match(uiSource, /data-edit-client="\$\{client\.id\}">Agregar seguimiento/);
+  assert.match(uiSource, /data-add-diffusion-followup="\$\{client\.id\}">Agregar seguimiento/);
+  assert.match(uiSource, /state\.activeModule = 'crm'/);
+  assert.match(uiSource, /state\.editingClientId = clientId/);
+  assert.match(uiSource, /state\.openForms\.client = true/);
   assert.doesNotMatch(uiSource, /client\.nextAction\s*=/);
   assert.doesNotMatch(uiSource, /client\.nextFollowUp\s*=/);
   assert.doesNotMatch(storeSource, /nextAction|nextFollowUp/);
