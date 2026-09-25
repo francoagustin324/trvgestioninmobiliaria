@@ -131,6 +131,9 @@ function normalizedActivityLog(value: unknown): ActivityEntry[] {
       ...(hasOwn(item, 'entityUid') ? { entityUid: canonicalUuid(item.entityUid) } : {}),
       detail: String(item.detail || ''),
       createdAt: String(item.createdAt || new Date().toISOString()),
+      ...(item.metadata && typeof item.metadata === 'object'
+        ? { metadata: structuredClone(item.metadata) }
+        : {}),
     }));
 }
 

@@ -87,6 +87,23 @@ export interface TeamMember {
   lastActiveAt?: string;
 }
 
+export type PropertyDiffusionChannel = 'WhatsApp' | 'Email';
+export type PropertyDiffusionStatus = 'ENVIADO' | 'RESPONDIO';
+
+export interface PropertyDiffusionActivityMetadata {
+  kind: 'property_diffusion';
+  event: 'sent' | 'responded';
+  attemptId: string;
+  propertyId: number;
+  propertyUid?: string;
+  clientId: number;
+  clientUid?: string;
+  channel: PropertyDiffusionChannel;
+  status: PropertyDiffusionStatus;
+  sentAt: string;
+  respondedAt?: string;
+}
+
 export interface ActivityEntry extends SyncRecordMetadata {
   id: number;
   actorId: number;
@@ -96,6 +113,7 @@ export interface ActivityEntry extends SyncRecordMetadata {
   entityUid?: string;
   detail: string;
   createdAt: string;
+  metadata?: PropertyDiffusionActivityMetadata;
 }
 
 export interface Client extends SyncRecordMetadata {
