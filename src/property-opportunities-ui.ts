@@ -25,8 +25,9 @@ import {
 import { propertyMatchReasonsHtml } from './property-matching-ui.js';
 import type { PropertyWithFicha } from './property-ficha.js';
 import { openEntityReadOnly } from './entity-read-navigation.js';
-import { registerTransientStateReset, state } from './store.js';
+import { authenticatedTenantMember, registerTransientStateReset, state } from './store.js';
 import { visibleClients, visibleProperties } from './team-access.js';
+import { assignmentVisible } from './team-policy.js';
 import { assertTenantCrmScope } from './tenant-storage.js';
 import {
   assertTenantRuntimeLeaseCurrent,
@@ -446,7 +447,12 @@ export function renderPropertyOpportunities(container: HTMLElement, onBack: () =
       assertTenantCrmScope(scope, state.crm);
       const currentProperty = (state.crm.properties as PropertyWithFicha[])
         .find((item) => item.id === property.id && (!item.uid || !property.uid || item.uid === property.uid));
-      if (!currentProperty || !visibleProperties().some((item) => item.id === currentProperty.id)) {
+      const member = authenticatedTenantMember(scope);
+      if (
+        !currentProperty
+        || !member
+        || !assignmentVisible(member.role, member.id, currentProperty.assignedToId)
+      ) {
         throw new Error(TENANT_RUNTIME_STALE);
       }
       const published = await publishAndRememberPropertyFicha(
