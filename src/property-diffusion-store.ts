@@ -139,5 +139,9 @@ export function recordPropertyDiffusionEvent(
     throw error;
   }
 
+  if (!entry) {
+    rollbackDiffusion(input, previousCrm);
+    throw new Error('PROPERTY_DIFFUSION_ACTIVITY_MISSING');
+  }
   return entry;
 }
