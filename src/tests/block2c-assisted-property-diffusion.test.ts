@@ -9,7 +9,7 @@ import {
   normalizedEmail,
   normalizedWhatsAppPhone,
   propertyDiffusionEmailUrl,
-  propertyDiffusionHistory,
+  propertyDiffusionSendCount,
   propertyDiffusionStatus,
   propertyDiffusionWhatsAppUrl,
 } from '../property-diffusion.js';
@@ -281,9 +281,10 @@ test('K. volver al mismo par propiedad-cliente detecta la difusión previa', asy
     channel: 'WhatsApp',
     status: 'ENVIADO',
   }, () => {});
-  const previous = latestPropertyDiffusionSent(h.store.state.crm.activityLog, h.property, h.client);
+  const currentClient = h.store.state.crm.clients[0]!;
+  const previous = latestPropertyDiffusionSent(currentClient, h.property);
   assert.ok(previous);
-  assert.equal(propertyDiffusionStatus(h.store.state.crm.activityLog, h.property, h.client), 'ENVIADO');
+  assert.equal(propertyDiffusionStatus(currentClient, h.property), 'ENVIADO');
   assert.match(uiSource, /Ya enviada el/);
 });
 
@@ -299,8 +300,7 @@ test('L. el reenvío sigue permitido pero queda como un nuevo evento y la UI adv
       status: 'ENVIADO',
     }, () => {});
   }
-  const history = propertyDiffusionHistory(h.store.state.crm.activityLog, h.property, h.client);
-  assert.equal(history.filter((entry) => entry.diffusionStatus === 'ENVIADO').length, 2);
+  assert.equal(propertyDiffusionSendCount(h.store.state.crm.clients[0]!, h.property), 2);
   assert.match(uiSource, /Marcar nuevo envío/);
 });
 
@@ -327,7 +327,7 @@ test('M. Respondió se registra sin alterar pipeline, temperatura ni resultado c
     channel: 'WhatsApp',
     status: 'RESPONDIO',
   }, () => {});
-  assert.equal(propertyDiffusionStatus(h.store.state.crm.activityLog, h.property, h.client), 'RESPONDIO');
+  assert.equal(propertyDiffusionStatus(h.store.state.crm.clients[0]!, h.property), 'RESPONDIO');
   assert.deepEqual({
     pipeline: h.store.state.crm.clients[0]?.pipeline,
     temperature: h.store.state.crm.clients[0]?.temperature,
@@ -401,7 +401,7 @@ test('Q. un error de persistencia revierte la difusión y no deja Enviado falso'
     status: 'ENVIADO',
   }, () => { throw new Error('PERSISTENCE_TEST_FAILURE'); }), /PERSISTENCE_TEST_FAILURE/);
   assert.deepEqual(h.store.state.crm.activityLog, before.activityLog);
-  assert.equal(latestPropertyDiffusionSent(h.store.state.crm.activityLog, h.property, h.client), null);
+  assert.equal(latestPropertyDiffusionSent(h.store.state.crm.clients[0]!, h.property), null);
 });
 
 test('R. el panel de difusión está cubierto por mobile sin overflow y con controles táctiles', () => {
