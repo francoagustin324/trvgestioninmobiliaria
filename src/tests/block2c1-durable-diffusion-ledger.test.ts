@@ -393,6 +393,16 @@ test('2C.1 datos legacy sólo en activityLog hidratan ledger una vez y no duplic
 test('2C.1 migración legacy conserva respuesta, canal y actor sin inventar registros inválidos', async () => {
   const h = await harness('LEGACYRESP');
   const legacy = tenantCrm(h.scope.organizationId, h.scope.userId, 'LEGACYRESP');
+  legacy.clients[0]!.propertyDiffusions = [{
+    clientId: 999,
+    propertyId: 999,
+    sendCount: 0,
+    firstSentAt: 'fecha-invalida',
+    lastSentAt: 'fecha-invalida',
+    lastSentChannel: 'WhatsApp',
+    lastSentActorId: 0,
+    updatedAt: 'fecha-invalida',
+  }];
   legacy.activityLog = [
     {
       id: 3,
