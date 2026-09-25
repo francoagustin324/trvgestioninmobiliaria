@@ -129,6 +129,17 @@ function normalizedActivityLog(value: unknown): ActivityEntry[] {
       entityType: item.entityType || 'Equipo',
       entityId: Number.isFinite(item.entityId) ? Number(item.entityId) : undefined,
       ...(hasOwn(item, 'entityUid') ? { entityUid: canonicalUuid(item.entityUid) } : {}),
+      ...(item.activityKind === 'property-diffusion' ? { activityKind: 'property-diffusion' as const } : {}),
+      ...(Number.isFinite(item.diffusionPropertyId) ? { diffusionPropertyId: Number(item.diffusionPropertyId) } : {}),
+      ...(hasOwn(item, 'diffusionPropertyUid') ? { diffusionPropertyUid: canonicalUuid(item.diffusionPropertyUid) } : {}),
+      ...(Number.isFinite(item.diffusionClientId) ? { diffusionClientId: Number(item.diffusionClientId) } : {}),
+      ...(hasOwn(item, 'diffusionClientUid') ? { diffusionClientUid: canonicalUuid(item.diffusionClientUid) } : {}),
+      ...(item.diffusionChannel === 'WhatsApp' || item.diffusionChannel === 'Email'
+        ? { diffusionChannel: item.diffusionChannel }
+        : {}),
+      ...(item.diffusionStatus === 'PENDIENTE' || item.diffusionStatus === 'ENVIADO' || item.diffusionStatus === 'RESPONDIO'
+        ? { diffusionStatus: item.diffusionStatus }
+        : {}),
       detail: String(item.detail || ''),
       createdAt: String(item.createdAt || new Date().toISOString()),
     }));
