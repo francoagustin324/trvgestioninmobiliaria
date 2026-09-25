@@ -11,6 +11,7 @@ import type {
   WhatsAppConversation,
 } from './models.js';
 import { defaultSettings, initialData } from './models.js';
+import { hydrateLegacyPropertyDiffusionLedger } from './property-diffusion-ledger.js';
 import {
   assertTenantCrmScope,
   hasTenantLocalBackup,
@@ -148,16 +149,25 @@ function normalizedActivityLog(value: unknown): ActivityEntry[] {
 function normalizedData(value: Partial<CrmData>): CrmData {
   const teamMembers = normalizedTeamMembers(value.teamMembers);
   const ownerId = teamMembers.find((member) => member.role === 'Dueño')?.id ?? teamMembers[0]?.id ?? 1;
-  return {
-    organization: normalizedOrganization(value.organization),
-    teamMembers,
-    activityLog: normalizedActivityLog(value.activityLog),
-    clients: Array.isArray(value.clients) ? value.clients.map((client) => ({
+  const activityLog = normalizedActivityLog(value.activityLog);
+  const clients = Array.isArray(value.clients) ? value.clients.map((client) => {
+    const normalizedClient = {
       ...client,
       ...normalizedSyncMetadata(client),
       assignedToId: Number(client.assignedToId ?? ownerId),
       createdById: Number(client.createdById ?? ownerId),
-    })) : [],
+    };
+    const propertyDiffusions = hydrateLegacyPropertyDiffusionLedger(normalizedClient, activityLog);
+    return {
+      ...normalizedClient,
+      ...(propertyDiffusions.length ? { propertyDiffusions } : {}),
+    };
+  }) : [];
+  return {
+    organization: normalizedOrganization(value.organization),
+    teamMembers,
+    activityLog,
+    clients,
     properties: Array.isArray(value.properties) ? value.properties.map((property) => ({
       ...property,
       ...normalizedSyncMetadata(property),
