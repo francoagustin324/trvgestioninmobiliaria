@@ -109,7 +109,7 @@ function activityHtml(activity: ActivityEntry | undefined): string {
 }
 
 function priorDiffusionHtml(property: Property, client: Client): string {
-  const sent = latestPropertyDiffusionSent(state.crm.activityLog, property, client);
+  const sent = latestPropertyDiffusionSent(client, property);
   if (!sent) return '<span class="opportunity-diffusion-state is-pending">No enviada</span>';
   return `<span class="opportunity-diffusion-state is-sent">✓ Ya difundida el ${formattedDate(sent.createdAt)} · ${escapeHtml(sent.diffusionChannel)}</span>`;
 }
@@ -202,9 +202,9 @@ function selectionText(): string {
 }
 
 function responseAfterLatestSend(property: Property, client: Client): ActivityEntry | null {
-  const sent = latestPropertyDiffusionSent(state.crm.activityLog, property, client);
+  const sent = latestPropertyDiffusionSent(client, property);
   if (!sent) return null;
-  const response = latestPropertyDiffusionResponse(state.crm.activityLog, property, client);
+  const response = latestPropertyDiffusionResponse(client, property);
   return response && response.createdAt >= sent.createdAt ? response : null;
 }
 
@@ -243,7 +243,7 @@ function diffusionChannelRows(property: Property, client: Client, priorSent: Act
 
 function diffusionReviewCard(opportunity: PropertyOpportunity, property: Property): string {
   const client = opportunity.match.client;
-  const priorSent = latestPropertyDiffusionSent(state.crm.activityLog, property, client);
+  const priorSent = latestPropertyDiffusionSent(client, property);
   const responded = responseAfterLatestSend(property, client);
   const validPhone = normalizedWhatsAppPhone(client.phone);
   const email = normalizedEmail(client.email);
