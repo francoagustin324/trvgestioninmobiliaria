@@ -83,10 +83,11 @@ function normalizeLedgerRecord(
   if (clientUid && currentClientUid && clientUid !== currentClientUid) return null;
 
   const lastResponseAt = validTimestamp(record.lastResponseAt);
+  const lastResponseChannel = validChannel(record.lastResponseChannel) ? record.lastResponseChannel : null;
   const lastResponseActorId = positiveInteger(record.lastResponseActorId);
   const hasValidResponse = Boolean(
     lastResponseAt
-    && validChannel(record.lastResponseChannel)
+    && lastResponseChannel
     && lastResponseActorId,
   );
   const responseTime = hasValidResponse ? lastResponseAt! : '';
@@ -107,7 +108,7 @@ function normalizeLedgerRecord(
     lastSentActorId,
     ...(hasValidResponse ? {
       lastResponseAt: responseTime,
-      lastResponseChannel: record.lastResponseChannel,
+      lastResponseChannel: lastResponseChannel!,
       lastResponseActorId: lastResponseActorId!,
     } : {}),
     updatedAt,
