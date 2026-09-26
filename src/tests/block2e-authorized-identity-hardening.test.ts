@@ -112,7 +112,7 @@ function conversation(id: number, clientId: number, assignedToId: number): Whats
     id,
     clientId,
     phone: '5493515550000',
-    mode: 'manual',
+    mode: 'Humano',
     unread: 0,
     lastActivity: '2026-09-26T10:00:00.000Z',
     messages: [],
