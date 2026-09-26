@@ -1,5 +1,5 @@
 import { state } from '../store.js';
-import { activeMember, canAccessModule, visibleConversations } from '../team-access.js';
+import { canAccessModule, canViewAll, visibleConversations } from '../team-access.js';
 import { renderTeam, renderTeamAccount } from './team-ui.js';
 
 let initialized = false;
@@ -41,18 +41,16 @@ function ensureTeamDom(): void {
 }
 
 function applyRoleNavigation(): void {
-  const member = activeMember();
   document.querySelectorAll<HTMLButtonElement>('[data-module]').forEach((button) => {
     const module = button.dataset.module;
-    const allowed = module ? canAccessModule(module as typeof state.activeModule, member) : true;
+    const allowed = module ? canAccessModule(module as typeof state.activeModule) : true;
     button.hidden = !allowed;
   });
-  if (!canAccessModule(state.activeModule, member)) state.activeModule = 'inicio';
+  if (!canAccessModule(state.activeModule)) state.activeModule = 'inicio';
 }
 
 function applyConversationPrivacyPreview(): void {
-  const member = activeMember();
-  if (member.role !== 'Corredor') return;
+  if (canViewAll()) return;
   const visibleIds = new Set(visibleConversations().map((conversation) => conversation.id));
   document.querySelectorAll<HTMLElement>('[data-wa-select]').forEach((thread) => {
     thread.hidden = !visibleIds.has(Number(thread.dataset.waSelect));
