@@ -38,7 +38,7 @@ export function selectedTeamViewMember(): TeamMember | null {
  * Compatibilidad histórica para superficies de presentación.
  *
  * Authorization-sensitive code debe usar authenticatedTenantMember()/los
- * helpers can*/visible* de este módulo, nunca activeMember().
+ * helpers de permisos y visibilidad de este módulo, nunca activeMember().
  */
 export function activeMember(): TeamMember {
   const member = selectedTeamViewMember();
