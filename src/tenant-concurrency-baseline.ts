@@ -7,7 +7,7 @@ export const TENANT_CONCURRENCY_BASELINE_UNSAFE = 'TENANT_CONCURRENCY_BASELINE_U
 
 export type ConcurrencyProtectedEntityType = 'client' | 'property';
 
-export type TenantConcurrencyTenantConcurrencyBaselineRow = Pick<
+export type TenantConcurrencyBaselineRow = Pick<
   CloudRecordRow,
   'organization_id' | 'entity_type' | 'entity_key' | 'assigned_member_id' | 'payload'
 >;
