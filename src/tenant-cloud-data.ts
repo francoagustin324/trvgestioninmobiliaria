@@ -9,6 +9,7 @@ import {
   type CloudRecordRow,
 } from './cloud-records.js';
 import type { CrmData } from './models.js';
+import { writeTenantConcurrencyBaseline } from './tenant-concurrency-baseline.js';
 import {
   assertTenantCrmScope,
   assertTenantRemoteIsSafe,
@@ -289,6 +290,7 @@ export async function pullTenantCloudData(
       const crm = cloudRecordsToCrm(crmRecords, transport.context, fallback);
       assertTenantCrmScope(scope, crm);
       assertTenantRuntimeLeaseCurrent(runtimeLease);
+      writeTenantConcurrencyBaseline(scope, crmRecords);
       markTenantCloudHydrated(scope, latestRemoteVersion(crmRecords));
       return crm;
     }
@@ -305,6 +307,7 @@ export async function pullTenantCloudData(
         markTenantCloudHydrated(scope, legacy?.updated_at || null, tenantFingerprint(crm));
         return crm;
       }
+      writeTenantConcurrencyBaseline(scope, []);
       markTenantCloudHydrated(scope, null);
       return null;
     }
@@ -312,6 +315,7 @@ export async function pullTenantCloudData(
     const crm = cloudRecordsToCrm([], transport.context, fallback);
     assertTenantCrmScope(scope, crm);
     assertTenantRuntimeLeaseCurrent(runtimeLease);
+    writeTenantConcurrencyBaseline(scope, []);
     markTenantCloudHydrated(scope, null);
     return crm;
   } catch (error) {
@@ -358,6 +362,7 @@ export async function pushTenantModernCloudData(
   assertCloudWriterLease(scope, runtimeLease);
   if (existingFingerprint === nextFingerprint) {
     assertCloudWriterLease(scope, runtimeLease);
+    writeTenantConcurrencyBaseline(scope, existing);
     markTenantCloudSaved(scope, remoteVersion, token);
     assertCloudWriterLease(scope, runtimeLease);
     return;
@@ -375,6 +380,7 @@ export async function pushTenantModernCloudData(
     throw new Error(`La verificación remota moderna no coincide con el snapshot tenant que ${PRODUCT_BRAND.name} intentó guardar.`);
   }
   assertCloudWriterLease(scope, runtimeLease);
+  writeTenantConcurrencyBaseline(scope, refreshed);
   markTenantCloudSaved(scope, latestRemoteVersion(crmSyncRecords(refreshed)), token);
   assertCloudWriterLease(scope, runtimeLease);
 }
