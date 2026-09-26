@@ -7,7 +7,7 @@ export const TENANT_CONCURRENCY_BASELINE_UNSAFE = 'TENANT_CONCURRENCY_BASELINE_U
 
 export type ConcurrencyProtectedEntityType = 'client' | 'property';
 
-type BaselineRow = Pick<
+export type TenantConcurrencyTenantConcurrencyBaselineRow = Pick<
   CloudRecordRow,
   'organization_id' | 'entity_type' | 'entity_key' | 'assigned_member_id' | 'payload'
 >;
@@ -15,7 +15,7 @@ type BaselineRow = Pick<
 type StoredBaseline = Readonly<{
   version: 1;
   organizationId: string;
-  rows: BaselineRow[];
+  rows: TenantConcurrencyBaselineRow[];
 }>;
 
 function targetStorage(storage?: Storage): Storage {
@@ -40,7 +40,7 @@ function cloudEntityType(value: string): value is CloudEntityType {
   return CLOUD_ENTITY_TYPES.has(value as CloudEntityType);
 }
 
-function baselineRow(row: CloudRecordRow): BaselineRow {
+function baselineRow(row: CloudRecordRow): TenantConcurrencyBaselineRow {
   return {
     organization_id: row.organization_id,
     entity_type: row.entity_type,
@@ -50,9 +50,9 @@ function baselineRow(row: CloudRecordRow): BaselineRow {
   };
 }
 
-function validRow(value: unknown, organizationId: string): value is BaselineRow {
+function validRow(value: unknown, organizationId: string): value is TenantConcurrencyBaselineRow {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
-  const row = value as Partial<BaselineRow>;
+  const row = value as Partial<TenantConcurrencyBaselineRow>;
   return row.organization_id === organizationId
     && typeof row.entity_type === 'string'
     && cloudEntityType(row.entity_type)
@@ -87,7 +87,7 @@ export function writeTenantConcurrencyBaseline(
 export function readTenantConcurrencyBaseline(
   scope: TenantScope,
   storage?: Storage,
-): readonly BaselineRow[] | null {
+): readonly TenantConcurrencyBaselineRow[] | null {
   const raw = targetStorage(storage).getItem(tenantConcurrencyBaselineKey(scope));
   if (raw === null) return null;
   let parsed: unknown;
@@ -127,9 +127,9 @@ export function concurrencyRowFingerprint(
 }
 
 export function concurrencyBaselineMap(
-  rows: readonly BaselineRow[],
+  rows: readonly TenantConcurrencyBaselineRow[],
   entityType: CloudEntityType,
-): ReadonlyMap<string, BaselineRow> {
+): ReadonlyMap<string, TenantConcurrencyBaselineRow> {
   return new Map(rows
     .filter((row) => row.entity_type === entityType)
     .map((row) => [concurrencyRowIdentity(row), row] as const));
