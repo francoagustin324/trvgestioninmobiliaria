@@ -33,20 +33,6 @@ const EDITING = 'b131Editing';
 const DUPLICATE = 'b132DuplicateClientId';
 const SAVE_DELAY_MS = 120;
 
-function traceLostWrite(source: string, details: Record<string, unknown> = {}): void {
-  const candidate = state.crm.clients.find((client) => client.name === 'CLIENTE E2E LOST');
-  if (!candidate && details.name !== 'CLIENTE E2E LOST') return;
-  console.log('BLOCK2E_LOST_WRITE=' + JSON.stringify({
-    source,
-    at: typeof performance === 'undefined' ? Date.now() : performance.now(),
-    currentPipeline: candidate?.pipeline,
-    currentOutcome: candidate?.outcome,
-    editingClientId: state.editingClientId,
-    openClientForm: state.openForms.client,
-    ...details,
-  }));
-}
-
 type FeedbackKind = 'idle' | 'working' | 'success' | 'error' | 'duplicate';
 
 interface LeadFormTenantContext {
@@ -469,13 +455,6 @@ function persistLead(
   previous: Client | null,
 ): void {
   const context = leadFormTenantContext(form);
-  traceLostWrite('persist-enter', {
-    name: values.name,
-    editingId,
-    valuesPipeline: values.pipeline,
-    previousPipeline: previous?.pipeline,
-    previousOutcome: previous?.outcome,
-  });
   if (!context || !formStillAuthorized(form)) {
     showError(form, 'El tenant o runtime activo cambió. Volvé a abrir el formulario antes de guardar.');
     restoreSubmit(form);
@@ -483,12 +462,6 @@ function persistLead(
   }
 
   if (!capturedClientStillCurrent(editingId, previous)) {
-    traceLostWrite('persist-stale-rejected', {
-      name: values.name,
-      editingId,
-      valuesPipeline: values.pipeline,
-      previousPipeline: previous?.pipeline,
-    });
     showError(form, 'Este Lead cambió mientras se preparaba el guardado. Revisá el estado actual antes de volver a guardar.');
     restoreSubmit(form);
     return;
@@ -525,13 +498,6 @@ function persistLead(
 
     assertLeadFormTenantCurrent(context);
     state.crm.clients = upsertClient(state.crm.clients, client);
-    traceLostWrite('persist-upserted', {
-      name: client.name,
-      editingId,
-      valuesPipeline: values.pipeline,
-      nextPipeline: client.pipeline,
-      nextOutcome: client.outcome,
-    });
     activitiesForClientSave(previous, client).forEach((activity) => (
       addActivityForAuthenticatedTenant(context.scope, activity)
     ));
@@ -548,12 +514,6 @@ function persistLead(
 
     assertLeadFormTenantCurrent(context);
     queueCloudSave(context.scope, state.crm);
-    traceLostWrite('persist-cloud-queued', {
-      name: client.name,
-      editingId,
-      nextPipeline: client.pipeline,
-      nextOutcome: client.outcome,
-    });
     assertLeadFormTenantCurrent(context);
     state.editingClientId = null;
     state.openForms.client = false;
@@ -644,13 +604,6 @@ export function submitLeadForm(event: SubmitEvent): void {
     return;
   }
   const previousSnapshot = previous ? structuredClone(previous) : null;
-  traceLostWrite('submit-scheduled', {
-    name: values.name,
-    editingId,
-    valuesPipeline: values.pipeline,
-    previousPipeline: previousSnapshot?.pipeline,
-    previousOutcome: previousSnapshot?.outcome,
-  });
 
   const submit = form.querySelector<HTMLButtonElement>('[data-save-lead]');
   submittingForms.add(form);
@@ -661,7 +614,19 @@ export function submitLeadForm(event: SubmitEvent): void {
   }
   setStatus(form, 'Guardando…', 'working');
 
-  window.setTimeout(() => persistLead(form, values, editingId, previousSnapshot), SAVE_DELAY_MS);
+  const persist = (): void => persistLead(form, values, editingId, previousSnapshot);
+  const terminalTransition = values.pipeline === 'Ganado' || values.pipeline === 'Perdido';
+
+  // Un cierre terminal confirmado no puede quedar dentro de la ventana diferida
+  // del editor común: debe fijar estado + snapshot tenant antes de devolver el
+  // control al resto de la UI. Las ediciones activas conservan el delay y el
+  // guard anti-stale de capturedClientStillCurrent().
+  if (terminalTransition) {
+    persist();
+    return;
+  }
+
+  window.setTimeout(persist, SAVE_DELAY_MS);
 }
 
 function scheduleEnhancement(): void {

@@ -580,10 +580,6 @@ test('2D E2E LOST exige motivo, conserva historia y sale de Agenda y oportunidad
   const { context, syncKey } = await contextFor(browser, seed, userId, 1, 'lost');
   try {
     const page = await context.newPage();
-    page.on('console', (message) => {
-      const value = message.text();
-      if (value.startsWith('BLOCK2E_LOST_WRITE=')) console.log(value);
-    });
     await openApp(page, 'http://127.0.0.1:63522');
     const clientId = await createQuickLead(page, 'CLIENTE E2E LOST', '351 511 2202');
     await completeLeadRequirements(page, clientId, 'Revisar precio final', '2026-09-26');
