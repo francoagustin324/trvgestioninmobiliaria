@@ -1,5 +1,5 @@
 import type { TenantScope } from './active-organization.js';
-import type { CloudRecordRow } from './cloud-records.js';
+import type { CloudEntityType, CloudRecordRow } from './cloud-records.js';
 import { stableFingerprint } from './sync-safety.js';
 import { tenantStorageNamespace } from './tenant-storage.js';
 
@@ -22,8 +22,22 @@ function targetStorage(storage?: Storage): Storage {
   return storage ?? localStorage;
 }
 
-function protectedType(value: string): value is ConcurrencyProtectedEntityType {
-  return value === 'client' || value === 'property';
+const CLOUD_ENTITY_TYPES = new Set<CloudEntityType>([
+  'organization',
+  'client',
+  'property',
+  'visit',
+  'offer',
+  'reservation',
+  'commercial_contact',
+  'reminder',
+  'ficha',
+  'conversation',
+  'activity',
+]);
+
+function cloudEntityType(value: string): value is CloudEntityType {
+  return CLOUD_ENTITY_TYPES.has(value as CloudEntityType);
 }
 
 function baselineRow(row: CloudRecordRow): BaselineRow {
@@ -41,7 +55,7 @@ function validRow(value: unknown, organizationId: string): value is BaselineRow 
   const row = value as Partial<BaselineRow>;
   return row.organization_id === organizationId
     && typeof row.entity_type === 'string'
-    && protectedType(row.entity_type)
+    && cloudEntityType(row.entity_type)
     && typeof row.entity_key === 'string'
     && (row.assigned_member_id === null || Number.isSafeInteger(row.assigned_member_id))
     && row.payload !== undefined;
@@ -59,14 +73,13 @@ export function writeTenantConcurrencyBaseline(
   if (rows.some((row) => row.organization_id !== scope.organizationId)) {
     throw new Error(TENANT_CONCURRENCY_BASELINE_UNSAFE);
   }
-  const protectedRows = rows
-    .filter((row) => protectedType(row.entity_type))
+  const baselineRows = rows
     .map(baselineRow)
     .sort((left, right) => `${left.entity_type}:${left.entity_key}`.localeCompare(`${right.entity_type}:${right.entity_key}`));
   const baseline: StoredBaseline = Object.freeze({
     version: 1,
     organizationId: scope.organizationId,
-    rows: protectedRows,
+    rows: baselineRows,
   });
   targetStorage(storage).setItem(tenantConcurrencyBaselineKey(scope), JSON.stringify(baseline));
 }
@@ -115,7 +128,7 @@ export function concurrencyRowFingerprint(
 
 export function concurrencyBaselineMap(
   rows: readonly BaselineRow[],
-  entityType: ConcurrencyProtectedEntityType,
+  entityType: CloudEntityType,
 ): ReadonlyMap<string, BaselineRow> {
   return new Map(rows
     .filter((row) => row.entity_type === entityType)
