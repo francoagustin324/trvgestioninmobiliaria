@@ -48,6 +48,10 @@ export function isTenantRecordConflict(error: unknown): error is TenantRecordCon
       && String((error as { code?: unknown }).code ?? '') === TENANT_RECORD_CONFLICT);
 }
 
+export function tenantRecordConflictUserMessage(): string {
+  return 'Este registro cambió en otro dispositivo. Tus cambios no sobrescribieron la versión más reciente. Volvé a abrir el registro para revisar los cambios.';
+}
+
 export function tenantRecordConflictFrom(
   error: unknown,
   entityType: 'client' | 'property',
