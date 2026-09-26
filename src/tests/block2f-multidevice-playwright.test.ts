@@ -168,6 +168,9 @@ type ContextLabel = 'A' | 'B';
 type RaceCall = Readonly<{
   label: ContextLabel;
   execute: () => Promise<void>;
+  done: Promise<void>;
+  resolveDone: () => void;
+  rejectDone: (error: unknown) => void;
 }>;
 
 type RaceState = {
@@ -263,9 +266,25 @@ class SharedCloudHarness {
     throw new Error(`BLOCK2F_CONTEXT_LABEL_REQUIRED:${authorization}`);
   }
 
-  private async registerRaceCall(entityType: RaceEntity, call: RaceCall): Promise<boolean> {
+  private async registerRaceCall(
+    entityType: RaceEntity,
+    input: Pick<RaceCall, 'label' | 'execute'>,
+  ): Promise<boolean> {
     const race = this.race;
     if (!race || race.entityType !== entityType) return false;
+
+    let resolveDone!: () => void;
+    let rejectDone!: (error: unknown) => void;
+    const call: RaceCall = {
+      ...input,
+      done: new Promise<void>((resolve, reject) => {
+        resolveDone = resolve;
+        rejectDone = reject;
+      }),
+      resolveDone,
+      rejectDone,
+    };
+
     assert.equal(race.calls.has(call.label), false, `CAS duplicado para contexto ${call.label}.`);
     race.calls.set(call.label, call);
 
@@ -274,19 +293,25 @@ class SharedCloudHarness {
       race.resolveReady();
       queueMicrotask(() => {
         void (async () => {
+          const a = race.calls.get('A');
+          const b = race.calls.get('B');
           try {
-            const a = race.calls.get('A');
-            const b = race.calls.get('B');
             assert.ok(a && b, 'La barrera debe contener A y B.');
             await a.execute();
+            a.resolveDone();
             await b.execute();
+            b.resolveDone();
             race.resolveComplete();
           } catch (error) {
+            a?.rejectDone(error);
+            b?.rejectDone(error);
             race.rejectComplete(error);
           }
         })();
       });
     }
+
+    await call.done;
     return true;
   }
 
