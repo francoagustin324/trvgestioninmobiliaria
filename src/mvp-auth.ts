@@ -14,6 +14,7 @@ import {
 } from './cloud-api-compatible.js';
 import { appIcons } from './icons.js';
 import type { CrmData } from './models.js';
+import { isTenantRecordConflict, tenantRecordConflictUserMessage } from './tenant-property-cas.js';
 import {
   replaceDataForTenant,
   resetTransientState,
@@ -192,7 +193,9 @@ export async function synchronizeNow(): Promise<void> {
     dispatchTenantRender(runtimeLease);
   } catch (error) {
     if (!tenantRuntimeLeaseIsCurrent(runtimeLease)) return;
-    const message = error instanceof Error ? error.message : 'No se pudo sincronizar.';
+    const message = isTenantRecordConflict(error)
+      ? tenantRecordConflictUserMessage()
+      : error instanceof Error ? error.message : 'No se pudo sincronizar.';
     markTenantSyncError(scope, message);
     dispatchTenantCloudStatus(runtimeLease, message, 'error');
   }
