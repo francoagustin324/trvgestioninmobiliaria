@@ -1,11 +1,12 @@
-import { saveData, state } from '../store.js';
-import { activeMember, addActivity, canViewAll, visibleClients, visibleConversations, visibleProperties, visibleReminders } from '../team-access.js';
+import { authenticatedTenantMember, saveData, state } from '../store.js';
+import { addActivity, canViewAll, visibleClients, visibleConversations, visibleProperties, visibleReminders } from '../team-access.js';
 
 let applying = false;
 let initialized = false;
 
 function claimUnassignedRecords(): boolean {
-  const member = activeMember();
+  const member = authenticatedTenantMember();
+  if (!member) return false;
   let changed = false;
   const assign = <T extends { id: number; assignedToId?: number; createdById?: number }>(items: T[], type: 'Cliente' | 'Propiedad' | 'Conversación' | 'Tarea'): void => {
     items.forEach((item) => {
