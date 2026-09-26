@@ -4,7 +4,7 @@ import { authenticatedTenantMember, saveData, state } from './store.js';
 import { assertTenantCrmScope, writeTenantSnapshot } from './tenant-storage.js';
 import { assertTenantRuntimeLeaseCurrent, captureTenantRuntimeLease, requireCurrentTenantScope, tenantRuntimeLeaseIsCurrent, type TenantRuntimeLease } from './tenant-runtime.js';
 import type { TenantScope } from './active-organization.js';
-import { activeMember, visibleProperties } from './team-access.js';
+import { visibleProperties } from './team-access.js';
 import { assignmentVisible } from './team-policy.js';
 import { escapeHtml } from './utils.js';
 import {
@@ -28,7 +28,8 @@ function propertyLabel(property: Property | undefined, propertyId: number): stri
 }
 
 function visibleOffers(clientId: number): Offer[] {
-  const actor = activeMember();
+  const actor = authenticatedTenantMember();
+  if (!actor) return [];
   return offersForClient(
     state.crm.offers.filter((offer) => assignmentVisible(actor.role, actor.id, offer.assignedToId)),
     clientId,
@@ -137,7 +138,7 @@ function formattedDate(value: string): string {
 }
 
 function offerRow(client: Client, offer: Offer): string {
-  const property = state.crm.properties.find((item) => item.id === offer.propertyId);
+  const property = visibleProperties().find((item) => item.id === offer.propertyId);
   const parent = offer.parentOfferId ? state.crm.offers.find((item) => item.id === offer.parentOfferId) : undefined;
   const pending = offer.status === 'Pendiente';
   const details = [
