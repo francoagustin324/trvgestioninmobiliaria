@@ -592,35 +592,6 @@ test('2D E2E LOST exige motivo, conserva historia y sale de Agenda y oportunidad
 
     await navigate(page, 'crm');
     await openLeadDetails(page, clientId);
-    await page.evaluate((id) => {
-      const target = window as unknown as { __block2dLostTrace?: unknown[] };
-      target.__block2dLostTrace = [];
-      const capture = async (source: string, detail?: unknown) => {
-        const client = (await import('/dist/store.js')).state.crm.clients.find((item) => item.id === id);
-        target.__block2dLostTrace?.push({
-          source,
-          at: performance.now(),
-          pipeline: client?.pipeline,
-          outcome: client?.outcome,
-          closedAt: client?.closedAt,
-          lostReason: client?.lostReason,
-          detail,
-        });
-      };
-      document.addEventListener('trv-render', () => { void capture('trv-render'); });
-      document.addEventListener('propcontrol-cloud-status', (event) => {
-        void capture('cloud-status', (event as CustomEvent).detail);
-      });
-      document.addEventListener('propcontrol-cloud-authoritative-snapshot', (event) => {
-        const detail = (event as CustomEvent).detail;
-        const remote = detail?.crm?.clients?.find?.((item: { id?: number }) => item.id === id);
-        void capture('cloud-authoritative-snapshot', {
-          remotePipeline: remote?.pipeline,
-          remoteOutcome: remote?.outcome,
-          generation: detail?.token?.generation,
-        });
-      });
-    }, clientId);
     await page.locator('.mvp-lead-card[data-client-id="' + clientId + '"] [data-close-operation-stage="Perdido"]').click();
     const lost = page.locator('dialog[data-commercial-close-dialog][open] [data-commercial-close-modal-form="lost"]');
     await lost.waitFor({ state: 'visible' });
@@ -641,11 +612,6 @@ test('2D E2E LOST exige motivo, conserva historia y sale de Agenda y oportunidad
     // El cierre terminal aparece primero en memoria; la cola cloud termina después.
     // El checkpoint E2E debe validar el corte durable, no un frame intermedio.
     await waitSyncClean(page, syncKey);
-
-    const lostTrace = await page.evaluate(() => (
-      (window as unknown as { __block2dLostTrace?: unknown[] }).__block2dLostTrace ?? []
-    ));
-    console.log('BLOCK2D_LOST_TRACE=' + JSON.stringify(lostTrace));
 
     let crm = await crmState(page);
     const closed = crm.clients.find((item) => item.id === clientId)!;

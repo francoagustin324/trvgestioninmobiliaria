@@ -9,6 +9,7 @@ import { authenticatedTenantMember, state } from './store.js';
 import {
   assertTenantCrmScope,
   readTenantSnapshot,
+  tenantFingerprint,
   writeTenantSnapshot,
 } from './tenant-storage.js';
 import {
@@ -437,6 +438,16 @@ function rollbackTenantState(
   }
 }
 
+function capturedClientStillCurrent(
+  editingId: number | null,
+  previous: Client | null,
+): boolean {
+  if (editingId === null) return previous === null;
+  const current = state.crm.clients.find((client) => client.id === editingId) ?? null;
+  if (!current || !previous) return false;
+  return tenantFingerprint(current) === tenantFingerprint(previous);
+}
+
 function persistLead(
   form: HTMLFormElement,
   values: Record<string, string>,
@@ -446,6 +457,12 @@ function persistLead(
   const context = leadFormTenantContext(form);
   if (!context || !formStillAuthorized(form)) {
     showError(form, 'El tenant o runtime activo cambió. Volvé a abrir el formulario antes de guardar.');
+    restoreSubmit(form);
+    return;
+  }
+
+  if (!capturedClientStillCurrent(editingId, previous)) {
+    showError(form, 'Este Lead cambió mientras se preparaba el guardado. Revisá el estado actual antes de volver a guardar.');
     restoreSubmit(form);
     return;
   }
@@ -586,6 +603,7 @@ export function submitLeadForm(event: SubmitEvent): void {
     showError(form, 'El lead ya no está disponible para este usuario.');
     return;
   }
+  const previousSnapshot = previous ? structuredClone(previous) : null;
 
   const submit = form.querySelector<HTMLButtonElement>('[data-save-lead]');
   submittingForms.add(form);
@@ -596,7 +614,7 @@ export function submitLeadForm(event: SubmitEvent): void {
   }
   setStatus(form, 'Guardando…', 'working');
 
-  window.setTimeout(() => persistLead(form, values, editingId, previous), SAVE_DELAY_MS);
+  window.setTimeout(() => persistLead(form, values, editingId, previousSnapshot), SAVE_DELAY_MS);
 }
 
 function scheduleEnhancement(): void {
