@@ -13,6 +13,7 @@ import { MAX_PROPERTY_PHOTOS, uploadPropertyPhoto } from './property-photo-uploa
 import { propertyShareText, type PropertyWithFicha } from './property-ficha.js';
 import { publishPropertyFicha, type PublishedPropertyFicha } from './public-property-share.js';
 import { authenticatedTenantMember, saveData, state } from './store.js';
+import { visibleProperties } from './team-access.js';
 import { assertTenantCrmScope, writeTenantSnapshot } from './tenant-storage.js';
 import { newSyncRecordMetadata } from './sync-identity.js';
 import {
@@ -80,7 +81,7 @@ function option(value: string, label: string, current: string | undefined): stri
 
 function propertyRows(): PropertyWithFicha[] {
   const query = normalized(searchText);
-  const properties = state.crm.properties as PropertyWithFicha[];
+  const properties = visibleProperties() as PropertyWithFicha[];
   const filtered = query
     ? properties.filter((property) => [
       property.title,
@@ -147,7 +148,7 @@ function focusPropertyForm(container: HTMLElement): void {
 }
 
 function findProperty(id: number): PropertyWithFicha | null {
-  return (state.crm.properties as PropertyWithFicha[]).find((property) => property.id === id) ?? null;
+  return (visibleProperties() as PropertyWithFicha[]).find((property) => property.id === id) ?? null;
 }
 
 function propertyReadOnlySheet(): string {
