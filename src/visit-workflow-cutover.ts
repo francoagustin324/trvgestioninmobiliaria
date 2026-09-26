@@ -74,6 +74,28 @@ function applyAuthoritativeResult(
   queueCloudSave(runtimeLease.scope, state.crm, true);
 }
 
+function persistHistoricalLocal(
+  before: CrmData,
+  reason: string,
+  runtimeLease: TenantRuntimeLease,
+): void {
+  try {
+    assertTenantRuntimeLeaseCurrent(runtimeLease);
+    saveData(reason);
+    assertTenantRuntimeLeaseCurrent(runtimeLease);
+    assertTenantCrmScope(runtimeLease.scope, state.crm);
+  } catch (error) {
+    if (!tenantRuntimeLeaseIsCurrent(runtimeLease)) throw error;
+    state.crm = before;
+    writeTenantSnapshot(runtimeLease.scope, state.crm, {
+      markDirty: true,
+      reason: `Reversión local: ${reason}`,
+      backup: false,
+    });
+    throw error;
+  }
+}
+
 async function persistHistoricalCloud(
   before: CrmData,
   reason: string,
@@ -159,8 +181,9 @@ export async function coordinateVisitWithCutover(input: CoordinateVisitCutoverIn
     },
     runLocal: () => {
       assertTenantRuntimeLeaseCurrent(runtimeLease);
+      const before = structuredClone(state.crm);
       const reason = historicalCoordinate(input, scope);
-      saveData(reason);
+      persistHistoricalLocal(before, reason, runtimeLease);
     },
     runLegacyCloud: async () => {
       assertTenantRuntimeLeaseCurrent(runtimeLease);
@@ -210,8 +233,9 @@ export async function registerVisitResultWithCutover(input: RegisterVisitResultC
     },
     runLocal: () => {
       assertTenantRuntimeLeaseCurrent(runtimeLease);
+      const before = structuredClone(state.crm);
       const reason = historicalResolve(input, scope);
-      saveData(reason);
+      persistHistoricalLocal(before, reason, runtimeLease);
     },
     runLegacyCloud: async () => {
       assertTenantRuntimeLeaseCurrent(runtimeLease);
