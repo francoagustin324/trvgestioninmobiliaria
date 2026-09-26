@@ -1,8 +1,8 @@
 import { isTerminalClient, localIsoDate } from './lead-pipeline.js';
 import type { Client, Offer, OfferCurrency, OfferOrigin, OfferStatus, Property } from './models.js';
 import { authenticatedTenantMember, saveData, state } from './store.js';
-import { assertTenantCrmScope } from './tenant-storage.js';
-import { assertTenantRuntimeLeaseCurrent, captureTenantRuntimeLease, requireCurrentTenantScope, type TenantRuntimeLease } from './tenant-runtime.js';
+import { assertTenantCrmScope, writeTenantSnapshot } from './tenant-storage.js';
+import { assertTenantRuntimeLeaseCurrent, captureTenantRuntimeLease, requireCurrentTenantScope, tenantRuntimeLeaseIsCurrent, type TenantRuntimeLease } from './tenant-runtime.js';
 import type { TenantScope } from './active-organization.js';
 import { activeMember, visibleProperties } from './team-access.js';
 import { assignmentVisible } from './team-policy.js';
@@ -281,11 +281,40 @@ function writeContext(form: HTMLFormElement) {
   return { ...context, member };
 }
 
+function rollbackOfferMutation(
+  context: ReturnType<typeof writeContext>,
+  previousCrm: typeof state.crm,
+): void {
+  if (!tenantRuntimeLeaseIsCurrent(context.runtimeLease)) return;
+  try {
+    assertTenantRuntimeLeaseCurrent(context.runtimeLease);
+    assertTenantCrmScope(context.scope, previousCrm);
+    state.crm = previousCrm;
+    writeTenantSnapshot(context.scope, previousCrm, {
+      markDirty: true,
+      reason: 'Reversión de oferta no persistida',
+      backup: false,
+    });
+  } catch {
+    // Fail closed: nunca se restaura sobre otro tenant/runtime.
+  }
+}
+
 function applyResult(result: { crm: typeof state.crm }, context: ReturnType<typeof writeContext>): void {
   assertTenantRuntimeLeaseCurrent(context.runtimeLease);
   assertTenantCrmScope(context.scope, result.crm);
-  state.crm = result.crm;
-  saveData('Flujo comercial de ofertas');
+  const previousCrm = structuredClone(state.crm);
+  try {
+    state.crm = result.crm;
+    assertTenantRuntimeLeaseCurrent(context.runtimeLease);
+    assertTenantCrmScope(context.scope, state.crm);
+    saveData('Flujo comercial de ofertas');
+    assertTenantRuntimeLeaseCurrent(context.runtimeLease);
+    assertTenantCrmScope(context.scope, state.crm);
+  } catch (error) {
+    rollbackOfferMutation(context, previousCrm);
+    throw error;
+  }
   document.dispatchEvent(new CustomEvent('trv-render'));
 }
 
