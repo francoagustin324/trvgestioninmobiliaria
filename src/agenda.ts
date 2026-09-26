@@ -1,6 +1,7 @@
 import { commercialStage, isTerminalClient } from './lead-pipeline.js';
 import type { Client, Offer, Property, Reminder, Reservation, TeamMember, Visit } from './models.js';
 import { assignmentVisible } from './team-policy.js';
+import { visitNextAction } from './visit-workflow.js';
 
 export type AgendaUrgency = 'overdue' | 'today' | 'upcoming';
 export type AgendaSource = 'client' | 'reminder' | 'visit' | 'offer' | 'reservation';
@@ -272,8 +273,24 @@ export function buildCommercialAgendaItems(
     }];
   });
 
+  const mirroredVisitFollowUps = new Set(
+    input.visits
+      .filter((visit) => visit.status === 'Coordinada')
+      .flatMap((visit) => {
+        const when = canonicalDateTime(visit.scheduledAt);
+        const property = agendaPropertyLabel(input.properties, visit.propertyId);
+        const client = agendaClientLabel(input.clients, visit.clientId);
+        if (!when || !property || !client || client.nextAction !== visitNextAction(property)) return [];
+        return [`${visit.clientId}:${when.date}`];
+      }),
+  );
+  const deduplicatedBaseItems = baseItems.filter((item) => (
+    item.source !== 'client'
+    || !mirroredVisitFollowUps.has(`${item.sourceId}:${item.date}`)
+  ));
+
   return sortAgendaItems([
-    ...baseItems,
+    ...deduplicatedBaseItems,
     ...visitItems,
     ...offerItems,
     ...reservationItems,
