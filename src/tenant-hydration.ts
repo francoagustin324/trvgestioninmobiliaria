@@ -26,6 +26,7 @@ import {
 } from './cloud-records.js';
 import { fetchMembershipCatalog } from './membership-catalog.js';
 import type { CrmData } from './models.js';
+import { isTenantRecordConflict, tenantRecordConflictUserMessage } from './tenant-property-cas.js';
 import {
   activateStorageForTenant,
   replaceDataForTenant,
@@ -208,7 +209,9 @@ export async function hydrateTenantAfterAuth(): Promise<TenantScope> {
         markTenantSyncError(scope, authorityMessage);
         throw error;
       }
-      const message = error instanceof Error ? error.message : 'No se pudieron sincronizar los cambios locales.';
+      const message = isTenantRecordConflict(error)
+        ? tenantRecordConflictUserMessage()
+        : error instanceof Error ? error.message : 'No se pudieron sincronizar los cambios locales.';
       markTenantSyncError(scope, message);
       activateAuthenticatedMember(scope, runtimeLease);
       return scope;
