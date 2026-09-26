@@ -22,10 +22,37 @@ import {
   seatAvailable,
 } from './team-policy.js';
 
+/**
+ * Miembro seleccionado únicamente para presentación/vista.
+ *
+ * NO es una fuente de autoridad. No resuelve Dueño ni primer miembro como
+ * fallback: si activeMemberId es inválido, la selección visual es inválida.
+ */
+export function selectedTeamViewMember(): TeamMember | null {
+  return state.crm.teamMembers.find(
+    (member) => member.id === state.activeMemberId && member.status !== 'Suspendido',
+  ) ?? null;
+}
+
+/**
+ * Compatibilidad histórica para superficies de presentación.
+ *
+ * Authorization-sensitive code debe usar authenticatedTenantMember()/los
+ * helpers can*/visible* de este módulo, nunca activeMember().
+ */
 export function activeMember(): TeamMember {
-  return state.crm.teamMembers.find((member) => member.id === state.activeMemberId)
-    ?? state.crm.teamMembers.find((member) => member.role === 'Dueño')
-    ?? state.crm.teamMembers[0]!;
+  const member = selectedTeamViewMember();
+  if (!member) throw new Error('TEAM_VIEW_MEMBER_REQUIRED');
+  return member;
+}
+
+function authorizedTenantMember(candidate?: TeamMember): TeamMember | null {
+  const member = authenticatedTenantMember();
+  if (!member) return null;
+  // Un actor explícito sólo puede actuar como assertion de identidad, nunca como
+  // fuente de autoridad. Un member visual/obsoleto diferente falla cerrado.
+  if (candidate && candidate.id !== member.id) return null;
+  return member;
 }
 
 export function memberName(memberId: number | undefined): string {
@@ -42,33 +69,36 @@ export function memberName(memberId: number | undefined): string {
   return identity.valid ? identity.fullName : 'Nombre sin configurar';
 }
 
-export function canManageTeam(member = activeMember()): boolean {
-  return roleCanManageTeam(member.role);
+export function canManageTeam(candidate?: TeamMember): boolean {
+  const member = authorizedTenantMember(candidate);
+  return Boolean(member && roleCanManageTeam(member.role));
 }
 
-export function canViewAll(member = activeMember()): boolean {
-  return roleCanViewAll(member.role);
+export function canViewAll(candidate?: TeamMember): boolean {
+  const member = authorizedTenantMember(candidate);
+  return Boolean(member && roleCanViewAll(member.role));
 }
 
-export function canAccessModule(module: ModuleId, member = activeMember()): boolean {
-  return roleCanAccessModule(member.role, module);
+export function canAccessModule(module: ModuleId, candidate?: TeamMember): boolean {
+  const member = authorizedTenantMember(candidate);
+  return Boolean(member && roleCanAccessModule(member.role, module));
 }
 
 /**
  * Capacidades administrativas compuestas a partir de la política de roles existente.
- * Ninguna interfaz debe volver a interpretar Dueño/Administrador/Corredor por su cuenta.
+ * La identidad efectiva siempre se vuelve a resolver desde TenantScope.
  */
-export function canAccessSettings(member = activeMember()): boolean {
-  return canAccessModule('configuracion', member);
+export function canAccessSettings(candidate?: TeamMember): boolean {
+  return canAccessModule('configuracion', candidate);
 }
 
-export function canAdministerTeam(member = activeMember()): boolean {
-  return canManageTeam(member) && canAccessModule('equipo', member);
+export function canAdministerTeam(candidate?: TeamMember): boolean {
+  return canManageTeam(candidate) && canAccessModule('equipo', candidate);
 }
 
 /**
- * Recovery is authorization-sensitive: unlike visual/member-view capabilities,
- * it is always bound to the exact ACTIVE member for the current TenantScope user.
+ * Recovery es authorization-sensitive y siempre queda ligado al miembro ACTIVE
+ * exacto del usuario del TenantScope actual.
  */
 export function canUseRecovery(): boolean {
   const member = authenticatedTenantMember();
@@ -79,18 +109,36 @@ export function canUseRecovery(): boolean {
   );
 }
 
-export function canInviteTeamRole(role: Exclude<TeamRole, 'Dueño'>, member = activeMember()): boolean {
-  return canAdministerTeam(member) && (member.role === 'Dueño' || role === 'Corredor');
+export function canInviteTeamRole(role: Exclude<TeamRole, 'Dueño'>, candidate?: TeamMember): boolean {
+  const member = authorizedTenantMember(candidate);
+  return Boolean(
+    member
+    && roleCanManageTeam(member.role)
+    && roleCanAccessModule(member.role, 'equipo')
+    && (member.role === 'Dueño' || role === 'Corredor'),
+  );
 }
 
-export function canChangeTeamMemberRole(target: TeamMember, member = activeMember()): boolean {
-  return canAdministerTeam(member) && member.role === 'Dueño' && target.role !== 'Dueño';
+export function canChangeTeamMemberRole(target: TeamMember, candidate?: TeamMember): boolean {
+  const member = authorizedTenantMember(candidate);
+  return Boolean(
+    member
+    && roleCanManageTeam(member.role)
+    && roleCanAccessModule(member.role, 'equipo')
+    && member.role === 'Dueño'
+    && target.role !== 'Dueño',
+  );
 }
 
-export function canChangeTeamMemberStatus(target: TeamMember, member = activeMember()): boolean {
-  return canAdministerTeam(member)
+export function canChangeTeamMemberStatus(target: TeamMember, candidate?: TeamMember): boolean {
+  const member = authorizedTenantMember(candidate);
+  return Boolean(
+    member
+    && roleCanManageTeam(member.role)
+    && roleCanAccessModule(member.role, 'equipo')
     && target.role !== 'Dueño'
-    && (member.role === 'Dueño' || target.role === 'Corredor');
+    && (member.role === 'Dueño' || target.role === 'Corredor'),
+  );
 }
 
 export function accessibleModules(): Array<[ModuleId, string]> {
@@ -98,7 +146,8 @@ export function accessibleModules(): Array<[ModuleId, string]> {
 }
 
 function visibleByAssignment<T extends { assignedToId?: number }>(items: T[]): T[] {
-  const member = activeMember();
+  const member = authorizedTenantMember();
+  if (!member) return [];
   return items.filter((item) => assignmentVisible(member.role, member.id, item.assignedToId));
 }
 
@@ -108,7 +157,9 @@ export function visibleReminders(): Reminder[] { return visibleByAssignment(stat
 export function visibleConversations(): WhatsAppConversation[] { return visibleByAssignment(state.crm.conversations); }
 
 export function defaultAssigneeId(): number {
-  return activeMember().id;
+  const member = authorizedTenantMember();
+  if (!member) throw new Error('AUTHENTICATED_TENANT_MEMBER_REQUIRED');
+  return member.id;
 }
 
 export function activeSeatCount(): number {
@@ -154,8 +205,14 @@ export function addActivityForAuthenticatedTenant(scope: TenantScope, entry: New
   appendActivity(entry, member.id);
 }
 
+/**
+ * Compatibilidad histórica: aun sin scope explícito, el actor se deriva del
+ * usuario autenticado actual. activeMemberId nunca participa.
+ */
 export function addActivity(entry: NewActivityEntry): void {
-  appendActivity(entry, activeMember().id);
+  const member = authorizedTenantMember();
+  if (!member) throw new Error('AUTHENTICATED_TENANT_MEMBER_REQUIRED');
+  appendActivity(entry, member.id);
 }
 
 export function ensureAccessibleModule(): void {
