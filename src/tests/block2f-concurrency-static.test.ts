@@ -53,6 +53,7 @@ test('2F Property CAS y UX de conflicto son atómicos, tenant-scoped y fail-clos
   assert.match(migration, /exception when unique_violation[\s\S]*STALE_REVISION/);
   assert.match(migration, /revoke all on function public\.property_snapshot_cas_v1[\s\S]*grant execute[\s\S]*authenticated/);
   assert.match(propertyCas, /TENANT_RECORD_CONFLICT/);
-  assert.match(api, /Este registro cambió en otro dispositivo\. Tus cambios no sobrescribieron la versión más reciente\./);
+  assert.match(propertyCas, /Este registro cambió en otro dispositivo\. Tus cambios no sobrescribieron la versión más reciente\./);
+  assert.match(api, /tenantRecordConflictUserMessage\(\)/);
   assert.match(api, /markTenantSyncError\(job\.scope, message\)/);
 });
