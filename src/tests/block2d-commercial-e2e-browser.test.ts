@@ -592,6 +592,39 @@ test('2D E2E LOST exige motivo, conserva historia y sale de Agenda y oportunidad
 
     await navigate(page, 'crm');
     await openLeadDetails(page, clientId);
+    await page.evaluate(async ({ id, key }) => {
+      const store = await import('/dist/store.js');
+      const target = window as unknown as { __block2eLostRaceTrace?: unknown[] };
+      target.__block2eLostRaceTrace = [];
+      const capture = (source: string, detail?: unknown) => {
+        const client = store.state.crm.clients.find((item) => item.id === id);
+        const sync = JSON.parse(localStorage.getItem(key) || '{}') as Record<string, unknown>;
+        target.__block2eLostRaceTrace?.push({
+          source,
+          at: performance.now(),
+          pipeline: client?.pipeline,
+          outcome: client?.outcome,
+          closedAt: client?.closedAt,
+          lostReason: client?.lostReason,
+          dirty: sync.dirty,
+          localGeneration: sync.localGeneration,
+          verifiedGeneration: sync.verifiedGeneration,
+          detail,
+        });
+      };
+      capture('installed');
+      document.addEventListener('trv-render', () => capture('trv-render'));
+      document.addEventListener('propcontrol-cloud-status', (event) => capture('cloud-status', (event as CustomEvent).detail));
+      document.addEventListener('propcontrol-cloud-authoritative-snapshot', (event) => {
+        const detail = (event as CustomEvent).detail;
+        const remote = detail?.crm?.clients?.find?.((item: { id?: number }) => item.id === id);
+        capture('cloud-authoritative-snapshot', {
+          remotePipeline: remote?.pipeline,
+          remoteOutcome: remote?.outcome,
+          tokenGeneration: detail?.token?.generation,
+        });
+      });
+    }, { id: clientId, key: syncKey });
     await page.locator('.mvp-lead-card[data-client-id="' + clientId + '"] [data-close-operation-stage="Perdido"]').click();
     const lost = page.locator('dialog[data-commercial-close-dialog][open] [data-commercial-close-modal-form="lost"]');
     await lost.waitFor({ state: 'visible' });
@@ -612,6 +645,11 @@ test('2D E2E LOST exige motivo, conserva historia y sale de Agenda y oportunidad
     // El cierre terminal aparece primero en memoria; la cola cloud termina después.
     // El checkpoint E2E debe validar el corte durable, no un frame intermedio.
     await waitSyncClean(page, syncKey);
+
+    const lostRaceTrace = await page.evaluate(() => (
+      (window as unknown as { __block2eLostRaceTrace?: unknown[] }).__block2eLostRaceTrace ?? []
+    ));
+    console.log('BLOCK2E_LOST_RACE_TRACE=' + JSON.stringify(lostRaceTrace));
 
     let crm = await crmState(page);
     const closed = crm.clients.find((item) => item.id === clientId)!;
