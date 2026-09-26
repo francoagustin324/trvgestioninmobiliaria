@@ -17,6 +17,7 @@ on:
       - fix/ordenbroker-block2c1-durable-diffusion-ledger
       - test/ordenbroker-block2d-commercial-e2e
       - security/ordenbroker-block2e-authorized-identity-hardening
+      - security/ordenbroker-block2f-multidevice-concurrency-cas
   schedule:
     - cron: "0 10 * * *"
   workflow_dispatch:
