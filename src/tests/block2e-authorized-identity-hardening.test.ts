@@ -377,7 +377,7 @@ test('2E inventario: activeMember queda sólo como selección visual y no reapar
 
 test('2E inventario: activeMemberId y TEAM_VIEW_KEY quedan confinados a presentación/hidratación visual', () => {
   const files = productionSources();
-  const activeMemberIdFiles = files.filter((file) => readFileSync(file, 'utf8').includes('activeMemberId'));
+  const activeMemberIdFiles = files.filter((file) => /\bactiveMemberId\b/.test(readFileSync(file, 'utf8')));
   const allowedActiveMemberIdFiles = new Set([
     'src/lead-create-reliability.ts',
     'src/mvp-auth.ts',

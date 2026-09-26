@@ -734,18 +734,22 @@ test('A3.3 Guard 5: identidad visual no puede alimentar write actor ni Activity 
   }
 
   const quarantinedTeam = source('src/legacy-quarantine/team-scope.ts');
-  assert.match(quarantinedTeam, /\bactiveMember\(\)/,
-    'El actor visual histórico se preserva sólo en el módulo quarantine exacto y unreachable.');
+  assert.doesNotMatch(quarantinedTeam, /\bactiveMember\(\)/,
+    'Ni siquiera quarantine puede volver a derivar actor de la selección visual.');
+  assert.match(quarantinedTeam, /const member = authenticatedTenantMember\(\);/,
+    'La asignación histórica de quarantine debe resolver al miembro autenticado real.');
   assert.match(quarantinedTeam, /\baddActivity\s*\(/,
-    'El writer visual histórico se preserva sólo en el módulo quarantine exacto y unreachable.');
+    'El helper de compatibilidad puede sobrevivir sólo porque team-access resuelve actor autenticado.');
 
   const store = source('src/store.ts');
   assert.match(store, /activeMemberId \/ TEAM_VIEW_KEY remain a visual preference only and never[\s\S]*authenticatedTenantMember/);
   const legacyTeam = source(LEGACY_TEAM_UI);
-  assert.match(legacyTeam, /\bactiveMember\(\)/,
-    'team-ui.ts preserva activeMember únicamente dentro del quarantine exacto y unreachable.');
+  assert.doesNotMatch(legacyTeam, /\bactiveMember\(\)/,
+    'team-ui.ts quarantine tampoco puede usar activeMember como autoridad.');
+  assert.match(legacyTeam, /authenticatedTenantMember\(\)/,
+    'team-ui.ts quarantine debe identificar la sesión mediante membership autenticada.');
   assert.match(legacyTeam, /\baddActivity\s*\(/,
-    'team-ui.ts preserva addActivity únicamente dentro del quarantine exacto y unreachable.');
+    'El helper addActivity queda permitido sólo bajo la autoridad autenticada de team-access.');
 });
 
 test('A3.3 Guard 6: tenant de escritura no se deriva de CRM/record/payload mutable', () => {

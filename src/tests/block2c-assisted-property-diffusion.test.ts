@@ -443,6 +443,6 @@ test('U. clientes email-only siguen participando del matching y del contacto asi
 test('V. FULL CI conserva Bloque 2C dentro de la cardinalidad integrada vigente', () => {
   assert.match(workflowSource, /ux\/ordenbroker-block2c-assisted-property-diffusion/);
   assert.match(workflowSource, /fix\/ordenbroker-block2c1-durable-diffusion-ledger/);
-  assert.match(workflowSource, /EXPECTED_TEST_TOTAL: "1475"/);
-  assert.match(workflowSource, /expected = 1475/);
+  assert.match(workflowSource, /EXPECTED_TEST_TOTAL: "1482"/);
+  assert.match(workflowSource, /expected = 1482/);
 });

@@ -47,7 +47,7 @@ test('B1.2.9 centraliza capacidades administrativas sobre la política existente
   }
 
   assert.match(access, /export function canUseRecovery\(\): boolean \{\s+const member = authenticatedTenantMember\(\);\s+return Boolean\(\s+member\s+&& roleCanManageTeam\(member\.role\)\s+&& roleCanAccessModule\(member\.role, 'configuracion'\),\s+\);\s+\}/);
-  assert.match(access, /return canManageTeam\(member\) && canAccessModule\('equipo', member\);/);
+  assert.match(access, /return canManageTeam\(candidate\) && canAccessModule\('equipo', candidate\);/);
   assert.match(access, /roleCanManageTeam\(member\.role\)/);
 });
 
