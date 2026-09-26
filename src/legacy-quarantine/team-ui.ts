@@ -11,14 +11,21 @@ import {
   tenantRuntimeLeaseIsCurrent,
   type TenantRuntimeLease,
 } from '../tenant-runtime.js';
-import { saveData, state } from '../store.js';
+import { authenticatedTenantMember, saveData, state } from '../store.js';
 import {
-  activeMember,
   activeSeatCount,
   addActivity,
+  canChangeTeamMemberRole,
+  canChangeTeamMemberStatus,
+  canInviteTeamRole,
   canManageTeam,
+  canViewAll,
   hasSeatAvailable,
   memberName,
+  visibleClients,
+  visibleConversations,
+  visibleProperties,
+  visibleReminders,
   workload,
 } from '../team-access.js';
 import { escapeHtml, field, formValues } from '../utils.js';
@@ -58,11 +65,8 @@ function memberOptions(selectedId: number | undefined): string {
 
 function memberCard(member: TeamMember): string {
   const load = workload(member.id);
-  const current = activeMember();
-  const manageable = cloudTeamReady()
-    && canManageTeam()
-    && member.role !== 'Dueño'
-    && (current.role === 'Dueño' || member.role === 'Corredor');
+  const roleEditable = cloudTeamReady() && canChangeTeamMemberRole(member);
+  const statusEditable = cloudTeamReady() && canChangeTeamMemberStatus(member);
   const roleOptions = roles.filter((role) => role !== 'Dueño');
   return `<article class="team-member-card ${memberStatusClass(member)}">
     <div class="team-member-heading">
@@ -71,7 +75,7 @@ function memberCard(member: TeamMember): string {
       <span class="team-status">${escapeHtml(member.status)}</span>
     </div>
     <label>Rol
-      <select data-team-role="${member.id}"${manageable ? '' : ' disabled'}>${(member.role === 'Dueño' ? ['Dueño'] : roleOptions).map((role) => `<option${role === member.role ? ' selected' : ''}>${role}</option>`).join('')}</select>
+      <select data-team-role="${member.id}"${roleEditable ? '' : ' disabled'}>${(member.role === 'Dueño' ? ['Dueño'] : roleOptions).map((role) => `<option${role === member.role ? ' selected' : ''}>${role}</option>`).join('')}</select>
     </label>
     <p class="role-description">${escapeHtml(roleDescription(member.role))}</p>
     <div class="team-workload">
@@ -79,7 +83,7 @@ function memberCard(member: TeamMember): string {
       <span><b>${load.conversations}</b> conversaciones</span><span><b>${load.tasks}</b> tareas</span>
       <span><b>${load.unread}</b> sin leer</span>
     </div>
-    ${manageable ? `<button type="button" class="secondary" data-team-status="${member.id}">${member.status === 'Suspendido' ? 'Reactivar acceso' : 'Suspender acceso'}</button>` : ''}
+    ${statusEditable ? `<button type="button" class="secondary" data-team-status="${member.id}">${member.status === 'Suspendido' ? 'Reactivar acceso' : 'Suspender acceso'}</button>` : ''}
   </article>`;
 }
 
@@ -92,14 +96,18 @@ interface AssignmentRow {
 }
 
 function assignmentRows(): AssignmentRow[] {
+  const clients = canViewAll() ? state.crm.clients : visibleClients();
+  const properties = canViewAll() ? state.crm.properties : visibleProperties();
+  const conversations = canViewAll() ? state.crm.conversations : visibleConversations();
+  const reminders = canViewAll() ? state.crm.reminders : visibleReminders();
   return [
-    ...state.crm.clients.map((item) => ({ type: 'Cliente' as const, id: item.id, title: item.name, detail: item.interest, assignedToId: item.assignedToId })),
-    ...state.crm.properties.map((item) => ({ type: 'Propiedad' as const, id: item.id, title: item.title, detail: item.address, assignedToId: item.assignedToId })),
-    ...state.crm.conversations.map((item) => {
-      const client = state.crm.clients.find((candidate) => candidate.id === item.clientId);
+    ...clients.map((item) => ({ type: 'Cliente' as const, id: item.id, title: item.name, detail: item.interest, assignedToId: item.assignedToId })),
+    ...properties.map((item) => ({ type: 'Propiedad' as const, id: item.id, title: item.title, detail: item.address, assignedToId: item.assignedToId })),
+    ...conversations.map((item) => {
+      const client = clients.find((candidate) => candidate.id === item.clientId);
       return { type: 'Conversación' as const, id: item.id, title: client?.name ?? item.phone, detail: `${item.unread} mensajes sin leer`, assignedToId: item.assignedToId };
     }),
-    ...state.crm.reminders.map((item) => ({ type: 'Tarea' as const, id: item.id, title: item.title, detail: `${item.date} · ${item.related}`, assignedToId: item.assignedToId })),
+    ...reminders.map((item) => ({ type: 'Tarea' as const, id: item.id, title: item.title, detail: `${item.date} · ${item.related}`, assignedToId: item.assignedToId })),
   ];
 }
 
@@ -127,7 +135,7 @@ function teamFormHtml(): string {
     <input name="name" placeholder="Nombre y apellido" required>
     <input name="email" type="email" placeholder="Correo de acceso" required>
     <input name="phone" inputmode="tel" placeholder="Teléfono opcional">
-    <select name="role"><option>Corredor</option>${activeMember().role === 'Dueño' ? '<option>Administrador</option>' : ''}</select>
+    <select name="role"><option>Corredor</option>${canInviteTeamRole('Administrador') ? '<option>Administrador</option>' : ''}</select>
     <button type="submit"${ready && hasSeatAvailable() ? '' : ' disabled'}>${!ready ? 'Ingresá para invitar' : hasSeatAvailable() ? 'Enviar invitación' : 'Cupo completo'}</button>
     <small data-team-feedback></small>
   </form>`;
@@ -137,10 +145,12 @@ export function renderTeamAccount(): void {
   const container = document.querySelector<HTMLElement>('#team-account');
   if (!container) return;
   const session = getCloudSession();
-  const member = activeMember();
-  container.innerHTML = session
+  const member = authenticatedTenantMember();
+  container.innerHTML = session && member
     ? `<div class="team-view-switch"><span>Usuario autenticado</span><strong>${escapeHtml(member.name)}</strong><small>${escapeHtml(member.role)}</small></div>`
-    : '<div class="team-view-switch"><span>Modo local</span><strong>Sin sesión segura</strong></div>';
+    : session
+      ? '<div class="team-view-switch"><span>Sesión segura</span><strong>Sin membresía activa</strong></div>'
+      : '<div class="team-view-switch"><span>Modo local</span><strong>Sin sesión segura</strong></div>';
 }
 
 export function renderTeam(container: HTMLElement): void {
@@ -189,11 +199,13 @@ function bindTeam(container: HTMLElement): void {
     if (submit) submit.disabled = true;
     feedback(container, 'Enviando invitación…');
     const { scope, runtimeLease } = teamMutationContext();
+    const role = field(values, 'role') as Exclude<TeamRole, 'Dueño'>;
+    if (!canInviteTeamRole(role)) return;
     void inviteTeamMember({
       name: field(values, 'name').trim(),
       email,
       phone: field(values, 'phone').trim() || undefined,
-      role: field(values, 'role') as Exclude<TeamRole, 'Dueño'>,
+      role,
     }, scope, runtimeLease).then((member) => {
       assertTenantRuntimeLeaseCurrent(runtimeLease);
       replaceMember(member);
@@ -212,11 +224,13 @@ function bindTeam(container: HTMLElement): void {
     if (!canManageTeam() || !getCloudSession()) return;
     const memberId = Number(select.dataset.teamRole);
     const target = state.crm.teamMembers.find((member) => member.id === memberId);
-    if (!target || target.role === 'Dueño') return;
+    if (!target || !canChangeTeamMemberRole(target)) return;
+    const nextRole = select.value as Exclude<TeamRole, 'Dueño'>;
+    if (!canInviteTeamRole(nextRole)) return;
     const previousRole = target.role;
     select.disabled = true;
     const { scope, runtimeLease } = teamMutationContext();
-    void updateTeamMemberAccess(memberId, { role: select.value as Exclude<TeamRole, 'Dueño'> }, scope, runtimeLease)
+    void updateTeamMemberAccess(memberId, { role: nextRole }, scope, runtimeLease)
       .then((updated) => {
         assertTenantRuntimeLeaseCurrent(runtimeLease);
         replaceMember(updated);
@@ -235,7 +249,7 @@ function bindTeam(container: HTMLElement): void {
   container.querySelectorAll<HTMLButtonElement>('[data-team-status]').forEach((button) => button.addEventListener('click', () => {
     if (!canManageTeam() || !getCloudSession()) return;
     const target = state.crm.teamMembers.find((member) => member.id === Number(button.dataset.teamStatus));
-    if (!target || target.role === 'Dueño') return;
+    if (!target || !canChangeTeamMemberStatus(target)) return;
     button.disabled = true;
     const status = target.status === 'Suspendido' ? 'Activo' : 'Suspendido';
     const { scope, runtimeLease } = teamMutationContext();
