@@ -636,7 +636,10 @@ async function crmState(page: Page): Promise<CrmData> {
 
 async function mutateClientAndSave(page: Page, notes: string): Promise<void> {
   await page.evaluate(async ({ clientId, nextNotes }) => {
-    const store = await import('/dist/store.js');
+    const store = await import('/dist/store.js') as unknown as {
+      state: { crm: CrmData };
+      saveData: (reason?: string) => void;
+    };
     const target = store.state.crm.clients.find((item) => item.id === clientId);
     if (!target) throw new Error('BLOCK2F_CLIENT_NOT_FOUND');
     target.notes = nextNotes;
@@ -646,7 +649,10 @@ async function mutateClientAndSave(page: Page, notes: string): Promise<void> {
 
 async function mutatePropertyAndSave(page: Page, price: number): Promise<void> {
   await page.evaluate(async ({ propertyId, nextPrice }) => {
-    const store = await import('/dist/store.js');
+    const store = await import('/dist/store.js') as unknown as {
+      state: { crm: CrmData };
+      saveData: (reason?: string) => void;
+    };
     const target = store.state.crm.properties.find((item) => item.id === propertyId);
     if (!target) throw new Error('BLOCK2F_PROPERTY_NOT_FOUND');
     target.price = nextPrice;
