@@ -335,12 +335,14 @@ async function agendaCardFor(page: Page, text: string) {
 }
 
 async function openAgendaContext(page: Page, card: ReturnType<Page['locator']>, clientId: number): Promise<void> {
-  const direct = card.locator('[data-open-agenda-context="' + clientId + '"]');
-  if (await direct.count()) {
+  const direct = card.locator('[data-open-agenda-context="' + clientId + '"]').first();
+  if (await direct.isVisible()) {
     await direct.click();
   } else {
-    await card.locator('.agenda-more-actions > summary').click();
-    await card.locator('[data-open-agenda-context="' + clientId + '"]').click();
+    const menu = card.locator('.agenda-more-actions > summary');
+    await menu.waitFor({ state: 'visible' });
+    await menu.click();
+    await card.locator('[data-open-agenda-context="' + clientId + '"]:visible').click();
   }
   await page.waitForSelector('#crm.active', { state: 'visible' });
   await page.waitForFunction((selector) => {
