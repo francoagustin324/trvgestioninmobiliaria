@@ -294,7 +294,8 @@ test('P1.1-A2 conserva Agenda/Reminder/B1.4.2 fuera del flujo y Visit sin campos
   assert.match(ui, /coordinateVisitWithCutover\(/);
   assert.match(ui, /registerVisitResultWithCutover\(/);
   assert.doesNotMatch(ui, /\bsaveData\(|\baddActivity\(/);
-  assert.match(cutover, /runLocal:\s*\(\)\s*=>\s*\{[\s\S]*?saveData\(reason\)/);
+  assert.match(cutover, /runLocal:\s*\(\)\s*=>\s*\{[\s\S]*?persistHistoricalLocal\(before, reason, runtimeLease\)/);
+  assert.match(cutover, /function persistHistoricalLocal\([\s\S]*?saveData\(reason\)[\s\S]*?writeTenantSnapshot\(/);
   assert.doesNotMatch(cutover, /state\.crm\.reminders\.push|state\.crm\.reminders\s*=/);
 });
 
