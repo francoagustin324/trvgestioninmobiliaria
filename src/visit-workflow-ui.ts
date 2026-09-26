@@ -1,9 +1,9 @@
 import { missingQualificationQuestions, visitReadiness } from './lead-qualification.js';
 import { isTerminalClient, localIsoDate } from './lead-pipeline.js';
 import type { Client, Property, SyncedVisit, Visit, VisitInterest, VisitStatus } from './models.js';
-import { state } from './store.js';
+import { authenticatedTenantMember, state } from './store.js';
 import { newOperationId } from './sync-identity.js';
-import { activeMember, visibleProperties } from './team-access.js';
+import { visibleProperties } from './team-access.js';
 import { assignmentVisible } from './team-policy.js';
 import { escapeHtml } from './utils.js';
 import {
@@ -25,7 +25,7 @@ const dateTimeFormatter = new Intl.DateTimeFormat('es-AR', {
 });
 
 function propertyForVisit(visit: Visit): Property | undefined {
-  return state.crm.properties.find((property) => property.id === visit.propertyId);
+  return visibleProperties().find((property) => property.id === visit.propertyId);
 }
 
 function statusClass(status: VisitStatus): string {
@@ -41,7 +41,8 @@ function formatScheduledAt(value: string): string {
 }
 
 function visibleVisits(clientId: number): Visit[] {
-  const actor = activeMember();
+  const actor = authenticatedTenantMember();
+  if (!actor) return [];
   return visitsForClient(
     state.crm.visits.filter((visit) => assignmentVisible(actor.role, actor.id, visit.assignedToId)),
     clientId,
