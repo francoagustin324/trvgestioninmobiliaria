@@ -256,7 +256,7 @@ async function createQuickLead(page: Page, name: string, phone: string): Promise
 
 async function completeLeadRequirements(page: Page, clientId: number, nextAction = '', nextFollowUp = ''): Promise<void> {
   await navigate(page, 'crm');
-  await page.locator('[data-edit-client="' + clientId + '"]').click();
+  await page.locator('[data-edit-client="' + clientId + '"]:visible').first().click();
   const form = page.locator('#mvp-lead-form:not(.collapsed)');
   await form.waitFor({ state: 'visible' });
   await form.locator('input[name="interest"]').fill('Dúplex en Docta para vivir');
