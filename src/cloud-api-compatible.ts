@@ -10,6 +10,7 @@ import {
   updateTeamMemberAccess,
 } from './cloud-api.js';
 import type { SyncSaveToken } from './sync-safety.js';
+import { isTenantRecordConflict } from './tenant-property-cas.js';
 import {
   assertTenantCrmScope,
   markTenantSyncError,
@@ -323,8 +324,9 @@ export function queueCloudSave(
       })
       .catch((error) => {
         if (!tenantRuntimeLeaseIsCurrent(job.runtimeLease)) return;
-        const technicalMessage = errorMessage(error) || 'No se pudo guardar en la nube.';
-        const message = `Guardado localmente, sincronización pendiente. ${technicalMessage}`;
+        const message = isTenantRecordConflict(error)
+          ? 'Este registro cambió en otro dispositivo. Tus cambios no sobrescribieron la versión más reciente. Volvé a abrir el registro para revisar los cambios.'
+          : `Guardado localmente, sincronización pendiente. ${errorMessage(error) || 'No se pudo guardar en la nube.'}`;
         markTenantSyncError(job.scope, message);
         emitStatus(job, message, 'error');
       });
