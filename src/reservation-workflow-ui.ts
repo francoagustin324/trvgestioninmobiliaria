@@ -1,7 +1,7 @@
 import type { Client, OfferCurrency, Property, Reservation, ReservationStatus } from './models.js';
 import { authenticatedTenantMember, saveData, state } from './store.js';
-import { assertTenantCrmScope } from './tenant-storage.js';
-import { assertTenantRuntimeLeaseCurrent, captureTenantRuntimeLease, requireCurrentTenantScope, type TenantRuntimeLease } from './tenant-runtime.js';
+import { assertTenantCrmScope, writeTenantSnapshot } from './tenant-storage.js';
+import { assertTenantRuntimeLeaseCurrent, captureTenantRuntimeLease, requireCurrentTenantScope, tenantRuntimeLeaseIsCurrent, type TenantRuntimeLease } from './tenant-runtime.js';
 import type { TenantScope } from './active-organization.js';
 import { activeMember, visibleProperties } from './team-access.js';
 import { assignmentVisible } from './team-policy.js';
@@ -30,7 +30,34 @@ export function enhanceLeadReservations(): void { forEachLead(ensureLeadReservat
 function refreshVisibleReservations():void{forEachLead(refreshLeadReservations);}
 function busy(form:HTMLFormElement,value:boolean):void{form.dataset.submitting=value?'true':'false';form.querySelectorAll<HTMLButtonElement>('button[type=submit]').forEach((x)=>{x.disabled=value;});}
 function error(form:HTMLFormElement,value:unknown):void{const out=form.querySelector<HTMLElement>('[data-reservation-error]');if(out){out.textContent=value instanceof Error?value.message:'No se pudo guardar la reserva.';out.hidden=false;}}
-function apply(result:{crm:typeof state.crm},context:ReturnType<typeof reservationWriteContext>):void{assertTenantRuntimeLeaseCurrent(context.runtimeLease);assertTenantCrmScope(context.scope,result.crm);state.crm=result.crm;saveData('Flujo comercial de reservas');document.dispatchEvent(new CustomEvent('trv-render'));}
+function rollbackReservationMutation(context:ReturnType<typeof reservationWriteContext>,previousCrm:typeof state.crm):void{
+  if(!tenantRuntimeLeaseIsCurrent(context.runtimeLease))return;
+  try{
+    assertTenantRuntimeLeaseCurrent(context.runtimeLease);
+    assertTenantCrmScope(context.scope,previousCrm);
+    state.crm=previousCrm;
+    writeTenantSnapshot(context.scope,previousCrm,{markDirty:true,reason:'Reversión de reserva no persistida',backup:false});
+  }catch{
+    // Fail closed: nunca se restaura sobre otro tenant/runtime.
+  }
+}
+function apply(result:{crm:typeof state.crm},context:ReturnType<typeof reservationWriteContext>):void{
+  assertTenantRuntimeLeaseCurrent(context.runtimeLease);
+  assertTenantCrmScope(context.scope,result.crm);
+  const previousCrm=structuredClone(state.crm);
+  try{
+    state.crm=result.crm;
+    assertTenantRuntimeLeaseCurrent(context.runtimeLease);
+    assertTenantCrmScope(context.scope,state.crm);
+    saveData('Flujo comercial de reservas');
+    assertTenantRuntimeLeaseCurrent(context.runtimeLease);
+    assertTenantCrmScope(context.scope,state.crm);
+  }catch(value){
+    rollbackReservationMutation(context,previousCrm);
+    throw value;
+  }
+  document.dispatchEvent(new CustomEvent('trv-render'));
+}
 document.addEventListener('submit',(event)=>{const target=event.target;if(!(target instanceof HTMLFormElement))return;if(!target.matches('[data-register-reservation],[data-update-reservation]'))return;event.preventDefault();if(target.dataset.submitting==='true')return;busy(target,true);try{const context=reservationWriteContext(target);const actor={id:context.member.id,role:context.member.role};const data=new FormData(target);if(target.matches('[data-register-reservation]')){const rawOffer=String(data.get('offerId')||'');apply(registerReservation(state.crm,actor,{clientId:Number(target.dataset.registerReservation),propertyId:Number(data.get('propertyId')),offerId:rawOffer?Number(rawOffer):undefined,amount:Number(data.get('amount')),currency:String(data.get('currency')||'') as OfferCurrency,paymentMethod:String(data.get('paymentMethod')||''),conditions:String(data.get('conditions')||''),reservedAt:String(data.get('reservedAt')||''),expiresAt:String(data.get('expiresAt')||'')}),context);}else{apply(updateReservationStatus(state.crm,actor,{reservationId:Number(target.dataset.updateReservation),status:String(data.get('status')||'')}),context);}}catch(value){busy(target,false);error(target,value);}});
 document.addEventListener('change',(event)=>{const offer=(event.target as HTMLElement).closest<HTMLSelectElement>('[data-register-reservation] select[name="offerId"]');if(!offer?.value)return;const option=offer.selectedOptions[0];const property=offer.form?.elements.namedItem('propertyId');if(property instanceof HTMLSelectElement&&option?.dataset.propertyId)property.value=option.dataset.propertyId;});
 document.addEventListener('trv-render',()=>queueMicrotask(refreshVisibleReservations));function observe():void{if(observing)return;const root=document.querySelector('#root');if(!root)return;observing=true;new MutationObserver(enhanceLeadReservations).observe(root,{childList:true,subtree:true});}observe();queueMicrotask(enhanceLeadReservations);
