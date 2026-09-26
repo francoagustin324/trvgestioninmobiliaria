@@ -204,7 +204,7 @@ export function buildCommercialAgendaItems(
     if (!assignmentVisible(input.actor.role, input.actor.id, visit.assignedToId)) return [];
     const when = canonicalDateTime(visit.scheduledAt);
     const client = agendaClientLabel(input.clients, visit.clientId);
-    if (!when || !client) return [];
+    if (!when || !client || isTerminalClient(client)) return [];
     const property = agendaPropertyLabel(input.properties, visit.propertyId);
     return [{
       id: `visit-${visit.id}`,
@@ -227,7 +227,7 @@ export function buildCommercialAgendaItems(
     if (!assignmentVisible(input.actor.role, input.actor.id, offer.assignedToId)) return [];
     const validUntil = canonicalDateTime(offer.validUntil);
     const client = agendaClientLabel(input.clients, offer.clientId);
-    if (!validUntil || !client) return [];
+    if (!validUntil || !client || isTerminalClient(client)) return [];
     const property = agendaPropertyLabel(input.properties, offer.propertyId);
     return [{
       id: `offer-${offer.id}`,
@@ -252,7 +252,7 @@ export function buildCommercialAgendaItems(
     if (!assignmentVisible(input.actor.role, input.actor.id, reservation.assignedToId)) return [];
     const expiresAt = canonicalDateTime(reservation.expiresAt);
     const client = agendaClientLabel(input.clients, reservation.clientId);
-    if (!expiresAt || !client) return [];
+    if (!expiresAt || !client || isTerminalClient(client)) return [];
     const property = agendaPropertyLabel(input.properties, reservation.propertyId);
     return [{
       id: `reservation-${reservation.id}`,
