@@ -405,11 +405,28 @@ test('2D E2E WON recorre Lead → Propiedad → Difusión → Seguimiento → Vi
     await visitForm.locator('input[name="date"]').fill('2026-09-27');
     await visitForm.locator('input[name="time"]').fill('15:30');
     await visitForm.locator('button[type="submit"]').click();
-    await page.waitForFunction(() => (window as any).__noop === undefined && true);
-    await page.waitForFunction(async () => (await import('/dist/store.js')).state.crm.visits.some((item) => item.status === 'Coordinada'));
+    await page.waitForFunction(async ({ clientId: expectedClientId, propertyId: expectedPropertyId }) => {
+      const visits = (await import('/dist/store.js')).state.crm.visits;
+      return visits.some((item) => (
+        item.clientId === expectedClientId
+        && item.propertyId === expectedPropertyId
+        && item.status === 'Coordinada'
+      ));
+    }, { clientId, propertyId });
+    await waitSyncClean(page, syncKey);
+    await page.waitForFunction(async ({ clientId: expectedClientId, propertyId: expectedPropertyId }) => {
+      const visits = (await import('/dist/store.js')).state.crm.visits;
+      return visits.some((item) => (
+        item.clientId === expectedClientId
+        && item.propertyId === expectedPropertyId
+        && item.status === 'Coordinada'
+      ));
+    }, { clientId, propertyId });
 
     crm = await crmState(page);
-    const visitId = crm.visits[0]!.id;
+    const visit = crm.visits.find((item) => item.clientId === clientId && item.propertyId === propertyId);
+    assert.ok(visit, 'La visita coordinada debe seguir presente una vez confirmada la persistencia.');
+    const visitId = visit.id;
     card = await agendaCardFor(page, 'CLIENTE E2E WON');
     assert.equal(await card.count(), 1, 'La visita coordinada no debe duplicarse con el follow-up espejo.');
     assert.equal(await card.locator('[data-agenda-source="visit"]').count(), 1);
