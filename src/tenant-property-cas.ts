@@ -21,15 +21,17 @@ export const PROPERTY_SNAPSHOT_CONFLICT = 'PROPERTY_SNAPSHOT_CONFLICT';
 
 export class TenantRecordConflictError extends Error {
   readonly code = TENANT_RECORD_CONFLICT;
-  readonly entityType = 'property' as const;
+  readonly entityType: 'client' | 'property';
   readonly reason: typeof STALE_REVISION | typeof PROPERTY_SNAPSHOT_CONFLICT;
 
   constructor(
+    entityType: 'client' | 'property',
     reason: typeof STALE_REVISION | typeof PROPERTY_SNAPSHOT_CONFLICT = PROPERTY_SNAPSHOT_CONFLICT,
     options: { cause?: unknown } = {},
   ) {
     super(TENANT_RECORD_CONFLICT, options);
     this.name = 'TenantRecordConflictError';
+    this.entityType = entityType;
     this.reason = reason;
   }
 }
@@ -44,6 +46,20 @@ export function isTenantRecordConflict(error: unknown): error is TenantRecordCon
   return error instanceof TenantRecordConflictError
     || (Boolean(error && typeof error === 'object')
       && String((error as { code?: unknown }).code ?? '') === TENANT_RECORD_CONFLICT);
+}
+
+export function tenantRecordConflictFrom(
+  error: unknown,
+  entityType: 'client' | 'property',
+): TenantRecordConflictError | null {
+  if (isTenantRecordConflict(error)) return error;
+  const code = errorCode(error);
+  if (code !== '40001' && code !== '23505' && code !== 'P0002') return null;
+  return new TenantRecordConflictError(
+    entityType,
+    code === '40001' ? STALE_REVISION : PROPERTY_SNAPSHOT_CONFLICT,
+    { cause: error },
+  );
 }
 
 function record(value: unknown): Record<string, unknown> | null {
@@ -133,6 +149,7 @@ export async function invokePropertySnapshotCasV1(
     const code = errorCode(error);
     if (code === '40001' || code === '23505' || code === 'P0002') {
       throw new TenantRecordConflictError(
+        'property',
         code === '40001' ? STALE_REVISION : PROPERTY_SNAPSHOT_CONFLICT,
         { cause: error },
       );
