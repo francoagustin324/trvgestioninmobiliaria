@@ -1,7 +1,7 @@
 import { getCloudSession, pushCloudData, queueCloudSave } from './cloud-api-compatible.js';
 import type { Client, CrmData, Property, SyncedVisit, VisitInterest, VisitStatus } from './models.js';
 import { authenticatedTenantMember, saveData, state } from './store.js';
-import { tenantFingerprint, writeTenantSnapshot } from './tenant-storage.js';
+import { assertTenantCrmScope, tenantFingerprint, writeTenantSnapshot } from './tenant-storage.js';
 import {
   assertTenantRuntimeLeaseCurrent,
   captureTenantRuntimeLease,
