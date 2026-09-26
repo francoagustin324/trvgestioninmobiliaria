@@ -5,7 +5,7 @@ import {
   cloudRecordsToCrm,
   crmToCloudRecords,
   isSupervisedRecommendationTelemetryPayload,
-  staleCloudRecords,
+  type CloudEntityType,
   type CloudRecordRow,
 } from './cloud-records.js';
 import {
@@ -13,6 +13,23 @@ import {
   snapshotMayWriteCommercialEntity,
 } from './commercial-sync-transition.js';
 import type { Client, CrmData } from './models.js';
+import {
+  concurrencyBaselineMap,
+  concurrencyRowFingerprint,
+  concurrencyRowIdentity,
+  readTenantConcurrencyBaseline,
+  writeTenantConcurrencyBaseline,
+  type TenantConcurrencyBaselineRow,
+} from './tenant-concurrency-baseline.js';
+import {
+  PROPERTY_SNAPSHOT_CONFLICT,
+  TenantRecordConflictError,
+  invokePropertySnapshotCasV1,
+  propertyPayload,
+  propertyRecordReference,
+  propertyRevision,
+  tenantRecordConflictFrom,
+} from './tenant-property-cas.js';
 import { latestRemoteVersion, type SyncSaveToken } from './sync-safety.js';
 import { canonicalUuid, normalizeRevision } from './sync-identity.js';
 import {
@@ -254,42 +271,31 @@ function recordsFingerprint(records: readonly CloudRecordRow[]): string {
     .sort((left, right) => `${left.entity_type}:${left.entity_key}`.localeCompare(`${right.entity_type}:${right.entity_key}`)));
 }
 
-function rowFingerprint(row: CloudRecordRow): string {
+function casComparableFingerprint(row: Pick<CloudRecordRow, 'assigned_member_id' | 'payload'>): string {
+  const payload = structuredClone(row.payload);
+  const value = record(payload);
+  if (value) {
+    delete value.revision;
+    delete value.operationId;
+  }
   return tenantFingerprint({
     assigned_member_id: row.assigned_member_id,
-    payload: row.payload,
+    payload,
   });
 }
 
-function remoteComparableCrm(crm: CrmData): unknown {
-  const comparable = structuredClone(crm) as unknown as Record<string, unknown>;
-  const organization = comparable.organization as Record<string, unknown> | undefined;
-  if (organization) delete organization.id;
-  comparable.teamMembers = [];
-  ['clients', 'properties', 'visits', 'offers', 'reservations', 'contacts', 'reminders', 'fichas', 'conversations'].forEach((key) => {
-    const items = comparable[key];
-    if (!Array.isArray(items)) return;
-    items.forEach((item) => {
-      if (!item || typeof item !== 'object' || Array.isArray(item)) return;
-      const itemRecord = item as Record<string, unknown>;
-      delete itemRecord.assignedToId;
-      delete itemRecord.createdById;
-      if (key === 'clients') {
-        delete itemRecord.revision;
-        delete itemRecord.operationId;
-      }
-    });
-    items.sort((left, right) => Number((left as Record<string, unknown>)?.id ?? 0) - Number((right as Record<string, unknown>)?.id ?? 0));
-  });
-  const activity = comparable.activityLog;
-  if (Array.isArray(activity)) {
-    activity.forEach((item) => {
-      if (!item || typeof item !== 'object' || Array.isArray(item)) return;
-      delete (item as Record<string, unknown>).actorId;
-    });
-    activity.sort((left, right) => Number((left as Record<string, unknown>)?.id ?? 0) - Number((right as Record<string, unknown>)?.id ?? 0));
-  }
-  return comparable;
+function rowMap(rows: readonly Pick<CloudRecordRow, 'entity_type' | 'entity_key'>[]): Map<string, typeof rows[number]> {
+  return new Map(rows.map((row) => [concurrencyRowIdentity(row), row]));
+}
+
+function baselineAsRows(rows: readonly TenantConcurrencyBaselineRow[]): CloudRecordRow[] {
+  return rows.map((row) => ({
+    organization_id: row.organization_id,
+    entity_type: row.entity_type,
+    entity_key: row.entity_key,
+    assigned_member_id: row.assigned_member_id,
+    payload: structuredClone(row.payload),
+  }));
 }
 
 async function fetchCloudRecords(
@@ -331,6 +337,31 @@ async function upsertRecords(
       headers: {
         ...tenantCloudHeaders(transport.config.publishableKey, transport.accessToken),
         Prefer: 'resolution=merge-duplicates,return=minimal',
+      },
+      body: JSON.stringify(chunk),
+    }));
+    assertTenantRuntimeLeaseCurrent(runtimeLease);
+  }
+}
+
+async function insertRecordsIgnoreDuplicates(
+  scope: TenantScope,
+  transport: TenantCloudTransport,
+  runtimeLease: TenantRuntimeLease,
+  records: CloudRecordRow[],
+): Promise<void> {
+  assertRowsTenant(scope, records);
+  for (let index = 0; index < records.length; index += 100) {
+    assertTenantRuntimeLeaseCurrent(runtimeLease);
+    const chunk = records.slice(index, index + 100);
+    if (!chunk.length) continue;
+    const target = new URL(`${transport.config.url}/rest/v1/propcontrol_records`);
+    target.searchParams.set('on_conflict', 'organization_id,entity_type,entity_key');
+    await parseTenantCloudJson(await fetch(target, {
+      method: 'POST',
+      headers: {
+        ...tenantCloudHeaders(transport.config.publishableKey, transport.accessToken),
+        Prefer: 'resolution=ignore-duplicates,return=minimal',
       },
       body: JSON.stringify(chunk),
     }));
@@ -394,57 +425,273 @@ function clientPayload(row: CloudRecordRow): Client {
   return structuredClone(value) as unknown as Client;
 }
 
+type ProtectedReconcileResult = Readonly<{
+  inserts: CloudRecordRow[];
+  touched: Set<string>;
+}>;
+
+function positiveAssignedMemberId(row: Pick<CloudRecordRow, 'assigned_member_id'>, label: string): number {
+  const memberId = row.assigned_member_id;
+  if (typeof memberId !== 'number' || !Number.isSafeInteger(memberId) || memberId <= 0) {
+    throw new Error(`${label} requiere un member id positivo válido.`);
+  }
+  return memberId;
+}
+
 async function reconcileClientsWithCas(
   scope: TenantScope,
   transport: TenantCloudTransport,
   runtimeLease: TenantRuntimeLease,
   existing: CloudRecordRow[],
   next: CloudRecordRow[],
-): Promise<{ inserts: CloudRecordRow[]; staleHandled: Set<string> }> {
+  baseline: readonly TenantConcurrencyBaselineRow[],
+): Promise<ProtectedReconcileResult> {
+  const baselineClients = concurrencyBaselineMap(baseline, 'client');
   const existingClients = new Map(existing
     .filter((row) => row.entity_type === 'client')
-    .map((row) => [cloudRecordIdentity(row), row]));
-  const nextClients = next.filter((row) => row.entity_type === 'client');
+    .map((row) => [concurrencyRowIdentity(row), row] as const));
+  const nextClients = new Map(next
+    .filter((row) => row.entity_type === 'client')
+    .map((row) => [concurrencyRowIdentity(row), row] as const));
+  const identities = new Set([...baselineClients.keys(), ...nextClients.keys()]);
   const inserts: CloudRecordRow[] = [];
+  const touched = new Set<string>();
 
-  for (const nextRow of nextClients) {
+  for (const identity of [...identities].sort()) {
     assertTenantRuntimeLeaseCurrent(runtimeLease);
-    const identity = cloudRecordIdentity(nextRow);
-    const current = existingClients.get(identity);
-    if (!current) {
-      inserts.push(nextRow);
+    const base = baselineClients.get(identity);
+    const local = nextClients.get(identity);
+    const remote = existingClients.get(identity);
+
+    if (!base && local) {
+      if (remote) {
+        if (casComparableFingerprint(remote) === casComparableFingerprint(local)) continue;
+        throw new TenantRecordConflictError('client', PROPERTY_SNAPSHOT_CONFLICT);
+      }
+      inserts.push(local);
+      touched.add(identity);
       continue;
     }
-    if (rowFingerprint(current) === rowFingerprint(nextRow)) continue;
-    let assignedMemberId: number | undefined;
-    if (current.assigned_member_id !== nextRow.assigned_member_id) {
-      const targetMemberId = nextRow.assigned_member_id;
-      if (typeof targetMemberId !== 'number' || !Number.isSafeInteger(targetMemberId) || targetMemberId <= 0) {
-        throw new Error('La reasignación de Client requiere un member id positivo válido.');
+    if (!base) continue;
+
+    if (!local) {
+      try {
+        await clientSnapshotCasWithTransport(scope, transport, runtimeLease, {
+          action: 'delete',
+          client: clientReference(base.payload),
+          expectedRevision: clientRevision(base.payload),
+        });
+      } catch (error) {
+        const conflict = tenantRecordConflictFrom(error, 'client');
+        if (conflict) throw conflict;
+        throw error;
       }
-      assignedMemberId = targetMemberId;
+      touched.add(identity);
+      continue;
     }
-    await clientSnapshotCasWithTransport(scope, transport, runtimeLease, {
-      action: 'update',
-      client: clientReference(current.payload),
-      expectedRevision: clientRevision(current.payload),
-      payload: clientPayload(nextRow),
-      ...(assignedMemberId === undefined ? {} : { assignedMemberId }),
-    });
+
+    if (concurrencyRowFingerprint(base) === concurrencyRowFingerprint(local)) continue;
+
+    let assignedMemberId: number | undefined;
+    if (base.assigned_member_id !== local.assigned_member_id) {
+      assignedMemberId = positiveAssignedMemberId(local, 'La reasignación de Client');
+    }
+    try {
+      await clientSnapshotCasWithTransport(scope, transport, runtimeLease, {
+        action: 'update',
+        client: clientReference(base.payload),
+        expectedRevision: clientRevision(base.payload),
+        payload: clientPayload(local),
+        ...(assignedMemberId === undefined ? {} : { assignedMemberId }),
+      });
+    } catch (error) {
+      const conflict = tenantRecordConflictFrom(error, 'client');
+      if (conflict) throw conflict;
+      throw error;
+    }
+    touched.add(identity);
   }
 
-  const staleHandled = new Set<string>();
-  const staleClients = staleCloudRecords(existing, next).filter((row) => row.entity_type === 'client');
-  for (const current of staleClients) {
+  return { inserts, touched };
+}
+
+async function reconcilePropertiesWithCas(
+  scope: TenantScope,
+  transport: TenantCloudTransport,
+  runtimeLease: TenantRuntimeLease,
+  existing: CloudRecordRow[],
+  next: CloudRecordRow[],
+  baseline: readonly TenantConcurrencyBaselineRow[],
+): Promise<Set<string>> {
+  const baselineProperties = concurrencyBaselineMap(baseline, 'property');
+  const existingProperties = new Map(existing
+    .filter((row) => row.entity_type === 'property')
+    .map((row) => [concurrencyRowIdentity(row), row] as const));
+  const nextProperties = new Map(next
+    .filter((row) => row.entity_type === 'property')
+    .map((row) => [concurrencyRowIdentity(row), row] as const));
+  const identities = new Set([...baselineProperties.keys(), ...nextProperties.keys()]);
+  const touched = new Set<string>();
+
+  for (const identity of [...identities].sort()) {
     assertTenantRuntimeLeaseCurrent(runtimeLease);
-    await clientSnapshotCasWithTransport(scope, transport, runtimeLease, {
-      action: 'delete',
-      client: clientReference(current.payload),
-      expectedRevision: clientRevision(current.payload),
-    });
-    staleHandled.add(cloudRecordIdentity(current));
+    const base = baselineProperties.get(identity);
+    const local = nextProperties.get(identity);
+    const remote = existingProperties.get(identity);
+
+    if (!base && local) {
+      if (remote) {
+        if (casComparableFingerprint(remote) === casComparableFingerprint(local)) continue;
+        throw new TenantRecordConflictError('property', PROPERTY_SNAPSHOT_CONFLICT);
+      }
+      await invokePropertySnapshotCasV1(scope, {
+        action: 'insert',
+        property: propertyRecordReference(local.payload),
+        expectedRevision: 0,
+        payload: propertyPayload(local.payload),
+        assignedMemberId: positiveAssignedMemberId(local, 'Property insert'),
+      }, runtimeLease, transport);
+      touched.add(identity);
+      continue;
+    }
+    if (!base) continue;
+
+    if (!local) {
+      await invokePropertySnapshotCasV1(scope, {
+        action: 'delete',
+        property: propertyRecordReference(base.payload),
+        expectedRevision: propertyRevision(base.payload),
+      }, runtimeLease, transport);
+      touched.add(identity);
+      continue;
+    }
+
+    if (concurrencyRowFingerprint(base) === concurrencyRowFingerprint(local)) continue;
+
+    const assignedMemberId = base.assigned_member_id === local.assigned_member_id
+      ? undefined
+      : positiveAssignedMemberId(local, 'La reasignación de Property');
+
+    await invokePropertySnapshotCasV1(scope, {
+      action: 'update',
+      property: propertyRecordReference(base.payload),
+      expectedRevision: propertyRevision(base.payload),
+      payload: propertyPayload(local.payload),
+      ...(assignedMemberId === undefined ? {} : { assignedMemberId }),
+    }, runtimeLease, transport);
+    touched.add(identity);
   }
-  return { inserts, staleHandled };
+
+  return touched;
+}
+
+type GenericDelta = Readonly<{
+  upserts: CloudRecordRow[];
+  deletes: CloudRecordRow[];
+  touched: Set<string>;
+}>;
+
+function genericWritable(row: Pick<CloudRecordRow, 'entity_type' | 'payload'>): boolean {
+  if (row.entity_type === 'client' || row.entity_type === 'property') return false;
+  return snapshotMayWriteRecord(row as CloudRecordRow);
+}
+
+function genericDelta(
+  baseline: readonly TenantConcurrencyBaselineRow[],
+  existing: CloudRecordRow[],
+  next: CloudRecordRow[],
+): GenericDelta {
+  const baseRows = baselineAsRows(baseline).filter(genericWritable);
+  const remoteRows = existing.filter(genericWritable);
+  const localRows = next.filter(genericWritable);
+  const baseMap = new Map(baseRows.map((row) => [concurrencyRowIdentity(row), row] as const));
+  const remoteMap = new Map(remoteRows.map((row) => [concurrencyRowIdentity(row), row] as const));
+  const localMap = new Map(localRows.map((row) => [concurrencyRowIdentity(row), row] as const));
+  const identities = new Set([...baseMap.keys(), ...localMap.keys()]);
+  const upserts: CloudRecordRow[] = [];
+  const deletes: CloudRecordRow[] = [];
+  const touched = new Set<string>();
+
+  for (const identity of [...identities].sort()) {
+    const base = baseMap.get(identity);
+    const local = localMap.get(identity);
+    const remote = remoteMap.get(identity);
+
+    if (!base && local) {
+      if (remote && concurrencyRowFingerprint(remote) !== concurrencyRowFingerprint(local)) {
+        throw new Error('GENERIC_RECORD_CONFLICT');
+      }
+      if (!remote) upserts.push(local);
+      if (!remote) touched.add(identity);
+      continue;
+    }
+    if (!base) continue;
+
+    if (!local) {
+      if (!remote) continue;
+      if (concurrencyRowFingerprint(remote) !== concurrencyRowFingerprint(base)) {
+        throw new Error('GENERIC_RECORD_CONFLICT');
+      }
+      deletes.push(remote);
+      touched.add(identity);
+      continue;
+    }
+
+    if (concurrencyRowFingerprint(base) === concurrencyRowFingerprint(local)) continue;
+    if (!remote || concurrencyRowFingerprint(remote) !== concurrencyRowFingerprint(base)) {
+      throw new Error('GENERIC_RECORD_CONFLICT');
+    }
+    upserts.push(local);
+    touched.add(identity);
+  }
+
+  return { upserts, deletes, touched };
+}
+
+function assertProtectedVerification(
+  entityType: 'client' | 'property',
+  touched: ReadonlySet<string>,
+  next: readonly CloudRecordRow[],
+  refreshed: readonly CloudRecordRow[],
+): void {
+  const localMap = new Map(next
+    .filter((row) => row.entity_type === entityType)
+    .map((row) => [concurrencyRowIdentity(row), row] as const));
+  const remoteMap = new Map(refreshed
+    .filter((row) => row.entity_type === entityType)
+    .map((row) => [concurrencyRowIdentity(row), row] as const));
+
+  for (const identity of touched) {
+    const local = localMap.get(identity);
+    const remote = remoteMap.get(identity);
+    if (!local) {
+      if (remote) throw new Error(`${entityType.toUpperCase()}_DELETE_VERIFICATION_FAILED`);
+      continue;
+    }
+    if (!remote || casComparableFingerprint(remote) !== casComparableFingerprint(local)) {
+      throw new TenantRecordConflictError(entityType, PROPERTY_SNAPSHOT_CONFLICT);
+    }
+  }
+}
+
+function assertGenericVerification(
+  delta: GenericDelta,
+  next: readonly CloudRecordRow[],
+  refreshed: readonly CloudRecordRow[],
+): void {
+  const localMap = new Map(next.map((row) => [concurrencyRowIdentity(row), row] as const));
+  const remoteMap = new Map(refreshed.map((row) => [concurrencyRowIdentity(row), row] as const));
+  for (const identity of delta.touched) {
+    const local = localMap.get(identity);
+    const remote = remoteMap.get(identity);
+    if (!local) {
+      if (remote) throw new Error('GENERIC_DELETE_VERIFICATION_FAILED');
+      continue;
+    }
+    if (!remote || concurrencyRowFingerprint(remote) !== concurrencyRowFingerprint(local)) {
+      throw new Error('GENERIC_WRITE_VERIFICATION_FAILED');
+    }
+  }
 }
 
 export async function pushCloudDataWithVisitAuthorityV2(
@@ -462,41 +709,64 @@ export async function pushCloudDataWithVisitAuthorityV2(
   const existingFingerprint = recordsFingerprint(existing);
   const nextFingerprint = recordsFingerprint(next);
   const remoteVersion = latestRemoteVersion(crmSyncRecords(existing));
-  assertTenantRemoteIsSafe(scope, remoteVersion, nextFingerprint, existingFingerprint);
+  const storedBaseline = readTenantConcurrencyBaseline(scope);
+  const baseline = storedBaseline ?? crmSyncRecords(existing).map((row) => ({
+    organization_id: row.organization_id,
+    entity_type: row.entity_type,
+    entity_key: row.entity_key,
+    assigned_member_id: row.assigned_member_id,
+    payload: structuredClone(row.payload),
+  }));
 
-  if (existingFingerprint !== nextFingerprint) {
-    const { inserts: clientInserts, staleHandled } = await reconcileClientsWithCas(
-      scope,
-      transport,
-      runtimeLease,
-      existing,
-      next,
-    );
-    assertTenantRuntimeLeaseCurrent(runtimeLease);
+  // Upgrade bootstrap: sin baseline persistida todavía, el guard histórico global
+  // sigue actuando como barrera fail-closed antes de inferir intención local.
+  if (!storedBaseline && existingFingerprint !== nextFingerprint) {
+    assertTenantRemoteIsSafe(scope, remoteVersion, nextFingerprint, existingFingerprint);
+  }
 
-    const writableNonClients = next
-      .filter((row) => row.entity_type !== 'client')
-      .filter(snapshotMayWriteRecord);
-    await upsertRecords(scope, transport, runtimeLease, [...clientInserts, ...writableNonClients]);
+  const generic = genericDelta(baseline, existing, next);
 
-    const stale = staleCloudRecords(existing, next).filter((row) => (
-      !staleHandled.has(cloudRecordIdentity(row))
-      && row.entity_type !== 'client'
-      && snapshotMayWriteRecord(row)
-    ));
-    await deleteRecords(scope, transport, runtimeLease, stale);
+  const clients = await reconcileClientsWithCas(
+    scope,
+    transport,
+    runtimeLease,
+    existing,
+    next,
+    baseline,
+  );
+  assertTenantRuntimeLeaseCurrent(runtimeLease);
+
+  const propertiesTouched = await reconcilePropertiesWithCas(
+    scope,
+    transport,
+    runtimeLease,
+    existing,
+    next,
+    baseline,
+  );
+  assertTenantRuntimeLeaseCurrent(runtimeLease);
+
+  if (clients.inserts.length) {
+    await insertRecordsIgnoreDuplicates(scope, transport, runtimeLease, clients.inserts);
+  }
+  if (generic.upserts.length) {
+    await upsertRecords(scope, transport, runtimeLease, generic.upserts);
+  }
+  if (generic.deletes.length) {
+    await deleteRecords(scope, transport, runtimeLease, generic.deletes);
   }
 
   const refreshed = await fetchCloudRecords(scope, transport, runtimeLease);
+  assertRowsTenant(scope, refreshed);
+  assertProtectedVerification('client', clients.touched, next, refreshed);
+  assertProtectedVerification('property', propertiesTouched, next, refreshed);
+  assertGenericVerification(generic, next, refreshed);
+
   const verified = cloudRecordsToCrm(crmSyncRecords(refreshed), transport.context, crm);
   assertTenantCrmScope(scope, verified);
   assertTenantRuntimeLeaseCurrent(runtimeLease);
 
-  if (tenantFingerprint(remoteComparableCrm(verified)) !== tenantFingerprint(remoteComparableCrm(crm))) {
-    throw new Error(`La verificación remota V2 no coincide con el snapshot tenant que ${PRODUCT_BRAND.name} intentó guardar.`);
-  }
-
-  assertTenantRuntimeLeaseCurrent(runtimeLease);
+  writeTenantConcurrencyBaseline(scope, crmSyncRecords(refreshed));
   markTenantCloudSaved(scope, latestRemoteVersion(crmSyncRecords(refreshed)), token);
   return structuredClone(verified);
 }
