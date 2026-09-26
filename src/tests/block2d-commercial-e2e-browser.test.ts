@@ -600,7 +600,15 @@ test('2D E2E LOST exige motivo, conserva historia y sale de Agenda y oportunidad
     assert.match(await lost.locator('[data-commercial-close-error]').innerText(), /motivo/i);
     await lost.locator('select[name="lostReason"]').selectOption('Precio');
     await lost.locator('[data-commercial-close-confirm="Perdido"]').click();
-    await page.waitForFunction(async (id) => (await import('/dist/store.js')).state.crm.clients.find((item) => item.id === id)?.outcome === 'lost', clientId);
+    await page.waitForFunction(async (id) => {
+      const client = (await import('/dist/store.js')).state.crm.clients.find((item) => item.id === id);
+      return client?.pipeline === 'Perdido'
+        && client.outcome === 'lost'
+        && Boolean(client.closedAt)
+        && Boolean(client.lostReason)
+        && !client.nextAction
+        && !client.nextFollowUp;
+    }, clientId);
 
     let crm = await crmState(page);
     const closed = crm.clients.find((item) => item.id === clientId)!;
@@ -627,8 +635,13 @@ test('2D E2E LOST exige motivo, conserva historia y sale de Agenda y oportunidad
     await page.reload({ waitUntil: 'domcontentloaded' });
     await page.waitForSelector('#crm.active', { state: 'visible' });
     crm = await crmState(page);
-    assert.equal(crm.clients.find((item) => item.id === clientId)?.outcome, 'lost');
-    assert.equal(crm.clients.find((item) => item.id === clientId)?.lostReason, 'Precio');
+    const reloadedLost = crm.clients.find((item) => item.id === clientId);
+    assert.equal(reloadedLost?.pipeline, 'Perdido');
+    assert.equal(reloadedLost?.outcome, 'lost');
+    assert.equal(reloadedLost?.lostReason, 'Precio');
+    assert.ok(reloadedLost?.closedAt);
+    assert.equal(reloadedLost?.nextAction, undefined);
+    assert.equal(reloadedLost?.nextFollowUp, undefined);
   } finally {
     await context.close();
     await browser.close();
