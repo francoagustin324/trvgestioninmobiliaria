@@ -609,6 +609,9 @@ test('2D E2E LOST exige motivo, conserva historia y sale de Agenda y oportunidad
         && !client.nextAction
         && !client.nextFollowUp;
     }, clientId);
+    // El cierre terminal aparece primero en memoria; la cola cloud termina después.
+    // El checkpoint E2E debe validar el corte durable, no un frame intermedio.
+    await waitSyncClean(page, syncKey);
 
     let crm = await crmState(page);
     const closed = crm.clients.find((item) => item.id === clientId)!;
