@@ -326,6 +326,19 @@ export function setActiveMemberId(memberId: number): void {
 }
 
 export function replaceDataForTenant(scope: TenantScope, data: CrmData, syncCloud = false): boolean {
+  const beforeLost = state.crm.clients.find((client) => client.name === 'CLIENTE E2E LOST');
+  const incomingLost = data.clients.find((client) => client.name === 'CLIENTE E2E LOST');
+  if (beforeLost || incomingLost) {
+    console.log('BLOCK2E_LOST_WRITE=' + JSON.stringify({
+      source: 'replaceDataForTenant',
+      at: typeof performance === 'undefined' ? Date.now() : performance.now(),
+      beforePipeline: beforeLost?.pipeline,
+      beforeOutcome: beforeLost?.outcome,
+      incomingPipeline: incomingLost?.pipeline,
+      incomingOutcome: incomingLost?.outcome,
+      syncCloud,
+    }));
+  }
   if (!tenantScopesEqual(currentTenantScope(), scope)) return false;
   assertTenantCrmScope(scope, data);
   const normalized = normalizedData(data);
@@ -348,6 +361,16 @@ export function replaceData(data: CrmData, syncCloud = false): void {
 }
 
 export function saveData(reason = 'Cambio local'): void {
+  const lost = state.crm.clients.find((client) => client.name === 'CLIENTE E2E LOST');
+  if (lost) {
+    console.log('BLOCK2E_LOST_WRITE=' + JSON.stringify({
+      source: 'saveData',
+      at: typeof performance === 'undefined' ? Date.now() : performance.now(),
+      reason,
+      currentPipeline: lost.pipeline,
+      currentOutcome: lost.outcome,
+    }));
+  }
   const scope = requireCurrentTenantScope();
   assertTenantCrmScope(scope, state.crm);
   writeTenantSnapshot(scope, state.crm, { markDirty: true, reason });
