@@ -428,11 +428,21 @@ test('P1.2-A1 browser: Lost mobile exige detalle Otro y no deja seguimiento viej
 
     await page.locator('dialog [name="lostReasonDetail"]').fill('El cliente cambió el alcance de la búsqueda');
     await page.locator('dialog [name="closeNote"]').fill('Cierre browser mobile');
+
+    // Simula una capa visual que resincroniza el select mientras el modal sigue
+    // abierto. La confirmación explícita Perdido debe volver a fijar la etapa
+    // canónica antes del submit y no depender de ese estado intermedio.
+    await page.locator('#mvp-lead-form select[name="pipeline"]').evaluate((node) => {
+      (node as HTMLSelectElement).value = 'Contactado';
+    });
+    assert.equal(await page.locator('#mvp-lead-form select[name="pipeline"]').inputValue(), 'Contactado');
+
     await page.locator('dialog [data-commercial-close-confirm="Perdido"]').click();
     await page.waitForSelector('.mvp-lead-card[data-client-id="2"].terminal', { state: 'visible' });
 
     const crm = await localCrm(page);
     const client = crm.clients.find((item) => item.id === 2)!;
+    assert.equal(client.pipeline, 'Perdido');
     assert.equal(client.outcome, 'lost');
     assert.equal(client.lostReason, 'Otro');
     assert.equal(client.lostReasonDetail, 'El cliente cambió el alcance de la búsqueda');

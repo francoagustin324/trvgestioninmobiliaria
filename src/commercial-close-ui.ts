@@ -355,7 +355,21 @@ function bindDialogControls(form: HTMLFormElement, dialog: HTMLDialogElement, in
         field?.focus();
         return;
       }
-      form.dataset.commercialCloseConfirmed = target || '';
+      if (target !== 'Ganado' && target !== 'Perdido') {
+        modalError(dialog, 'El estado de cierre dejó de ser válido. Volvé a intentar.');
+        return;
+      }
+      const stage = form.elements.namedItem('pipeline');
+      if (!(stage instanceof HTMLSelectElement)) {
+        modalError(dialog, 'No se pudo confirmar la etapa comercial del cierre.');
+        return;
+      }
+      // El modal es la intención humana confirmada. Reafirmamos esa intención en
+      // el campo canónico justo antes del submit para que una capa visual que haya
+      // resincronizado el select mientras el modal estaba abierto no pueda guardar
+      // Calificado/Negociación junto con metadata terminal.
+      stage.value = target;
+      form.dataset.commercialCloseConfirmed = target;
       closeDialog(dialog);
       form.requestSubmit();
     });
