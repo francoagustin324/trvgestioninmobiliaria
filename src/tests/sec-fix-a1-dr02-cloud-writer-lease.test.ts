@@ -414,7 +414,8 @@ test('DR-02 caller pasa job.runtimeLease original a ambos writers y guarda fallb
   assert.ok(start >= 0 && end > start);
   const run = source.slice(start, end);
 
-  assert.match(run, /pushTenantModernCloudData\(job\.scope, job\.snapshot, job\.token, job\.runtimeLease\)/);
+  assert.match(run, /pushCloudDataWithVisitAuthorityV2\([\s\S]*job\.scope,[\s\S]*job\.snapshot,[\s\S]*job\.token,[\s\S]*job\.runtimeLease,[\s\S]*authorityActive/);
+  assert.doesNotMatch(run, /pushTenantModernCloudData/);
   assert.match(run, /pushTenantLegacyCloudData\(job\.scope, job\.snapshot, job\.token, job\.runtimeLease\)/);
   assert.match(run, /catch \(error\)[\s\S]*isLegacySchemaError\(error\)[\s\S]*assertTenantRuntimeLeaseCurrent\(job\.runtimeLease\)[\s\S]*pushTenantLegacyCloudData/);
   assert.doesNotMatch(run, /captureTenantRuntimeLease\s*\(/);
