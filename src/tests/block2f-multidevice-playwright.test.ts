@@ -593,6 +593,10 @@ async function contextFor(
 
   const namespace = tenantStorageNamespace({ userId: USER, organizationId: ORG });
   const baselineKey = tenantConcurrencyBaselineKey({ userId: USER, organizationId: ORG });
+  const localSeed = structuredClone(crm);
+  const seededClient = localSeed.clients.find((item) => item.id === 101);
+  assert.ok(seededClient);
+  seededClient.notes = 'BLOCK2F-BOOTSTRAP-' + label;
   await context.addInitScript(({ data, crmKey, syncKey, label: contextLabel }) => {
     const generation = 'block2f-generation-' + contextLabel;
     localStorage.setItem('propcontrol-cloud-auth-generation-v1', generation);
@@ -615,7 +619,7 @@ async function contextFor(
     }));
     localStorage.setItem('propcontrol-active-team-member-v1', '1');
   }, {
-    data: crm,
+    data: localSeed,
     crmKey: namespace.crmKey,
     syncKey: namespace.syncKey,
     label,
@@ -627,7 +631,11 @@ async function openApp(page: Page, baseUrl: string, baselineKey: string): Promis
   await page.clock.setFixedTime(FIXED_TIME);
   await page.goto(baseUrl, { waitUntil: 'domcontentloaded' });
   await page.waitForSelector('#crm.active', { state: 'visible', timeout: 20000 });
-  await page.waitForFunction((key) => Boolean(localStorage.getItem(key)), baselineKey);
+  await page.waitForFunction(async (key) => {
+    if (!localStorage.getItem(key)) return false;
+    const store = await import('/dist/store.js') as unknown as { state: { crm: CrmData } };
+    return store.state.crm.clients.find((item) => item.id === 101)?.notes === 'base-client';
+  }, baselineKey, { timeout: 30000 });
 }
 
 async function crmState(page: Page): Promise<CrmData> {
