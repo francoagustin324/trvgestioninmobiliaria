@@ -371,7 +371,8 @@ test('C2 static: save completion, status y authoritative event cargan scope+leas
   assert.doesNotMatch(compatible, /timerKey\s*=\s*(?:scope|job\.scope)\.userId\b/);
   assert.match(compatible, /runCloudPush\(job: CloudSaveJob\)[\s\S]*session\.userId !== job\.scope\.userId/);
   assert.match(compatible, /resolveTenantVisitAuthority\(job\.scope, job\.runtimeLease\)/);
-  assert.match(compatible, /pushTenantModernCloudData\(job\.scope, job\.snapshot, job\.token, job\.runtimeLease\)/);
+  assert.match(compatible, /pushCloudDataWithVisitAuthorityV2\([\s\S]*job\.scope,[\s\S]*job\.snapshot,[\s\S]*job\.token,[\s\S]*job\.runtimeLease,[\s\S]*authorityActive/);
+  assert.doesNotMatch(compatible, /pushTenantModernCloudData/);
   assert.match(compatible, /pushTenantLegacyCloudData\(job\.scope, job\.snapshot, job\.token, job\.runtimeLease\)/);
 
   const eventStart = compatible.indexOf('function emitAuthoritativeSnapshot');
