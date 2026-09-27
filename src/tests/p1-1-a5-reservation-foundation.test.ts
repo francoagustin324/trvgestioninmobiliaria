@@ -353,7 +353,7 @@ test('P1.1-A5 Reservations participa del cloud tenant-aware y Agenda las expone 
 
   const compatible = readFileSync('src/cloud-api-compatible.ts', 'utf8');
   assert.match(compatible, /pullTenantCloudData/);
-  assert.match(compatible, /pushTenantModernCloudData/);
+  assert.doesNotMatch(compatible, /pushTenantModernCloudData/);
   assert.match(compatible, /pushTenantLegacyCloudData/);
   assert.match(compatible, /pushCloudDataWithVisitAuthorityV2/);
   assert.doesNotMatch(compatible, /\b(?:push|pull|sync|save)Reservations?\w*\b/);
