@@ -16,6 +16,8 @@ test('2F writer map conserva cola/lease y deriva a deltas con CAS por registro',
   assert.match(store, /saveData[\s\S]*writeTenantSnapshot[\s\S]*queueCloudSave/);
   assert.match(api, /createCloudSaveJob[\s\S]*LatestSerialQueue/);
   assert.match(api, /resolveTenantVisitAuthority[\s\S]*pushCloudDataWithVisitAuthorityV2/);
+  assert.match(api, /pushCloudDataWithVisitAuthorityV2\([\s\S]*authorityActive/);
+  assert.doesNotMatch(api, /pushTenantModernCloudData/);
   assert.match(writer, /fetchCloudRecords[\s\S]*readTenantConcurrencyBaseline/);
   assert.match(writer, /reconcileClientsWithCas[\s\S]*reconcilePropertiesWithCas/);
   assert.match(writer, /expectedRevision:\s*clientRevision\(base\.payload\)/);
@@ -31,7 +33,8 @@ test('2F matriz: Client/Property/Visit protegidos; entidades restantes continúa
   assert.match(writer, /invokePropertySnapshotCasV1/);
   assert.match(writer, /genericWritable[\s\S]*row\.entity_type === 'client' \|\| row\.entity_type === 'property'/);
   assert.match(transition, /transactionOwnedEntityTypes:\s*new Set<TransactionalCommercialEntityType>\(\['visit'\]\)/);
-  assert.match(writer, /isVisitOwnedActivity[\s\S]*return false/);
+  assert.match(writer, /isVisitOwnedActivity[\s\S]*return !visitAuthorityActive/);
+  assert.match(writer, /genericDelta\(baseline, existing, next, visitAuthorityActive\)/);
 
   for (const entity of ['offer', 'reservation', 'reminder', 'conversation']) {
     assert.match(records, new RegExp(`row\\(org, '${entity === 'conversation' ? 'conversation' : entity}'`));
