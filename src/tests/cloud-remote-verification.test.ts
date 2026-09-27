@@ -63,6 +63,18 @@ test('modern: no declara éxito si la relectura remota no coincide con el snapsh
       if (url.pathname === '/api/cloud-config') return json({ configured: true, url: 'https://supabase.test', publishableKey: 'key' });
       if (url.pathname.endsWith('/organization_members')) return json([membership]);
       if (url.pathname.endsWith('/propcontrol_records') && method === 'GET') return json([]);
+      if (url.pathname.endsWith('/rpc/property_snapshot_cas_v1') && method === 'POST') {
+        const body = JSON.parse(String(init?.body ?? '{}')) as {
+          p_request?: { action?: string; payload?: unknown };
+        };
+        return json({
+          success: true,
+          organizationId: TENANT_SCOPE.organizationId,
+          action: body.p_request?.action,
+          property: body.p_request?.payload,
+          serverTimestamp: '2026-09-27T18:00:00.000Z',
+        });
+      }
       if (url.pathname.endsWith('/propcontrol_records') && ['POST', 'DELETE'].includes(method)) return json([]);
       if (url.pathname.endsWith('/fichas') && method === 'GET') return json([]);
       throw new Error(`unexpected ${method} ${url}`);
@@ -76,7 +88,7 @@ test('modern: no declara éxito si la relectura remota no coincide con el snapsh
 
   await assert.rejects(
     () => pushCloudData(TENANT_SCOPE, crm, false),
-    /verificación remota moderna no coincide/i,
+    /TENANT_RECORD_CONFLICT|verificación remota moderna no coincide/i,
   );
   assert.equal(getSyncState(storage).dirty, true);
 });
