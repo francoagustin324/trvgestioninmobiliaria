@@ -1,11 +1,11 @@
 import type { BrowserContext, Route } from 'playwright';
-import { crmToCloudRecords, membershipContext, type CloudMembershipRow } from '../cloud-records.js';
+import { crmToCloudRecords, membershipContext, type CloudMembershipRow, type CloudRecordRow } from '../cloud-records.js';
 import type { CrmData, TeamMember } from '../models.js';
 
 export const A35_H5_R1_AUTH_GENERATION = 'a35-h5-r1-auth-generation';
 
 interface HarnessState {
-  records: unknown[];
+  records: CloudRecordRow[];
   recordsOutageArmed: boolean;
   recordsOutageActive: boolean;
 }
@@ -60,6 +60,119 @@ async function fulfillOptions(route: Route): Promise<void> {
     },
     body: '',
   });
+}
+
+function recordIdentity(row: Pick<CloudRecordRow, 'organization_id' | 'entity_type' | 'entity_key'>): string {
+  return `${row.organization_id}:${row.entity_type}:${row.entity_key}`;
+}
+
+function payloadRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null;
+}
+
+function findProtectedRecord(
+  state: HarnessState,
+  entityType: 'client' | 'property',
+  reference: { uid?: string; legacyId?: number } | undefined,
+): CloudRecordRow | undefined {
+  return state.records.find((row) => {
+    if (row.entity_type !== entityType) return false;
+    const payload = payloadRecord(row.payload);
+    if (reference?.uid) return String(payload?.uid ?? '') === reference.uid;
+    if (reference?.legacyId) return Number(payload?.id) === reference.legacyId;
+    return false;
+  });
+}
+
+async function fulfillProtectedCas(
+  route: Route,
+  state: HarnessState,
+  entityType: 'client' | 'property',
+): Promise<void> {
+  const request = route.request().postDataJSON() as {
+    p_organization_id?: string;
+    p_request?: {
+      action?: 'insert' | 'update' | 'delete';
+      client?: { uid?: string; legacyId?: number };
+      property?: { uid?: string; legacyId?: number };
+      expectedRevision?: number;
+      payload?: Record<string, unknown>;
+      assignedMemberId?: number;
+    };
+  };
+  const intent = request.p_request ?? {};
+  const reference = entityType === 'client' ? intent.client : intent.property;
+  const current = findProtectedRecord(state, entityType, reference);
+  const currentPayload = current ? payloadRecord(current.payload) : null;
+  const currentRevision = Number(currentPayload?.revision ?? 0);
+
+  if (intent.action === 'insert') {
+    if (current) {
+      await route.fulfill(json({ code: '40001', message: 'STALE_REVISION' }, 409));
+      return;
+    }
+    const payload = structuredClone(intent.payload ?? {});
+    const uid = String(payload.uid ?? reference?.uid ?? '');
+    const id = Number(payload.id ?? reference?.legacyId);
+    const entityKey = `${request.p_organization_id}:${uid || id}`;
+    const inserted: CloudRecordRow = {
+      organization_id: String(request.p_organization_id ?? ''),
+      entity_type: entityType,
+      entity_key: entityKey,
+      assigned_member_id: intent.assignedMemberId ?? Number(payload.assignedToId ?? 1),
+      payload: { ...payload, revision: 0 },
+      created_by: String(route.request().headers().authorization ?? 'synthetic'),
+      updated_at: '2026-09-27T12:00:00.000Z',
+    };
+    state.records.push(inserted);
+    await route.fulfill(json({
+      success: true,
+      organizationId: request.p_organization_id,
+      action: 'insert',
+      [entityType]: inserted.payload,
+      serverTimestamp: inserted.updated_at,
+    }));
+    return;
+  }
+
+  if (!current) {
+    await route.fulfill(json({ code: 'P0002', message: 'NOT_FOUND' }, 404));
+    return;
+  }
+  if (currentRevision !== Number(intent.expectedRevision)) {
+    await route.fulfill(json({ code: '40001', message: 'STALE_REVISION' }, 409));
+    return;
+  }
+  if (intent.action === 'delete') {
+    state.records = state.records.filter((row) => row !== current);
+    await route.fulfill(json({
+      success: true,
+      organizationId: request.p_organization_id,
+      action: 'delete',
+      serverTimestamp: '2026-09-27T12:00:00.000Z',
+    }));
+    return;
+  }
+
+  const nextPayload = {
+    ...structuredClone(intent.payload ?? {}),
+    id: currentPayload?.id,
+    ...(currentPayload?.uid ? { uid: currentPayload.uid } : {}),
+    revision: currentRevision + 1,
+    ...(intent.assignedMemberId ? { assignedToId: intent.assignedMemberId } : {}),
+  };
+  current.payload = nextPayload;
+  if (intent.assignedMemberId) current.assigned_member_id = intent.assignedMemberId;
+  current.updated_at = '2026-09-27T12:00:00.000Z';
+  await route.fulfill(json({
+    success: true,
+    organizationId: request.p_organization_id,
+    action: 'update',
+    [entityType]: nextPayload,
+    serverTimestamp: current.updated_at,
+  }));
 }
 
 async function installAuthGeneration(context: BrowserContext): Promise<void> {
@@ -154,6 +267,16 @@ export async function installA35H5R1ModernTenantHarness(
       return;
     }
 
+    if (url.pathname.endsWith('/rest/v1/rpc/client_snapshot_cas_v2')) {
+      await fulfillProtectedCas(route, state, 'client');
+      return;
+    }
+
+    if (url.pathname.endsWith('/rest/v1/rpc/property_snapshot_cas_v1')) {
+      await fulfillProtectedCas(route, state, 'property');
+      return;
+    }
+
     if (url.pathname.endsWith('/rest/v1/propcontrol_records')) {
       if (state.recordsOutageActive) {
         await route.fulfill(json({ message: 'A3.5 H5 R1 synthetic cloud outage.' }, 503));
@@ -165,12 +288,33 @@ export async function installA35H5R1ModernTenantHarness(
       }
       if (request.method() === 'POST' || request.method() === 'PATCH') {
         const body = request.postDataJSON();
-        state.records = Array.isArray(body) ? structuredClone(body) : [structuredClone(body)];
-        await route.fulfill(json(state.records, request.method() === 'POST' ? 201 : 200));
+        const rows = (Array.isArray(body) ? body : [body]) as CloudRecordRow[];
+        const prefer = request.headers().prefer ?? '';
+        for (const incoming of rows) {
+          const identity = recordIdentity(incoming);
+          const index = state.records.findIndex((row) => recordIdentity(row) === identity);
+          if (index >= 0 && prefer.includes('ignore-duplicates')) continue;
+          const next = structuredClone(incoming);
+          if (index >= 0) state.records[index] = next;
+          else state.records.push(next);
+        }
+        await route.fulfill(json([], request.method() === 'POST' ? 201 : 200));
         return;
       }
       if (request.method() === 'DELETE') {
-        state.records = [];
+        const organization = eqFilter(url, 'organization_id');
+        const entityType = eqFilter(url, 'entity_type');
+        const rawKeys = url.searchParams.get('entity_key') ?? '';
+        const keys = new Set(
+          rawKeys.startsWith('in.(')
+            ? rawKeys.slice(4, -1).split(',').map((key) => key.replace(/^"|"$/g, ''))
+            : [],
+        );
+        state.records = state.records.filter((row) => !(
+          (!organization || row.organization_id === organization)
+          && (!entityType || row.entity_type === entityType)
+          && (!keys.size || keys.has(row.entity_key))
+        ));
         await route.fulfill({ status: 204, headers: { 'access-control-allow-origin': '*' }, body: '' });
         return;
       }
