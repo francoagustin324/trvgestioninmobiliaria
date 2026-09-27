@@ -9,6 +9,7 @@ import {
   type CloudRecordRow,
 } from './cloud-records.js';
 import {
+  SNAPSHOT_ONLY_COMMERCIAL_AUTHORITY,
   VISIT_TRANSACTION_COMMERCIAL_AUTHORITY,
   snapshotMayWriteCommercialEntity,
 } from './commercial-sync-transition.js';
@@ -247,11 +248,17 @@ function isVisitOwnedActivity(row: CloudRecordRow): boolean {
   return row.entity_type === 'activity' && record(row.payload)?.transactionOwner === 'visit';
 }
 
-function snapshotMayWriteRecord(row: CloudRecordRow): boolean {
+function snapshotMayWriteRecord(
+  row: CloudRecordRow,
+  visitAuthorityActive: boolean,
+): boolean {
+  const authority = visitAuthorityActive
+    ? VISIT_TRANSACTION_COMMERCIAL_AUTHORITY
+    : SNAPSHOT_ONLY_COMMERCIAL_AUTHORITY;
   if (row.entity_type === 'visit') {
-    return snapshotMayWriteCommercialEntity('visit', VISIT_TRANSACTION_COMMERCIAL_AUTHORITY);
+    return snapshotMayWriteCommercialEntity('visit', authority);
   }
-  if (isVisitOwnedActivity(row)) return false;
+  if (isVisitOwnedActivity(row)) return !visitAuthorityActive;
   return true;
 }
 
@@ -591,19 +598,24 @@ type GenericDelta = Readonly<{
   touched: Set<string>;
 }>;
 
-function genericWritable(row: Pick<CloudRecordRow, 'entity_type' | 'payload'>): boolean {
+function genericWritable(
+  row: Pick<CloudRecordRow, 'entity_type' | 'payload'>,
+  visitAuthorityActive: boolean,
+): boolean {
   if (row.entity_type === 'client' || row.entity_type === 'property') return false;
-  return snapshotMayWriteRecord(row as CloudRecordRow);
+  return snapshotMayWriteRecord(row as CloudRecordRow, visitAuthorityActive);
 }
 
 function genericDelta(
   baseline: readonly TenantConcurrencyBaselineRow[],
   existing: CloudRecordRow[],
   next: CloudRecordRow[],
+  visitAuthorityActive: boolean,
 ): GenericDelta {
-  const baseRows = baselineAsRows(baseline).filter(genericWritable);
-  const remoteRows = existing.filter(genericWritable);
-  const localRows = next.filter(genericWritable);
+  const writable = (row: CloudRecordRow) => genericWritable(row, visitAuthorityActive);
+  const baseRows = baselineAsRows(baseline).filter(writable);
+  const remoteRows = existing.filter(writable);
+  const localRows = next.filter(writable);
   const baseMap = new Map(baseRows.map((row) => [concurrencyRowIdentity(row), row] as const));
   const remoteMap = new Map(remoteRows.map((row) => [concurrencyRowIdentity(row), row] as const));
   const localMap = new Map(localRows.map((row) => [concurrencyRowIdentity(row), row] as const));
@@ -699,6 +711,7 @@ export async function pushCloudDataWithVisitAuthorityV2(
   crm: CrmData,
   token: SyncSaveToken,
   runtimeLease: TenantRuntimeLease = captureTenantRuntimeLease(scope),
+  visitAuthorityActive = true,
 ): Promise<CrmData> {
   assertTenantCrmScope(scope, crm);
   const transport = await transportFor(scope, runtimeLease);
@@ -724,7 +737,9 @@ export async function pushCloudDataWithVisitAuthorityV2(
     assertTenantRemoteIsSafe(scope, remoteVersion, nextFingerprint, existingFingerprint);
   }
 
-  const generic = genericDelta(baseline, existing, next);
+  // Client y Property siempre pasan por CAS. La capability de Visit sólo decide
+  // si Visit/Activity visit-owned quedan bajo RPC transaccional o snapshot histórico.
+  const generic = genericDelta(baseline, existing, next, visitAuthorityActive);
 
   const clients = await reconcileClientsWithCas(
     scope,
