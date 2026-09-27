@@ -21,7 +21,6 @@ import {
 import {
   pullTenantCloudData,
   pushTenantLegacyCloudData,
-  pushTenantModernCloudData,
 } from './tenant-cloud-data.js';
 import {
   pushCloudDataWithVisitAuthorityV2,
@@ -225,23 +224,21 @@ async function runCloudPush(job: CloudSaveJob): Promise<void> {
     ?? await resolveTenantVisitAuthority(job.scope, job.runtimeLease);
   assertTenantRuntimeLeaseCurrent(job.runtimeLease);
 
-  if (authorityActive) {
+  try {
     const verified = await pushCloudDataWithVisitAuthorityV2(
       job.scope,
       job.snapshot,
       job.token,
       job.runtimeLease,
+      authorityActive,
     );
     assertTenantRuntimeLeaseCurrent(job.runtimeLease);
     if (cloudSaveJobIsLatest(job)) emitAuthoritativeSnapshot(job, verified);
     return;
-  }
-
-  try {
-    await pushTenantModernCloudData(job.scope, job.snapshot, job.token, job.runtimeLease);
-    assertTenantRuntimeLeaseCurrent(job.runtimeLease);
   } catch (error) {
-    if (!isLegacySchemaError(error)) throw error;
+    // La ausencia del writer transaccional de Visit no desactiva CAS de Client/Property.
+    // Sólo una instalación legacy sin propcontrol_records conserva el fallback histórico.
+    if (authorityActive || !isLegacySchemaError(error)) throw error;
     assertTenantRuntimeLeaseCurrent(job.runtimeLease);
     await pushTenantLegacyCloudData(job.scope, job.snapshot, job.token, job.runtimeLease);
     assertTenantRuntimeLeaseCurrent(job.runtimeLease);
