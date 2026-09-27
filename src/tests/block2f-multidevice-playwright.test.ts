@@ -844,6 +844,7 @@ test('2F authority=false: Client y Property siguen por CAS y stale falla cerrado
         openApp(pageB, baseUrl, b.baselineKey),
       ]);
 
+      const activityBeforeStaleB = harness.activityWriteCount('B');
       harness.armRace(entityType);
       if (entityType === 'client') {
         await Promise.all([
@@ -871,7 +872,7 @@ test('2F authority=false: Client y Property siguen por CAS y stale falla cerrado
       assert.equal(harness.protectedGenericUpsertCount(), 0);
       assert.equal(
         harness.activityWriteCount('B'),
-        0,
+        activityBeforeStaleB,
         'El writer stale B no debe crear Activity remota de éxito.',
       );
 
