@@ -4,7 +4,7 @@ import { existsSync } from 'node:fs';
 import test from 'node:test';
 import { chromium, type BrowserContext, type Page, type Route } from 'playwright';
 import { crmToCloudRecords, type CloudMembershipContext, type CloudRecordRow } from '../cloud-records.js';
-import { initialData, type CrmData, type TeamMember } from '../models.js';
+import { initialData, type Client, type CrmData, type TeamMember } from '../models.js';
 
 const USER_ID = 'p1-a2-owner';
 const ORG_ID = 'p1-a2-org';
