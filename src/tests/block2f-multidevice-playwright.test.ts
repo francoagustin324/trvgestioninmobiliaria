@@ -189,6 +189,7 @@ class SharedCloudHarness {
   private readonly memberships: CloudMembershipRow[];
   private race: RaceState | null = null;
   private protectedGenericWrites = 0;
+  private readonly activityWrites = new Map<ContextLabel, number>([['A', 0], ['B', 0]]);
   private resolveProtectedGenericWrite!: () => void;
   private readonly protectedGenericWrite = new Promise<void>((resolve) => {
     this.resolveProtectedGenericWrite = resolve;
@@ -262,8 +263,8 @@ class SharedCloudHarness {
     return this.protectedGenericWrites;
   }
 
-  remoteActivityCount(): number {
-    return this.records.filter((row) => row.entity_type === 'activity').length;
+  activityWriteCount(label: ContextLabel): number {
+    return this.activityWrites.get(label) ?? 0;
   }
 
   async waitCasOrProtectedGeneric(): Promise<'cas' | 'generic'> {
@@ -519,6 +520,11 @@ class SharedCloudHarness {
         if (request.method() === 'POST' || request.method() === 'PATCH') {
           const body = request.postDataJSON();
           const rows = (Array.isArray(body) ? body : [body]) as CloudRecordRow[];
+          const label = this.labelFrom(route);
+          const activityCount = rows.filter((row) => row.entity_type === 'activity').length;
+          if (activityCount) {
+            this.activityWrites.set(label, (this.activityWrites.get(label) ?? 0) + activityCount);
+          }
           const prefer = request.headers().prefer ?? '';
           if (prefer.includes('merge-duplicates')) {
             const protectedRows = rows.filter((row) => row.entity_type === 'client' || row.entity_type === 'property');
@@ -863,7 +869,11 @@ test('2F authority=false: Client y Property siguen por CAS y stale falla cerrado
       ]);
 
       assert.equal(harness.protectedGenericUpsertCount(), 0);
-      assert.equal(harness.remoteActivityCount(), 0, 'Un CAS stale no debe crear Activity remota de éxito.');
+      assert.equal(
+        harness.activityWriteCount('B'),
+        0,
+        'El writer stale B no debe crear Activity remota de éxito.',
+      );
 
       if (entityType === 'client') {
         assert.equal(harness.clientNotes(), 'AUTH-FALSE-CLIENT-WINNER-A');
