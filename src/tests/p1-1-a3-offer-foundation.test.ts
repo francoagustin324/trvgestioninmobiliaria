@@ -326,7 +326,7 @@ test('P1.1-A3 cloud tenant-aware incluye Offers y Agenda los expone read-only co
   assert.deepEqual(reconciled.merged.offers.map((item) => item.id), [41, 42]);
 
   assert.match(compatible, /pullTenantCloudData/);
-  assert.match(compatible, /pushTenantModernCloudData/);
+  assert.doesNotMatch(compatible, /pushTenantModernCloudData/);
   assert.match(compatible, /pushTenantLegacyCloudData/);
   assert.match(compatible, /pushCloudDataWithVisitAuthorityV2/);
   assert.doesNotMatch(compatible, /\b(?:push|pull|sync|save)Offer\w*\b/i);
