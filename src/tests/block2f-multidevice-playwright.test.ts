@@ -597,7 +597,10 @@ async function contextFor(
   const seededClient = localSeed.clients.find((item) => item.id === 101);
   assert.ok(seededClient);
   seededClient.notes = 'BLOCK2F-BOOTSTRAP-' + label;
-  await context.addInitScript(({ data, crmKey, syncKey, label: contextLabel }) => {
+  const markerKey = 'block2f-seed:' + label;
+  await context.addInitScript(({ data, crmKey, syncKey, label: contextLabel, markerKey: seedMarkerKey }) => {
+    if (localStorage.getItem(seedMarkerKey)) return;
+    localStorage.setItem(seedMarkerKey, '1');
     const generation = 'block2f-generation-' + contextLabel;
     localStorage.setItem('propcontrol-cloud-auth-generation-v1', generation);
     localStorage.setItem('propcontrol-cloud-session-v1', JSON.stringify({
@@ -623,6 +626,7 @@ async function contextFor(
     crmKey: namespace.crmKey,
     syncKey: namespace.syncKey,
     label,
+    markerKey,
   });
   return { context, syncKey: namespace.syncKey, baselineKey };
 }
