@@ -203,6 +203,54 @@ async function installCloud(context: BrowserContext, initial: CrmData): Promise<
 
     if (url.pathname.endsWith('/rpc/activate_my_organization_memberships')) return fulfill({});
     if (url.pathname.endsWith('/rpc/visit_transaction_authority_active_v2')) return fulfill(false);
+    if (url.pathname.endsWith('/rpc/client_snapshot_cas_v2')) {
+      const body = request.postDataJSON() as {
+        p_organization_id?: string;
+        p_request?: {
+          action?: 'update' | 'delete';
+          client?: { uid?: string; legacyId?: number };
+          expectedRevision?: number;
+          payload?: Client;
+          assignedMemberId?: number;
+        };
+      };
+      const intent = body.p_request ?? {};
+      const current = remote.find((row) => {
+        if (row.entity_type !== 'client' || row.organization_id !== body.p_organization_id) return false;
+        const payload = row.payload as Client;
+        if (intent.client?.uid) return payload.uid === intent.client.uid;
+        return Number(payload.id) === Number(intent.client?.legacyId);
+      });
+      if (!current) return route.fulfill({ status: 404, contentType: 'application/json', body: JSON.stringify({ code: 'P0002', message: 'NOT_FOUND' }) });
+      const currentPayload = current.payload as Client;
+      const currentRevision = Number(currentPayload.revision ?? 0);
+      if (currentRevision !== Number(intent.expectedRevision)) {
+        return route.fulfill({ status: 409, contentType: 'application/json', body: JSON.stringify({ code: '40001', message: 'STALE_REVISION' }) });
+      }
+      version += 1;
+      const stamp = `2026-08-23T18:00:${String(version).padStart(2, '0')}.000Z`;
+      if (intent.action === 'delete') {
+        remote = remote.filter((row) => row !== current);
+        return fulfill({ success: true, organizationId: body.p_organization_id, action: 'delete', serverTimestamp: stamp });
+      }
+      const nextPayload: Client = {
+        ...structuredClone(intent.payload ?? currentPayload),
+        id: currentPayload.id,
+        ...(currentPayload.uid ? { uid: currentPayload.uid } : {}),
+        revision: currentRevision + 1,
+        assignedToId: intent.assignedMemberId ?? currentPayload.assignedToId,
+      };
+      current.payload = nextPayload;
+      current.assigned_member_id = nextPayload.assignedToId ?? current.assigned_member_id;
+      current.updated_at = stamp;
+      return fulfill({
+        success: true,
+        organizationId: body.p_organization_id,
+        action: 'update',
+        client: nextPayload,
+        serverTimestamp: stamp,
+      });
+    }
     if (url.pathname.endsWith('/organization_members')) {
       return fulfill([{
         organization_id: ORG_ID,
