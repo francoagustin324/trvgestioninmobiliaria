@@ -529,7 +529,7 @@ async function reconcilePropertiesWithCas(
   existing: CloudRecordRow[],
   next: CloudRecordRow[],
   baseline: readonly TenantConcurrencyBaselineRow[],
-): Promise<Set<string>> {
+): Promise<ProtectedReconcileResult> {
   const baselineProperties = concurrencyBaselineMap(baseline, 'property');
   const existingProperties = new Map(existing
     .filter((row) => row.entity_type === 'property')
@@ -538,6 +538,7 @@ async function reconcilePropertiesWithCas(
     .filter((row) => row.entity_type === 'property')
     .map((row) => [concurrencyRowIdentity(row), row] as const));
   const identities = new Set([...baselineProperties.keys(), ...nextProperties.keys()]);
+  const inserts: CloudRecordRow[] = [];
   const touched = new Set<string>();
 
   for (const identity of [...identities].sort()) {
@@ -551,13 +552,10 @@ async function reconcilePropertiesWithCas(
         if (casComparableFingerprint(remote) === casComparableFingerprint(local)) continue;
         throw new TenantRecordConflictError('property', PROPERTY_SNAPSHOT_CONFLICT);
       }
-      await invokePropertySnapshotCasV1(scope, {
-        action: 'insert',
-        property: propertyRecordReference(local.payload),
-        expectedRevision: 0,
-        payload: propertyPayload(local.payload),
-        assignedMemberId: positiveAssignedMemberId(local, 'Property insert'),
-      }, runtimeLease, transport);
+      // Insert nuevo: la PK tenant+entity+key y resolution=ignore-duplicates
+      // hacen el alta atómica sin permitir merge last-write-wins. La verificación
+      // posterior exige que el remoto coincida; una colisión distinta falla cerrado.
+      inserts.push(local);
       touched.add(identity);
       continue;
     }
@@ -589,7 +587,7 @@ async function reconcilePropertiesWithCas(
     touched.add(identity);
   }
 
-  return touched;
+  return { inserts, touched };
 }
 
 type GenericDelta = Readonly<{
@@ -751,7 +749,7 @@ export async function pushCloudDataWithVisitAuthorityV2(
   );
   assertTenantRuntimeLeaseCurrent(runtimeLease);
 
-  const propertiesTouched = await reconcilePropertiesWithCas(
+  const properties = await reconcilePropertiesWithCas(
     scope,
     transport,
     runtimeLease,
@@ -761,8 +759,9 @@ export async function pushCloudDataWithVisitAuthorityV2(
   );
   assertTenantRuntimeLeaseCurrent(runtimeLease);
 
-  if (clients.inserts.length) {
-    await insertRecordsIgnoreDuplicates(scope, transport, runtimeLease, clients.inserts);
+  const protectedInserts = [...clients.inserts, ...properties.inserts];
+  if (protectedInserts.length) {
+    await insertRecordsIgnoreDuplicates(scope, transport, runtimeLease, protectedInserts);
   }
   if (generic.upserts.length) {
     await upsertRecords(scope, transport, runtimeLease, generic.upserts);
@@ -774,7 +773,7 @@ export async function pushCloudDataWithVisitAuthorityV2(
   const refreshed = await fetchCloudRecords(scope, transport, runtimeLease);
   assertRowsTenant(scope, refreshed);
   assertProtectedVerification('client', clients.touched, next, refreshed);
-  assertProtectedVerification('property', propertiesTouched, next, refreshed);
+  assertProtectedVerification('property', properties.touched, next, refreshed);
   assertGenericVerification(generic, next, refreshed);
 
   const verified = cloudRecordsToCrm(crmSyncRecords(refreshed), transport.context, crm);
