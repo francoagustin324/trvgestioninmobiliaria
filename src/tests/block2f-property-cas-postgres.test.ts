@@ -238,7 +238,7 @@ test('2F PostgreSQL 17: Property CAS evita lost update, resurrección y lock glo
     psql(migration);
 
     assert.equal(psql(`
-      select p.prosecdef::text || '|' || pg_catalog.coalesce(p.proconfig::text, '')
+      select p.prosecdef::text || '|' || coalesce(p.proconfig::text, '')
       from pg_catalog.pg_proc p
       where p.oid='public.property_snapshot_cas_v1(uuid,jsonb,boolean)'::pg_catalog.regprocedure;
     `), 'false|{"search_path=\"\""}');
