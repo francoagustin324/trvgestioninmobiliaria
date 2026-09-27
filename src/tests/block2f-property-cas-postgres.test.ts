@@ -152,7 +152,7 @@ test('2F PostgreSQL 17: Property CAS evita lost update, resurrección y lock glo
 
       create function private.visit_normalized(value text) returns text
       language sql immutable security invoker set search_path = ''
-      as $f$ select pg_catalog.lower(pg_catalog.coalesce(value, '')) $f$;
+      as $f$ select pg_catalog.lower(coalesce(value, '')) $f$;
 
       grant execute on function auth.uid() to authenticated;
       grant execute on function private.visit_normalized(text) to authenticated;
