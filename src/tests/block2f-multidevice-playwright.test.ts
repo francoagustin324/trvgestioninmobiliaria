@@ -188,8 +188,16 @@ class SharedCloudHarness {
   private records: CloudRecordRow[];
   private readonly memberships: CloudMembershipRow[];
   private race: RaceState | null = null;
+  private protectedGenericWrites = 0;
+  private resolveProtectedGenericWrite!: () => void;
+  private readonly protectedGenericWrite = new Promise<void>((resolve) => {
+    this.resolveProtectedGenericWrite = resolve;
+  });
 
-  constructor(private readonly crm: CrmData) {
+  constructor(
+    private readonly crm: CrmData,
+    private readonly visitAuthorityActive = true,
+  ) {
     this.memberships = membershipRows(crm);
     const context = membershipContext(this.memberships, USER);
     this.records = crmToCloudRecords(crm, context, USER).map((row) => ({
@@ -248,6 +256,21 @@ class SharedCloudHarness {
   propertyRevision(): number {
     const row = this.findRecord('property', PROPERTY_UID);
     return Number((row.payload as Property).revision ?? 0);
+  }
+
+  protectedGenericUpsertCount(): number {
+    return this.protectedGenericWrites;
+  }
+
+  remoteActivityCount(): number {
+    return this.records.filter((row) => row.entity_type === 'activity').length;
+  }
+
+  async waitCasOrProtectedGeneric(): Promise<'cas' | 'generic'> {
+    return Promise.race([
+      this.waitRaceReady().then(() => 'cas' as const),
+      this.protectedGenericWrite.then(() => 'generic' as const),
+    ]);
   }
 
   private findRecord(entityType: RaceEntity, uid: string): CloudRecordRow {
@@ -474,7 +497,7 @@ class SharedCloudHarness {
       }
 
       if (url.pathname.endsWith('/rest/v1/rpc/visit_transaction_authority_active_v2')) {
-        await route.fulfill(json(true));
+        await route.fulfill(json(this.visitAuthorityActive));
         return;
       }
 
@@ -497,6 +520,13 @@ class SharedCloudHarness {
           const body = request.postDataJSON();
           const rows = (Array.isArray(body) ? body : [body]) as CloudRecordRow[];
           const prefer = request.headers().prefer ?? '';
+          if (prefer.includes('merge-duplicates')) {
+            const protectedRows = rows.filter((row) => row.entity_type === 'client' || row.entity_type === 'property');
+            if (protectedRows.length) {
+              this.protectedGenericWrites += protectedRows.length;
+              this.resolveProtectedGenericWrite();
+            }
+          }
           for (const incoming of rows) {
             const index = this.records.findIndex((row) => (
               row.organization_id === incoming.organization_id
@@ -784,6 +814,78 @@ test('2F Playwright determinista: mismo Property revision=11, notebook gana y mo
   } finally {
     await a.context.close();
     await b.context.close();
+    await browser.close();
+    await stopServer(server);
+  }
+});
+
+
+test('2F authority=false: Client y Property siguen por CAS y stale falla cerrado sin generic upsert', { timeout: 240_000 }, async () => {
+  const server = await startServer(63533);
+  const browser = await chromium.launch({ executablePath: chromeExecutable(), headless: true, args: ['--no-sandbox'] });
+  const baseUrl = 'http://127.0.0.1:63533';
+
+  const runScenario = async (entityType: RaceEntity): Promise<void> => {
+    const seed = fixture();
+    const harness = new SharedCloudHarness(seed, false);
+    const a = await contextFor(browser, harness, seed, 'A', { width: 1366, height: 900 });
+    const b = await contextFor(browser, harness, seed, 'B', { width: 390, height: 844 });
+    try {
+      const pageA = await a.context.newPage();
+      const pageB = await b.context.newPage();
+      await Promise.all([
+        openApp(pageA, baseUrl, a.baselineKey),
+        openApp(pageB, baseUrl, b.baselineKey),
+      ]);
+
+      harness.armRace(entityType);
+      if (entityType === 'client') {
+        await Promise.all([
+          mutateClientAndSave(pageA, 'AUTH-FALSE-CLIENT-WINNER-A'),
+          mutateClientAndSave(pageB, 'AUTH-FALSE-CLIENT-STALE-B'),
+        ]);
+      } else {
+        await Promise.all([
+          mutatePropertyAndSave(pageA, 126000),
+          mutatePropertyAndSave(pageB, 129500),
+        ]);
+      }
+
+      assert.equal(
+        await harness.waitCasOrProtectedGeneric(),
+        'cas',
+        'authority=false no puede derivar Client/Property a merge-duplicates genérico.',
+      );
+      await harness.waitRaceComplete();
+      await Promise.all([
+        waitSyncClean(pageA, a.syncKey),
+        waitSyncConflict(pageB, b.syncKey),
+      ]);
+
+      assert.equal(harness.protectedGenericUpsertCount(), 0);
+      assert.equal(harness.remoteActivityCount(), 0, 'Un CAS stale no debe crear Activity remota de éxito.');
+
+      if (entityType === 'client') {
+        assert.equal(harness.clientNotes(), 'AUTH-FALSE-CLIENT-WINNER-A');
+        assert.equal(harness.clientRevision(), 8);
+        const stale = await crmState(pageB);
+        assert.equal(stale.clients[0]?.notes, 'AUTH-FALSE-CLIENT-STALE-B');
+      } else {
+        assert.equal(harness.propertyPrice(), 126000);
+        assert.equal(harness.propertyRevision(), 12);
+        const stale = await crmState(pageB);
+        assert.equal(stale.properties[0]?.price, 129500);
+      }
+    } finally {
+      await a.context.close();
+      await b.context.close();
+    }
+  };
+
+  try {
+    await runScenario('client');
+    await runScenario('property');
+  } finally {
     await browser.close();
     await stopServer(server);
   }
