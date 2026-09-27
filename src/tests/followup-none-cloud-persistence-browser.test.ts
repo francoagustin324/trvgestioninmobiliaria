@@ -188,8 +188,8 @@ async function installCloud(context: BrowserContext, initial: CrmData): Promise<
       if (revision !== Number(intent.expectedRevision)) {
         return route.fulfill({ status: 409, contentType: 'application/json', body: JSON.stringify({ code: '40001', message: 'STALE_REVISION' }) });
       }
-      writeSequence += 1;
-      const serverTimestamp = `2026-08-07T19:53:${String(writeSequence).padStart(2, '0')}.000Z`;
+      version += 1;
+      const serverTimestamp = `2026-08-07T19:53:${String(version).padStart(2, '0')}.000Z`;
       if (intent.action === 'delete') {
         remote = remote.filter((row) => row !== current);
         return fulfill({ success: true, organizationId: body.p_organization_id, action: 'delete', serverTimestamp });
