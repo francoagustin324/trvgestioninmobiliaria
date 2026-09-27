@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { TenantScope } from '../active-organization.js';
+import type { CloudRecordRow } from '../cloud-records.js';
 import { initialData, type CrmData } from '../models.js';
 import { installTenantRuntimeScope, invalidateTenantRuntimeScope } from '../tenant-runtime.js';
 import {
@@ -21,8 +22,12 @@ class MemoryStorage implements Storage {
 }
 
 interface DeferredWrite {
-  records: Array<Record<string, unknown>>;
+  records: CloudRecordRow[];
   resolve: () => void;
+}
+
+function cloudRecordIdentity(record: Pick<CloudRecordRow, 'organization_id' | 'entity_type' | 'entity_key'>): string {
+  return `${record.organization_id}|${record.entity_type}|${record.entity_key}`;
 }
 
 function waitUntil(predicate: () => boolean, timeoutMs = 4_000, label = 'cloud step'): Promise<void> {
@@ -110,17 +115,18 @@ test('reproduce la pérdida física tenant-aware: contacto A en vuelo + seguimie
     email: 'franco@example.com',
     created_at: '2026-01-01T00:00:00.000Z',
   };
-  let remoteRecords: Array<Record<string, unknown>> = [];
+  let remoteRecords: CloudRecordRow[] = [];
   const pendingWrites: DeferredWrite[] = [];
   let writeNumber = 0;
+  let casWriteNumber = 0;
 
   Object.defineProperty(globalThis, 'fetch', {
     configurable: true,
     value: async (input: string | URL | Request, init?: RequestInit): Promise<Response> => {
       const url = new URL(typeof input === 'string' || input instanceof URL ? input.toString() : input.url, 'https://app.test');
       const method = String(init?.method || (input instanceof Request ? input.method : 'GET')).toUpperCase();
-      const json = (value: unknown) => new Response(JSON.stringify(value), {
-        status: 200,
+      const json = (value: unknown, status = 200) => new Response(JSON.stringify(value), {
+        status,
         headers: { 'Content-Type': 'application/json' },
       });
 
@@ -137,6 +143,56 @@ test('reproduce la pérdida física tenant-aware: contacto A en vuelo + seguimie
         assert.deepEqual(body, { p_organization_id: scopeA.organizationId });
         return json(false);
       }
+      if (url.pathname.endsWith('/rpc/client_snapshot_cas_v2')) {
+        assert.equal(method, 'POST');
+        const body = JSON.parse(String(init?.body || '{}')) as {
+          p_organization_id?: string;
+          p_request?: {
+            action?: 'update' | 'delete';
+            client?: { uid?: string; legacyId?: number };
+            expectedRevision?: number;
+            payload?: Record<string, unknown>;
+            assignedMemberId?: number;
+          };
+        };
+        assert.equal(body.p_organization_id, scopeA.organizationId);
+        const intent = body.p_request ?? {};
+        const current = remoteRecords.find((row) => {
+          if (row.entity_type !== 'client' || row.organization_id !== scopeA.organizationId) return false;
+          const payload = row.payload as Record<string, unknown>;
+          if (intent.client?.uid) return String(payload.uid ?? '') === intent.client.uid;
+          return Number(payload.id) === Number(intent.client?.legacyId);
+        });
+        if (!current) return json({ code: 'P0002', message: 'NOT_FOUND' }, 404);
+        const currentPayload = current.payload as Record<string, unknown>;
+        const revision = Number(currentPayload.revision ?? 0);
+        if (revision !== Number(intent.expectedRevision)) {
+          return json({ code: '40001', message: 'STALE_REVISION' }, 409);
+        }
+        casWriteNumber += 1;
+        const serverTimestamp = `2026-08-07T19:53:${String(casWriteNumber).padStart(2, '0')}.000Z`;
+        if (intent.action === 'delete') {
+          remoteRecords = remoteRecords.filter((row) => row !== current);
+          return json({ success: true, organizationId: scopeA.organizationId, action: 'delete', serverTimestamp });
+        }
+        const nextPayload = {
+          ...structuredClone(intent.payload ?? currentPayload),
+          id: currentPayload.id,
+          ...(currentPayload.uid ? { uid: currentPayload.uid } : {}),
+          revision: revision + 1,
+          assignedToId: intent.assignedMemberId ?? currentPayload.assignedToId,
+        };
+        current.payload = nextPayload;
+        if (typeof nextPayload.assignedToId === 'number') current.assigned_member_id = nextPayload.assignedToId;
+        current.updated_at = serverTimestamp;
+        return json({
+          success: true,
+          organizationId: scopeA.organizationId,
+          action: 'update',
+          client: nextPayload,
+          serverTimestamp,
+        });
+      }
       if (url.pathname.endsWith('/organization_members')) {
         assert.equal(url.searchParams.get('organization_id'), `eq.${scopeA.organizationId}`);
         return json([membership]);
@@ -151,7 +207,7 @@ test('reproduce la pérdida física tenant-aware: contacto A en vuelo + seguimie
       }
       if (url.pathname.endsWith('/propcontrol_records') && method === 'POST') {
         writeNumber += 1;
-        const records = JSON.parse(String(init?.body || '[]')) as Array<Record<string, unknown>>;
+        const records = JSON.parse(String(init?.body || '[]')) as CloudRecordRow[];
         assert.ok(records.length > 0);
         assert.ok(records.every((record) => record.organization_id === scopeA.organizationId));
         return await new Promise<Response>((resolve) => {
@@ -159,7 +215,12 @@ test('reproduce la pérdida física tenant-aware: contacto A en vuelo + seguimie
             records,
             resolve: () => {
               const stamp = `2026-08-07T19:52:0${writeNumber}.000Z`;
-              remoteRecords = records.map((record) => ({ ...structuredClone(record), updated_at: stamp }));
+              records.forEach((record) => {
+                const index = remoteRecords.findIndex((existing) => cloudRecordIdentity(existing) === cloudRecordIdentity(record));
+                const next = { ...structuredClone(record), updated_at: stamp };
+                if (index >= 0) remoteRecords[index] = { ...remoteRecords[index], ...next };
+                else remoteRecords.push(next);
+              });
               resolve(json([]));
             },
           });

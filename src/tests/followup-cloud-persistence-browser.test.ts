@@ -153,10 +153,14 @@ function activityCount(records: CloudRecordRow[], action: string): number {
   return humanActivityRows(records).filter((row) => (row.payload as { action?: string }).action === action).length;
 }
 
-function classifyCrmPost(records: CloudRecordRow[]): CrmPostClassification {
+function classifyCrmPost(
+  records: CloudRecordRow[],
+  protectedClient?: { nextFollowUp?: string; nextAction?: string },
+): CrmPostClassification {
   const contactCount = activityCount(records, 'Contacto por WhatsApp');
   const followUpCount = activityCount(records, 'Seguimiento por WhatsApp programado');
-  const client = records.find((row) => row.entity_type === 'client')?.payload as { nextFollowUp?: string; nextAction?: string } | undefined;
+  const client = protectedClient
+    ?? records.find((row) => row.entity_type === 'client')?.payload as { nextFollowUp?: string; nextAction?: string } | undefined;
   if (!contactCount && !followUpCount && !client?.nextFollowUp && !client?.nextAction) return 'STARTUP';
   if (contactCount && !followUpCount && !client?.nextFollowUp) return 'CONTACT_ONLY';
   if (contactCount && followUpCount && client?.nextFollowUp) return 'CONTACT_PLUS_FOLLOWUP';
@@ -399,8 +403,8 @@ test('navegador real: snapshot CRM retenido + mutación latest conserva el segui
 
     const firstPost = cloud.firstCrmPostRows();
     assert.ok(firstPost, 'El primer POST CRM debe capturarse antes de bloquearlo.');
-    const firstPostClassification = classifyCrmPost(firstPost);
-    const firstPostClient = firstPost.find((row) => row.entity_type === 'client')?.payload as { nextFollowUp?: string; nextAction?: string } | undefined;
+    const firstPostClient = cloud.remote().find((row) => row.entity_type === 'client')?.payload as { nextFollowUp?: string; nextAction?: string } | undefined;
+    const firstPostClassification = classifyCrmPost(firstPost, firstPostClient);
     assert.equal(firstPostClassification, 'CONTACT_PLUS_FOLLOWUP', 'El primer writer real ya debe contener contacto + seguimiento coalescidos.');
     assert.equal(firstPostClient?.nextFollowUp, FOLLOW_UP_DATE, 'El primer snapshot retenido debe conservar la sugerencia automática de 3 días.');
     assert.equal(firstPostClient?.nextAction, 'Volver a contactar por WhatsApp');

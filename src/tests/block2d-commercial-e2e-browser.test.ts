@@ -463,6 +463,7 @@ test('2D E2E WON recorre Lead → Propiedad → Difusión → Seguimiento → Vi
     await offerForm.locator('input[name="nextFollowUp"]').fill('2026-09-28');
     await offerForm.locator('button[type="submit"]').click();
     await page.waitForFunction(async () => (await import('/dist/store.js')).state.crm.offers.length === 1);
+    await waitSyncClean(page, syncKey);
 
     await navigate(page, 'agenda');
     assert.equal(await page.locator('[data-agenda-source="offer"]').count(), 1);

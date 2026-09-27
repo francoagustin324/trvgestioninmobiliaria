@@ -231,6 +231,26 @@ function fingerprintSha256(value: string): string {
   return createHash('sha256').update(value).digest('hex');
 }
 
+function businessSemanticFingerprint(value: unknown): string {
+  const snapshot = structuredClone(value) as { clients?: unknown[]; properties?: unknown[] };
+  for (const collection of [snapshot.clients, snapshot.properties]) {
+    collection?.forEach((item) => {
+      if (item && typeof item === 'object' && !Array.isArray(item)) {
+        delete (item as Record<string, unknown>).revision;
+      }
+    });
+  }
+  return tenantFingerprint(snapshot);
+}
+
+async function waitForTenantSyncClean(page: Page): Promise<void> {
+  await page.waitForFunction((key) => {
+    const raw = localStorage.getItem(`${key}:sync`);
+    if (!raw) return false;
+    return (JSON.parse(raw) as { dirty?: boolean }).dirty === false;
+  }, tenantReadbackKey, { timeout: 20_000 });
+}
+
 async function openApp(page: Page, baseUrl: string): Promise<void> {
   await page.goto(baseUrl, { waitUntil: 'domcontentloaded' });
   await page.waitForSelector('#crm.active .mvp-lead-card[data-client-id="1"]', { state: 'visible', timeout: 20_000 });
@@ -354,6 +374,7 @@ test('P1.2-A1 browser: Won desktop, replay visual seguro y reapertura persistent
     assert.equal(client.nextFollowUp, undefined);
     assert.equal(crm.activityLog.filter((entry) => entry.entityId === 1 && entry.action === 'Operación ganada').length, 1);
 
+    await waitForTenantSyncClean(page);
     const card = page.locator('.mvp-lead-card[data-client-id="1"]');
     await openLeadDetails(page, 1);
     await page.waitForSelector('.mvp-lead-card[data-client-id="1"] [data-commercial-close-card].won');
@@ -507,8 +528,8 @@ test('P1.2-A1 browser: Lost mobile exige detalle Otro y no deja seguimiento viej
     assert.equal(continuity.count, 1);
     assert.ok(continuity.localBefore);
     assert.ok(continuity.authoritative);
-    const beforeFingerprint = tenantFingerprint(continuity.localBefore);
-    const authoritativeFingerprint = tenantFingerprint(continuity.authoritative);
+    const beforeFingerprint = businessSemanticFingerprint(continuity.localBefore);
+    const authoritativeFingerprint = businessSemanticFingerprint(continuity.authoritative);
     assert.equal(beforeFingerprint, authoritativeFingerprint, 'El authoritative snapshot de TAP 836 debe ser un self-ACK semánticamente equivalente.');
     console.log(`R14_TAP836_CRM_BEFORE_SNAPSHOT_FINGERPRINT_SHA256=${fingerprintSha256(beforeFingerprint)}`);
     console.log(`R14_TAP836_CRM_AUTHORITATIVE_FINGERPRINT_SHA256=${fingerprintSha256(authoritativeFingerprint)}`);
