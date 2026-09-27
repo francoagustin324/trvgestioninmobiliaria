@@ -591,6 +591,7 @@ async function reconcilePropertiesWithCas(
 }
 
 type GenericDelta = Readonly<{
+  inserts: CloudRecordRow[];
   upserts: CloudRecordRow[];
   deletes: CloudRecordRow[];
   touched: Set<string>;
@@ -618,6 +619,7 @@ function genericDelta(
   const remoteMap = new Map(remoteRows.map((row) => [concurrencyRowIdentity(row), row] as const));
   const localMap = new Map(localRows.map((row) => [concurrencyRowIdentity(row), row] as const));
   const identities = new Set([...baseMap.keys(), ...localMap.keys()]);
+  const inserts: CloudRecordRow[] = [];
   const upserts: CloudRecordRow[] = [];
   const deletes: CloudRecordRow[] = [];
   const touched = new Set<string>();
@@ -631,7 +633,7 @@ function genericDelta(
       if (remote && concurrencyRowFingerprint(remote) !== concurrencyRowFingerprint(local)) {
         throw new Error('GENERIC_RECORD_CONFLICT');
       }
-      if (!remote) upserts.push(local);
+      if (!remote) inserts.push(local);
       if (!remote) touched.add(identity);
       continue;
     }
@@ -655,7 +657,7 @@ function genericDelta(
     touched.add(identity);
   }
 
-  return { upserts, deletes, touched };
+  return { inserts, upserts, deletes, touched };
 }
 
 function assertProtectedVerification(
@@ -759,9 +761,9 @@ export async function pushCloudDataWithVisitAuthorityV2(
   );
   assertTenantRuntimeLeaseCurrent(runtimeLease);
 
-  const protectedInserts = [...clients.inserts, ...properties.inserts];
-  if (protectedInserts.length) {
-    await insertRecordsIgnoreDuplicates(scope, transport, runtimeLease, protectedInserts);
+  const newRecordInserts = [...clients.inserts, ...properties.inserts, ...generic.inserts];
+  if (newRecordInserts.length) {
+    await insertRecordsIgnoreDuplicates(scope, transport, runtimeLease, newRecordInserts);
   }
   if (generic.upserts.length) {
     await upsertRecords(scope, transport, runtimeLease, generic.upserts);
