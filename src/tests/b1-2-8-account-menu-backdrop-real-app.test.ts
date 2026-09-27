@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { existsSync } from 'node:fs';
+import { createServer as createPortProbe } from 'node:net';
 import test from 'node:test';
 import { chromium, type BrowserContext } from 'playwright';
 import { initialData } from '../models.js';
@@ -51,9 +52,47 @@ function chromeExecutable(): string | undefined {
   ].find(existsSync);
 }
 
-async function waitForServer(url: string): Promise<void> {
+type ServerOutput = { stdout: string; stderr: string };
+
+async function availablePort(): Promise<number> {
+  return new Promise<number>((resolve, reject) => {
+    const probe = createPortProbe();
+    probe.unref();
+    probe.once('error', reject);
+    probe.listen(0, '127.0.0.1', () => {
+      const address = probe.address();
+      if (!address || typeof address === 'string') {
+        probe.close();
+        reject(new Error('B1.2.8 no pudo obtener un puerto efímero.'));
+        return;
+      }
+      const port = address.port;
+      probe.close((error) => error ? reject(error) : resolve(port));
+    });
+  });
+}
+
+function serverDiagnostic(server: ChildProcess, output: ServerOutput): string {
+  const stdout = output.stdout.slice(-4000);
+  const stderr = output.stderr.slice(-4000);
+  return [
+    `exitCode=${server.exitCode === null ? 'running' : server.exitCode}`,
+    `signal=${server.signalCode ?? 'none'}`,
+    `stdout=${JSON.stringify(stdout)}`,
+    `stderr=${JSON.stringify(stderr)}`,
+  ].join(' ');
+}
+
+async function waitForServer(
+  url: string,
+  server: ChildProcess,
+  output: ServerOutput,
+): Promise<void> {
   let lastError: unknown;
   for (let attempt = 0; attempt < 100; attempt += 1) {
+    if (server.exitCode !== null) {
+      throw new Error(`Servidor B1.2.8 terminó antes del health check: ${serverDiagnostic(server, output)}`);
+    }
     try {
       if ((await fetch(`${url}/health`)).ok) return;
     } catch (error) {
@@ -61,27 +100,48 @@ async function waitForServer(url: string): Promise<void> {
     }
     await new Promise((resolve) => setTimeout(resolve, 250));
   }
-  throw new Error(`Servidor B1.2.8 no disponible: ${String(lastError ?? 'sin respuesta')}`);
+  throw new Error(
+    `Servidor B1.2.8 no disponible: ${String(lastError ?? 'sin respuesta')} ${serverDiagnostic(server, output)}`,
+  );
 }
 
-async function startServer(port: number): Promise<ChildProcess> {
-  const server = spawn(process.execPath, ['dist/server.js'], {
-    cwd: process.cwd(),
-    env: {
-      ...process.env,
-      PORT: String(port),
-      SUPABASE_URL: '',
-      SUPABASE_PUBLISHABLE_KEY: '',
-      SUPABASE_SECRET_KEY: '',
-      SUPABASE_SERVICE_ROLE_KEY: '',
-      LEAD_QUALIFICATION_AI_ENDPOINT: '',
-      LEAD_QUALIFICATION_AI_KEY: '',
-      LEAD_QUALIFICATION_AI_MODEL: '',
-    },
-    stdio: ['ignore', 'pipe', 'pipe'],
-  });
-  await waitForServer(`http://127.0.0.1:${port}`);
-  return server;
+async function startServer(): Promise<{ server: ChildProcess; url: string }> {
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const port = await availablePort();
+    const url = `http://127.0.0.1:${port}`;
+    const output: ServerOutput = { stdout: '', stderr: '' };
+    const server = spawn(process.execPath, ['dist/server.js'], {
+      cwd: process.cwd(),
+      env: {
+        ...process.env,
+        PORT: String(port),
+        SUPABASE_URL: '',
+        SUPABASE_PUBLISHABLE_KEY: '',
+        SUPABASE_SECRET_KEY: '',
+        SUPABASE_SERVICE_ROLE_KEY: '',
+        LEAD_QUALIFICATION_AI_ENDPOINT: '',
+        LEAD_QUALIFICATION_AI_KEY: '',
+        LEAD_QUALIFICATION_AI_MODEL: '',
+      },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    server.stdout?.setEncoding('utf8');
+    server.stderr?.setEncoding('utf8');
+    server.stdout?.on('data', (chunk: string) => { output.stdout += chunk; });
+    server.stderr?.on('data', (chunk: string) => { output.stderr += chunk; });
+
+    try {
+      await waitForServer(url, server, output);
+      return { server, url };
+    } catch (error) {
+      const diagnostic = serverDiagnostic(server, output);
+      const portCollision = /EADDRINUSE/i.test(output.stderr) || /EADDRINUSE/i.test(output.stdout);
+      if (server.exitCode === null) await stopServer(server);
+      if (portCollision && attempt === 0) continue;
+      throw new Error(`${error instanceof Error ? error.message : String(error)} ${diagnostic}`);
+    }
+  }
+  throw new Error('Servidor B1.2.8 no pudo iniciar luego de descartar una colisión de puerto.');
 }
 
 async function stopServer(server: ChildProcess): Promise<void> {
@@ -188,9 +248,7 @@ test(
   async () => {
     const executablePath = chromeExecutable();
     assert.ok(executablePath, 'Chrome/Chromium no disponible para B1.2.8.');
-    const port = 49500 + Math.floor(Math.random() * 400);
-    const url = `http://127.0.0.1:${port}`;
-    const server = await startServer(port);
+    const { server, url } = await startServer();
     const browser = await chromium.launch({ executablePath, headless: true });
 
     try {
