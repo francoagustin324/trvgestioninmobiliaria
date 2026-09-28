@@ -180,7 +180,7 @@ export function renderCompactLeadCard(client: Client, context: CompactLeadCardCo
     : '<div class="mvp-lead-alert" data-lead-alert-kind="none" hidden aria-hidden="true"></div>';
   const nextAction = attention.showAction
     ? `<div class="mvp-lead-next-action state-${attention.followUpState}" data-lead-attention-kind="${attention.alertKind}" aria-label="${escapeHtml(attention.actionTitle)}" title="${escapeHtml(attention.actionTitle)}">
-        <div><span>Próxima acción</span><strong>${escapeHtml(attention.actionLabel)}</strong>${attention.showDate ? `<small>${escapeHtml(attention.dateLabel)}</small>` : ''}</div>
+        <div><span>${escapeHtml(attention.actionHeading)}</span><strong>${escapeHtml(attention.actionLabel)}</strong>${attention.showDate ? `<small>${escapeHtml(attention.dateLabel)}</small>` : ''}</div>
         ${followUpMenu(client)}
       </div>`
     : '';
