@@ -416,6 +416,14 @@ async function installBlock2dCloseTrace(page: Page): Promise<void> {
       });
     };
     document.addEventListener('click', (event) => {
+      const node = event.target instanceof Element ? event.target.closest('[data-edit-client="1"]') : null;
+      if (node) snapshot('edit-document-capture');
+    }, { capture: true });
+    document.addEventListener('click', (event) => {
+      const node = event.target instanceof Element ? event.target.closest('[data-edit-client="1"]') : null;
+      if (node) snapshot('edit-document-bubble');
+    });
+    document.addEventListener('click', (event) => {
       const node = event.target instanceof Element ? event.target.closest('[data-close-operation-stage="Ganado"]') : null;
       if (!node) return;
       snapshot('click-capture');
