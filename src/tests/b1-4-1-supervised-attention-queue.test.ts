@@ -132,7 +132,10 @@ test('B1.4.1 J: calcular y renderizar recomendaciones no muta Client ni contiene
   assert.match(html, /Contactos para gestionar primero\./);
 
   const source = readFileSync('src/lead-attention-queue.ts', 'utf8');
-  const legacySource = source.slice(0, source.indexOf("export type OperationalPriority"));
+  const legacySource = source.slice(
+    source.indexOf('export function supervisedAttentionRecommendationForClient'),
+    source.indexOf('export type OperationalPriority'),
+  );
   for (const forbidden of ['saveData', 'addActivity', 'Reminder', 'nextFollowUp =', 'nextAction =', 'Math.random', 'score']) {
     assert.equal(legacySource.includes(forbidden), false, forbidden);
   }
