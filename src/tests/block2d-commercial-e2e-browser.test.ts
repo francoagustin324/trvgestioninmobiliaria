@@ -496,6 +496,17 @@ test('2D E2E WON recorre Lead → Propiedad → Difusión → Seguimiento → Vi
     await resolve.locator('select[name="status"]').selectOption('Aceptada');
     await resolve.locator('input[name="nextAction"]').fill('Formalizar reserva');
     await resolve.locator('input[name="nextFollowUp"]').fill('2026-09-29');
+
+    await resolve.evaluate((form) => { form.dataset.block2dOfferGuard = 'mounted'; });
+    await page.evaluate(() => {
+      document.dispatchEvent(new CustomEvent('trv-render'));
+      return new Promise<void>((resolveRender) => queueMicrotask(resolveRender));
+    });
+    assert.equal(await resolve.getAttribute('data-block2d-offer-guard'), 'mounted');
+    assert.equal(await resolve.locator('select[name="status"]').inputValue(), 'Aceptada');
+    assert.equal(await resolve.locator('input[name="nextAction"]').inputValue(), 'Formalizar reserva');
+    assert.equal(await resolve.locator('input[name="nextFollowUp"]').inputValue(), '2026-09-29');
+
     await resolve.locator('button[type="submit"]').click();
     await page.waitForFunction(async () => (await import('/dist/store.js')).state.crm.offers.find((item) => item.id === 2)?.status === 'Aceptada');
 

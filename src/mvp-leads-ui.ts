@@ -447,7 +447,20 @@ function bindFilters(container: HTMLElement): void {
   });
 }
 
+function shouldPreserveCommercialEditor(container: HTMLElement): boolean {
+  return Boolean(container.querySelector([
+    '[data-offer-register-disclosure][open] form[data-register-offer]',
+    '[data-counteroffer-disclosure][open] form[data-register-counteroffer]',
+    '[data-resolve-offer-disclosure][open] form[data-resolve-offer]',
+    '[data-reservation-disclosure][open] form[data-register-reservation]',
+    'form[data-update-reservation][data-submitting="true"]',
+  ].join(',')));
+}
+
 export function renderMvpLeads(container: HTMLElement, centerSelectedStage = false): void {
+  // Un render global de fondo no debe desmontar editores comerciales activos.
+  // Cada workflow cierra su editor recién después de persistir con éxito.
+  if (shouldPreserveCommercialEditor(container)) return;
   const editing = visibleClients().find((client) => client.id === state.editingClientId) ?? null;
   const leads = leadRows();
   if (expandedClientId !== null && !leads.some((client) => client.id === expandedClientId)) expandedClientId = null;

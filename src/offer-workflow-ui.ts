@@ -301,7 +301,11 @@ function rollbackOfferMutation(
   }
 }
 
-function applyResult(result: { crm: typeof state.crm }, context: ReturnType<typeof writeContext>): void {
+function applyResult(
+  result: { crm: typeof state.crm },
+  context: ReturnType<typeof writeContext>,
+  originForm: HTMLFormElement,
+): void {
   assertTenantRuntimeLeaseCurrent(context.runtimeLease);
   assertTenantCrmScope(context.scope, result.crm);
   const previousCrm = structuredClone(state.crm);
@@ -316,6 +320,8 @@ function applyResult(result: { crm: typeof state.crm }, context: ReturnType<type
     rollbackOfferMutation(context, previousCrm);
     throw error;
   }
+  const details = originForm.closest<HTMLDetailsElement>('details[open]');
+  if (details) details.open = false;
   document.dispatchEvent(new CustomEvent('trv-render'));
 }
 
@@ -344,7 +350,7 @@ function submitRegister(form: HTMLFormElement): void {
       propertyId: Number(data.get('propertyId')),
       ...readOfferFields(data),
     });
-    applyResult(result, context);
+    applyResult(result, context, form);
   } catch (error) { formBusy(form, false); formError(form, error); }
 }
 
@@ -358,7 +364,7 @@ function submitCounter(form: HTMLFormElement): void {
       parentOfferId: Number(form.dataset.registerCounteroffer),
       ...readOfferFields(data),
     });
-    applyResult(result, context);
+    applyResult(result, context, form);
   } catch (error) { formBusy(form, false); formError(form, error); }
 }
 
@@ -374,7 +380,7 @@ function submitResolution(form: HTMLFormElement): void {
       nextAction: String(data.get('nextAction') || ''),
       nextFollowUp: String(data.get('nextFollowUp') || ''),
     });
-    applyResult(result, context);
+    applyResult(result, context, form);
   } catch (error) { formBusy(form, false); formError(form, error); }
 }
 
