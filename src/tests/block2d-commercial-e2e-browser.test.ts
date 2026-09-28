@@ -388,7 +388,7 @@ async function installBlock2dCloseTrace(page: Page): Promise<void> {
       const wonModal = document.querySelector<HTMLElement>('dialog[data-commercial-close-dialog][open] [data-commercial-close-modal-form="won"]');
       trace.push({
         label,
-        editingClientId: state.editingClientId,
+        editingClientId: (state as unknown as { editingClientId?: number | null }).editingClientId ?? null,
         cardExists: Boolean(card),
         cardConnected: Boolean(card?.isConnected),
         closeExists: Boolean(close),
