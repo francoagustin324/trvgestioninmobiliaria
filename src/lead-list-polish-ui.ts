@@ -1,6 +1,7 @@
-import { renderSupervisedAttentionQueue } from './lead-attention-queue.js';
+import { renderOperationalAttentionQueue, renderSupervisedAttentionQueue } from './lead-attention-queue.js';
 import { instrumentVisibleSupervisedRecommendations } from './lead-recommendation-instrumentation.js';
-import { visibleClients } from './team-access.js';
+import { authenticatedTenantMember, state } from './store.js';
+import { visibleClients, visibleProperties, visibleReminders } from './team-access.js';
 
 const desktopQuery = '(min-width: 901px)';
 
@@ -136,7 +137,22 @@ function renderAttentionQueue(container: HTMLElement): void {
   const results = container.querySelector<HTMLElement>('#mvp-lead-results');
   if (!results) return;
   container.querySelector<HTMLElement>('[data-supervised-attention-queue]')?.remove();
-  results.insertAdjacentHTML('beforebegin', renderSupervisedAttentionQueue(visibleClients()));
+  const clients = visibleClients();
+  const member = authenticatedTenantMember();
+  const legacyQueue = renderSupervisedAttentionQueue(visibleClients());
+  const markup = member
+    ? renderOperationalAttentionQueue({
+        clients,
+        properties: visibleProperties(),
+        visits: state.crm.visits,
+        offers: state.crm.offers,
+        reservations: state.crm.reservations,
+        reminders: visibleReminders(),
+        activityLog: state.crm.activityLog,
+        actor: { id: member.id, role: member.role },
+      })
+    : legacyQueue;
+  results.insertAdjacentHTML('beforebegin', markup);
 }
 
 function attentionNavigationStatus(container: HTMLElement): HTMLElement | null {
@@ -150,7 +166,7 @@ function announceAttentionNavigation(container: HTMLElement, message = ''): void
   status.hidden = !message;
 }
 
-export function openAttentionLead(container: HTMLElement, clientId: number): 'opened' | 'filtered-out' {
+export function openAttentionLead(container: HTMLElement, clientId: number, target: string = 'lead'): 'opened' | 'filtered-out' {
   const card = container.querySelector<HTMLElement>(`#mvp-lead-results .mvp-lead-card[data-client-id="${clientId}"]`);
   if (!card) {
     announceAttentionNavigation(
@@ -167,7 +183,20 @@ export function openAttentionLead(container: HTMLElement, clientId: number): 'op
 
   const details = card.querySelector<HTMLDetailsElement>(`[data-lead-full-sheet="${clientId}"]`);
   if (details) details.open = true;
-  const focusTarget = details?.querySelector<HTMLElement>('summary') || card;
+  const targetSelector = target === 'matches'
+    ? '.mvp-lead-matches'
+    : target === 'visits'
+      ? '[data-lead-visits]'
+      : target === 'offers'
+        ? '[data-lead-offers]'
+        : target === 'reservations'
+          ? '[data-lead-reservations]'
+          : '';
+  const nestedTarget = targetSelector ? card.querySelector<HTMLElement>(targetSelector) : null;
+  if (nestedTarget instanceof HTMLDetailsElement) nestedTarget.open = true;
+  const focusTarget = nestedTarget?.querySelector<HTMLElement>('summary, button, input, select, textarea')
+    || details?.querySelector<HTMLElement>('summary')
+    || card;
   if (focusTarget === card && !card.hasAttribute('tabindex')) card.tabIndex = -1;
 
   window.requestAnimationFrame(() => {
@@ -183,11 +212,18 @@ function bindAttentionQueue(container: HTMLElement): void {
   attentionQueueBindings.add(container);
   container.addEventListener('click', (event) => {
     const target = event.target as HTMLElement;
-    const button = target.closest<HTMLButtonElement>('button[data-attention-client-id]');
+    const button = target.closest<HTMLButtonElement>('button[data-attention-client-id], button[data-operational-action]');
     if (!button || !container.contains(button)) return;
     const clientId = Number(button.dataset.attentionClientId);
-    if (!clientId) return;
-    openAttentionLead(container, clientId);
+    const attentionTarget = button.dataset.attentionTarget || 'lead';
+    if (clientId) {
+      if (attentionTarget === 'lead') openAttentionLead(container, clientId);
+      else openAttentionLead(container, clientId, attentionTarget);
+      return;
+    }
+    const module = button.dataset.attentionModule;
+    if (!module) return;
+    document.querySelector<HTMLButtonElement>(`[data-module="${module}"]`)?.click();
   });
 }
 
