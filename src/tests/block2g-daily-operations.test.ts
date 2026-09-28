@@ -194,6 +194,6 @@ test('Block 2G A-M: Qué hacer ahora ordena trabajo real sin duplicar ni tocar c
 
   const concurrency = readFileSync('src/tenant-visit-v2.ts', 'utf8');
   assert.match(concurrency, /clientSnapshotCasV2|client_snapshot_cas_v2/, 'L/M: Client CAS sigue presente');
-  assert.match(concurrency, /propertySnapshotCasV1|property_snapshot_cas_v1/, 'L/M: Property CAS sigue presente');
+  assert.match(concurrency, /invokePropertySnapshotCasV1|property_snapshot_cas_v1/, 'L/M: Property CAS sigue presente');
   assert.match(concurrency, /pushCloudDataWithVisitAuthorityV2/, 'L/M: autoridad Visit 2F sigue presente');
 });
