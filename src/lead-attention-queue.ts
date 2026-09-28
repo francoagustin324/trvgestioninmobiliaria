@@ -558,7 +558,7 @@ export function renderOperationalAttentionQueue(
     normal: items.filter((item) => item.priority === 'NORMAL').length,
   };
   const body = items.length
-    ? `<div class="pc-daily-ops-list">${items.map((item) => `<button type="button" class="pc-supervised-attention-item pc-daily-ops-item priority-${item.priority.toLowerCase().normalize('NFD').replace(/[\\u0300-\\u036f]/g, '')}" data-operational-action="${escapeHtml(item.kind)}"${item.clientId ? ` data-attention-client-id="${item.clientId}"` : ''} data-attention-module="${item.module}" data-attention-target="${item.target}"${item.propertyId ? ` data-attention-property-id="${item.propertyId}"` : ''}>
+    ? `<div class="pc-daily-ops-list">${items.map((item) => `<button type="button" class="pc-supervised-attention-item pc-daily-ops-item priority-${item.priority.toLowerCase().normalize('NFD').replace(/[\\u0300-\\u036f]/g, '')}" data-operational-action="${escapeHtml(item.kind)}"${item.clientId ? ` data-attention-client-id="${item.clientId}"` : ''} data-attention-module="${item.module}" data-attention-target="${item.target}"${item.propertyId ? ` data-attention-property-id="${item.propertyId}"` : ''} aria-label="${escapeHtml(item.clientId ? `Abrir ficha completa de ${item.name}` : `Abrir acción ${item.action}: ${item.name}`)}">
       <span class="pc-daily-ops-priority">${escapeHtml(item.priority)}</span>
       <strong class="pc-supervised-attention-name">${escapeHtml(item.name)}</strong>
       <span class="pc-supervised-attention-reason">${escapeHtml(item.reason)}</span>
