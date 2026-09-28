@@ -515,6 +515,22 @@ test('2D E2E WON recorre Lead → Propiedad → Difusión → Seguimiento → Vi
     await reservationForm.locator('input[name="paymentMethod"]').fill('Transferencia');
     await reservationForm.locator('input[name="reservedAt"]').fill('2026-09-29');
     await reservationForm.locator('input[name="expiresAt"]').fill('2026-10-03');
+
+    // Regresión: un render de fondo no puede desmontar ni vaciar el editor
+    // mientras el usuario está cargando la reserva.
+    await reservationForm.evaluate((form) => { form.dataset.block2dReservationGuard = 'mounted'; });
+    await page.evaluate(() => {
+      document.dispatchEvent(new CustomEvent('trv-render'));
+      return new Promise<void>((resolve) => queueMicrotask(resolve));
+    });
+    assert.equal(await reservationForm.getAttribute('data-block2d-reservation-guard'), 'mounted');
+    assert.equal(await reservationForm.locator('select[name="propertyId"]').inputValue(), String(propertyId));
+    assert.equal(await reservationForm.locator('select[name="offerId"]').inputValue(), '2');
+    assert.equal(await reservationForm.locator('input[name="amount"]').inputValue(), '5000');
+    assert.equal(await reservationForm.locator('input[name="paymentMethod"]').inputValue(), 'Transferencia');
+    assert.equal(await reservationForm.locator('input[name="reservedAt"]').inputValue(), '2026-09-29');
+    assert.equal(await reservationForm.locator('input[name="expiresAt"]').inputValue(), '2026-10-03');
+
     await reservationForm.locator('button[type="submit"]').click();
     await page.waitForFunction(async () => (await import('/dist/store.js')).state.crm.reservations.some((item) => item.status === 'Activa'));
 

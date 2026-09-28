@@ -24,7 +24,17 @@ function captureReservationWriteContext(form: HTMLFormElement): void { if(reserv
 function reservationWriteContext(form: HTMLFormElement){const context=reservationWriteContexts.get(form);if(!context)throw new Error('TENANT_FORM_CONTEXT_REQUIRED');assertTenantRuntimeLeaseCurrent(context.runtimeLease);assertTenantCrmScope(context.scope,state.crm);const member=authenticatedTenantMember(context.scope);if(!member)throw new Error('AUTHENTICATED_TENANT_MEMBER_REQUIRED');return{...context,member};}
 function renderSection(card: HTMLElement, client: Client, current?: HTMLElement): void { const host=card.querySelector<HTMLElement>('.mvp-lead-full-content'); if(!host)return; const wrapper=document.createElement('div');wrapper.innerHTML=section(client);const el=wrapper.firstElementChild;if(!(el instanceof HTMLElement))return;if(current)current.replaceWith(el);else{const offers=host.querySelector('[data-lead-offers]');const anchor=offers?.nextSibling??host.querySelector('.mvp-lead-history, .mvp-lead-matches, .mvp-lead-full-actions');host.insertBefore(el,anchor);}el.querySelectorAll<HTMLFormElement>('[data-update-reservation]').forEach(captureReservationWriteContext);const details=el.querySelector<HTMLDetailsElement>('[data-reservation-disclosure]');details?.addEventListener('toggle',()=>{const target=details.querySelector<HTMLElement>('[data-reservation-form-host]');if(target){target.innerHTML=details.open?form(client):'';const created=target.querySelector<HTMLFormElement>('[data-register-reservation]');if(created)captureReservationWriteContext(created);}}); }
 function ensureLeadReservations(card: HTMLElement, client: Client): void { if(card.querySelector(SECTION))return;renderSection(card,client); }
-function refreshLeadReservations(card: HTMLElement, client: Client): void { const current=card.querySelector<HTMLElement>(SECTION);renderSection(card,client,current??undefined); }
+function reservationRegistrationOpen(section: HTMLElement): boolean {
+  const details = section.querySelector<HTMLDetailsElement>('[data-reservation-disclosure][open]');
+  return Boolean(details?.querySelector('form[data-register-reservation]'));
+}
+function refreshLeadReservations(card: HTMLElement, client: Client): void {
+  const current=card.querySelector<HTMLElement>(SECTION);
+  // Los renders de fondo (sync, Agenda, otros módulos) no deben destruir un
+  // formulario de reserva que el usuario está completando.
+  if(current && reservationRegistrationOpen(current))return;
+  renderSection(card,client,current??undefined);
+}
 function forEachLead(action:(card:HTMLElement,client:Client)=>void):void{document.querySelectorAll<HTMLElement>('.mvp-lead-card[data-client-id]').forEach((card)=>{const client=state.crm.clients.find((x)=>x.id===Number(card.dataset.clientId));if(client)action(card,client);});}
 export function enhanceLeadReservations(): void { forEachLead(ensureLeadReservations); }
 function refreshVisibleReservations():void{forEachLead(refreshLeadReservations);}
@@ -41,7 +51,7 @@ function rollbackReservationMutation(context:ReturnType<typeof reservationWriteC
     // Fail closed: nunca se restaura sobre otro tenant/runtime.
   }
 }
-function apply(result:{crm:typeof state.crm},context:ReturnType<typeof reservationWriteContext>):void{
+function apply(result:{crm:typeof state.crm},context:ReturnType<typeof reservationWriteContext>,originForm:HTMLFormElement):void{
   assertTenantRuntimeLeaseCurrent(context.runtimeLease);
   assertTenantCrmScope(context.scope,result.crm);
   const previousCrm=structuredClone(state.crm);
@@ -56,8 +66,14 @@ function apply(result:{crm:typeof state.crm},context:ReturnType<typeof reservati
     rollbackReservationMutation(context,previousCrm);
     throw value;
   }
+  // Sólo después de persistir con éxito cerramos el editor. Así el render de
+  // confirmación puede refrescar la sección sin perder datos ante un fallo.
+  if(originForm.matches('[data-register-reservation]')){
+    const details=originForm.closest<HTMLDetailsElement>('[data-reservation-disclosure]');
+    if(details)details.open=false;
+  }
   document.dispatchEvent(new CustomEvent('trv-render'));
 }
-document.addEventListener('submit',(event)=>{const target=event.target;if(!(target instanceof HTMLFormElement))return;if(!target.matches('[data-register-reservation],[data-update-reservation]'))return;event.preventDefault();if(target.dataset.submitting==='true')return;busy(target,true);try{const context=reservationWriteContext(target);const actor={id:context.member.id,role:context.member.role};const data=new FormData(target);if(target.matches('[data-register-reservation]')){const rawOffer=String(data.get('offerId')||'');apply(registerReservation(state.crm,actor,{clientId:Number(target.dataset.registerReservation),propertyId:Number(data.get('propertyId')),offerId:rawOffer?Number(rawOffer):undefined,amount:Number(data.get('amount')),currency:String(data.get('currency')||'') as OfferCurrency,paymentMethod:String(data.get('paymentMethod')||''),conditions:String(data.get('conditions')||''),reservedAt:String(data.get('reservedAt')||''),expiresAt:String(data.get('expiresAt')||'')}),context);}else{apply(updateReservationStatus(state.crm,actor,{reservationId:Number(target.dataset.updateReservation),status:String(data.get('status')||'')}),context);}}catch(value){busy(target,false);error(target,value);}});
+document.addEventListener('submit',(event)=>{const target=event.target;if(!(target instanceof HTMLFormElement))return;if(!target.matches('[data-register-reservation],[data-update-reservation]'))return;event.preventDefault();if(target.dataset.submitting==='true')return;busy(target,true);try{const context=reservationWriteContext(target);const actor={id:context.member.id,role:context.member.role};const data=new FormData(target);if(target.matches('[data-register-reservation]')){const rawOffer=String(data.get('offerId')||'');apply(registerReservation(state.crm,actor,{clientId:Number(target.dataset.registerReservation),propertyId:Number(data.get('propertyId')),offerId:rawOffer?Number(rawOffer):undefined,amount:Number(data.get('amount')),currency:String(data.get('currency')||'') as OfferCurrency,paymentMethod:String(data.get('paymentMethod')||''),conditions:String(data.get('conditions')||''),reservedAt:String(data.get('reservedAt')||''),expiresAt:String(data.get('expiresAt')||'')}),context,target);}else{apply(updateReservationStatus(state.crm,actor,{reservationId:Number(target.dataset.updateReservation),status:String(data.get('status')||'')}),context,target);}}catch(value){busy(target,false);error(target,value);}});
 document.addEventListener('change',(event)=>{const offer=(event.target as HTMLElement).closest<HTMLSelectElement>('[data-register-reservation] select[name="offerId"]');if(!offer?.value)return;const option=offer.selectedOptions[0];const property=offer.form?.elements.namedItem('propertyId');if(property instanceof HTMLSelectElement&&option?.dataset.propertyId)property.value=option.dataset.propertyId;});
 document.addEventListener('trv-render',()=>queueMicrotask(refreshVisibleReservations));function observe():void{if(observing)return;const root=document.querySelector('#root');if(!root)return;observing=true;new MutationObserver(enhanceLeadReservations).observe(root,{childList:true,subtree:true});}observe();queueMicrotask(enhanceLeadReservations);
