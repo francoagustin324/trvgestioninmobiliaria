@@ -37,7 +37,7 @@ import {
   openEntityReadOnly,
   returnToEntityReadOnly,
 } from './entity-read-navigation.js';
-import { matchPropertiesForClient, type PropertyMatch } from './property-matching.js';
+import { MATCH_DISMISSED_ACTION, matchDismissalActive, matchPropertiesForClient, type PropertyMatch } from './property-matching.js';
 import { saveData, state } from './store.js';
 import { addActivityForAuthenticatedTenant, memberName, visibleClients, visibleProperties } from './team-access.js';
 import { requireCurrentTenantScope } from './tenant-runtime.js';
@@ -108,6 +108,7 @@ function matchRow(match: PropertyMatch): string {
     <div class="mvp-match-actions">
       <b class="mvp-match-score ${match.level.toLowerCase()}">${match.score}%</b>
       <button type="button" class="secondary" data-open-match-property="${match.property.id}">Abrir propiedad</button>
+      <button type="button" class="quiet-button" data-dismiss-match-client="${match.client.id}" data-dismiss-match-property="${match.property.id}">Descartar match</button>
     </div>
   </article>`;
 }
@@ -116,7 +117,9 @@ function matchesForLead(client: Client): string {
   if (isTerminalClient(client)) return '';
   const properties = visibleProperties();
   if (!properties.length) return '<p class="mvp-match-empty">Todavía no hay propiedades cargadas para comparar.</p>';
-  const matches = matchPropertiesForClient(client, properties).slice(0, 3);
+  const matches = matchPropertiesForClient(client, properties)
+    .filter((match) => !matchDismissalActive(client, match.property, state.crm.activityLog))
+    .slice(0, 3);
   if (!matches.length) return '<p class="mvp-match-empty">No hay coincidencias claras con las propiedades disponibles.</p>';
   const best = matches[0]!;
   return `<details class="mvp-lead-matches">
@@ -275,6 +278,31 @@ function bindLeadCardActions(container: HTMLElement): void {
         { entityType: 'property', entityId: propertyId },
         { returnTarget: { entityType: 'lead', entityId: Number(button.closest('.mvp-lead-card')?.getAttribute('data-client-id')) } },
       );
+    });
+  });
+  container.querySelectorAll<HTMLButtonElement>('[data-dismiss-match-property]').forEach((button) => {
+    button.addEventListener('click', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      const clientId = Number(button.dataset.dismissMatchClient);
+      const propertyId = Number(button.dataset.dismissMatchProperty);
+      const client = visibleClients().find((item) => item.id === clientId);
+      const property = visibleProperties().find((item) => item.id === propertyId);
+      if (!client || !property || matchDismissalActive(client, property, state.crm.activityLog)) return;
+      addActivityForAuthenticatedTenant(requireCurrentTenantScope(), {
+        action: MATCH_DISMISSED_ACTION,
+        entityType: 'Cliente',
+        entityId: client.id,
+        entityUid: client.uid,
+        diffusionClientId: client.id,
+        diffusionClientUid: client.uid,
+        diffusionPropertyId: property.id,
+        diffusionPropertyUid: property.uid,
+        detail: `Propiedad descartada del matching: ${property.title || property.address || `#${property.id}`}\npropertyRevision=${Number(property.revision ?? 0)}`,
+      });
+      saveData(`Match descartado: ${client.name}`);
+      renderMvpLeads(container);
+      queueMicrotask(() => document.dispatchEvent(new CustomEvent('trv-render')));
     });
   });
   container.querySelectorAll<HTMLButtonElement>('[data-return-read-entity]').forEach((button) => {
