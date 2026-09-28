@@ -475,13 +475,12 @@ function bindLeadForm(form: HTMLFormElement): void {
 
   if (pendingCloseIntent?.clientId === state.editingClientId) {
     const intent = pendingCloseIntent;
+    if (!form.isConnected) return;
+    // El CTA de la ficha ya representa una intención humana explícita. Abrimos
+    // el modal directamente sobre el formulario vivo, sin pasar por un change
+    // sintético del select que puede disparar renders/listeners intermedios.
+    openCloseDialog(form, intent.targetStage, initialStage);
     pendingCloseIntent = null;
-    // Abrimos el cierre de forma síncrona sobre el formulario recién renderizado.
-    // Si se difiere a requestAnimationFrame, un trv-render pendiente puede
-    // reconstruir Leads entre medio, consumir la intención y dejar el modal
-    // asociado a un formulario ya desconectado del DOM.
-    stage.value = intent.targetStage;
-    stage.dispatchEvent(new Event('change', { bubbles: true }));
   }
 }
 
@@ -501,8 +500,18 @@ function bindDocumentActions(): void {
       event.preventDefault();
       event.stopPropagation();
       pendingCloseIntent = { clientId, targetStage };
-      const card = closeButton.closest<HTMLElement>('.mvp-lead-card');
-      card?.querySelector<HTMLButtonElement>('[data-edit-client]')?.click();
+      // Evitamos reemplazar el DOM de Leads dentro del mismo dispatch del click.
+      // Al terminar el evento, reubicamos el botón Editar en el DOM vigente y
+      // dejamos que el formulario nuevo consuma la intención de cierre.
+      queueMicrotask(() => {
+        const currentCard = document.querySelector<HTMLElement>(`.mvp-lead-card[data-client-id="${clientId}"]`);
+        const edit = currentCard?.querySelector<HTMLButtonElement>('[data-edit-client]');
+        if (!edit) {
+          pendingCloseIntent = null;
+          return;
+        }
+        edit.click();
+      });
       return;
     }
 
