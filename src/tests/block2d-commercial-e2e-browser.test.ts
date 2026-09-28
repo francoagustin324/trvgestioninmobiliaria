@@ -558,6 +558,17 @@ test('2D E2E WON recorre Lead → Propiedad → Difusión → Seguimiento → Vi
     await won.locator('select[name="commissionMode"]').selectOption('percentage');
     await won.locator('input[name="commissionPercentage"]').fill('3');
     await won.locator('textarea[name="closeNote"]').fill('Cierre sintético E2E');
+
+    await won.evaluate((modal) => { modal.dataset.block2dCloseGuard = 'mounted'; });
+    await page.evaluate(() => {
+      document.dispatchEvent(new CustomEvent('trv-render'));
+      return new Promise<void>((resolveRender) => queueMicrotask(resolveRender));
+    });
+    assert.equal(await won.getAttribute('data-block2d-close-guard'), 'mounted');
+    assert.equal(await won.locator('input[name="dealAmount"]').inputValue(), '118000');
+    assert.equal(await won.locator('input[name="commissionPercentage"]').inputValue(), '3');
+    assert.equal(await won.locator('textarea[name="closeNote"]').inputValue(), 'Cierre sintético E2E');
+
     await won.locator('[data-commercial-close-confirm="Ganado"]').click();
     await page.waitForFunction(async (id) => {
       const client = (await import('/dist/store.js')).state.crm.clients.find((item) => item.id === id);

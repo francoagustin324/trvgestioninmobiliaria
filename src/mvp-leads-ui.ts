@@ -254,7 +254,7 @@ function bindLeadCardActions(container: HTMLElement): void {
       clearReadEntityNavigation();
       state.editingClientId = clientId;
       state.openForms.client = true;
-      renderMvpLeads(container);
+      renderMvpLeads(container, false, true);
       focusLeadForm(container);
     });
   });
@@ -453,14 +453,16 @@ function shouldPreserveCommercialEditor(container: HTMLElement): boolean {
     '[data-counteroffer-disclosure][open] form[data-register-counteroffer]',
     '[data-resolve-offer-disclosure][open] form[data-resolve-offer]',
     '[data-reservation-disclosure][open] form[data-register-reservation]',
+    '[data-commercial-close-dialog][open]',
     'form[data-update-reservation][data-submitting="true"]',
   ].join(',')));
 }
 
-export function renderMvpLeads(container: HTMLElement, centerSelectedStage = false): void {
-  // Un render global de fondo no debe desmontar editores comerciales activos.
-  // Cada workflow cierra su editor recién después de persistir con éxito.
-  if (shouldPreserveCommercialEditor(container)) return;
+export function renderMvpLeads(container: HTMLElement, centerSelectedStage = false, force = false): void {
+  // Los renders globales de fondo no deben desmontar editores/modales activos.
+  // Una acción explícita del usuario (Editar/Ganado/Perdido) puede forzar el
+  // cambio de contexto para abrir el formulario de cierre.
+  if (!force && shouldPreserveCommercialEditor(container)) return;
   const editing = visibleClients().find((client) => client.id === state.editingClientId) ?? null;
   const leads = leadRows();
   if (expandedClientId !== null && !leads.some((client) => client.id === expandedClientId)) expandedClientId = null;
