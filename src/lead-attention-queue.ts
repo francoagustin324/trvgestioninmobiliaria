@@ -1,7 +1,7 @@
 import { leadCardAttentionPresentation } from './lead-card-attention.js';
 import { leadDaysFromToday, leadPrimaryAlert, sortLeads, type LeadAlertKind } from './lead-list-priority.js';
 import { commercialStage, isTerminalClient, localIsoDate } from './lead-pipeline.js';
-import { matchPropertiesForClient } from './property-matching.js';
+import { matchDismissalActive, matchPropertiesForClient } from './property-matching.js';
 import { assignmentVisible } from './team-policy.js';
 import type { ActivityEntry, Client, Offer, Property, Reminder, Reservation, TeamRole, Visit } from './models.js';
 import { escapeHtml } from './utils.js';
@@ -340,7 +340,11 @@ export function operationalAttentionQueue(
     }
 
     const freshMatch = matchPropertiesForClient(client, properties)
-      .find((match) => match.level === 'Alta' && !alreadyDiffused(client, match.property));
+      .find((match) => (
+        match.level === 'Alta'
+        && !alreadyDiffused(client, match.property)
+        && !matchDismissalActive(client, match.property, activities)
+      ));
     if (freshMatch) {
       pushUnique(items, {
         key: `new-match:${client.id}:${freshMatch.property.id}`,
