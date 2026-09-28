@@ -476,10 +476,12 @@ function bindLeadForm(form: HTMLFormElement): void {
   if (pendingCloseIntent?.clientId === state.editingClientId) {
     const intent = pendingCloseIntent;
     pendingCloseIntent = null;
-    window.requestAnimationFrame(() => {
-      stage.value = intent.targetStage;
-      stage.dispatchEvent(new Event('change', { bubbles: true }));
-    });
+    // Abrimos el cierre de forma síncrona sobre el formulario recién renderizado.
+    // Si se difiere a requestAnimationFrame, un trv-render pendiente puede
+    // reconstruir Leads entre medio, consumir la intención y dejar el modal
+    // asociado a un formulario ya desconectado del DOM.
+    stage.value = intent.targetStage;
+    stage.dispatchEvent(new Event('change', { bubbles: true }));
   }
 }
 
