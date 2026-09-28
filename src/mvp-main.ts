@@ -198,9 +198,9 @@ function ensureActiveModule(): void {
   if (!allowed.includes(state.activeModule)) state.activeModule = allowed[0] ?? 'crm';
 }
 
-function render(): void {
+function render(forceLeadEditor = false): void {
   ensureActiveModule();
-  renderMvpLeads(qs<HTMLElement>('#crm'));
+  renderMvpLeads(qs<HTMLElement>('#crm'), false, forceLeadEditor);
   renderMvpConversations(qs<HTMLElement>('#whatsapp'));
   renderAgenda(qs<HTMLElement>('#agenda'));
   renderMvpPropertiesWorkspace(qs<HTMLElement>('#propiedades'));
@@ -241,7 +241,7 @@ function bindEvents(): void {
   if (eventsBound) return;
   eventsBound = true;
   installPropertyPhotoUxGuard();
-  document.addEventListener('trv-render', render);
+  document.addEventListener('trv-render', () => render());
   document.addEventListener('propcontrol-account-menu-rendered', finalizeAccountMenu);
   document.addEventListener('propcontrol-cloud-status', (event) => {
     const detail = (event as CustomEvent<{ message?: string }>).detail;
@@ -263,7 +263,7 @@ function bindEvents(): void {
       return;
     }
     const editId = Number(target.closest<HTMLElement>('[data-edit-client]')?.dataset.editClient);
-    if (editId) { clearReadEntityNavigation(); state.activeModule = 'crm'; state.editingClientId = editId; state.openForms.client = true; render(); return; }
+    if (editId) { clearReadEntityNavigation(); state.activeModule = 'crm'; state.editingClientId = editId; state.openForms.client = true; render(true); return; }
     if (target.closest('[data-cancel-client-edit]')) { state.editingClientId = null; state.openForms.client = false; render(); return; }
     const toggle = target.closest<HTMLElement>('[data-toggle]')?.dataset.toggle;
     if (toggle === 'client-form') { clearReadEntityNavigation(); state.editingClientId = null; state.openForms.client = !state.openForms.client; render(); return; }
