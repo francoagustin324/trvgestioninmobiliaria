@@ -13,7 +13,7 @@ concurrency:
 jobs:
   build-and-test:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     env:
       PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
     steps:
@@ -33,5 +33,7 @@ jobs:
         run: npm ci --silent
       - name: Compilar TypeScript
         run: npm run build --silent
-      - name: Ejecutar rollback 2D aislado
-        run: node --test --test-concurrency=1 --test-name-pattern='2D fallos de persistencia revierten Visita Oferta Reserva y Cierre sin éxito falso' dist/tests/block2d-commercial-e2e-browser.test.js
+      - name: Regresión 2D WON y LOST
+        run: node --test --test-concurrency=1 --test-name-pattern='2D E2E WON recorre|2D E2E LOST exige' dist/tests/block2d-commercial-e2e-browser.test.js
+      - name: Regresión P1.2-A1 Won desktop y Lost mobile
+        run: node --test --test-concurrency=1 dist/tests/p1-2-a1-commercial-close-browser.test.js

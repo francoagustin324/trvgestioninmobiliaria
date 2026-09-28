@@ -372,81 +372,6 @@ async function restoreStorage(page: Page): Promise<void> {
   });
 }
 
-async function installBlock2dCloseTrace(page: Page): Promise<void> {
-  await page.evaluate(async () => {
-    const { state } = await import('/dist/store.js');
-    const target = window as unknown as { __block2dCloseTrace?: Array<Record<string, unknown>> };
-    const trace: Array<Record<string, unknown>> = [];
-    target.__block2dCloseTrace = trace;
-    const snapshot = (label: string): void => {
-      const card = document.querySelector<HTMLElement>('.mvp-lead-card[data-client-id="1"]');
-      const close = card?.querySelector<HTMLButtonElement>('[data-close-operation-stage="Ganado"]') ?? null;
-      const edit = card?.querySelector<HTMLButtonElement>('[data-edit-client="1"]') ?? null;
-      const leadForm = document.querySelector<HTMLFormElement>('#mvp-lead-form:not(.collapsed)');
-      const reservationForm = document.querySelector<HTMLFormElement>('form[data-register-reservation="1"]');
-      const reservationError = reservationForm?.querySelector<HTMLElement>('[data-reservation-error]') ?? null;
-      const wonModal = document.querySelector<HTMLElement>('dialog[data-commercial-close-dialog][open] [data-commercial-close-modal-form="won"]');
-      trace.push({
-        label,
-        editingClientId: (state as unknown as { editingClientId?: number | null }).editingClientId ?? null,
-        cardExists: Boolean(card),
-        cardConnected: Boolean(card?.isConnected),
-        closeExists: Boolean(close),
-        closeConnected: Boolean(close?.isConnected),
-        editExists: Boolean(edit),
-        editConnected: Boolean(edit?.isConnected),
-        leadFormOpen: Boolean(leadForm),
-        leadFormConnected: Boolean(leadForm?.isConnected),
-        stageValue: leadForm?.querySelector<HTMLSelectElement>('select[name="pipeline"]')?.value ?? null,
-        commercialFormsOpen: document.querySelectorAll([
-          '[data-visit-coordinate-disclosure][open] form[data-coordinate-visit]',
-          '[data-offer-register-disclosure][open] form[data-register-offer]',
-          '[data-reservation-disclosure][open] form[data-register-reservation]',
-        ].join(',')).length,
-        openDetails: Array.from(document.querySelectorAll<HTMLDetailsElement>('.mvp-lead-card[data-client-id="1"] details[open]'))
-          .map((details) => details.getAttribute('data-visit-coordinate-disclosure')
-            || details.getAttribute('data-offer-register-disclosure')
-            || (details.hasAttribute('data-reservation-disclosure') ? 'reservation' : details.className))
-          .slice(0, 12),
-        reservationSubmitting: reservationForm?.dataset.submitting ?? null,
-        reservationErrorHidden: reservationError?.hidden ?? null,
-        reservationErrorText: reservationError?.textContent ?? null,
-        dialogOpen: Boolean(document.querySelector('dialog[data-commercial-close-dialog][open]')),
-        wonModal: Boolean(wonModal),
-      });
-    };
-    document.addEventListener('click', (event) => {
-      const node = event.target instanceof Element ? event.target.closest('[data-edit-client="1"]') : null;
-      if (node) snapshot('edit-document-capture');
-    }, { capture: true });
-    document.addEventListener('click', (event) => {
-      const node = event.target instanceof Element ? event.target.closest('[data-edit-client="1"]') : null;
-      if (node) snapshot('edit-document-bubble');
-    });
-    document.addEventListener('click', (event) => {
-      const node = event.target instanceof Element ? event.target.closest('[data-close-operation-stage="Ganado"]') : null;
-      if (!node) return;
-      snapshot('click-capture');
-      queueMicrotask(() => {
-        snapshot('microtask-1');
-        queueMicrotask(() => snapshot('microtask-2'));
-      });
-      requestAnimationFrame(() => {
-        snapshot('raf-1');
-        requestAnimationFrame(() => snapshot('raf-2'));
-      });
-    }, { capture: true, once: true });
-  });
-}
-
-async function readBlock2dCloseTrace(page: Page): Promise<Array<Record<string, unknown>>> {
-  await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => requestAnimationFrame(() => resolve())))));
-  return page.evaluate(() => {
-    const target = window as unknown as { __block2dCloseTrace?: Array<Record<string, unknown>> };
-    return structuredClone(target.__block2dCloseTrace || []);
-  });
-}
-
 test('2D E2E WON recorre Lead → Propiedad → Difusión → Seguimiento → Visita → Oferta → Reserva → Cierre y F5', { timeout: 420000 }, async () => {
   const org = 'block2d-won-org';
   const userId = 'owner-' + org;
@@ -823,12 +748,8 @@ test('2D fallos de persistencia revierten Visita Oferta Reserva y Cierre sin éx
     assert.equal(crm.clients[0]?.pipeline, 'Calificado');
     await restoreStorage(page);
 
-    await installBlock2dCloseTrace(page);
     await armStorageFailure(page, 'Operación ganada');
     await page.locator('.mvp-lead-card[data-client-id="1"] [data-close-operation-stage="Ganado"]').click();
-    const closeTrace = await readBlock2dCloseTrace(page);
-    console.log('BLOCK2D_CLOSE_TRACE=' + JSON.stringify(closeTrace));
-    assert.equal(closeTrace.some((entry) => entry.wonModal === true), true, 'BLOCK2D_CLOSE_TRACE_NO_WON_MODAL=' + JSON.stringify(closeTrace));
     const won = page.locator('dialog[data-commercial-close-dialog][open] [data-commercial-close-modal-form="won"]');
     await won.waitFor({ state: 'visible' });
     await won.locator('input[name="dealAmount"]').fill('120000');
