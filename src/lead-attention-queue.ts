@@ -275,7 +275,7 @@ export function operationalAttentionQueue(
         key: `follow-up-overdue:${client.id}`,
         kind: 'follow-up-overdue',
         priority: 'CRÍTICO',
-        rank: 20,
+        rank: 5,
         clientId: client.id,
         module: 'crm',
         target: 'lead',
