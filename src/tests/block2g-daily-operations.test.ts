@@ -164,6 +164,67 @@ test('Block 2G A-M: Qué hacer ahora ordena trabajo real sin duplicar ni tocar c
   });
   assert.ok([...perClient.values()].every((count) => count <= 2), 'J: anti-spam limita acciones repetidas por cliente');
 
+  const dismissClient = client(60, { name: 'Match descartable', nextFollowUp: '2026-10-10' });
+  const dismissProperty = property(60, { revision: 3 });
+  const dismissal: ActivityEntry = {
+    id: 60,
+    actorId: 1,
+    action: 'Match descartado',
+    entityType: 'Cliente',
+    entityId: 60,
+    diffusionClientId: 60,
+    diffusionPropertyId: 60,
+    detail: 'Propiedad descartada del matching\npropertyRevision=3',
+    createdAt: '2026-09-28T12:00:00Z',
+  };
+  const dismissedQueue = operationalAttentionQueue({
+    clients: [dismissClient],
+    properties: [dismissProperty],
+    visits: [],
+    offers: [],
+    reservations: [],
+    reminders: [],
+    activityLog: [dismissal],
+    actor: { id: 1, role: 'Dueño' as const },
+    today: TODAY,
+    now: NOW,
+  }, 10);
+  assert.equal(dismissedQueue.some((item) => item.kind === 'new-match'), false, 'match descartado no reaparece sin causa válida');
+
+  const changedRequirements = { ...dismissClient, qualificationUpdatedAt: '2026-09-28T13:00:00Z' };
+  const reopenedByRequirements = operationalAttentionQueue({
+    clients: [changedRequirements],
+    properties: [dismissProperty],
+    visits: [],
+    offers: [],
+    reservations: [],
+    reminders: [],
+    activityLog: [dismissal],
+    actor: { id: 1, role: 'Dueño' as const },
+    today: TODAY,
+    now: NOW,
+  }, 10);
+  assert.equal(reopenedByRequirements.some((item) => item.kind === 'new-match'), true, 'cambiar requisitos después del descarte vuelve a habilitar el match');
+
+  const changedProperty = { ...dismissProperty, revision: 4 };
+  const reopenedByProperty = operationalAttentionQueue({
+    clients: [dismissClient],
+    properties: [changedProperty],
+    visits: [],
+    offers: [],
+    reservations: [],
+    reminders: [],
+    activityLog: [dismissal],
+    actor: { id: 1, role: 'Dueño' as const },
+    today: TODAY,
+    now: NOW,
+  }, 10);
+  assert.equal(reopenedByProperty.some((item) => item.kind === 'new-match'), true, 'una revisión nueva de Property es causa válida para reconsiderar el match');
+
+  const leadsSource = readFileSync('src/mvp-leads-ui.ts', 'utf8');
+  assert.match(leadsSource, /data-dismiss-match-property=/);
+  assert.match(leadsSource, /MATCH_DISMISSED_ACTION/);
+
   const html = renderOperationalAttentionQueue(input, 8);
   assert.match(html, /QUÉ HACER AHORA/);
   assert.match(html, /data-operational-action=/);
