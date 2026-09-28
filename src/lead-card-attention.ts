@@ -16,6 +16,7 @@ export interface LeadCardAttentionPresentation {
   alertTone: LeadAlertTone;
   alertRank: number;
   actionLabel: string;
+  actionHeading: string;
   dateLabel: string;
   scheduledDate: string;
   scheduledDateLabel: string;
@@ -134,6 +135,7 @@ export function leadCardAttentionPresentation(
     alertTone: alert.tone,
     alertRank: alert.rank,
     actionLabel,
+    actionHeading: followUp.state === 'overdue' ? 'Próxima acción vencida' : 'Próxima acción',
     dateLabel,
     scheduledDate,
     scheduledDateLabel,
