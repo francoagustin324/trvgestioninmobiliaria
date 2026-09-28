@@ -475,12 +475,15 @@ function bindLeadForm(form: HTMLFormElement): void {
 
   if (pendingCloseIntent?.clientId === state.editingClientId) {
     const intent = pendingCloseIntent;
-    if (!form.isConnected) return;
-    // El CTA de la ficha ya representa una intención humana explícita. Abrimos
-    // el modal directamente sobre el formulario vivo, sin pasar por un change
-    // sintético del select que puede disparar renders/listeners intermedios.
-    openCloseDialog(form, intent.targetStage, initialStage);
     pendingCloseIntent = null;
+    // El click del CTA ya fue desacoplado del DOM viejo. Sobre el formulario
+    // nuevo conservamos el contrato histórico del cierre: fijar la etapa y
+    // disparar su change para que toda la validación/captura existente participe.
+    window.requestAnimationFrame(() => {
+      if (!form.isConnected) return;
+      stage.value = intent.targetStage;
+      stage.dispatchEvent(new Event('change', { bubbles: true }));
+    });
   }
 }
 
