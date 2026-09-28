@@ -1,7 +1,48 @@
 import { isTerminalClient } from './lead-pipeline.js';
-import type { Client, Property } from './models.js';
+import type { ActivityEntry, Client, Property } from './models.js';
 
 export type MatchLevel = 'Alta' | 'Buena' | 'Posible';
+
+export const MATCH_DISMISSED_ACTION = 'Match descartado';
+
+function dismissedPropertyRevision(detail: string): number | null {
+  const match = detail.match(/(?:^|\n)propertyRevision=(\d+)(?:\n|$)/);
+  if (!match?.[1]) return null;
+  const revision = Number(match[1]);
+  return Number.isFinite(revision) && revision >= 0 ? revision : null;
+}
+
+export function matchDismissalActive(
+  client: Client,
+  property: Property,
+  activityLog: readonly ActivityEntry[],
+): boolean {
+  const dismissal = activityLog
+    .filter((entry) => (
+      entry.action === MATCH_DISMISSED_ACTION
+      && entry.entityType === 'Cliente'
+      && entry.entityId === client.id
+      && entry.diffusionPropertyId === property.id
+    ))
+    .sort((left, right) => right.createdAt.localeCompare(left.createdAt))[0];
+  if (!dismissal) return false;
+
+  if (
+    client.qualificationUpdatedAt
+    && Number.isFinite(Date.parse(client.qualificationUpdatedAt))
+    && Date.parse(client.qualificationUpdatedAt) > Date.parse(dismissal.createdAt)
+  ) {
+    return false;
+  }
+
+  const dismissedRevision = dismissedPropertyRevision(dismissal.detail);
+  const currentRevision = Number(property.revision ?? 0);
+  if (dismissedRevision !== null && Number.isFinite(currentRevision) && currentRevision > dismissedRevision) {
+    return false;
+  }
+
+  return true;
+}
 
 export interface PropertyMatch {
   client: Client;
