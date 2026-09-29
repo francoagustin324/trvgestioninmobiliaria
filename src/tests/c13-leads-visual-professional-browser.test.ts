@@ -238,20 +238,18 @@ async function inspectViewport(page: Page, url: string, width: number, height: n
   await page.setViewportSize({ width, height });
   await load(page, url);
 
-  const heading = page.locator('.pc-supervised-attention-heading');
-  assert.equal((await heading.locator('strong').textContent())?.trim(), 'LEADS PRIORITARIOS');
-  const fullCopy = heading.locator('.pc-supervised-attention-copy-full');
-  const compactCopy = heading.locator('.pc-supervised-attention-copy-compact');
+  const heading = page.locator('.pc-daily-ops-heading');
+  assert.equal((await heading.locator('strong').textContent())?.trim(), 'QUÉ HACER AHORA');
+  const explanatoryCopy = heading.locator(':scope > div:first-child > span');
   if (width <= 720) {
-    assert.equal(await compactCopy.isVisible(), true, `${width}: copy compacto visible.`);
-    assert.equal((await compactCopy.textContent())?.trim(), 'Contactos para gestionar primero.');
+    assert.equal(await explanatoryCopy.isVisible(), false, `${width}: copy explicativo se oculta para mantener jerarquía móvil compacta.`);
   } else {
-    assert.equal(await fullCopy.isVisible(), true, `${width}: copy completo visible.`);
-    assert.equal((await fullCopy.textContent())?.trim(), 'Gestioná primero los contactos que requieren acción.');
+    assert.equal(await explanatoryCopy.isVisible(), true, `${width}: copy explicativo visible en desktop.`);
+    assert.equal((await explanatoryCopy.textContent())?.trim(), 'Prioridad explicable a partir de actividad, fechas y estado comercial.');
   }
 
-  const priorityCards = page.locator('.pc-supervised-attention-item');
-  assert.equal(await priorityCards.count(), 3, `${width}: se conserva máximo y fixture top-3.`);
+  const priorityCards = page.locator('.pc-daily-ops-item');
+  assert.equal(await priorityCards.count(), 3, `${width}: la vista inicial conserva top-3 operativo.`);
   for (let index = 0; index < 3; index += 1) {
     const card = priorityCards.nth(index);
     await assertTarget(card, `${width}: prioridad ${index + 1}`);
