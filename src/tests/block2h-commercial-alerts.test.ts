@@ -17,6 +17,7 @@ import type {
   Property,
   Reminder,
   Reservation,
+  SyncedVisit,
   Visit,
 } from '../models.js';
 
@@ -153,7 +154,7 @@ test('Block 2H A-T: el motor puro detecta las diez condiciones y evita falsos po
     clients: [{ ...forgotten, pipeline: 'Ganado' }],
   }))).length, 0, 'G: lead terminal nunca se marca olvidado');
 
-  const visitBase: Visit = {
+  const visitBase: SyncedVisit = {
     id: 10,
     uid: '20000000-0000-4000-8000-000000000010',
     revision: 1,
