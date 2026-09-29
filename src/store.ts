@@ -1,4 +1,5 @@
 import { queueCloudSave } from './cloud-api-compatible.js';
+import { reconcileEvaluatedCommercialAlerts } from './commercial-alert-engine.js';
 import type { TenantScope } from './active-organization.js';
 import type {
   ActivityEntry,
@@ -147,6 +148,7 @@ function normalizedActivityLog(value: unknown): ActivityEntry[] {
 }
 
 function normalizedData(value: Partial<CrmData>): CrmData {
+  const organization = normalizedOrganization(value.organization);
   const teamMembers = normalizedTeamMembers(value.teamMembers);
   const ownerId = teamMembers.find((member) => member.role === 'Dueño')?.id ?? teamMembers[0]?.id ?? 1;
   const activityLog = normalizedActivityLog(value.activityLog);
@@ -165,7 +167,7 @@ function normalizedData(value: Partial<CrmData>): CrmData {
     };
   }) : [];
   return {
-    organization: normalizedOrganization(value.organization),
+    organization,
     teamMembers,
     activityLog,
     clients,
@@ -205,6 +207,15 @@ function normalizedData(value: Partial<CrmData>): CrmData {
       assignedToId: Number(reminder.assignedToId ?? ownerId),
       createdById: Number(reminder.createdById ?? ownerId),
     })) : [],
+    commercialAlerts: Array.isArray(value.commercialAlerts)
+      ? value.commercialAlerts
+        .filter((alert) => alert.organizationId === organization.id)
+        .map((alert) => ({
+          ...alert,
+          ...normalizedSyncMetadata(alert),
+          ...(Number.isFinite(Number(alert.ownerId)) ? { ownerId: Number(alert.ownerId) } : {}),
+        }))
+      : [],
     fichas: Array.isArray(value.fichas) ? value.fichas.map((ficha) => ({
       ...ficha,
       ...normalizedSyncMetadata(ficha),
@@ -350,6 +361,20 @@ export function replaceData(data: CrmData, syncCloud = false): void {
 export function saveData(reason = 'Cambio local'): void {
   const scope = requireCurrentTenantScope();
   assertTenantCrmScope(scope, state.crm);
+  const member = authenticatedTenantMember(scope);
+  if (member) {
+    state.crm.commercialAlerts = reconcileEvaluatedCommercialAlerts({
+      organizationId: scope.organizationId,
+      clients: state.crm.clients,
+      properties: state.crm.properties,
+      visits: state.crm.visits,
+      offers: state.crm.offers,
+      reservations: state.crm.reservations,
+      reminders: state.crm.reminders,
+      activityLog: state.crm.activityLog,
+      actor: { id: member.id, role: member.role },
+    }, state.crm.commercialAlerts);
+  }
   writeTenantSnapshot(scope, state.crm, { markDirty: true, reason });
   queueCloudSave(scope, state.crm);
 }
