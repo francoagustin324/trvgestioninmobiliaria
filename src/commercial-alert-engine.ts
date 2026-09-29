@@ -75,6 +75,7 @@ export interface CommercialAlertEvaluationInput {
   actor?: { id: number; role: TeamRole };
   today?: string;
   now?: Date;
+  precomputedMatchConditions?: readonly CommercialAlertCondition[];
 }
 
 function normalize(value: unknown): string {
@@ -305,12 +306,43 @@ export function visitConfirmationDetail(visit: Visit): string {
   ].filter(Boolean).join('\n');
 }
 
+function clientMatchCriteriaVersion(client: Client): string {
+  return [
+    client.qualificationUpdatedAt || '',
+    client.pipeline || '',
+    client.status || '',
+    client.temperature || '',
+    client.interest || '',
+    client.zones || '',
+    client.propertyType || '',
+    client.operation || '',
+    client.bedrooms ?? '',
+    client.currency || '',
+    client.budget || '',
+    client.paymentMethod || '',
+    client.needsFinancing || '',
+    client.creditPossible || '',
+    client.creditApprovedAmount || '',
+    client.purchaseTimeframe || '',
+    client.purpose || '',
+    client.knowsArea || '',
+    client.canMoveForward || '',
+    client.objections || '',
+    client.urgency || '',
+    client.garage || '',
+    client.patio || '',
+    client.pool || '',
+    client.requiresCreditReady || '',
+    client.features || '',
+    client.preferences || '',
+  ].map(normalize).join('~');
+}
+
 function matchVersion(client: Client, property: Property): string {
   return [
     property.uid || property.id,
     Number(property.revision ?? 0),
-    client.qualificationUpdatedAt || '',
-    Number(client.revision ?? 0),
+    clientMatchCriteriaVersion(client),
   ].join(':');
 }
 
@@ -327,6 +359,53 @@ function conditionSort(left: CommercialAlertCondition, right: CommercialAlertCon
     || left.rank - right.rank
     || left.name.localeCompare(right.name, 'es-AR')
     || left.dedupeKey.localeCompare(right.dedupeKey);
+}
+
+export function evaluateRelevantMatchAlertConditions(
+  input: Pick<
+    CommercialAlertEvaluationInput,
+    'organizationId' | 'clients' | 'properties' | 'activityLog' | 'actor'
+  >,
+): CommercialAlertCondition[] {
+  const activities = input.activityLog ?? [];
+  const clients = input.clients.filter((client) => (
+    !isTerminalClient(client) && assignmentAllowed(input as CommercialAlertEvaluationInput, client.assignedToId)
+  ));
+  const properties = input.properties.filter((property) => (
+    assignmentAllowed(input as CommercialAlertEvaluationInput, property.assignedToId)
+  ));
+  const conditions: CommercialAlertCondition[] = [];
+
+  for (const client of clients) {
+    const freshMatch = matchPropertiesForClient(client, properties)
+      .find((match) => (
+        match.level === 'Alta'
+        && !alreadyDiffused(client, match.property)
+        && !matchDismissalActive(client, match.property, activities)
+      ));
+    if (!freshMatch) continue;
+    pushCondition(conditions, {
+      organizationId: input.organizationId,
+      type: 'NEW_RELEVANT_MATCH',
+      entityType: 'match',
+      entityId: client.id,
+      ownerId: client.assignedToId,
+      priority: 'NORMAL',
+      rank: 92 - freshMatch.score / 100,
+      reason: `${freshMatch.score}% compatible · ${freshMatch.reasons.slice(0, 2).join(' · ')}`,
+      action: 'Revisar match',
+      actionType: 'REVIEW_MATCH',
+      target: 'matches',
+      name: client.name,
+      when: 'Nuevo match',
+      conditionVersion: matchVersion(client, freshMatch.property),
+      clientId: client.id,
+      propertyId: freshMatch.property.id,
+      sourceId: freshMatch.property.id,
+    });
+  }
+
+  return conditions.sort(conditionSort);
 }
 
 export function evaluateCommercialAlertConditions(
@@ -420,32 +499,13 @@ export function evaluateCommercialAlertConditions(
       }
     }
 
-    const freshMatch = matchPropertiesForClient(client, properties)
-      .find((match) => (
-        match.level === 'Alta'
-        && !alreadyDiffused(client, match.property)
-        && !matchDismissalActive(client, match.property, activities)
-      ));
-    if (freshMatch) {
-      pushCondition(conditions, {
-        organizationId: input.organizationId,
-        type: 'NEW_RELEVANT_MATCH',
-        entityType: 'match',
-        entityId: client.id,
-        ownerId: client.assignedToId,
-        priority: 'NORMAL',
-        rank: 92 - freshMatch.score / 100,
-        reason: `${freshMatch.score}% compatible · ${freshMatch.reasons.slice(0, 2).join(' · ')}`,
-        action: 'Revisar match',
-        actionType: 'REVIEW_MATCH',
-        target: 'matches',
-        name: client.name,
-        when: 'Nuevo match',
-        conditionVersion: matchVersion(client, freshMatch.property),
-        clientId: client.id,
-        propertyId: freshMatch.property.id,
-        sourceId: freshMatch.property.id,
-      });
+  }
+
+  const matchConditions = input.precomputedMatchConditions ?? evaluateRelevantMatchAlertConditions(input);
+  for (const matchCondition of matchConditions) {
+    if (matchCondition.organizationId !== input.organizationId || matchCondition.type !== 'NEW_RELEVANT_MATCH') continue;
+    if (!conditions.some((condition) => condition.dedupeKey === matchCondition.dedupeKey)) {
+      conditions.push({ ...matchCondition });
     }
   }
 
