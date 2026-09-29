@@ -496,16 +496,17 @@
 @media (max-width: 720px) {
   #crm .pc-supervised-attention-queue.pc-daily-ops-queue {
     grid-template-columns: minmax(0, 1fr);
-    gap: 3px;
-    margin: 1px 0 3px;
-    padding: 2px 3px;
+    gap: 1px;
+    margin: 0;
+    padding: 0 3px;
   }
 
   #crm .pc-daily-ops-heading {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 5px;
+    gap: 3px;
+    min-height: 0;
   }
 
   #crm .pc-daily-ops-summary {
@@ -523,8 +524,8 @@
   }
 
   #crm .pc-daily-ops-heading strong {
-    font-size: .6rem;
-    line-height: 1;
+    font-size: .58rem;
+    line-height: .95;
   }
 
   #crm .pc-daily-ops-priority {
