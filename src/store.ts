@@ -373,7 +373,7 @@ export function saveData(reason = 'Cambio local'): void {
       reminders: state.crm.reminders,
       activityLog: state.crm.activityLog,
       actor: { id: member.id, role: member.role },
-    }, state.crm.commercialAlerts);
+    }, state.crm.commercialAlerts ?? []);
   }
   writeTenantSnapshot(scope, state.crm, { markDirty: true, reason });
   queueCloudSave(scope, state.crm);
