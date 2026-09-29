@@ -1,10 +1,10 @@
 import { leadCardAttentionPresentation } from './lead-card-attention.js';
 import { leadDaysFromToday, leadPrimaryAlert, sortLeads, type LeadAlertKind } from './lead-list-priority.js';
 import { commercialStage, isTerminalClient, localIsoDate } from './lead-pipeline.js';
-import { evaluateCommercialAlertConditions, type CommercialAlertCondition } from './commercial-alert-engine.js';
+import { activeCommercialAlerts, evaluateCommercialAlertConditions, type CommercialAlertCondition } from './commercial-alert-engine.js';
 import { matchDismissalActive, matchPropertiesForClient } from './property-matching.js';
 import { assignmentVisible } from './team-policy.js';
-import type { ActivityEntry, Client, Offer, Property, Reminder, Reservation, TeamRole, Visit } from './models.js';
+import type { ActivityEntry, Client, CommercialAlert, Offer, Property, Reminder, Reservation, TeamRole, Visit } from './models.js';
 import { escapeHtml } from './utils.js';
 
 export interface LeadAttentionRecommendation {
@@ -114,6 +114,7 @@ export interface OperationalAttentionItem {
 
 export interface OperationalAttentionInput {
   organizationId?: string;
+  commercialAlerts?: CommercialAlert[];
   clients: Client[];
   properties: Property[];
   visits: Visit[];
@@ -193,19 +194,22 @@ export function operationalAttentionQueue(
 ): OperationalAttentionItem[] {
   const today = input.today ?? localIsoDate(input.now ?? new Date());
   const clients = input.clients.filter((client) => !isTerminalClient(client) && assignmentAllowed(input, client.assignedToId));
-  const items = evaluateCommercialAlertConditions({
-    organizationId: input.organizationId || 'local',
-    clients: input.clients,
-    properties: input.properties,
-    visits: input.visits,
-    offers: input.offers,
-    reservations: input.reservations,
-    reminders: input.reminders,
-    activityLog: input.activityLog,
-    actor: input.actor,
-    today,
-    now: input.now,
-  }).map(alertConditionToOperational);
+  const alertSource = input.commercialAlerts !== undefined
+    ? activeCommercialAlerts(input.commercialAlerts)
+    : evaluateCommercialAlertConditions({
+        organizationId: input.organizationId || 'local',
+        clients: input.clients,
+        properties: input.properties,
+        visits: input.visits,
+        offers: input.offers,
+        reservations: input.reservations,
+        reminders: input.reminders,
+        activityLog: input.activityLog,
+        actor: input.actor,
+        today,
+        now: input.now,
+      });
+  const items = alertSource.map(alertConditionToOperational);
 
   // 2G conserva sus recordatorios proactivos; no son alertas 2H.
   for (const client of clients) {
