@@ -12,6 +12,7 @@ import {
   commercialAlertDedupeKey,
   reconcileCommercialAlerts,
 } from '../commercial-alert-engine.js';
+import { commercialAlertConcurrentWriteAlreadySatisfied } from '../tenant-visit-v2.js';
 import { defaultSettings, type CommercialAlert, type CrmData, type TeamMember } from '../models.js';
 
 const ORG_A = '11111111-1111-4111-8111-111111111111';
@@ -176,4 +177,24 @@ test('Block 2H concurrencia: resolver es idempotente y una copia stale no resuci
 
   const sameEntityOtherTenant = alert(ORG_B, 1);
   assert.notEqual(active.dedupeKey, sameEntityOtherTenant.dedupeKey, 'mismo entityId entre tenants no colisiona');
+
+  const row = (value: CommercialAlert): CloudRecordRow => ({
+    organization_id: ORG_A,
+    entity_type: 'commercial_alert',
+    entity_key: organizationScopedEntityKey(ORG_A, value.dedupeKey),
+    assigned_member_id: 7,
+    payload: value,
+  });
+  const localResolved = { ...resolvedOnce[0]!, updatedAt: '2026-09-29T11:00:00.000Z' };
+  const remoteResolved = { ...resolvedOnce[0]!, id: 44, revision: 9, updatedAt: '2026-09-29T11:00:05.000Z' };
+  assert.equal(
+    commercialAlertConcurrentWriteAlreadySatisfied(row(localResolved), row(remoteResolved)),
+    true,
+    'dos dispositivos con el mismo estado terminal son idempotentes aunque difieran metadata local',
+  );
+  assert.equal(
+    commercialAlertConcurrentWriteAlreadySatisfied(row(active), row(remoteResolved)),
+    false,
+    'ACTIVE stale nunca satisface ni resucita un RESOLVED remoto',
+  );
 });
