@@ -1,4 +1,5 @@
 import { renderOperationalAttentionQueue, renderSupervisedAttentionQueue } from './lead-attention-queue.js';
+import { confirmScheduledVisit } from './visit-confirmation.js';
 import { instrumentVisibleSupervisedRecommendations } from './lead-recommendation-instrumentation.js';
 import { authenticatedTenantMember, state } from './store.js';
 import { visibleClients, visibleProperties, visibleReminders } from './team-access.js';
@@ -142,6 +143,7 @@ function renderAttentionQueue(container: HTMLElement): void {
   const legacyQueue = renderSupervisedAttentionQueue(visibleClients());
   const markup = member
     ? renderOperationalAttentionQueue({
+        organizationId: state.crm.organization.id,
         clients,
         properties: visibleProperties(),
         visits: state.crm.visits,
@@ -216,6 +218,19 @@ function bindAttentionQueue(container: HTMLElement): void {
     if (!button || !container.contains(button)) return;
     const clientId = Number(button.dataset.attentionClientId);
     const attentionTarget = button.dataset.attentionTarget || 'lead';
+    const operationalAction = button.dataset.operationalAction;
+    const sourceId = Number(button.dataset.attentionSourceId);
+    if (operationalAction === 'visit-confirm' && sourceId) {
+      button.disabled = true;
+      void confirmScheduledVisit(sourceId).catch((error) => {
+        if (button.isConnected) button.disabled = false;
+        announceAttentionNavigation(
+          container,
+          error instanceof Error ? error.message : 'No se pudo confirmar la visita.',
+        );
+      });
+      return;
+    }
     if (clientId) {
       if (attentionTarget === 'lead') openAttentionLead(container, clientId);
       else openAttentionLead(container, clientId, attentionTarget);
