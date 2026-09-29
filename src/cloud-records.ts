@@ -1,6 +1,7 @@
 import type {
   ActivityEntry,
   Client,
+  CommercialAlert,
   CommercialContact,
   CrmData,
   Ficha,
@@ -22,7 +23,7 @@ import {
   prepareCrmSyncContracts,
 } from './sync-identity.js';
 
-export type CloudEntityType = 'organization' | 'client' | 'property' | 'visit' | 'offer' | 'reservation' | 'commercial_contact' | 'reminder' | 'ficha' | 'conversation' | 'activity';
+export type CloudEntityType = 'organization' | 'client' | 'property' | 'visit' | 'offer' | 'reservation' | 'commercial_alert' | 'commercial_contact' | 'reminder' | 'ficha' | 'conversation' | 'activity';
 
 export interface CloudRecordRow {
   organization_id: string;
@@ -197,6 +198,11 @@ export function reconcileCrmAssignments(crm: CrmData, context: CloudMembershipCo
     visits: Array.isArray(crm.visits) ? crm.visits.map(assigned) : [],
     offers: Array.isArray(crm.offers) ? crm.offers.map(assigned) : [],
     reservations: Array.isArray(crm.reservations) ? crm.reservations.map(assigned) : [],
+    commercialAlerts: Array.isArray(crm.commercialAlerts)
+      ? crm.commercialAlerts
+        .filter((alert) => alert.organizationId === context.organizationId)
+        .map((alert) => ({ ...alert, ownerId: memberId(alert.ownerId) }))
+      : [],
     contacts: crm.contacts.map(assigned),
     reminders: crm.reminders.map(assigned),
     fichas: crm.fichas.map(assigned),
@@ -260,6 +266,9 @@ export function crmToCloudRecords(
     ...visibleToCurrentMember(reconciled.visits, context).map((item) => row(org, 'visit', identity(item), assignedId(item, member), item, userId)),
     ...visibleToCurrentMember(reconciled.offers, context).map((item) => row(org, 'offer', identity(item), assignedId(item, member), item, userId)),
     ...visibleToCurrentMember(reconciled.reservations, context).map((item) => row(org, 'reservation', identity(item), assignedId(item, member), item, userId)),
+    ...reconciled.commercialAlerts
+      .filter((alert) => elevated || alert.ownerId === member)
+      .map((alert) => row(org, 'commercial_alert', alert.dedupeKey, Number(alert.ownerId ?? member), alert, userId)),
     ...visibleToCurrentMember(reconciled.contacts, context).map((item) => row(org, 'commercial_contact', identity(item), assignedId(item, member), item, userId)),
     ...visibleToCurrentMember(reconciled.reminders, context).map((item) => row(org, 'reminder', identity(item), assignedId(item, member), item, userId)),
     ...visibleToCurrentMember(reconciled.fichas, context).map((item) => row(org, 'ficha', identity(item), assignedId(item, member), item, userId)),
@@ -332,6 +341,8 @@ export function cloudRecordsToCrm(
     visits: recordsOf<SyncedVisit>(rows, 'visit'),
     offers: recordsOf<SyncedOffer>(rows, 'offer'),
     reservations: recordsOf<SyncedReservation>(rows, 'reservation'),
+    commercialAlerts: recordsOf<CommercialAlert>(rows, 'commercial_alert')
+      .filter((alert) => alert.organizationId === context.organizationId),
     contacts: recordsOf<CommercialContact>(rows, 'commercial_contact'),
     reminders: recordsOf<Reminder>(rows, 'reminder'),
     fichas: recordsOf<Ficha>(rows, 'ficha'),
