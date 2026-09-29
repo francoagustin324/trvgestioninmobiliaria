@@ -618,35 +618,6 @@ test('PR143 desktop cero capacitación Chromium + regresión móvil', { timeout:
       const distance = await firstLeadDistance(page);
       console.log(`PR143_AFTER_${viewport.width}x${viewport.height}=${distance}`);
       if (viewport.width === 1366) {
-        const attentionGeometry = await page.evaluate(() => {
-          const queue = document.querySelector<HTMLElement>('#crm [data-supervised-attention-queue]');
-          const list = queue?.querySelector<HTMLElement>('.pc-daily-ops-list, .pc-supervised-attention-list');
-          const items = list ? Array.from(list.querySelectorAll<HTMLElement>('.pc-supervised-attention-item')) : [];
-          const rect = queue?.getBoundingClientRect();
-          return {
-            queueClass: queue?.className ?? '',
-            queueHeight: rect?.height ?? 0,
-            gridTemplateColumns: list ? getComputedStyle(list).gridTemplateColumns : '',
-            listHeight: list?.getBoundingClientRect().height ?? 0,
-            itemCount: items.length,
-            itemClasses: items.map((item) => item.className),
-            itemHeights: items.map((item) => item.getBoundingClientRect().height),
-            itemMinHeights: items.map((item) => getComputedStyle(item).minHeight),
-            itemPadding: items.map((item) => getComputedStyle(item).padding),
-            itemDisplay: items.map((item) => getComputedStyle(item).display),
-            itemGridAreas: items.map((item) => getComputedStyle(item).gridTemplateAreas),
-            reasonWhiteSpace: items.map((item) => {
-              const node = item.querySelector<HTMLElement>('.pc-supervised-attention-reason');
-              return node ? getComputedStyle(node).whiteSpace : '';
-            }),
-            actionWhiteSpace: items.map((item) => {
-              const node = item.querySelector<HTMLElement>('.pc-supervised-attention-action');
-              return node ? getComputedStyle(node).whiteSpace : '';
-            }),
-          };
-        });
-        console.log(`PR143_ATTENTION_GEOMETRY=${JSON.stringify(attentionGeometry)}`);
-
         assert.ok(distance <= TARGET_1366_DISTANCE + 0.5, `1366 debe reducir al menos 20%: ${distance} <= ${TARGET_1366_DISTANCE}.`);
       }
       if (viewport.width === 1024) {
