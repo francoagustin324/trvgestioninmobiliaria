@@ -399,7 +399,8 @@
 #crm .pc-supervised-attention-queue.pc-daily-ops-queue {
   grid-template-columns: 270px minmax(0, 1fr);
   gap: 8px;
-  padding: 6px 10px;
+  margin: 4px 0 6px;
+  padding: 4px 10px;
 }
 
 #crm .pc-daily-ops-heading {
@@ -446,30 +447,20 @@
   line-height: 1.1;
 }
 
-@media (max-width: 720px) {
+@media (min-width: 721px) and (max-width: 1199px) {
   #crm .pc-supervised-attention-queue.pc-daily-ops-queue {
-    grid-template-columns: minmax(0, 1fr);
-    gap: 4px;
-    margin: 3px 0 5px;
-    padding: 4px;
+    grid-template-columns: 180px minmax(0, 1fr);
+    gap: 7px;
+    margin: 4px 0 6px;
+    padding: 5px 8px;
   }
 
   #crm .pc-daily-ops-heading {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 6px;
+    gap: 3px;
   }
 
   #crm .pc-daily-ops-summary {
-    flex-wrap: nowrap;
-    justify-content: flex-end;
     gap: 2px;
-  }
-
-  #crm .pc-daily-ops-summary :is(b, span) {
-    padding: 2px 4px;
-    font-size: .58rem;
   }
 
   #crm .pc-daily-ops-list {
@@ -479,13 +470,72 @@
 
   #crm button.pc-supervised-attention-item.pc-daily-ops-item {
     min-height: 44px;
-    padding: 2px 4px;
+    padding: 3px 6px;
     grid-template-columns: auto minmax(0, 1fr) auto;
     grid-template-areas:
       "priority name when"
-      "reason action action";
-    column-gap: 4px;
+      "reason reason action";
+    column-gap: 5px;
     row-gap: 1px;
+  }
+}
+
+@media (max-width: 720px) {
+  #crm .pc-supervised-attention-queue.pc-daily-ops-queue {
+    grid-template-columns: 80px minmax(0, 1fr);
+    gap: 3px;
+    margin: 1px 0 3px;
+    padding: 2px 3px;
+  }
+
+  #crm .pc-daily-ops-heading {
+    display: grid;
+    align-content: center;
+    align-items: start;
+    justify-content: stretch;
+    gap: 2px;
+  }
+
+  #crm .pc-daily-ops-summary {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 1px;
+  }
+
+  #crm .pc-daily-ops-summary :is(b, span) {
+    padding: 1px 3px;
+    font-size: .56rem;
+    line-height: 1.05;
+  }
+
+  #crm .pc-daily-ops-list {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 2px;
+  }
+
+  #crm button.pc-supervised-attention-item.pc-daily-ops-item {
+    min-height: 44px;
+    padding: 2px 3px;
+    grid-template-columns: minmax(0, .7fr) minmax(0, 1fr) minmax(0, 1fr);
+    grid-template-areas: none;
+    grid-auto-flow: row;
+    column-gap: 3px;
+    row-gap: 0;
+    align-content: center;
+    align-items: center;
+  }
+
+  #crm button.pc-daily-ops-item > * {
+    grid-area: auto;
+  }
+
+  #crm button.pc-daily-ops-item .pc-supervised-attention-name,
+  #crm button.pc-daily-ops-item .pc-supervised-attention-reason,
+  #crm button.pc-daily-ops-item .pc-supervised-attention-action,
+  #crm button.pc-daily-ops-item .pc-daily-ops-when,
+  #crm button.pc-daily-ops-item .pc-daily-ops-priority {
+    font-size: .6rem;
+    line-height: 1.05;
   }
 }
 
