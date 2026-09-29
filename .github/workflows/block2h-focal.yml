@@ -31,6 +31,7 @@ jobs:
         run: |
           node --test --test-concurrency=1 \
             dist/tests/block2h-commercial-alerts.test.js \
+            dist/tests/block2h-security-concurrency.test.js \
             dist/tests/block2e-authorized-identity-hardening.test.js \
             dist/tests/block2f-concurrency-static.test.js \
             dist/tests/block2g-daily-operations.test.js \
