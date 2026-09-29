@@ -597,6 +597,44 @@ type GenericDelta = Readonly<{
   touched: Set<string>;
 }>;
 
+function commercialAlertSemanticPayload(row: CloudRecordRow): Record<string, unknown> | null {
+  if (row.entity_type !== 'commercial_alert') return null;
+  const payload = record(row.payload);
+  if (!payload) return null;
+  const {
+    id: _id,
+    revision: _revision,
+    createdAt: _createdAt,
+    updatedAt: _updatedAt,
+    resolvedAt: _resolvedAt,
+    dismissedAt: _dismissedAt,
+    ...semantic
+  } = payload;
+  return semantic;
+}
+
+export function commercialAlertConcurrentWriteAlreadySatisfied(
+  local: CloudRecordRow,
+  remote: CloudRecordRow,
+): boolean {
+  if (
+    local.entity_type !== 'commercial_alert'
+    || remote.entity_type !== 'commercial_alert'
+    || local.organization_id !== remote.organization_id
+    || local.entity_key !== remote.entity_key
+  ) return false;
+  const localPayload = commercialAlertSemanticPayload(local);
+  const remotePayload = commercialAlertSemanticPayload(remote);
+  if (!localPayload || !remotePayload) return false;
+  const localState = String(localPayload.state ?? '');
+  const remoteState = String(remotePayload.state ?? '');
+  if (
+    localState !== remoteState
+    || !['ACTIVE', 'RESOLVED', 'DISMISSED'].includes(localState)
+  ) return false;
+  return tenantFingerprint(localPayload) === tenantFingerprint(remotePayload);
+}
+
 function genericWritable(
   row: Pick<CloudRecordRow, 'entity_type' | 'payload'>,
   visitAuthorityActive: boolean,
@@ -630,7 +668,11 @@ function genericDelta(
     const remote = remoteMap.get(identity);
 
     if (!base && local) {
-      if (remote && concurrencyRowFingerprint(remote) !== concurrencyRowFingerprint(local)) {
+      if (
+        remote
+        && concurrencyRowFingerprint(remote) !== concurrencyRowFingerprint(local)
+        && !commercialAlertConcurrentWriteAlreadySatisfied(local, remote)
+      ) {
         throw new Error('GENERIC_RECORD_CONFLICT');
       }
       if (!remote) inserts.push(local);
@@ -650,7 +692,9 @@ function genericDelta(
     }
 
     if (concurrencyRowFingerprint(base) === concurrencyRowFingerprint(local)) continue;
-    if (!remote || concurrencyRowFingerprint(remote) !== concurrencyRowFingerprint(base)) {
+    if (!remote) throw new Error('GENERIC_RECORD_CONFLICT');
+    if (concurrencyRowFingerprint(remote) !== concurrencyRowFingerprint(base)) {
+      if (commercialAlertConcurrentWriteAlreadySatisfied(local, remote)) continue;
       throw new Error('GENERIC_RECORD_CONFLICT');
     }
     upserts.push(local);
