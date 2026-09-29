@@ -496,9 +496,11 @@
 @media (max-width: 720px) {
   #crm .pc-supervised-attention-queue.pc-daily-ops-queue {
     grid-template-columns: minmax(0, 1fr);
-    gap: 1px;
+    gap: 0;
     margin: 0;
     padding: 0 3px;
+    border-top-width: 0;
+    border-bottom-width: 0;
   }
 
   #crm .pc-daily-ops-heading {
