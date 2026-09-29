@@ -398,9 +398,9 @@
 /* Block 2G: la cola operativa conserva su layout propio por encima del hotfix C13 legacy. */
 #crm .pc-supervised-attention-queue.pc-daily-ops-queue {
   grid-template-columns: 270px minmax(0, 1fr);
-  gap: 8px;
-  margin: 4px 0 6px;
-  padding: 4px 10px;
+  gap: 6px;
+  margin: 2px 0 4px;
+  padding: 2px 10px;
 }
 
 #crm .pc-daily-ops-heading {
@@ -445,6 +445,14 @@
 #crm button.pc-daily-ops-item .pc-supervised-attention-action {
   margin-top: 0;
   line-height: 1.1;
+}
+
+@media (min-width: 1200px) and (max-width: 1320px) {
+  #crm button.pc-supervised-attention-item.pc-daily-ops-item {
+    grid-template-areas:
+      "priority name name"
+      "when reason action";
+  }
 }
 
 @media (min-width: 721px) and (max-width: 1199px) {
@@ -516,25 +524,27 @@
   #crm button.pc-supervised-attention-item.pc-daily-ops-item {
     min-height: 44px;
     padding: 2px 3px;
-    grid-template-columns: minmax(0, .7fr) minmax(0, 1fr) minmax(0, 1fr);
-    grid-template-areas: none;
-    grid-auto-flow: row;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    grid-template-areas:
+      "priority name when"
+      "reason reason reason"
+      "action action action";
     column-gap: 3px;
     row-gap: 0;
     align-content: center;
     align-items: center;
   }
 
-  #crm button.pc-daily-ops-item > * {
-    grid-area: auto;
-  }
-
   #crm button.pc-daily-ops-item .pc-supervised-attention-name,
   #crm button.pc-daily-ops-item .pc-supervised-attention-reason,
-  #crm button.pc-daily-ops-item .pc-supervised-attention-action,
+  #crm button.pc-daily-ops-item .pc-supervised-attention-action {
+    font-size: .625rem;
+    line-height: 1.05;
+  }
+
   #crm button.pc-daily-ops-item .pc-daily-ops-when,
   #crm button.pc-daily-ops-item .pc-daily-ops-priority {
-    font-size: .6rem;
+    font-size: .56rem;
     line-height: 1.05;
   }
 }
