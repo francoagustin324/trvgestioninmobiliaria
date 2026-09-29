@@ -19,6 +19,7 @@ on:
       - security/ordenbroker-block2e-authorized-identity-hardening
       - security/ordenbroker-block2f-multidevice-concurrency-cas
       - feature/ordenbroker-block2g-daily-operations-zero-training
+      - feature/ordenbroker-block2h-commercial-alerts-automation
   schedule:
     - cron: "0 10 * * *"
   workflow_dispatch:
