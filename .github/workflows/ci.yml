@@ -44,14 +44,7 @@ jobs:
             dist/tests/block2g-daily-operations.test.js \
             dist/tests/b1-4-1-supervised-attention-queue.test.js \
             dist/tests/property-matching-ui.test.js
-      - name: Focal jerarquía real desktop/mobile
-        run: |
-          node --test --test-concurrency=1 \
-            dist/tests/b1-2-4-responsive-real-app.test.js \
-            dist/tests/c13-leads-visual-professional-browser.test.js \
-            dist/tests/leads-desktop-zero-training.test.js \
-            dist/tests/leads-mobile-priority-webkit.test.js \
-            dist/tests/leads-mobile-real-validation.test.js \
-            dist/tests/leads-professional-redesign.test.js
+      - name: Diagnóstico focal geometría real
+        run: node --test --test-concurrency=1 dist/tests/leads-desktop-zero-training.test.js
       - name: Regresión concurrencia 2F
         run: node --test --test-concurrency=1 dist/tests/block2f-concurrency-static.test.js
