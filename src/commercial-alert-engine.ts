@@ -275,10 +275,11 @@ function reservationMovementAt(reservation: Reservation, activities: readonly Ac
 }
 
 function confirmationDetailMatches(visit: Visit, detail: string): boolean {
+  const syncedVisit = visit as Visit & { uid?: string };
   const scheduled = detail.match(/(?:^|\n)scheduledAt=(.*?)(?:\n|$)/)?.[1]?.trim();
   if (scheduled !== visit.scheduledAt) return false;
   const visitUid = detail.match(/(?:^|\n)visitUid=(.*?)(?:\n|$)/)?.[1]?.trim();
-  if (visit.uid && visitUid) return visitUid === visit.uid;
+  if (syncedVisit.uid && visitUid) return visitUid === syncedVisit.uid;
   const visitId = Number(detail.match(/(?:^|\n)visitId=(\d+)(?:\n|$)/)?.[1]);
   return Number.isFinite(visitId) && visitId === visit.id;
 }
@@ -296,9 +297,10 @@ export function visitConfirmationActive(
 }
 
 export function visitConfirmationDetail(visit: Visit): string {
+  const syncedVisit = visit as Visit & { uid?: string };
   return [
     `visitId=${visit.id}`,
-    visit.uid ? `visitUid=${visit.uid}` : '',
+    syncedVisit.uid ? `visitUid=${syncedVisit.uid}` : '',
     `scheduledAt=${visit.scheduledAt}`,
   ].filter(Boolean).join('\n');
 }
