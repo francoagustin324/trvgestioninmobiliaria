@@ -399,7 +399,7 @@
 #crm .pc-supervised-attention-queue.pc-daily-ops-queue {
   grid-template-columns: 270px minmax(0, 1fr);
   gap: 8px;
-  padding: 8px 10px;
+  padding: 6px 10px;
 }
 
 #crm .pc-daily-ops-heading {
