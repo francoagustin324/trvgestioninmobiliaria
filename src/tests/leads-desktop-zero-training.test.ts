@@ -618,6 +618,24 @@ test('PR143 desktop cero capacitación Chromium + regresión móvil', { timeout:
       const distance = await firstLeadDistance(page);
       console.log(`PR143_AFTER_${viewport.width}x${viewport.height}=${distance}`);
       if (viewport.width === 1366) {
+        const attentionGeometry = await page.evaluate(() => {
+          const queue = document.querySelector<HTMLElement>('#crm [data-supervised-attention-queue]');
+          const list = queue?.querySelector<HTMLElement>('.pc-daily-ops-list, .pc-supervised-attention-list');
+          const items = list ? Array.from(list.querySelectorAll<HTMLElement>('.pc-supervised-attention-item')) : [];
+          const rect = queue?.getBoundingClientRect();
+          return {
+            queueClass: queue?.className ?? '',
+            queueHeight: rect?.height ?? 0,
+            gridTemplateColumns: list ? getComputedStyle(list).gridTemplateColumns : '',
+            listHeight: list?.getBoundingClientRect().height ?? 0,
+            itemCount: items.length,
+            itemHeights: items.map((item) => item.getBoundingClientRect().height),
+            itemMinHeights: items.map((item) => getComputedStyle(item).minHeight),
+            itemPadding: items.map((item) => getComputedStyle(item).padding),
+          };
+        });
+        console.log(`PR143_ATTENTION_GEOMETRY=${JSON.stringify(attentionGeometry)}`);
+
         assert.ok(distance <= TARGET_1366_DISTANCE + 0.5, `1366 debe reducir al menos 20%: ${distance} <= ${TARGET_1366_DISTANCE}.`);
       }
       if (viewport.width === 1024) {
