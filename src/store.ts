@@ -309,7 +309,7 @@ export function resetTransientState(): void {
   transientStateResetHandlers.forEach((handler) => handler());
 }
 
-function reconcileAuthorizedCommercialAlerts(scope: TenantScope, now = new Date()): boolean {
+export function reconcileAuthorizedCommercialAlerts(scope: TenantScope, now = new Date()): boolean {
   const member = authenticatedTenantMember(scope);
   if (!member) return false;
   const before = JSON.stringify(state.crm.commercialAlerts ?? []);
