@@ -225,7 +225,7 @@
 
 .pc-daily-ops-list {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 8px;
   min-width: 0;
 }
@@ -297,9 +297,9 @@
 @media (max-width: 720px) {
   .pc-daily-ops-queue {
     grid-template-columns: minmax(0, 1fr);
-    gap: 8px;
+    gap: 6px;
     margin: 4px 0 8px;
-    padding: 9px;
+    padding: 7px;
     overflow-x: hidden;
   }
 
@@ -322,18 +322,18 @@
 
   .pc-daily-ops-list {
     grid-template-columns: minmax(0, 1fr);
-    gap: 6px;
+    gap: 4px;
   }
 
   .pc-daily-ops-item.pc-supervised-attention-item {
-    min-height: 58px;
+    min-height: 48px;
     grid-template-columns: auto minmax(0, 1fr) auto;
     grid-template-areas:
       "priority name when"
       "reason reason reason"
       "action action action";
-    gap: 3px 6px;
-    padding: 7px 8px;
+    gap: 2px 6px;
+    padding: 3px 7px;
   }
 
   .pc-daily-ops-item .pc-supervised-attention-name,
