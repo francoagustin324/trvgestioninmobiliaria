@@ -40,6 +40,31 @@ export type OfferOrigin = 'Cliente' | 'Propietario';
 export type OfferStatus = 'Pendiente' | 'Aceptada' | 'Rechazada' | 'Contraofertada' | 'Retirada';
 export type OfferCurrency = 'USD' | 'ARS';
 export type ReservationStatus = 'Activa' | 'Cancelada' | 'Concretada';
+export type CommercialAlertState = 'ACTIVE' | 'RESOLVED' | 'DISMISSED';
+export type CommercialAlertPriority = 'CRÍTICO' | 'ALTO' | 'NORMAL';
+export type CommercialAlertType =
+  | 'NEW_LEAD_UNATTENDED'
+  | 'FOLLOW_UP_OVERDUE'
+  | 'FORGOTTEN_LEAD'
+  | 'VISIT_UNCONFIRMED'
+  | 'VISIT_RESULT_MISSING'
+  | 'OFFER_STALLED'
+  | 'RESERVATION_STALLED'
+  | 'ADVANCED_NO_NEXT_ACTION'
+  | 'NEW_RELEVANT_MATCH'
+  | 'TASK_OVERDUE';
+export type CommercialAlertTarget = 'lead' | 'visits' | 'offers' | 'reservations' | 'matches' | 'agenda';
+export type CommercialAlertActionType =
+  | 'CONTACT_LEAD'
+  | 'REPROGRAM_FOLLOW_UP'
+  | 'RESUME_CONTACT'
+  | 'CONFIRM_VISIT'
+  | 'LOAD_VISIT_RESULT'
+  | 'REVIEW_OFFER'
+  | 'REVIEW_RESERVATION'
+  | 'DEFINE_NEXT_ACTION'
+  | 'REVIEW_MATCH'
+  | 'RESOLVE_TASK';
 
 /**
  * Foundation A7-R1. `id:number` permanece como identidad legacy/backward-compatible.
@@ -236,6 +261,34 @@ export interface Reminder extends SyncRecordMetadata {
   assignedToId?: number; createdById?: number;
 }
 
+export interface CommercialAlert extends SyncRecordMetadata {
+  id: number;
+  organizationId: string;
+  type: CommercialAlertType;
+  entityType: 'client' | 'visit' | 'offer' | 'reservation' | 'match' | 'reminder';
+  entityId: number;
+  ownerId?: number;
+  priority: CommercialAlertPriority;
+  rank: number;
+  reason: string;
+  state: CommercialAlertState;
+  createdAt: string;
+  updatedAt: string;
+  dueAt?: string;
+  resolvedAt?: string;
+  dismissedAt?: string;
+  actionType: CommercialAlertActionType;
+  action: string;
+  target: CommercialAlertTarget;
+  name: string;
+  when: string;
+  dedupeKey: string;
+  conditionVersion: string;
+  clientId?: number;
+  propertyId?: number;
+  sourceId?: number;
+}
+
 export interface ConversationMessage {
   id: number;
   direction: 'inbound' | 'outbound';
@@ -301,6 +354,7 @@ export interface CrmData {
   reservations: Reservation[];
   contacts: CommercialContact[];
   reminders: Reminder[];
+  commercialAlerts: CommercialAlert[];
   fichas: Ficha[];
   conversations: WhatsAppConversation[];
   settings: Settings;
@@ -400,6 +454,7 @@ export const initialData: CrmData = {
   visits: [],
   offers: [],
   reservations: [],
+  commercialAlerts: [],
   reminders: [{
     id: 1, date: '2026-07-13', title: 'Llamar a Lucía', related: 'Búsqueda Nueva Córdoba', priority: 'Alta',
     assignedToId: 1, createdById: 1,
