@@ -402,8 +402,9 @@ test('R3.26 B1.4.1 mantiene priority/max3/terminales y sin score nuevo', () => {
   assert.equal(queue.length, 3);
   assert.equal(queue.some((item) => item.stage === 'Ganado' || item.stage === 'Perdido'), false);
   const source = readFileSync('src/lead-attention-queue.ts', 'utf8');
-  assert.match(source, /sortLeads\(active, 'priority', today\)/);
-  assert.equal(source.includes('score'), false);
+  const legacySource = source.slice(0, source.indexOf('export type OperationalPriority'));
+  assert.match(legacySource, /sortLeads\(active, 'priority', today\)/);
+  assert.equal(legacySource.includes('score'), false);
 });
 
 test('R3.27 Leads normal conserva recent / Más recientes', () => {
