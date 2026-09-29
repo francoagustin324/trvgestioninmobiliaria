@@ -1,5 +1,4 @@
 import { queueCloudSave } from './cloud-api-compatible.js';
-import { reconcileEvaluatedCommercialAlerts } from './commercial-alert-engine.js';
 import type { TenantScope } from './active-organization.js';
 import type {
   ActivityEntry,
@@ -148,7 +147,6 @@ function normalizedActivityLog(value: unknown): ActivityEntry[] {
 }
 
 function normalizedData(value: Partial<CrmData>): CrmData {
-  const organization = normalizedOrganization(value.organization);
   const teamMembers = normalizedTeamMembers(value.teamMembers);
   const ownerId = teamMembers.find((member) => member.role === 'Dueño')?.id ?? teamMembers[0]?.id ?? 1;
   const activityLog = normalizedActivityLog(value.activityLog);
@@ -167,7 +165,7 @@ function normalizedData(value: Partial<CrmData>): CrmData {
     };
   }) : [];
   return {
-    organization,
+    organization: normalizedOrganization(value.organization),
     teamMembers,
     activityLog,
     clients,
@@ -207,15 +205,6 @@ function normalizedData(value: Partial<CrmData>): CrmData {
       assignedToId: Number(reminder.assignedToId ?? ownerId),
       createdById: Number(reminder.createdById ?? ownerId),
     })) : [],
-    commercialAlerts: Array.isArray(value.commercialAlerts)
-      ? value.commercialAlerts
-        .filter((alert) => alert.organizationId === organization.id)
-        .map((alert) => ({
-          ...alert,
-          ...normalizedSyncMetadata(alert),
-          ...(Number.isFinite(Number(alert.ownerId)) ? { ownerId: Number(alert.ownerId) } : {}),
-        }))
-      : [],
     fichas: Array.isArray(value.fichas) ? value.fichas.map((ficha) => ({
       ...ficha,
       ...normalizedSyncMetadata(ficha),
@@ -309,56 +298,9 @@ export function resetTransientState(): void {
   transientStateResetHandlers.forEach((handler) => handler());
 }
 
-export function reconcileAuthorizedCommercialAlerts(scope: TenantScope, now = new Date()): boolean {
-  const member = authenticatedTenantMember(scope);
-  if (!member) return false;
-  const existing = state.crm.commercialAlerts ?? [];
-  const before = JSON.stringify(existing);
-  const scopedExisting = member.role === 'Corredor'
-    ? existing.filter((alert) => alert.ownerId === member.id)
-    : existing;
-  const preserved = member.role === 'Corredor'
-    ? existing.filter((alert) => alert.ownerId !== member.id)
-    : [];
-  const reconciled = reconcileEvaluatedCommercialAlerts({
-    organizationId: scope.organizationId,
-    clients: state.crm.clients,
-    properties: state.crm.properties,
-    visits: state.crm.visits,
-    offers: state.crm.offers,
-    reservations: state.crm.reservations,
-    reminders: state.crm.reminders,
-    activityLog: state.crm.activityLog,
-    actor: { id: member.id, role: member.role },
-    now,
-  }, scopedExisting);
-  const maxPreservedId = Math.max(0, ...preserved.map((alert) => Number(alert.id) || 0));
-  const usedIds = new Set(preserved.map((alert) => alert.id));
-  let nextId = Math.max(maxPreservedId, ...reconciled.map((alert) => Number(alert.id) || 0), 0) + 1;
-  const collisionSafe = reconciled.map((alert) => {
-    if (!usedIds.has(alert.id)) {
-      usedIds.add(alert.id);
-      return alert;
-    }
-    const rewritten = { ...alert, id: nextId++ };
-    usedIds.add(rewritten.id);
-    return rewritten;
-  });
-  state.crm.commercialAlerts = [...preserved, ...collisionSafe];
-  return JSON.stringify(state.crm.commercialAlerts) !== before;
-}
-
 export function activateStorageForTenant(scope: TenantScope): void {
   state.crm = loadData(scope);
   assertTenantCrmScope(scope, state.crm);
-  const changed = reconcileAuthorizedCommercialAlerts(scope);
-  if (changed) {
-    writeTenantSnapshot(scope, state.crm, {
-      markDirty: true,
-      reason: 'Alertas comerciales reconciliadas al iniciar',
-      backup: false,
-    });
-  }
   resetTransientState();
 }
 
@@ -388,12 +330,11 @@ export function replaceDataForTenant(scope: TenantScope, data: CrmData, syncClou
   assertTenantCrmScope(scope, data);
   const normalized = normalizedData(data);
   assertTenantCrmScope(scope, normalized);
-  state.crm = normalized;
-  const alertsChanged = reconcileAuthorizedCommercialAlerts(scope);
-  writeTenantSnapshot(scope, state.crm, {
-    markDirty: syncCloud || alertsChanged,
-    reason: syncCloud ? 'Restauración local' : alertsChanged ? 'Carga cloud + alertas reconciliadas' : 'Carga desde la nube',
+  writeTenantSnapshot(scope, normalized, {
+    markDirty: syncCloud,
+    reason: syncCloud ? 'Restauración local' : 'Carga desde la nube',
   });
+  state.crm = normalized;
   resetTransientState();
   if (syncCloud) queueCloudSave(scope, state.crm);
   return true;
@@ -409,7 +350,6 @@ export function replaceData(data: CrmData, syncCloud = false): void {
 export function saveData(reason = 'Cambio local'): void {
   const scope = requireCurrentTenantScope();
   assertTenantCrmScope(scope, state.crm);
-  reconcileAuthorizedCommercialAlerts(scope);
   writeTenantSnapshot(scope, state.crm, { markDirty: true, reason });
   queueCloudSave(scope, state.crm);
 }
@@ -462,18 +402,17 @@ export function restoreLatestLocalBackupForTenant(
 
   assertTenantRuntimeLeaseCurrent(runtimeLease);
   state.crm = structuredClone(restoredSnapshot);
-  reconcileAuthorizedCommercialAlerts(scope);
   resetTransientState();
 
   assertTenantRuntimeLeaseCurrent(runtimeLease);
-  writeTenantSnapshot(scope, state.crm, {
+  writeTenantSnapshot(scope, restoredSnapshot, {
     markDirty: true,
     reason: 'Restauración confirmada',
     backup: false,
   });
 
   assertTenantRuntimeLeaseCurrent(runtimeLease);
-  queueCloudSave(scope, state.crm);
+  queueCloudSave(scope, restoredSnapshot);
   return true;
 }
 
