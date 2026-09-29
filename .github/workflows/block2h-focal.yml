@@ -27,5 +27,16 @@ jobs:
         run: npm ci --silent
       - name: Compilar TypeScript
         run: npm run build --silent
-      - name: Ejecutar focal Block 2H
-        run: node --test --test-concurrency=1 dist/tests/block2h-commercial-alerts.test.js
+      - name: Ejecutar focal Block 2H y regresiones críticas
+        run: |
+          node --test --test-concurrency=1 \
+            dist/tests/block2h-commercial-alerts.test.js \
+            dist/tests/block2e-authorized-identity-hardening.test.js \
+            dist/tests/block2f-concurrency-static.test.js \
+            dist/tests/block2g-daily-operations.test.js \
+            dist/tests/p1-1-a2-visit-workflow.test.js \
+            dist/tests/p1-1-a4-offer-workflow.test.js \
+            dist/tests/p1-1-a6-reservation-workflow.test.js \
+            dist/tests/property-matching.test.js \
+            dist/tests/agenda-workflow.test.js \
+            dist/tests/followup-cloud-persistence.test.js
