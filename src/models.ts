@@ -354,7 +354,7 @@ export interface CrmData {
   reservations: Reservation[];
   contacts: CommercialContact[];
   reminders: Reminder[];
-  commercialAlerts: CommercialAlert[];
+  commercialAlerts?: CommercialAlert[];
   fichas: Ficha[];
   conversations: WhatsAppConversation[];
   settings: Settings;
