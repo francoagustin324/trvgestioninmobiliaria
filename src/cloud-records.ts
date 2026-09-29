@@ -266,7 +266,7 @@ export function crmToCloudRecords(
     ...visibleToCurrentMember(reconciled.visits, context).map((item) => row(org, 'visit', identity(item), assignedId(item, member), item, userId)),
     ...visibleToCurrentMember(reconciled.offers, context).map((item) => row(org, 'offer', identity(item), assignedId(item, member), item, userId)),
     ...visibleToCurrentMember(reconciled.reservations, context).map((item) => row(org, 'reservation', identity(item), assignedId(item, member), item, userId)),
-    ...reconciled.commercialAlerts
+    ...(reconciled.commercialAlerts ?? [])
       .filter((alert) => elevated || alert.ownerId === member)
       .map((alert) => row(org, 'commercial_alert', alert.dedupeKey, Number(alert.ownerId ?? member), alert, userId)),
     ...visibleToCurrentMember(reconciled.contacts, context).map((item) => row(org, 'commercial_contact', identity(item), assignedId(item, member), item, userId)),
