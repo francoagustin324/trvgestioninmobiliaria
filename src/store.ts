@@ -312,8 +312,15 @@ export function resetTransientState(): void {
 export function reconcileAuthorizedCommercialAlerts(scope: TenantScope, now = new Date()): boolean {
   const member = authenticatedTenantMember(scope);
   if (!member) return false;
-  const before = JSON.stringify(state.crm.commercialAlerts ?? []);
-  state.crm.commercialAlerts = reconcileEvaluatedCommercialAlerts({
+  const existing = state.crm.commercialAlerts ?? [];
+  const before = JSON.stringify(existing);
+  const scopedExisting = member.role === 'Corredor'
+    ? existing.filter((alert) => alert.ownerId === member.id)
+    : existing;
+  const preserved = member.role === 'Corredor'
+    ? existing.filter((alert) => alert.ownerId !== member.id)
+    : [];
+  const reconciled = reconcileEvaluatedCommercialAlerts({
     organizationId: scope.organizationId,
     clients: state.crm.clients,
     properties: state.crm.properties,
@@ -324,7 +331,20 @@ export function reconcileAuthorizedCommercialAlerts(scope: TenantScope, now = ne
     activityLog: state.crm.activityLog,
     actor: { id: member.id, role: member.role },
     now,
-  }, state.crm.commercialAlerts ?? []);
+  }, scopedExisting);
+  const maxPreservedId = Math.max(0, ...preserved.map((alert) => Number(alert.id) || 0));
+  const usedIds = new Set(preserved.map((alert) => alert.id));
+  let nextId = Math.max(maxPreservedId, ...reconciled.map((alert) => Number(alert.id) || 0), 0) + 1;
+  const collisionSafe = reconciled.map((alert) => {
+    if (!usedIds.has(alert.id)) {
+      usedIds.add(alert.id);
+      return alert;
+    }
+    const rewritten = { ...alert, id: nextId++ };
+    usedIds.add(rewritten.id);
+    return rewritten;
+  });
+  state.crm.commercialAlerts = [...preserved, ...collisionSafe];
   return JSON.stringify(state.crm.commercialAlerts) !== before;
 }
 
