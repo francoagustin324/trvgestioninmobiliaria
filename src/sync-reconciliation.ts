@@ -7,7 +7,7 @@ import {
 } from './tenant-storage.js';
 
 export interface ReconciliationDifference {
-  key: keyof Pick<CrmData, 'clients' | 'properties' | 'visits' | 'offers' | 'reservations' | 'contacts' | 'reminders' | 'fichas' | 'conversations' | 'activityLog'>;
+  key: keyof Pick<CrmData, 'clients' | 'properties' | 'visits' | 'offers' | 'reservations' | 'commercialAlerts' | 'contacts' | 'reminders' | 'fichas' | 'conversations' | 'activityLog'>;
   label: string;
   localOnly: string[];
   cloudOnly: string[];
@@ -36,6 +36,7 @@ const COLLECTIONS: Array<{
   { key: 'visits', label: 'visitas' },
   { key: 'offers', label: 'ofertas' },
   { key: 'reservations', label: 'reservas' },
+  { key: 'commercialAlerts', label: 'alertas comerciales' },
   { key: 'contacts', label: 'contactos' },
   { key: 'reminders', label: 'seguimientos' },
   { key: 'fichas', label: 'fichas' },
@@ -64,9 +65,13 @@ function mergeCollection(localValue: unknown, cloudValue: unknown): {
 } {
   const local = identifiedItems(localValue);
   const cloud = identifiedItems(cloudValue);
-  const localById = new Map(local.map((item) => [item.id, item]));
-  const cloudById = new Map(cloud.map((item) => [item.id, item]));
-  const ids = [...new Set([...localById.keys(), ...cloudById.keys()])].sort((left, right) => left - right);
+  const mergeKey = (item: Identified): string => {
+    const dedupeKey = typeof item.dedupeKey === 'string' ? item.dedupeKey.trim() : '';
+    return dedupeKey ? `dedupe:${dedupeKey}` : `id:${item.id}`;
+  };
+  const localById = new Map(local.map((item) => [mergeKey(item), item]));
+  const cloudById = new Map(cloud.map((item) => [mergeKey(item), item]));
+  const ids = [...new Set([...localById.keys(), ...cloudById.keys()])].sort();
   const merged: Identified[] = [];
   const localOnly: string[] = [];
   const cloudOnly: string[] = [];
