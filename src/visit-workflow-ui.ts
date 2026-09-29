@@ -1,4 +1,6 @@
 import { missingQualificationQuestions, visitReadiness } from './lead-qualification.js';
+import { visitConfirmationActive } from './commercial-alert-engine.js';
+import { confirmScheduledVisit } from './visit-confirmation.js';
 import { isTerminalClient, localIsoDate } from './lead-pipeline.js';
 import type { Client, Property, SyncedVisit, Visit, VisitInterest, VisitStatus } from './models.js';
 import { authenticatedTenantMember, state } from './store.js';
@@ -140,11 +142,19 @@ function outcomeBlock(client: Client, visit: Visit): string {
 function visitRow(client: Client, visit: Visit): string {
   const property = propertyForVisit(visit);
   const propertyLabel = property ? visitPropertyLabel(property) : `Propiedad #${visit.propertyId}`;
+  const confirmed = visitConfirmationActive(visit, state.crm.activityLog);
+  const futureCoordinated = visit.status === 'Coordinada' && Date.parse(visit.scheduledAt) >= Date.now();
+  const confirmation = confirmed
+    ? '<span class="pc-visit-confirmed">Visita confirmada</span>'
+    : futureCoordinated
+      ? `<button type="button" class="pc-visit-confirm-button" data-confirm-visit="${visit.id}">Confirmar visita</button><span class="pc-visit-confirm-error" data-visit-confirm-error="${visit.id}" role="alert" hidden></span>`
+      : '';
   return `<article class="pc-visit-row" data-visit-id="${visit.id}">
     <div class="pc-visit-row-head">
       <div><strong>${escapeHtml(propertyLabel)}</strong><time>${escapeHtml(formatScheduledAt(visit.scheduledAt))}</time></div>
       <span class="pc-visit-status status-${statusClass(visit.status)}">${escapeHtml(visit.status)}</span>
     </div>
+    ${confirmation}
     ${visit.interest ? `<p class="pc-visit-interest"><span>Interés</span><strong>${escapeHtml(visit.interest)}</strong></p>` : ''}
     ${visit.objection ? `<p class="pc-visit-objection">${escapeHtml(visit.objection)}</p>` : ''}
     ${outcomeBlock(client, visit)}
@@ -320,7 +330,29 @@ async function registerResultFromForm(form: HTMLFormElement): Promise<void> {
 }
 
 function bindEvents(): void {
-  document.addEventListener('submit', (event) => {
+  document.addEventListener('click', (event) => {
+  const button = (event.target as HTMLElement).closest<HTMLButtonElement>('button[data-confirm-visit]');
+  if (!button || button.dataset.submitting === 'true') return;
+  const visitId = Number(button.dataset.confirmVisit);
+  if (!visitId) return;
+  button.dataset.submitting = 'true';
+  button.disabled = true;
+  const row = button.closest<HTMLElement>('[data-visit-id]');
+  const output = row?.querySelector<HTMLElement>(`[data-visit-confirm-error="${visitId}"]`);
+  if (output) { output.hidden = true; output.textContent = ''; }
+  void confirmScheduledVisit(visitId).catch((error) => {
+    if (button.isConnected) {
+      button.dataset.submitting = 'false';
+      button.disabled = false;
+    }
+    if (output?.isConnected) {
+      output.textContent = error instanceof Error ? error.message : 'No se pudo confirmar la visita.';
+      output.hidden = false;
+    }
+  });
+});
+
+document.addEventListener('submit', (event) => {
     const form = event.target as HTMLFormElement;
     if (!(form instanceof HTMLFormElement)) return;
     if (form.matches('[data-coordinate-visit]')) {
