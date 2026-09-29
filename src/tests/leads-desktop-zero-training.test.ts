@@ -629,9 +629,20 @@ test('PR143 desktop cero capacitación Chromium + regresión móvil', { timeout:
             gridTemplateColumns: list ? getComputedStyle(list).gridTemplateColumns : '',
             listHeight: list?.getBoundingClientRect().height ?? 0,
             itemCount: items.length,
+            itemClasses: items.map((item) => item.className),
             itemHeights: items.map((item) => item.getBoundingClientRect().height),
             itemMinHeights: items.map((item) => getComputedStyle(item).minHeight),
             itemPadding: items.map((item) => getComputedStyle(item).padding),
+            itemDisplay: items.map((item) => getComputedStyle(item).display),
+            itemGridAreas: items.map((item) => getComputedStyle(item).gridTemplateAreas),
+            reasonWhiteSpace: items.map((item) => {
+              const node = item.querySelector<HTMLElement>('.pc-supervised-attention-reason');
+              return node ? getComputedStyle(node).whiteSpace : '';
+            }),
+            actionWhiteSpace: items.map((item) => {
+              const node = item.querySelector<HTMLElement>('.pc-supervised-attention-action');
+              return node ? getComputedStyle(node).whiteSpace : '';
+            }),
           };
         });
         console.log(`PR143_ATTENTION_GEOMETRY=${JSON.stringify(attentionGeometry)}`);
