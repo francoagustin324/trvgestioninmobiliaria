@@ -309,9 +309,36 @@ export function resetTransientState(): void {
   transientStateResetHandlers.forEach((handler) => handler());
 }
 
+function reconcileAuthorizedCommercialAlerts(scope: TenantScope, now = new Date()): boolean {
+  const member = authenticatedTenantMember(scope);
+  if (!member) return false;
+  const before = JSON.stringify(state.crm.commercialAlerts ?? []);
+  state.crm.commercialAlerts = reconcileEvaluatedCommercialAlerts({
+    organizationId: scope.organizationId,
+    clients: state.crm.clients,
+    properties: state.crm.properties,
+    visits: state.crm.visits,
+    offers: state.crm.offers,
+    reservations: state.crm.reservations,
+    reminders: state.crm.reminders,
+    activityLog: state.crm.activityLog,
+    actor: { id: member.id, role: member.role },
+    now,
+  }, state.crm.commercialAlerts ?? []);
+  return JSON.stringify(state.crm.commercialAlerts) !== before;
+}
+
 export function activateStorageForTenant(scope: TenantScope): void {
   state.crm = loadData(scope);
   assertTenantCrmScope(scope, state.crm);
+  const changed = reconcileAuthorizedCommercialAlerts(scope);
+  if (changed) {
+    writeTenantSnapshot(scope, state.crm, {
+      markDirty: true,
+      reason: 'Alertas comerciales reconciliadas al iniciar',
+      backup: false,
+    });
+  }
   resetTransientState();
 }
 
@@ -341,11 +368,12 @@ export function replaceDataForTenant(scope: TenantScope, data: CrmData, syncClou
   assertTenantCrmScope(scope, data);
   const normalized = normalizedData(data);
   assertTenantCrmScope(scope, normalized);
-  writeTenantSnapshot(scope, normalized, {
-    markDirty: syncCloud,
-    reason: syncCloud ? 'Restauración local' : 'Carga desde la nube',
-  });
   state.crm = normalized;
+  const alertsChanged = reconcileAuthorizedCommercialAlerts(scope);
+  writeTenantSnapshot(scope, state.crm, {
+    markDirty: syncCloud || alertsChanged,
+    reason: syncCloud ? 'Restauración local' : alertsChanged ? 'Carga cloud + alertas reconciliadas' : 'Carga desde la nube',
+  });
   resetTransientState();
   if (syncCloud) queueCloudSave(scope, state.crm);
   return true;
@@ -361,20 +389,7 @@ export function replaceData(data: CrmData, syncCloud = false): void {
 export function saveData(reason = 'Cambio local'): void {
   const scope = requireCurrentTenantScope();
   assertTenantCrmScope(scope, state.crm);
-  const member = authenticatedTenantMember(scope);
-  if (member) {
-    state.crm.commercialAlerts = reconcileEvaluatedCommercialAlerts({
-      organizationId: scope.organizationId,
-      clients: state.crm.clients,
-      properties: state.crm.properties,
-      visits: state.crm.visits,
-      offers: state.crm.offers,
-      reservations: state.crm.reservations,
-      reminders: state.crm.reminders,
-      activityLog: state.crm.activityLog,
-      actor: { id: member.id, role: member.role },
-    }, state.crm.commercialAlerts ?? []);
-  }
+  reconcileAuthorizedCommercialAlerts(scope);
   writeTenantSnapshot(scope, state.crm, { markDirty: true, reason });
   queueCloudSave(scope, state.crm);
 }
@@ -427,17 +442,18 @@ export function restoreLatestLocalBackupForTenant(
 
   assertTenantRuntimeLeaseCurrent(runtimeLease);
   state.crm = structuredClone(restoredSnapshot);
+  reconcileAuthorizedCommercialAlerts(scope);
   resetTransientState();
 
   assertTenantRuntimeLeaseCurrent(runtimeLease);
-  writeTenantSnapshot(scope, restoredSnapshot, {
+  writeTenantSnapshot(scope, state.crm, {
     markDirty: true,
     reason: 'Restauración confirmada',
     backup: false,
   });
 
   assertTenantRuntimeLeaseCurrent(runtimeLease);
-  queueCloudSave(scope, restoredSnapshot);
+  queueCloudSave(scope, state.crm);
   return true;
 }
 
