@@ -199,9 +199,11 @@ export function reconcileCrmAssignments(crm: CrmData, context: CloudMembershipCo
     offers: Array.isArray(crm.offers) ? crm.offers.map(assigned) : [],
     reservations: Array.isArray(crm.reservations) ? crm.reservations.map(assigned) : [],
     commercialAlerts: Array.isArray(crm.commercialAlerts)
-      ? crm.commercialAlerts
-        .filter((alert) => alert.organizationId === context.organizationId)
-        .map((alert) => ({ ...alert, ownerId: memberId(alert.ownerId) }))
+      ? crm.commercialAlerts.filter((alert) => (
+          alert.organizationId === context.organizationId
+          && alert.ownerId !== undefined
+          && validMemberIds.has(alert.ownerId)
+        ))
       : [],
     contacts: crm.contacts.map(assigned),
     reminders: crm.reminders.map(assigned),
