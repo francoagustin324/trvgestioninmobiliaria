@@ -144,7 +144,6 @@ function renderAttentionQueue(container: HTMLElement): void {
   const markup = member
     ? renderOperationalAttentionQueue({
         organizationId: state.crm.organization.id,
-        commercialAlerts: state.crm.commercialAlerts ?? [],
         clients,
         properties: visibleProperties(),
         visits: state.crm.visits,
