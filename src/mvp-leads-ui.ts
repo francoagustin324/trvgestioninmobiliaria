@@ -37,7 +37,8 @@ import {
   openEntityReadOnly,
   returnToEntityReadOnly,
 } from './entity-read-navigation.js';
-import { MATCH_DISMISSED_ACTION, matchDismissalActive, matchPropertiesForClient, type PropertyMatch } from './property-matching.js';
+import { matchPropertiesForClient, type PropertyMatch } from './property-matching.js';
+import { MATCH_DISMISSED_ACTION, matchDismissalActive } from './property-matching.js';
 import { saveData, state } from './store.js';
 import { addActivityForAuthenticatedTenant, memberName, visibleClients, visibleProperties } from './team-access.js';
 import { requireCurrentTenantScope } from './tenant-runtime.js';
@@ -117,9 +118,8 @@ function matchesForLead(client: Client): string {
   if (isTerminalClient(client)) return '';
   const properties = visibleProperties();
   if (!properties.length) return '<p class="mvp-match-empty">Todavía no hay propiedades cargadas para comparar.</p>';
-  const matches = matchPropertiesForClient(client, properties)
-    .filter((match) => !matchDismissalActive(client, match.property, state.crm.activityLog))
-    .slice(0, 3);
+  const matches = matchPropertiesForClient(client, properties).slice(0, 3)
+    .filter((match) => !matchDismissalActive(client, match.property, state.crm.activityLog));
   if (!matches.length) return '<p class="mvp-match-empty">No hay coincidencias claras con las propiedades disponibles.</p>';
   const best = matches[0]!;
   return `<details class="mvp-lead-matches">
