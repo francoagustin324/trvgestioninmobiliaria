@@ -394,3 +394,98 @@
     font-size: .625rem;
   }
 }
+
+/* Block 2G: la cola operativa conserva su layout propio por encima del hotfix C13 legacy. */
+#crm .pc-supervised-attention-queue.pc-daily-ops-queue {
+  grid-template-columns: minmax(180px, .62fr) minmax(0, 2.38fr);
+  gap: 8px;
+  padding: 8px 10px;
+}
+
+#crm .pc-daily-ops-heading {
+  display: grid;
+  align-content: center;
+  align-items: start;
+  justify-content: stretch;
+  gap: 4px;
+}
+
+#crm .pc-daily-ops-summary {
+  justify-content: flex-start;
+  gap: 3px;
+}
+
+#crm .pc-daily-ops-summary :is(b, span) {
+  padding: 2px 5px;
+  font-size: .6rem;
+}
+
+#crm .pc-daily-ops-list {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+}
+
+#crm button.pc-supervised-attention-item.pc-daily-ops-item {
+  min-height: 48px;
+  padding: 4px 6px;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-areas:
+    "priority name when"
+    "reason reason action";
+  align-content: center;
+  align-items: center;
+  column-gap: 5px;
+  row-gap: 2px;
+  line-height: 1.1;
+}
+
+#crm button.pc-daily-ops-item .pc-supervised-attention-name,
+#crm button.pc-daily-ops-item .pc-supervised-attention-reason,
+#crm button.pc-daily-ops-item .pc-supervised-attention-action {
+  margin-top: 0;
+  line-height: 1.1;
+}
+
+@media (max-width: 720px) {
+  #crm .pc-supervised-attention-queue.pc-daily-ops-queue {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 4px;
+    margin: 3px 0 5px;
+    padding: 4px;
+  }
+
+  #crm .pc-daily-ops-heading {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 6px;
+  }
+
+  #crm .pc-daily-ops-summary {
+    flex-wrap: nowrap;
+    justify-content: flex-end;
+    gap: 2px;
+  }
+
+  #crm .pc-daily-ops-summary :is(b, span) {
+    padding: 2px 4px;
+    font-size: .58rem;
+  }
+
+  #crm .pc-daily-ops-list {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 3px;
+  }
+
+  #crm button.pc-supervised-attention-item.pc-daily-ops-item {
+    min-height: 44px;
+    padding: 2px 4px;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    grid-template-areas:
+      "priority name when"
+      "reason action action";
+    column-gap: 4px;
+    row-gap: 1px;
+  }
+}
+
