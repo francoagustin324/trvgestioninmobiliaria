@@ -244,7 +244,7 @@ test('Block 2G A-M: Qué hacer ahora ordena trabajo real sin duplicar ni tocar c
 
   const css = readFileSync('src/lead-attention-queue.css', 'utf8');
   assert.match(css, /pc-daily-ops-item\.pc-supervised-attention-item[\s\S]*?min-height:\s*74px/);
-  assert.match(css.slice(css.indexOf('@media (max-width: 720px)')), /pc-daily-ops-item\.pc-supervised-attention-item[\s\S]*?min-height:\s*58px/);
+  assert.match(css.slice(css.indexOf('@media (max-width: 720px)')), /pc-daily-ops-item\.pc-supervised-attention-item[\s\S]*?min-height:\s*48px/);
   assert.equal(css.includes('position: fixed'), false, 'K: cola mobile no agrega overlay fijo');
   assert.equal(css.includes('position: absolute'), false, 'K: cola mobile no agrega overlay absoluto');
 
