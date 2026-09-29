@@ -4,7 +4,7 @@ import {
   visitConfirmationDetail,
   VISIT_CONFIRMED_ACTION,
 } from './commercial-alert-engine.js';
-import { authenticatedTenantMember, reconcileAuthorizedCommercialAlerts, state } from './store.js';
+import { authenticatedTenantMember, state } from './store.js';
 import { addActivityForAuthenticatedTenant } from './team-access.js';
 import { assignmentVisible } from './team-policy.js';
 import {
@@ -43,7 +43,6 @@ export async function confirmScheduledVisit(visitId: number): Promise<'confirmed
     entityId: visit.clientId,
     detail: visitConfirmationDetail(visit),
   });
-  reconcileAuthorizedCommercialAlerts(scope);
 
   const reason = 'Visita confirmada';
   writeTenantSnapshot(scope, state.crm, { markDirty: true, reason });
