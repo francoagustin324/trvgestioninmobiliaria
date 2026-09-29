@@ -1,11 +1,10 @@
 import { getCloudSession, pushCloudData } from './cloud-api-compatible.js';
 import {
-  reconcileEvaluatedCommercialAlerts,
   visitConfirmationActive,
   visitConfirmationDetail,
   VISIT_CONFIRMED_ACTION,
 } from './commercial-alert-engine.js';
-import { authenticatedTenantMember, state } from './store.js';
+import { authenticatedTenantMember, reconcileAuthorizedCommercialAlerts, state } from './store.js';
 import { addActivityForAuthenticatedTenant } from './team-access.js';
 import { assignmentVisible } from './team-policy.js';
 import {
@@ -19,22 +18,6 @@ import {
   tenantRuntimeLeaseIsCurrent,
 } from './tenant-runtime.js';
 
-function reconcileAlertsForCurrentActor(): void {
-  const scope = requireCurrentTenantScope();
-  const member = authenticatedTenantMember(scope);
-  if (!member) throw new Error('AUTHENTICATED_TENANT_MEMBER_REQUIRED');
-  state.crm.commercialAlerts = reconcileEvaluatedCommercialAlerts({
-    organizationId: scope.organizationId,
-    clients: state.crm.clients,
-    properties: state.crm.properties,
-    visits: state.crm.visits,
-    offers: state.crm.offers,
-    reservations: state.crm.reservations,
-    reminders: state.crm.reminders,
-    activityLog: state.crm.activityLog,
-    actor: { id: member.id, role: member.role },
-  }, state.crm.commercialAlerts ?? []);
-}
 
 export async function confirmScheduledVisit(visitId: number): Promise<'confirmed' | 'already-confirmed'> {
   const scope = requireCurrentTenantScope();
@@ -60,7 +43,7 @@ export async function confirmScheduledVisit(visitId: number): Promise<'confirmed
     entityId: visit.clientId,
     detail: visitConfirmationDetail(visit),
   });
-  reconcileAlertsForCurrentActor();
+  reconcileAuthorizedCommercialAlerts(scope);
 
   const reason = 'Visita confirmada';
   writeTenantSnapshot(scope, state.crm, { markDirty: true, reason });
