@@ -570,11 +570,16 @@ export function renderOperationalAttentionQueue(
       <span class="pc-supervised-attention-action"><b aria-hidden="true">→</b> ${escapeHtml(item.action)}</span>
     </button>`).join('')}</div>`
     : '<p class="pc-supervised-attention-empty">No hay acciones operativas urgentes. Revisá los próximos seguimientos en Agenda.</p>';
+  const summary = [
+    counts.critical > 0 ? `<b>${counts.critical} críticos</b>` : '',
+    counts.high > 0 ? `<span>${counts.high} altos</span>` : '',
+    counts.normal > 0 ? `<span>${counts.normal} normales</span>` : '',
+  ].filter(Boolean).join('');
 
   return `<section class="pc-supervised-attention-queue pc-daily-ops-queue" data-supervised-attention-queue data-operational-attention-queue aria-labelledby="pc-daily-ops-title">
     <header class="pc-daily-ops-heading">
       <div><strong id="pc-daily-ops-title">QUÉ HACER AHORA</strong><span>Prioridad explicable a partir de actividad, fechas y estado comercial.</span></div>
-      <div class="pc-daily-ops-summary" aria-label="Resumen de prioridades"><b>${counts.critical} críticos</b><span>${counts.high} altos</span><span>${counts.normal} normales</span></div>
+      ${summary ? `<div class="pc-daily-ops-summary" aria-label="Resumen de prioridades">${summary}</div>` : ''}
     </header>
     ${body}
     <p class="pc-supervised-attention-status" data-attention-navigation-status role="status" aria-live="polite" hidden></p>
