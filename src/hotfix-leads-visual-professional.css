@@ -397,7 +397,7 @@
 
 /* Block 2G: la cola operativa conserva su layout propio por encima del hotfix C13 legacy. */
 #crm .pc-supervised-attention-queue.pc-daily-ops-queue {
-  grid-template-columns: minmax(180px, .62fr) minmax(0, 2.38fr);
+  grid-template-columns: 270px minmax(0, 1fr);
   gap: 8px;
   padding: 8px 10px;
 }
