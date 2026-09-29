@@ -354,7 +354,6 @@ export interface CrmData {
   reservations: Reservation[];
   contacts: CommercialContact[];
   reminders: Reminder[];
-  commercialAlerts?: CommercialAlert[];
   fichas: Ficha[];
   conversations: WhatsAppConversation[];
   settings: Settings;
@@ -454,7 +453,6 @@ export const initialData: CrmData = {
   visits: [],
   offers: [],
   reservations: [],
-  commercialAlerts: [],
   reminders: [{
     id: 1, date: '2026-07-13', title: 'Llamar a Lucía', related: 'Búsqueda Nueva Córdoba', priority: 'Alta',
     assignedToId: 1, createdById: 1,
