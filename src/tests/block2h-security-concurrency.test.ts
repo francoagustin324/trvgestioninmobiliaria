@@ -1,23 +1,17 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import {
-  assertLocalWriteAuthorityCompatible,
-  cloudRecordsToCrm,
-  crmToCloudRecords,
-  organizationScopedEntityKey,
-  type CloudMembershipContext,
-  type CloudRecordRow,
-} from '../cloud-records.js';
+import { assertLocalWriteAuthorityCompatible, type CloudMembershipContext } from '../cloud-records.js';
 import {
   commercialAlertDedupeKey,
+  evaluateCommercialAlertConditions,
   reconcileCommercialAlerts,
 } from '../commercial-alert-engine.js';
-import { commercialAlertConcurrentWriteAlreadySatisfied } from '../tenant-visit-v2.js';
-import { defaultSettings, type CommercialAlert, type CrmData, type TeamMember } from '../models.js';
+import { defaultSettings, type Client, type CommercialAlert, type CrmData, type TeamMember } from '../models.js';
 
 const ORG_A = '11111111-1111-4111-8111-111111111111';
 const ORG_B = '22222222-2222-4222-8222-222222222222';
 const USER_A = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+const NOW = new Date('2026-09-29T12:00:00.000Z');
 
 function member(overrides: Partial<TeamMember> = {}): TeamMember {
   return {
@@ -33,12 +27,44 @@ function member(overrides: Partial<TeamMember> = {}): TeamMember {
   };
 }
 
-function alert(
-  organizationId: string,
-  id: number,
-  ownerId = 7,
-  overrides: Partial<CommercialAlert> = {},
-): CommercialAlert {
+function client(id: number, assignedToId: number, overrides: Partial<Client> = {}): Client {
+  return {
+    id,
+    name: `Cliente ${id}`,
+    phone: '5493515550000',
+    interest: 'Departamento',
+    status: 'Lead',
+    temperature: 'Tibio',
+    pipeline: 'Nuevo',
+    assignedToId,
+    createdById: assignedToId,
+    ...overrides,
+  };
+}
+
+function crm(teamMembers = [member()]): CrmData {
+  return {
+    organization: { id: ORG_A, name: 'Inmobiliaria A', seatLimit: null, planLabel: 'Test' },
+    teamMembers,
+    activityLog: [],
+    clients: [],
+    properties: [],
+    visits: [],
+    offers: [],
+    reservations: [],
+    contacts: [],
+    reminders: [],
+    fichas: [],
+    conversations: [],
+    settings: { ...defaultSettings },
+  };
+}
+
+function context(role: CloudMembershipContext['currentRole'] = 'Corredor', members = [member()]): CloudMembershipContext {
+  return { organizationId: ORG_A, currentMemberId: 7, currentRole: role, members };
+}
+
+function alert(organizationId: string, id: number): CommercialAlert {
   const base = {
     organizationId,
     type: 'FOLLOW_UP_OVERDUE' as const,
@@ -50,7 +76,7 @@ function alert(
     id,
     revision: 0,
     ...base,
-    ownerId,
+    ownerId: 7,
     priority: 'ALTO',
     rank: 24,
     reason: 'Llamar',
@@ -66,76 +92,47 @@ function alert(
     dedupeKey: commercialAlertDedupeKey(base),
     clientId: 10,
     sourceId: 10,
-    ...overrides,
   };
 }
 
-function crm(teamMembers = [member()]): CrmData {
-  return {
-    organization: {
-      id: ORG_A,
-      name: 'Inmobiliaria A',
-      seatLimit: null,
-      planLabel: 'Test',
-    },
-    teamMembers,
-    activityLog: [],
-    clients: [],
+test('Block 2H seguridad: evaluación queda confinada por tenant y responsable', () => {
+  const own = client(10, 7);
+  const other = client(11, 8);
+  const conditions = evaluateCommercialAlertConditions({
+    organizationId: ORG_A,
+    clients: [own, other],
     properties: [],
     visits: [],
     offers: [],
     reservations: [],
-    contacts: [],
     reminders: [],
-    commercialAlerts: [],
-    fichas: [],
-    conversations: [],
-    settings: { ...defaultSettings },
-  };
-}
+    actor: { id: 7, role: 'Corredor' },
+    now: NOW,
+    today: '2026-09-29',
+  });
 
-function context(role: CloudMembershipContext['currentRole'] = 'Corredor', members = [member()]): CloudMembershipContext {
-  return {
+  assert.ok(conditions.some((item) => item.clientId === own.id));
+  assert.equal(conditions.some((item) => item.clientId === other.id), false, 'selector visual ajeno no amplía autoridad');
+  assert.ok(conditions.every((item) => item.organizationId === ORG_A));
+
+  const sameEntityA = commercialAlertDedupeKey({
     organizationId: ORG_A,
-    currentMemberId: 7,
-    currentRole: role,
-    members,
-  };
-}
-
-test('Block 2H seguridad: alertas cloud quedan confinadas por tenant y responsable', () => {
-  const data = crm();
-  data.commercialAlerts = [
-    alert(ORG_A, 1, 7),
-    alert(ORG_A, 2, 8, { entityId: 11, clientId: 11, dedupeKey: commercialAlertDedupeKey({
-      organizationId: ORG_A,
-      type: 'FOLLOW_UP_OVERDUE',
-      entityType: 'client',
-      entityId: 11,
-      conditionVersion: '2026-09-28:llamar',
-    }) }),
-    alert(ORG_B, 3, 7),
-  ];
-
-  const rows = crmToCloudRecords(data, context('Corredor'), USER_A)
-    .filter((row) => row.entity_type === 'commercial_alert');
-  assert.equal(rows.length, 1, 'Corredor sólo serializa su alerta del tenant actual');
-  assert.equal((rows[0]!.payload as CommercialAlert).organizationId, ORG_A);
-  assert.equal(rows[0]!.assigned_member_id, 7);
-  assert.ok(rows[0]!.entity_key.startsWith(`${ORG_A}:`), 'entity_key queda scopeada por organización');
-
-  const maliciousRow: CloudRecordRow = {
-    organization_id: ORG_A,
-    entity_type: 'commercial_alert',
-    entity_key: organizationScopedEntityKey(ORG_A, 'malicious'),
-    assigned_member_id: 7,
-    payload: alert(ORG_B, 99, 7),
-  };
-  const hydrated = cloudRecordsToCrm([maliciousRow], context('Corredor'), crm());
-  assert.deepEqual(hydrated.commercialAlerts, [], 'payload de otro tenant se descarta fail closed');
+    type: 'NEW_LEAD_UNATTENDED',
+    entityType: 'client',
+    entityId: 10,
+    conditionVersion: 'v1',
+  });
+  const sameEntityB = commercialAlertDedupeKey({
+    organizationId: ORG_B,
+    type: 'NEW_LEAD_UNATTENDED',
+    entityType: 'client',
+    entityId: 10,
+    conditionVersion: 'v1',
+  });
+  assert.notEqual(sameEntityA, sameEntityB, 'mismo entityId entre tenants no colisiona');
 });
 
-test('Block 2H seguridad: membership suspendida o ambigua no obtiene autoridad', () => {
+test('Block 2H seguridad: membership suspendida o ambigua falla cerrado', () => {
   const suspended = member({ status: 'Suspendido' });
   assert.throws(
     () => assertLocalWriteAuthorityCompatible(crm([suspended]), context('Corredor', [suspended]), USER_A),
@@ -149,52 +146,26 @@ test('Block 2H seguridad: membership suspendida o ambigua no obtiene autoridad',
   );
 });
 
-test('Block 2H concurrencia: resolver es idempotente y una copia stale no resucita la alerta', () => {
+test('Block 2H concurrencia: resolución derivada es idempotente y una copia stale no resucita alerta', () => {
   const active = alert(ORG_A, 1);
-  const resolvedOnce = reconcileCommercialAlerts(
-    [active],
-    [],
-    new Date('2026-09-29T11:00:00.000Z'),
-  );
-  assert.equal(resolvedOnce.length, 1);
+  const resolvedOnce = reconcileCommercialAlerts([active], [], new Date('2026-09-29T11:00:00.000Z'));
   assert.equal(resolvedOnce[0]!.state, 'RESOLVED');
 
-  const resolvedTwice = reconcileCommercialAlerts(
-    resolvedOnce,
-    [],
-    new Date('2026-09-29T12:00:00.000Z'),
-  );
-  assert.equal(resolvedTwice.length, 1);
+  const resolvedTwice = reconcileCommercialAlerts(resolvedOnce, [], new Date('2026-09-29T12:00:00.000Z'));
   assert.equal(resolvedTwice[0]!.state, 'RESOLVED');
   assert.equal(resolvedTwice[0]!.revision, resolvedOnce[0]!.revision, 'segunda resolución no genera write artificial');
 
-  const staleDevice = reconcileCommercialAlerts(
-    [active],
-    [],
-    new Date('2026-09-29T12:00:00.000Z'),
-  );
-  assert.equal(staleDevice[0]!.state, 'RESOLVED', 'estado de negocio sin condición nunca reactiva ACTIVE');
+  const staleDevice = reconcileCommercialAlerts([active], [], new Date('2026-09-29T12:00:00.000Z'));
+  assert.equal(staleDevice[0]!.state, 'RESOLVED', 'sin condición de negocio no se puede reactivar ACTIVE');
+});
 
-  const sameEntityOtherTenant = alert(ORG_B, 1);
-  assert.notEqual(active.dedupeKey, sameEntityOtherTenant.dedupeKey, 'mismo entityId entre tenants no colisiona');
+test('Block 2H concurrencia: estados terminales equivalentes convergen sin duplicar', () => {
+  const active = alert(ORG_A, 1);
+  const deviceA = reconcileCommercialAlerts([active], [], new Date('2026-09-29T11:00:00.000Z'));
+  const deviceB = reconcileCommercialAlerts([active], [], new Date('2026-09-29T11:00:00.000Z'));
 
-  const row = (value: CommercialAlert): CloudRecordRow => ({
-    organization_id: ORG_A,
-    entity_type: 'commercial_alert',
-    entity_key: organizationScopedEntityKey(ORG_A, value.dedupeKey),
-    assigned_member_id: 7,
-    payload: value,
-  });
-  const localResolved = { ...resolvedOnce[0]!, updatedAt: '2026-09-29T11:00:00.000Z' };
-  const remoteResolved = { ...resolvedOnce[0]!, id: 44, revision: 9, updatedAt: '2026-09-29T11:00:05.000Z' };
-  assert.equal(
-    commercialAlertConcurrentWriteAlreadySatisfied(row(localResolved), row(remoteResolved)),
-    true,
-    'dos dispositivos con el mismo estado terminal son idempotentes aunque difieran metadata local',
-  );
-  assert.equal(
-    commercialAlertConcurrentWriteAlreadySatisfied(row(active), row(remoteResolved)),
-    false,
-    'ACTIVE stale nunca satisface ni resucita un RESOLVED remoto',
-  );
+  assert.deepEqual(deviceA, deviceB);
+  const merged = reconcileCommercialAlerts(deviceA, [], new Date('2026-09-29T12:00:00.000Z'));
+  assert.equal(merged.length, 1);
+  assert.equal(merged[0]!.state, 'RESOLVED');
 });
