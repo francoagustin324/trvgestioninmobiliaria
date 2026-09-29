@@ -1,6 +1,7 @@
 import { leadCardAttentionPresentation } from './lead-card-attention.js';
 import { leadDaysFromToday, leadPrimaryAlert, sortLeads, type LeadAlertKind } from './lead-list-priority.js';
 import { commercialStage, isTerminalClient, localIsoDate } from './lead-pipeline.js';
+import { evaluateCommercialAlertConditions, type CommercialAlertCondition } from './commercial-alert-engine.js';
 import { matchDismissalActive, matchPropertiesForClient } from './property-matching.js';
 import { assignmentVisible } from './team-policy.js';
 import type { ActivityEntry, Client, Offer, Property, Reminder, Reservation, TeamRole, Visit } from './models.js';
@@ -112,6 +113,7 @@ export interface OperationalAttentionItem {
 }
 
 export interface OperationalAttentionInput {
+  organizationId?: string;
   clients: Client[];
   properties: Property[];
   visits: Visit[];
@@ -124,48 +126,8 @@ export interface OperationalAttentionInput {
   now?: Date;
 }
 
-const OPERATIONAL_DAY_MS = 86_400_000;
-
 function assignmentAllowed(input: OperationalAttentionInput, assignedToId: number | undefined): boolean {
   return !input.actor || assignmentVisible(input.actor.role, input.actor.id, assignedToId);
-}
-
-function dateAgeDays(value: string | undefined, now: Date): number | null {
-  if (!value) return null;
-  const stamp = Date.parse(value);
-  if (!Number.isFinite(stamp)) return null;
-  return Math.max(0, Math.floor((now.getTime() - stamp) / OPERATIONAL_DAY_MS));
-}
-
-function latestClientTouch(client: Client, activities: ActivityEntry[]): string | undefined {
-  const candidates = [
-    client.lastContact,
-    client.qualificationUpdatedAt,
-    ...activities
-      .filter((entry) => entry.entityType === 'Cliente' && entry.entityId === client.id)
-      .map((entry) => entry.createdAt),
-  ].filter((value): value is string => Boolean(value && Number.isFinite(Date.parse(value))));
-  return candidates.sort((left, right) => Date.parse(right) - Date.parse(left))[0];
-}
-
-function leadCreatedAt(client: Client, activities: ActivityEntry[]): string | undefined {
-  return activities
-    .filter((entry) => entry.entityType === 'Cliente' && entry.entityId === client.id && entry.action === 'Lead creado')
-    .map((entry) => entry.createdAt)
-    .filter((value) => Number.isFinite(Date.parse(value)))
-    .sort((left, right) => Date.parse(left) - Date.parse(right))[0];
-}
-
-function relativeAge(value: string | undefined, now: Date): string {
-  if (!value) return 'Atender ahora';
-  const stamp = Date.parse(value);
-  if (!Number.isFinite(stamp)) return 'Atender ahora';
-  const minutes = Math.max(0, Math.floor((now.getTime() - stamp) / 60_000));
-  if (minutes < 60) return minutes <= 1 ? 'Hace 1 min' : `Hace ${minutes} min`;
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return hours === 1 ? 'Hace 1 h' : `Hace ${hours} h`;
-  const days = Math.floor(hours / 24);
-  return days === 1 ? 'Hace 1 día' : `Hace ${days} días`;
 }
 
 function relativeDate(value: string | undefined, today: string): string {
@@ -180,47 +142,35 @@ function relativeDate(value: string | undefined, today: string): string {
   return value;
 }
 
-function visitDate(visit: Visit): string {
-  const date = new Date(visit.scheduledAt);
-  return Number.isNaN(date.getTime()) ? '' : localIsoDate(date);
-}
+const ALERT_KIND: Record<CommercialAlertCondition['type'], OperationalActionKind> = {
+  NEW_LEAD_UNATTENDED: 'new-uncontacted',
+  FOLLOW_UP_OVERDUE: 'follow-up-overdue',
+  FORGOTTEN_LEAD: 'forgotten-client',
+  VISIT_UNCONFIRMED: 'visit-confirm',
+  VISIT_RESULT_MISSING: 'visit-result',
+  OFFER_STALLED: 'offer-stalled',
+  RESERVATION_STALLED: 'reservation-attention',
+  ADVANCED_NO_NEXT_ACTION: 'advanced-no-action',
+  NEW_RELEVANT_MATCH: 'new-match',
+  TASK_OVERDUE: 'task-overdue',
+};
 
-function visitTimeLabel(visit: Visit): string {
-  const date = new Date(visit.scheduledAt);
-  if (Number.isNaN(date.getTime())) return '';
-  return `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
-}
-
-function clientName(clients: Client[], clientId: number): string {
-  return clients.find((client) => client.id === clientId)?.name || `Cliente #${clientId}`;
-}
-
-function propertyLabel(properties: Property[], propertyId: number): string {
-  const property = properties.find((item) => item.id === propertyId);
-  return property?.title?.trim() || property?.address?.trim() || `Propiedad #${propertyId}`;
-}
-
-function normalize(value: unknown): string {
-  return String(value ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
-}
-
-function reminderClient(reminder: Reminder, clients: Client[]): Client | undefined {
-  const related = normalize(reminder.related);
-  if (!related) return undefined;
-  return clients.find((client) => {
-    const name = normalize(client.name);
-    return related === name || related.includes(name) || name.includes(related);
-  });
-}
-
-function alreadyDiffused(client: Client, property: Property): boolean {
-  return (client.propertyDiffusions ?? []).some((record) => (
-    record.sendCount > 0
-    && (
-      record.propertyId === property.id
-      || Boolean(property.uid && record.propertyUid === property.uid)
-    )
-  ));
+function alertConditionToOperational(condition: CommercialAlertCondition): OperationalAttentionItem {
+  return {
+    key: condition.dedupeKey,
+    kind: ALERT_KIND[condition.type],
+    priority: condition.priority,
+    rank: condition.rank,
+    ...(condition.clientId ? { clientId: condition.clientId } : {}),
+    ...(condition.propertyId ? { propertyId: condition.propertyId } : {}),
+    ...(condition.sourceId ? { sourceId: condition.sourceId } : {}),
+    module: condition.target === 'agenda' ? 'agenda' : 'crm',
+    target: condition.target,
+    name: condition.name,
+    reason: condition.reason,
+    action: condition.action,
+    when: condition.when,
+  };
 }
 
 function pushUnique(items: OperationalAttentionItem[], item: OperationalAttentionItem): void {
@@ -242,90 +192,27 @@ export function operationalAttentionQueue(
   limit = 8,
 ): OperationalAttentionItem[] {
   const today = input.today ?? localIsoDate(input.now ?? new Date());
-  const now = input.now ?? new Date();
-  const activities = input.activityLog ?? [];
   const clients = input.clients.filter((client) => !isTerminalClient(client) && assignmentAllowed(input, client.assignedToId));
-  const properties = input.properties.filter((property) => assignmentAllowed(input, property.assignedToId));
-  const activeClientIds = new Set(clients.map((client) => client.id));
-  const items: OperationalAttentionItem[] = [];
+  const items = evaluateCommercialAlertConditions({
+    organizationId: input.organizationId || 'local',
+    clients: input.clients,
+    properties: input.properties,
+    visits: input.visits,
+    offers: input.offers,
+    reservations: input.reservations,
+    reminders: input.reminders,
+    activityLog: input.activityLog,
+    actor: input.actor,
+    today,
+    now: input.now,
+  }).map(alertConditionToOperational);
 
+  // 2G conserva sus recordatorios proactivos; no son alertas 2H.
   for (const client of clients) {
-    const stage = commercialStage(client);
     const followUpDays = leadDaysFromToday(client.nextFollowUp, today);
-    const isNew = stage === 'Nuevo' && !client.lastContact;
-
-    if (isNew) {
-      pushUnique(items, {
-        key: `new-uncontacted:${client.id}`,
-        kind: 'new-uncontacted',
-        priority: 'CRÍTICO',
-        rank: 10,
-        clientId: client.id,
-        module: 'crm',
-        target: 'lead',
-        name: client.name,
-        reason: 'Lead nuevo todavía no atendido',
-        action: 'Contactar',
-        when: relativeAge(leadCreatedAt(client, activities), now),
-      });
-    }
-
-    if (followUpDays !== null && followUpDays < 0) {
-      pushUnique(items, {
-        key: `follow-up-overdue:${client.id}`,
-        kind: 'follow-up-overdue',
-        priority: 'CRÍTICO',
-        rank: 5,
-        clientId: client.id,
-        module: 'crm',
-        target: 'lead',
-        name: client.name,
-        reason: client.nextAction?.trim() || 'Seguimiento vencido',
-        action: client.nextAction?.trim() || 'Hacer seguimiento',
-        when: relativeDate(client.nextFollowUp, today),
-      });
-    }
-
-    if (['Visita coordinada', 'Negociación', 'Reservado'].includes(stage) && (!client.nextAction?.trim() || !client.nextFollowUp)) {
-      pushUnique(items, {
-        key: `advanced-no-action:${client.id}`,
-        kind: 'advanced-no-action',
-        priority: 'ALTO',
-        rank: 48,
-        clientId: client.id,
-        module: 'crm',
-        target: 'lead',
-        name: client.name,
-        reason: `${stage} sin próxima acción completa`,
-        action: 'Definir próximo paso',
-        when: 'Ahora',
-      });
-    }
-
-    if (!isNew && !(followUpDays !== null && followUpDays <= 0)) {
-      const lastTouch = latestClientTouch(client, activities);
-      const inactiveDays = dateAgeDays(lastTouch, now);
-      const threshold = client.temperature === 'Caliente' ? 3 : 7;
-      if (inactiveDays !== null && inactiveDays >= threshold) {
-        pushUnique(items, {
-          key: `forgotten-client:${client.id}`,
-          kind: 'forgotten-client',
-          priority: client.temperature === 'Caliente' ? 'ALTO' : 'NORMAL',
-          rank: client.temperature === 'Caliente' ? 52 : 88,
-          clientId: client.id,
-          module: 'crm',
-          target: 'lead',
-          name: client.name,
-          reason: `Sin contacto reciente hace ${inactiveDays} días`,
-          action: 'Retomar contacto',
-          when: `Hace ${inactiveDays} días`,
-        });
-      }
-    }
-
     if (followUpDays !== null && followUpDays >= 0 && followUpDays <= 3) {
       pushUnique(items, {
-        key: `next-follow-up:${client.id}`,
+        key: `next-follow-up:${client.id}:${client.nextFollowUp || ''}`,
         kind: 'next-follow-up',
         priority: 'NORMAL',
         rank: 90 + followUpDays,
@@ -339,166 +226,23 @@ export function operationalAttentionQueue(
       });
     }
 
-    const freshMatch = matchPropertiesForClient(client, properties)
-      .find((match) => (
-        match.level === 'Alta'
-        && !alreadyDiffused(client, match.property)
-        && !matchDismissalActive(client, match.property, activities)
-      ));
-    if (freshMatch) {
-      pushUnique(items, {
-        key: `new-match:${client.id}:${freshMatch.property.id}`,
-        kind: 'new-match',
-        priority: 'ALTO',
-        rank: 60 + (100 - freshMatch.score) / 100,
-        clientId: client.id,
-        propertyId: freshMatch.property.id,
-        module: 'crm',
-        target: 'matches',
-        name: client.name,
-        reason: `${freshMatch.score}% compatible · ${freshMatch.reasons.slice(0, 2).join(' · ')}`,
-        action: 'Revisar match',
-        when: 'Nuevo match',
-      });
-    }
-  }
-
-  for (const visit of input.visits) {
-    if (!activeClientIds.has(visit.clientId) || !assignmentAllowed(input, visit.assignedToId)) continue;
-    const scheduledDate = visitDate(visit);
-    const scheduledMs = Date.parse(visit.scheduledAt);
-    const name = clientName(clients, visit.clientId);
-    const property = propertyLabel(properties, visit.propertyId);
-    if (visit.status === 'Coordinada' && Number.isFinite(scheduledMs) && scheduledMs < now.getTime()) {
-      pushUnique(items, {
-        key: `visit-result:${visit.id}`,
-        kind: 'visit-result',
-        priority: 'CRÍTICO',
-        rank: 12,
-        clientId: visit.clientId,
-        propertyId: visit.propertyId,
-        sourceId: visit.id,
-        module: 'crm',
-        target: 'visits',
-        name,
-        reason: `Visita programada con ${property} sin resultado cargado`,
-        action: 'Cargar resultado',
-        when: relativeDate(scheduledDate, today),
-      });
-      continue;
-    }
-    const visitDays = leadDaysFromToday(scheduledDate, today);
-    if (visit.status === 'Coordinada' && (visitDays === 0 || visitDays === 1)) {
-      pushUnique(items, {
-        key: `visit-confirm:${visit.id}`,
-        kind: 'visit-confirm',
-        priority: visitDays === 0 ? 'CRÍTICO' : 'ALTO',
-        rank: visitDays === 0 ? 14 : 35,
-        clientId: visit.clientId,
-        propertyId: visit.propertyId,
-        sourceId: visit.id,
-        module: 'crm',
-        target: 'visits',
-        name,
-        reason: `Visita ${visitDays === 0 ? 'de hoy' : 'de mañana'} · ${property}`,
-        action: 'Confirmar visita',
-        when: visitDays === 0 ? `Hoy ${visitTimeLabel(visit)}`.trim() : `Mañana ${visitTimeLabel(visit)}`.trim(),
-      });
-    }
-    const client = clients.find((item) => item.id === visit.clientId);
-    if (visit.status === 'Realizada' && (!visit.interest || !client?.nextAction?.trim() || !client.nextFollowUp)) {
-      pushUnique(items, {
-        key: `visit-result-incomplete:${visit.id}`,
-        kind: 'visit-result',
-        priority: 'ALTO',
-        rank: 32,
-        clientId: visit.clientId,
-        propertyId: visit.propertyId,
-        sourceId: visit.id,
-        module: 'crm',
-        target: 'visits',
-        name,
-        reason: 'Visita realizada sin resultado o próximo paso completo',
-        action: 'Completar resultado',
-        when: relativeAge(visit.updatedAt, now),
-      });
-    }
-  }
-
-  for (const offer of input.offers) {
-    if (offer.status !== 'Pendiente' || !activeClientIds.has(offer.clientId) || !assignmentAllowed(input, offer.assignedToId)) continue;
-    const name = clientName(clients, offer.clientId);
-    const validDays = leadDaysFromToday(offer.validUntil, today);
-    const staleDays = dateAgeDays(offer.updatedAt || offer.createdAt, now) ?? 0;
-    if (validDays !== null && validDays <= 0) {
-      pushUnique(items, {
-        key: `offer-stalled:${offer.id}`,
-        kind: 'offer-stalled',
-        priority: 'CRÍTICO',
-        rank: 18,
-        clientId: offer.clientId,
-        propertyId: offer.propertyId,
-        sourceId: offer.id,
-        module: 'crm',
-        target: 'offers',
-        name,
-        reason: validDays < 0 ? 'Oferta vencida sin resolución' : 'Oferta vence hoy sin resolución',
-        action: 'Hacer seguimiento',
-        when: relativeDate(offer.validUntil, today),
-      });
-    } else if (staleDays >= 2 || validDays === 1) {
-      pushUnique(items, {
-        key: `offer-stalled:${offer.id}`,
-        kind: 'offer-stalled',
-        priority: 'ALTO',
-        rank: 40,
-        clientId: offer.clientId,
-        propertyId: offer.propertyId,
-        sourceId: offer.id,
-        module: 'crm',
-        target: 'offers',
-        name,
-        reason: `Oferta sin movimiento hace ${staleDays} días · espera respuesta del ${offer.origin === 'Cliente' ? 'propietario' : 'cliente'}`,
-        action: 'Hacer seguimiento',
-        when: staleDays === 1 ? 'Hace 1 día' : `Hace ${staleDays} días`,
-      });
-    }
-  }
-
-  for (const reservation of input.reservations) {
-    if (reservation.status !== 'Activa' || !activeClientIds.has(reservation.clientId) || !assignmentAllowed(input, reservation.assignedToId)) continue;
-    const name = clientName(clients, reservation.clientId);
-    const expiryDays = leadDaysFromToday(reservation.expiresAt, today);
-    const staleDays = dateAgeDays(reservation.updatedAt || reservation.createdAt, now) ?? 0;
-    if ((expiryDays !== null && expiryDays <= 2) || staleDays >= 2) {
-      const critical = expiryDays !== null && expiryDays <= 0;
-      pushUnique(items, {
-        key: `reservation-attention:${reservation.id}`,
-        kind: 'reservation-attention',
-        priority: critical ? 'CRÍTICO' : 'ALTO',
-        rank: critical ? 16 : 44,
-        clientId: reservation.clientId,
-        propertyId: reservation.propertyId,
-        sourceId: reservation.id,
-        module: 'crm',
-        target: 'reservations',
-        name,
-        reason: critical
-          ? (expiryDays! < 0 ? 'Reserva vencida sin movimiento' : 'Reserva vence hoy')
-          : expiryDays !== null ? `Reserva vence ${relativeDate(reservation.expiresAt, today).toLowerCase()}` : `Reserva sin movimiento hace ${staleDays} días`,
-        action: 'Revisar reserva',
-        when: reservation.expiresAt ? relativeDate(reservation.expiresAt, today) : relativeAge(reservation.updatedAt, now),
-      });
-    }
-  }
-
-  for (const client of clients) {
     const stage = commercialStage(client);
-    const hasActiveReservation = input.reservations.some((reservation) => reservation.clientId === client.id && reservation.status === 'Activa');
-    const hasAcceptedOffer = input.offers.some((offer) => offer.clientId === client.id && offer.status === 'Aceptada');
-    if ((stage === 'Reservado' || (stage === 'Negociación' && hasAcceptedOffer)) && !items.some((item) => item.clientId === client.id && item.priority === 'CRÍTICO')) {
+    const hasActiveReservation = input.reservations.some((reservation) => (
+      reservation.clientId === client.id
+      && reservation.status === 'Activa'
+      && assignmentAllowed(input, reservation.assignedToId)
+    ));
+    const hasAcceptedOffer = input.offers.some((offer) => (
+      offer.clientId === client.id
+      && offer.status === 'Aceptada'
+      && assignmentAllowed(input, offer.assignedToId)
+    ));
+    if (
+      (stage === 'Reservado' || (stage === 'Negociación' && hasAcceptedOffer))
+      && !items.some((item) => item.clientId === client.id && item.priority === 'CRÍTICO')
+    ) {
       pushUnique(items, {
-        key: `close-intervention:${client.id}`,
+        key: `close-intervention:${client.id}:${stage}`,
         kind: 'close-intervention',
         priority: 'ALTO',
         rank: hasActiveReservation ? 50 : 54,
@@ -511,28 +255,6 @@ export function operationalAttentionQueue(
         when: client.nextFollowUp ? relativeDate(client.nextFollowUp, today) : 'Ahora',
       });
     }
-  }
-
-  for (const reminder of input.reminders) {
-    const completedAt = (reminder as Reminder & { completedAt?: string }).completedAt;
-    if (completedAt || !assignmentAllowed(input, reminder.assignedToId)) continue;
-    const days = leadDaysFromToday(reminder.date, today);
-    if (days === null || days >= 0) continue;
-    const client = reminderClient(reminder, clients);
-    pushUnique(items, {
-      key: `task-overdue:${reminder.id}`,
-      kind: 'task-overdue',
-      priority: reminder.priority === 'Alta' ? 'CRÍTICO' : 'ALTO',
-      rank: reminder.priority === 'Alta' ? 22 : 46,
-      ...(client ? { clientId: client.id } : {}),
-      sourceId: reminder.id,
-      module: 'agenda',
-      target: 'agenda',
-      name: client?.name || reminder.related || reminder.title,
-      reason: reminder.title,
-      action: 'Resolver tarea',
-      when: relativeDate(reminder.date, today),
-    });
   }
 
   const sorted = operationalSort(items);
@@ -562,7 +284,7 @@ export function renderOperationalAttentionQueue(
     normal: items.filter((item) => item.priority === 'NORMAL').length,
   };
   const body = items.length
-    ? `<div class="pc-daily-ops-list">${items.map((item) => `<button type="button" class="pc-supervised-attention-item pc-daily-ops-item priority-${item.priority.toLowerCase().normalize('NFD').replace(/[\\u0300-\\u036f]/g, '')}" data-operational-action="${escapeHtml(item.kind)}"${item.clientId ? ` data-attention-client-id="${item.clientId}"` : ''} data-attention-module="${item.module}" data-attention-target="${item.target}"${item.propertyId ? ` data-attention-property-id="${item.propertyId}"` : ''} aria-label="${escapeHtml(item.clientId ? `Abrir ficha completa de ${item.name}` : `Abrir acción ${item.action}: ${item.name}`)}">
+    ? `<div class="pc-daily-ops-list">${items.map((item) => `<button type="button" class="pc-supervised-attention-item pc-daily-ops-item priority-${item.priority.toLowerCase().normalize('NFD').replace(/[\\u0300-\\u036f]/g, '')}" data-operational-action="${escapeHtml(item.kind)}"${item.clientId ? ` data-attention-client-id="${item.clientId}"` : ''} data-attention-module="${item.module}" data-attention-target="${item.target}"${item.propertyId ? ` data-attention-property-id="${item.propertyId}"` : ''}${item.sourceId ? ` data-attention-source-id="${item.sourceId}"` : ''} aria-label="${escapeHtml(item.clientId ? `Abrir ficha completa de ${item.name}` : `Abrir acción ${item.action}: ${item.name}`)}">
       <span class="pc-daily-ops-priority">${escapeHtml(item.priority)}</span>
       <strong class="pc-supervised-attention-name">${escapeHtml(item.name)}</strong>
       <span class="pc-supervised-attention-reason">${escapeHtml(item.reason)}</span>
