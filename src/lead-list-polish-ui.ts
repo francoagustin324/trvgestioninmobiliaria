@@ -150,7 +150,7 @@ function renderAttentionQueue(container: HTMLElement): void {
         reminders: visibleReminders(),
         activityLog: state.crm.activityLog,
         actor: { id: member.id, role: member.role },
-      })
+      }, 3)
     : legacyQueue;
   results.insertAdjacentHTML('beforebegin', markup);
 }
