@@ -481,6 +481,34 @@ export function evaluateCommercialAlertConditions(
       continue;
     }
 
+    const visitedClient = clients.find((client) => client.id === visit.clientId);
+    if (
+      visit.status === 'Realizada'
+      && (!visit.interest || !visitedClient?.nextAction?.trim() || !visitedClient.nextFollowUp)
+    ) {
+      pushCondition(conditions, {
+        organizationId: input.organizationId,
+        type: 'VISIT_RESULT_MISSING',
+        entityType: 'visit',
+        entityId: visit.id,
+        ownerId: visit.assignedToId,
+        priority: 'ALTO',
+        rank: 30,
+        reason: 'Visita realizada con resultado o próximo paso incompleto',
+        action: 'Completar resultado',
+        actionType: 'LOAD_VISIT_RESULT',
+        target: 'visits',
+        name,
+        when: relativeAge(visit.updatedAt, now),
+        conditionVersion: `${visit.updatedAt}:${visit.interest || ''}:${visitedClient?.nextAction || ''}:${visitedClient?.nextFollowUp || ''}`,
+        dueAt: visit.scheduledAt,
+        clientId: visit.clientId,
+        propertyId: visit.propertyId,
+        sourceId: visit.id,
+      });
+      continue;
+    }
+
     if (
       visit.status === 'Coordinada'
       && visitDays !== null
