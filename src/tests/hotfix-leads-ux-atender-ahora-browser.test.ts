@@ -430,7 +430,7 @@ async function targetClientId(page: Page): Promise<number> {
   const value = await page.locator('#crm .pc-supervised-attention-item[data-attention-client-id]').first().getAttribute('data-attention-client-id');
   const clientId = Number(value || 0);
   assert.ok(clientId > 0, `ATENDER AHORA debe exponer un clientId real; recibido ${value}.`);
-  assert.equal(clientId, 501, `El fixture R2 debe priorizar al lead 501; recibido ${value}.`);
+  assert.equal(clientId, 502, `El fixture R2 debe priorizar al lead nuevo sin atender 502 por encima del follow-up vencido 501; recibido ${value}.`);
   return clientId;
 }
 
@@ -950,7 +950,7 @@ test('HOTFIX UX POST-B1.4.2 R3 — mobile tap, target y contraste accesible exac
           const queueButton = page.locator(`#crm button.pc-supervised-attention-item[data-attention-client-id="${clientId}"]`).first();
           assert.equal(await queueButton.evaluate((element) => element.tagName), 'BUTTON');
           assert.equal(await queueButton.getAttribute('type'), 'button');
-          assert.match(await queueButton.getAttribute('aria-label') || '', /Abrir ficha completa de Lead R2 Prioritario/);
+          assert.match(await queueButton.getAttribute('aria-label') || '', /Abrir ficha completa de Lead R2 Dos/);
 
           const crmBefore = await crmSnapshot(page);
           const whatsappBefore = await whatsAppSnapshot(page);
