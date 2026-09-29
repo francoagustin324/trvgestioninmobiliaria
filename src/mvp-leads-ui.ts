@@ -38,7 +38,6 @@ import {
   returnToEntityReadOnly,
 } from './entity-read-navigation.js';
 import { matchPropertiesForClient, type PropertyMatch } from './property-matching.js';
-import { dismissCommercialAlert } from './commercial-alert-engine.js';
 import { MATCH_DISMISSED_ACTION, matchDismissalActive } from './property-matching.js';
 import { saveData, state } from './store.js';
 import { addActivityForAuthenticatedTenant, memberName, visibleClients, visibleProperties } from './team-access.js';
@@ -301,18 +300,6 @@ function bindLeadCardActions(container: HTMLElement): void {
         diffusionPropertyUid: property.uid,
         detail: `Propiedad descartada del matching: ${property.title || property.address || `#${property.id}`}\npropertyRevision=${Number(property.revision ?? 0)}`,
       });
-      const activeMatchAlert = (state.crm.commercialAlerts ?? []).find((alert) => (
-        alert.state === 'ACTIVE'
-        && alert.type === 'NEW_RELEVANT_MATCH'
-        && alert.clientId === client.id
-        && alert.propertyId === property.id
-      ));
-      if (activeMatchAlert) {
-        state.crm.commercialAlerts = dismissCommercialAlert(
-          state.crm.commercialAlerts ?? [],
-          activeMatchAlert.dedupeKey,
-        );
-      }
       saveData(`Match descartado: ${client.name}`);
       renderMvpLeads(container);
       queueMicrotask(() => document.dispatchEvent(new CustomEvent('trv-render')));
