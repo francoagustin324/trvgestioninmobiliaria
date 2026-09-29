@@ -448,10 +448,15 @@
 }
 
 @media (min-width: 1200px) and (max-width: 1320px) {
+  #crm .pc-supervised-attention-queue.pc-daily-ops-queue {
+    grid-template-columns: 250px minmax(0, 1fr);
+  }
+
   #crm button.pc-supervised-attention-item.pc-daily-ops-item {
+    grid-template-columns: auto minmax(0, 1.25fr) minmax(96px, .75fr);
     grid-template-areas:
-      "priority name name"
-      "when reason action";
+      "priority name when"
+      "reason reason action";
   }
 }
 
@@ -490,24 +495,25 @@
 
 @media (max-width: 720px) {
   #crm .pc-supervised-attention-queue.pc-daily-ops-queue {
-    grid-template-columns: 80px minmax(0, 1fr);
+    grid-template-columns: minmax(0, 1fr);
     gap: 3px;
     margin: 1px 0 3px;
     padding: 2px 3px;
   }
 
   #crm .pc-daily-ops-heading {
-    display: grid;
-    align-content: center;
-    align-items: start;
-    justify-content: stretch;
-    gap: 2px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 5px;
   }
 
   #crm .pc-daily-ops-summary {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr);
-    gap: 1px;
+    display: flex;
+    flex: 0 0 auto;
+    flex-wrap: nowrap;
+    justify-content: flex-end;
+    gap: 2px;
   }
 
   #crm .pc-daily-ops-summary :is(b, span) {
@@ -523,14 +529,13 @@
 
   #crm button.pc-supervised-attention-item.pc-daily-ops-item {
     min-height: 44px;
-    padding: 2px 3px;
-    grid-template-columns: auto minmax(0, 1fr) auto;
+    padding: 2px 4px;
+    grid-template-columns: auto minmax(0, 1fr) minmax(72px, .72fr);
     grid-template-areas:
       "priority name when"
-      "reason reason reason"
-      "action action action";
+      "reason reason action";
     column-gap: 3px;
-    row-gap: 0;
+    row-gap: 1px;
     align-content: center;
     align-items: center;
   }
