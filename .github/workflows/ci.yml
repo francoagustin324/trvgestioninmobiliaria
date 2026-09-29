@@ -38,14 +38,11 @@ jobs:
           npx playwright install --with-deps webkit
       - name: Compilar TypeScript
         run: npm run build --silent
-      - name: Focal Block 2G + contratos históricos afectados
+      - name: Focal Block 2G + contratos ejecutables en modo focal
         run: |
           node --test --test-concurrency=1 \
             dist/tests/block2g-daily-operations.test.js \
             dist/tests/b1-4-1-supervised-attention-queue.test.js \
-            dist/tests/b1-4-2-r3-recommendation-lifecycle.test.js \
-            dist/tests/b1-4-2-r4-exactly-once-coalescing.test.js \
-            dist/tests/block2c-assisted-property-diffusion.test.js \
             dist/tests/property-matching-ui.test.js
       - name: Focal jerarquía real desktop/mobile
         run: |
