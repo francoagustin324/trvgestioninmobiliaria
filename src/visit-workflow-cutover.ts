@@ -1,6 +1,6 @@
 import { getCloudSession, pushCloudData, queueCloudSave } from './cloud-api-compatible.js';
 import type { Client, CrmData, Property, SyncedVisit, VisitInterest, VisitStatus } from './models.js';
-import { authenticatedTenantMember, reconcileAuthorizedCommercialAlerts, saveData, state } from './store.js';
+import { authenticatedTenantMember, saveData, state } from './store.js';
 import { assertTenantCrmScope, tenantFingerprint, writeTenantSnapshot } from './tenant-storage.js';
 import {
   assertTenantRuntimeLeaseCurrent,
@@ -63,7 +63,6 @@ function applyAuthoritativeResult(
   replaceClient(result.client);
   upsertAuthoritativeVisit(result.visit);
   upsertAuthoritativeActivity(result);
-  reconcileAuthorizedCommercialAlerts(runtimeLease.scope);
   writeTenantSnapshot(runtimeLease.scope, state.crm, {
     markDirty: false,
     reason: result.operationType === 'VISIT_CREATE'
