@@ -429,7 +429,7 @@
 #crm button.pc-supervised-attention-item.pc-daily-ops-item {
   min-height: 48px;
   padding: 4px 6px;
-  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-columns: auto minmax(0, 1.2fr) minmax(84px, .8fr);
   grid-template-areas:
     "priority name when"
     "reason reason action";
@@ -517,9 +517,18 @@
   }
 
   #crm .pc-daily-ops-summary :is(b, span) {
+    padding: 0 2px;
+    font-size: .53rem;
+    line-height: 1;
+  }
+
+  #crm .pc-daily-ops-heading strong {
+    font-size: .6rem;
+    line-height: 1;
+  }
+
+  #crm .pc-daily-ops-priority {
     padding: 1px 3px;
-    font-size: .56rem;
-    line-height: 1.05;
   }
 
   #crm .pc-daily-ops-list {
@@ -530,7 +539,7 @@
   #crm button.pc-supervised-attention-item.pc-daily-ops-item {
     min-height: 44px;
     padding: 2px 4px;
-    grid-template-columns: auto minmax(0, 1fr) minmax(72px, .72fr);
+    grid-template-columns: auto minmax(0, 1fr) minmax(100px, .9fr);
     grid-template-areas:
       "priority name when"
       "reason reason action";
