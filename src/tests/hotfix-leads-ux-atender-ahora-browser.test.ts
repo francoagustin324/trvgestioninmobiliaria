@@ -13,6 +13,32 @@ const PORT = 62753;
 const HIDDEN_SEARCH = '__r2_lead_oculto__';
 const HIDDEN_MESSAGE = 'Este lead está oculto por los filtros actuales. Ajustá o limpiá los filtros para verlo sin perder tu selección.';
 const SYNTHETIC_CLOUD_POST_HISTORY = new WeakMap<BrowserContext, unknown[]>();
+interface SyntheticCloudWriteGate {
+  signalStarted: () => void;
+  pending: Promise<void>;
+}
+
+const SYNTHETIC_CLOUD_WRITE_GATES = new WeakMap<BrowserContext, SyntheticCloudWriteGate>();
+
+function holdSyntheticCloudWrites(context: BrowserContext): { started: Promise<void>; release: () => void } {
+  let signalStarted!: () => void;
+  let releasePending!: () => void;
+  const started = new Promise<void>((resolve) => { signalStarted = resolve; });
+  const pending = new Promise<void>((resolve) => { releasePending = resolve; });
+  const gate: SyntheticCloudWriteGate = { signalStarted, pending };
+  SYNTHETIC_CLOUD_WRITE_GATES.set(context, gate);
+  let released = false;
+  return {
+    started,
+    release: () => {
+      if (released) return;
+      released = true;
+      if (SYNTHETIC_CLOUD_WRITE_GATES.get(context) === gate) SYNTHETIC_CLOUD_WRITE_GATES.delete(context);
+      releasePending();
+    },
+  };
+}
+
 
 interface ScrollCall {
   clientId: string;
@@ -180,7 +206,34 @@ function fixture(): CrmData {
   ];
   crm.reminders = [];
   crm.conversations = [];
-  crm.properties = [];
+  crm.properties = [{
+    id: 9001,
+    uid: '90010000-0000-4000-8000-000000000001',
+    revision: 1,
+    title: 'Departamento Centro R2',
+    address: 'Centro, Córdoba',
+    type: 'Departamento',
+    operation: 'Venta',
+    price: 55000,
+    owner: 'Propietario R2',
+    status: 'Activa',
+    bedrooms: 1,
+    assignedToId: 1,
+    createdById: 1,
+  }];
+  crm.visits = [{
+    id: 9001,
+    uid: '90020000-0000-4000-8000-000000000001',
+    revision: 1,
+    clientId: 505,
+    propertyId: 9001,
+    scheduledAt: '2030-01-11T15:00:00.000Z',
+    status: 'Coordinada',
+    assignedToId: 1,
+    createdById: 1,
+    createdAt: '2026-09-13T12:00:00.000Z',
+    updatedAt: '2026-09-13T12:00:00.000Z',
+  }];
   crm.contacts = [];
   crm.fichas = [];
   crm.settings = {
@@ -328,6 +381,11 @@ async function installSyntheticAuthority(context: BrowserContext, origin: string
         const postedRecords = Array.isArray(body) ? structuredClone(body) : [structuredClone(body)];
         syntheticPostHistory.push(...postedRecords);
         syntheticRecords = postedRecords;
+        const gate = SYNTHETIC_CLOUD_WRITE_GATES.get(context);
+        if (gate) {
+          gate.signalStarted();
+          await gate.pending;
+        }
         await route.fulfill(syntheticJson(syntheticRecords, 201));
         return;
       }
@@ -979,6 +1037,41 @@ test('HOTFIX UX POST-B1.4.2 R3 — mobile tap, target y contraste accesible exac
             syntheticRecommendationTelemetrySnapshot(context),
             syntheticTelemetryBefore,
             'Navegar no debe generar nueva telemetría cloud ni DECISION.',
+          );
+
+          await closeSheet(page, clientId);
+          const visitClientId = 505;
+          const visitId = 9001;
+          const visitSheet = page.locator(`.mvp-lead-card[data-client-id="${visitClientId}"] details[data-lead-full-sheet="${visitClientId}"]`);
+          await visitSheet.locator(':scope > summary').click();
+          await page.waitForSelector(`[data-confirm-visit="${visitId}"]`, { state: 'visible' });
+
+          const writeGate = holdSyntheticCloudWrites(context);
+          const confirmButton = page.locator(`[data-confirm-visit="${visitId}"]`);
+          try {
+            await confirmButton.click();
+            await writeGate.started;
+            assert.equal(await confirmButton.isVisible(), true, 'Mientras cloud no confirma, el CTA original debe seguir visible.');
+            assert.equal(await confirmButton.isDisabled(), true, 'Mientras persiste, el CTA queda bloqueado para evitar doble submit.');
+            assert.equal(
+              await page.locator(`[data-visit-id="${visitId}"] .pc-visit-confirmed`).count(),
+              0,
+              'La UI no puede mostrar éxito antes de la persistencia cloud.',
+            );
+            assert.match(
+              await crmSnapshot(page),
+              /Visita confirmada/,
+              'La intención queda persistida localmente antes de esperar confirmación cloud.',
+            );
+          } finally {
+            writeGate.release();
+          }
+
+          await page.waitForSelector(`[data-visit-id="${visitId}"] .pc-visit-confirmed`, { state: 'visible' });
+          assert.equal(
+            await page.locator(`[data-confirm-visit="${visitId}"]`).count(),
+            0,
+            'Después de persistir, la condición real resuelta reemplaza automáticamente el CTA.',
           );
         } finally {
           await context.close();
