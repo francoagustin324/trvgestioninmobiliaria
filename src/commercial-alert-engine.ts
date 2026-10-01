@@ -393,7 +393,7 @@ export function evaluateRelevantMatchAlertConditions(
       priority: 'NORMAL',
       rank: 92 - freshMatch.score / 100,
       reason: `${freshMatch.score}% compatible · ${freshMatch.reasons.slice(0, 2).join(' · ')}`,
-      action: 'Revisar match',
+      action: 'Ver oportunidad',
       actionType: 'REVIEW_MATCH',
       target: 'matches',
       name: client.name,
@@ -406,6 +406,67 @@ export function evaluateRelevantMatchAlertConditions(
   }
 
   return conditions.sort(conditionSort);
+}
+
+function taskMirrorsSpecificAlert(
+  task: CommercialAlertCondition,
+  specific: CommercialAlertCondition,
+): boolean {
+  if (task.type !== 'TASK_OVERDUE' || !task.clientId || task.clientId !== specific.clientId) return false;
+  const title = normalize(task.reason);
+  if (!title) return false;
+  const action = normalize(specific.action);
+  if (action && (title === action || title.includes(action) || action.includes(title))) return true;
+  if (specific.type === 'VISIT_UNCONFIRMED') return title.includes('visita') && title.includes('confirm');
+  if (specific.type === 'VISIT_RESULT_MISSING') return title.includes('visita') && (title.includes('resultado') || title.includes('cargar'));
+  if (specific.type === 'OFFER_STALLED') return title.includes('oferta') && (title.includes('retomar') || title.includes('revisar'));
+  if (specific.type === 'RESERVATION_STALLED') return title.includes('reserva') && (title.includes('revisar') || title.includes('retomar'));
+  return false;
+}
+
+function deduplicateCommercialConditions(
+  conditions: readonly CommercialAlertCondition[],
+): CommercialAlertCondition[] {
+  const byClient = new Map<number, CommercialAlertCondition[]>();
+  for (const condition of conditions) {
+    if (!condition.clientId) continue;
+    const siblings = byClient.get(condition.clientId) ?? [];
+    siblings.push(condition);
+    byClient.set(condition.clientId, siblings);
+  }
+
+  const dominantTypes = new Set<CommercialAlertType>([
+    'FOLLOW_UP_OVERDUE',
+    'VISIT_UNCONFIRMED',
+    'VISIT_RESULT_MISSING',
+    'OFFER_STALLED',
+    'RESERVATION_STALLED',
+  ]);
+  const taskDominantTypes = new Set<CommercialAlertType>([
+    'VISIT_UNCONFIRMED',
+    'VISIT_RESULT_MISSING',
+    'OFFER_STALLED',
+    'RESERVATION_STALLED',
+  ]);
+
+  return conditions.filter((condition) => {
+    if (!condition.clientId) return true;
+    const siblings = byClient.get(condition.clientId) ?? [];
+
+    if (condition.type === 'FORGOTTEN_LEAD' || condition.type === 'ADVANCED_NO_NEXT_ACTION') {
+      return !siblings.some((candidate) => candidate !== condition && dominantTypes.has(candidate.type));
+    }
+
+    if (condition.type === 'TASK_OVERDUE') {
+      return !siblings.some((candidate) => (
+        candidate !== condition
+        && taskDominantTypes.has(candidate.type)
+        && taskMirrorsSpecificAlert(condition, candidate)
+      ));
+    }
+
+    return true;
+  }).sort(conditionSort);
 }
 
 export function evaluateCommercialAlertConditions(
@@ -437,7 +498,7 @@ export function evaluateCommercialAlertConditions(
         priority: 'CRÍTICO',
         rank: 10,
         reason: 'Lead nuevo todavía no atendido',
-        action: 'Contactar',
+        action: 'Atender ahora',
         actionType: 'CONTACT_LEAD',
         target: 'lead',
         name: client.name,
@@ -458,7 +519,7 @@ export function evaluateCommercialAlertConditions(
         priority: 'ALTO',
         rank: 24,
         reason: client.nextAction?.trim() || 'Seguimiento vencido',
-        action: client.nextAction?.trim() || 'Contactar',
+        action: 'Hacer seguimiento',
         actionType: 'REPROGRAM_FOLLOW_UP',
         target: 'lead',
         name: client.name,
@@ -621,7 +682,7 @@ export function evaluateCommercialAlertConditions(
         priority: 'CRÍTICO',
         rank: 18,
         reason: `${amount} · ${validDays < 0 ? 'oferta vencida sin resolución' : 'vence hoy sin resolución'}`,
-        action: 'Revisar oferta',
+        action: 'Retomar oferta',
         actionType: 'REVIEW_OFFER',
         target: 'offers',
         name,
@@ -645,7 +706,7 @@ export function evaluateCommercialAlertConditions(
         priority: 'ALTO',
         rank: 40,
         reason: `${amount} · sin movimiento hace ${staleDays} días`,
-        action: 'Revisar oferta',
+        action: 'Retomar oferta',
         actionType: 'REVIEW_OFFER',
         target: 'offers',
         name,
@@ -705,6 +766,7 @@ export function evaluateCommercialAlertConditions(
   const specificClientBlocks = new Set(
     conditions
       .filter((condition) => [
+        'FOLLOW_UP_OVERDUE',
         'VISIT_UNCONFIRMED',
         'VISIT_RESULT_MISSING',
         'OFFER_STALLED',
@@ -769,7 +831,7 @@ export function evaluateCommercialAlertConditions(
     });
   }
 
-  return conditions.sort(conditionSort);
+  return deduplicateCommercialConditions(conditions);
 }
 
 function nextAlertId(existing: readonly CommercialAlert[]): number {
