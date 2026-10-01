@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
-import { chromium } from 'playwright';
+import { webkit } from 'playwright';
 import { managementDashboardMarkup } from '../management-dashboard-ui.js';
 import type { ManagementMetrics } from '../management-metrics.js';
 import type { TeamMember } from '../models.js';
@@ -35,7 +35,7 @@ test('Block 2I browser/responsive: Gestión existe en app real y no genera scrol
     dataQuality:{firstResponseComplete:false,firstResponseNote:'Primera respuesta calculada con 100 de 120 leads: faltan timestamps históricos confiables.'},
   };
 
-  const browser=await chromium.launch({headless:true});
+  const browser=await webkit.launch({headless:true});
   try{
     const page=await browser.newPage({viewport:{width:1366,height:768}});
     await page.setContent(`<style>${css}</style><main style="width:100%;box-sizing:border-box">${managementDashboardMarkup(metrics,members)}</main>`);
