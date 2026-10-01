@@ -188,6 +188,29 @@ function operationalSort(items: OperationalAttentionItem[]): OperationalAttentio
   ));
 }
 
+function hasClientAction(
+  items: readonly OperationalAttentionItem[],
+  clientId: number,
+  kinds: readonly OperationalActionKind[],
+): boolean {
+  return items.some((item) => item.clientId === clientId && kinds.includes(item.kind));
+}
+
+const SPECIFIC_FOLLOW_UP_BLOCKERS: readonly OperationalActionKind[] = [
+  'follow-up-overdue',
+  'visit-confirm',
+  'visit-result',
+  'offer-stalled',
+  'reservation-attention',
+  'advanced-no-action',
+];
+
+const SPECIFIC_CLOSE_BLOCKERS: readonly OperationalActionKind[] = [
+  'offer-stalled',
+  'reservation-attention',
+  'advanced-no-action',
+];
+
 export function operationalAttentionQueue(
   input: OperationalAttentionInput,
   limit = 8,
@@ -214,7 +237,12 @@ export function operationalAttentionQueue(
   // 2G conserva sus recordatorios proactivos; no son alertas 2H.
   for (const client of clients) {
     const followUpDays = leadDaysFromToday(client.nextFollowUp, today);
-    if (followUpDays !== null && followUpDays >= 0 && followUpDays <= 3) {
+    if (
+      followUpDays !== null
+      && followUpDays >= 0
+      && followUpDays <= 3
+      && !hasClientAction(items, client.id, SPECIFIC_FOLLOW_UP_BLOCKERS)
+    ) {
       pushUnique(items, {
         key: `next-follow-up:${client.id}:${client.nextFollowUp || ''}`,
         kind: 'next-follow-up',
@@ -244,6 +272,7 @@ export function operationalAttentionQueue(
     if (
       (stage === 'Reservado' || (stage === 'Negociación' && hasAcceptedOffer))
       && !items.some((item) => item.clientId === client.id && item.priority === 'CRÍTICO')
+      && !hasClientAction(items, client.id, SPECIFIC_CLOSE_BLOCKERS)
     ) {
       pushUnique(items, {
         key: `close-intervention:${client.id}:${stage}`,
