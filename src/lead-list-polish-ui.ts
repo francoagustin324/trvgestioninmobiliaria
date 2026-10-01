@@ -1,9 +1,10 @@
-import { renderOperationalAttentionQueue, renderOperationalAttentionUnavailable } from './lead-attention-queue.js';
+import { renderOperationalAttentionForTenant } from './lead-attention-runtime.js';
 import { confirmScheduledVisit } from './visit-confirmation.js';
 import { instrumentVisibleSupervisedRecommendations } from './lead-recommendation-instrumentation.js';
 import type { Property } from './models.js';
-import { authenticatedTenantMember, state } from './store.js';
-import { visibleClients, visibleProperties, visibleReminders } from './team-access.js';
+import { state } from './store.js';
+import { visibleProperties } from './team-access.js';
+import { currentTenantScope } from './tenant-runtime.js';
 
 const desktopQuery = '(min-width: 901px)';
 
@@ -140,21 +141,12 @@ function renderAttentionQueue(container: HTMLElement, properties: Property[] = v
   const results = container.querySelector<HTMLElement>('#mvp-lead-results');
   if (!results) return;
   container.querySelector<HTMLElement>('[data-supervised-attention-queue]')?.remove();
-  const clients = visibleClients();
-  const member = authenticatedTenantMember();
-  const markup = member
-    ? renderOperationalAttentionQueue({
-        organizationId: state.crm.organization.id,
-        clients,
-        properties,
-        visits: state.crm.visits,
-        offers: state.crm.offers,
-        reservations: state.crm.reservations,
-        reminders: visibleReminders(),
-        activityLog: state.crm.activityLog,
-        actor: { id: member.id, role: member.role },
-      }, 3)
-    : renderOperationalAttentionUnavailable();
+  const markup = renderOperationalAttentionForTenant(
+    state.crm,
+    currentTenantScope(),
+    3,
+    properties,
+  );
   results.insertAdjacentHTML('beforebegin', markup);
 }
 

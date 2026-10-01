@@ -2,10 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   commercialAlertDedupeKey,
-  dismissCommercialAlert,
   evaluateCommercialAlertConditions,
-  reconcileCommercialAlerts,
-  reconcileEvaluatedCommercialAlerts,
   visitConfirmationDetail,
   VISIT_CONFIRMED_ACTION,
 } from '../commercial-alert-engine.js';
@@ -13,7 +10,6 @@ import { operationalAttentionQueue, renderOperationalAttentionQueue } from '../l
 import type {
   ActivityEntry,
   Client,
-  CommercialAlert,
   Offer,
   Property,
   Reminder,
@@ -158,7 +154,7 @@ test('Block 2H A-T: el motor puro detecta las diez condiciones y evita falsos po
   }))).length, 0, 'G: lead terminal nunca se marca olvidado');
   assert.equal(activeOf('FORGOTTEN_LEAD', evaluateCommercialAlertConditions(evaluation({
     clients: [{ ...forgotten, nextAction: 'Enviar alternativas' }],
-  }))).length, 0, 'G: un nextAction útil impide etiquetar al lead como olvidado');
+  }))).length, 1, 'G: un nextAction sin fecha válida no prueba gestión vigente');
 
   const visitBase: SyncedVisit = {
     id: 10,
@@ -208,11 +204,24 @@ test('Block 2H A-T: el motor puro detecta las diez condiciones y evita falsos po
     properties: [property(10)],
     visits: [pastVisit],
   }))).length, 1, 'K: visita pasada sin resultado alerta');
+  const realizedVisit = { ...pastVisit, status: 'Realizada' as const, interest: 'Alto' as const, updatedAt: '2026-09-29T14:00:00.000Z' };
+  const realizedActivity: ActivityEntry = {
+    id: 11,
+    actorId: 1,
+    action: 'Visita realizada',
+    entityType: 'Cliente',
+    entityId: 4,
+    detail: 'Resultado causal',
+    createdAt: '2026-09-29T14:00:01.000Z',
+    commercialEntityType: 'visit',
+    commercialEntityId: realizedVisit.id,
+  };
   assert.equal(activeOf('VISIT_RESULT_MISSING', evaluateCommercialAlertConditions(evaluation({
     clients: [visitClient],
     properties: [property(10)],
-    visits: [{ ...pastVisit, status: 'Realizada', interest: 'Alto' }],
-  }))).length, 0, 'L: visita con resultado no alerta');
+    visits: [realizedVisit],
+    activityLog: [realizedActivity],
+  }))).length, 0, 'L: visita con resultado causal y próximo paso válido no alerta');
 
   const offerClient = client(5, { pipeline: 'Negociación', nextAction: 'Esperar respuesta', nextFollowUp: '2026-10-02' });
   const stalledOffer: Offer = {
@@ -451,49 +460,43 @@ test('Block 2H A-T: el motor puro detecta las diez condiciones y evita falsos po
   assert.equal(activeOf('TASK_OVERDUE', visitTaskConditions).length, 0, 'dedupe tarea: recordatorio espejo no duplica la visita');
 });
 
-test('Block 2H dedupe/resolución: misma condición es idempotente y una nueva versión puede reaparecer', () => {
+test('Block 2H derivación: la misma snapshot es determinística y la resolución vive sólo en estado comercial real', () => {
   const overdue = client(20, { nextAction: 'Llamar', nextFollowUp: '2026-09-27' });
   const input = evaluation({ clients: [overdue] });
-  const conditions = evaluateCommercialAlertConditions(input);
-  assert.equal(conditions.length, 1);
+  const first = evaluateCommercialAlertConditions(input);
+  const second = evaluateCommercialAlertConditions(input);
+  assert.deepEqual(second, first, 'misma snapshot produce exactamente las mismas condiciones derivadas');
+  assert.equal(activeOf('FOLLOW_UP_OVERDUE', first).length, 1);
 
-  let alerts: CommercialAlert[] = reconcileCommercialAlerts([], conditions, NOW);
-  const firstId = alerts[0]!.id;
-  const firstCreatedAt = alerts[0]!.createdAt;
-  for (let index = 0; index < 20; index += 1) {
-    alerts = reconcileCommercialAlerts(alerts, conditions, NOW);
-  }
-  assert.equal(alerts.length, 1, 'misma condición evaluada 20 veces = 1 alerta');
-  assert.equal(alerts[0]!.id, firstId);
-  assert.equal(alerts[0]!.createdAt, firstCreatedAt);
-
-  alerts = reconcileEvaluatedCommercialAlerts(evaluation({
+  const resolved = evaluateCommercialAlertConditions(evaluation({
     clients: [{ ...overdue, nextFollowUp: '2026-10-03' }],
-  }), alerts);
-  assert.equal(alerts[0]!.state, 'RESOLVED', 'reprogramar follow-up resuelve condición');
+  }));
+  assert.equal(activeOf('FOLLOW_UP_OVERDUE', resolved).length, 0, 'reprogramar el estado real elimina la condición sin lifecycle paralelo');
 
-  alerts = reconcileEvaluatedCommercialAlerts(input, alerts);
-  assert.equal(alerts.length, 1, 'misma versión resuelta no resucita');
-  assert.equal(alerts[0]!.state, 'RESOLVED');
-
-  alerts = reconcileEvaluatedCommercialAlerts(evaluation({
-    clients: [{ ...overdue, nextFollowUp: '2026-09-28', revision: 4 }],
-  }), alerts);
-  assert.equal(alerts.length, 2, 'nueva obligación vencida crea instancia legítima');
-  assert.equal(alerts.filter((alert) => alert.state === 'ACTIVE').length, 1);
-
-  const matchCondition = evaluateCommercialAlertConditions(evaluation({
-    clients: [client(21, { qualificationUpdatedAt: '2026-09-29T10:00:00.000Z' })],
-    properties: [property(21)],
-  })).find((condition) => condition.type === 'NEW_RELEVANT_MATCH')!;
-  let matchAlerts = reconcileCommercialAlerts([], [matchCondition], NOW);
-  matchAlerts = dismissCommercialAlert(matchAlerts, matchCondition.dedupeKey, NOW);
-  assert.equal(matchAlerts[0]!.state, 'DISMISSED', 'match puede descartarse explícitamente');
-  assert.throws(
-    () => dismissCommercialAlert(alerts, alerts.find((alert) => alert.type === 'FOLLOW_UP_OVERDUE' && alert.state === 'ACTIVE')!.dedupeKey, NOW),
-    /no puede ocultarse manualmente/,
-    'obligaciones críticas/altas no se ocultan con un X genérico',
-  );
+  const matchClient = client(21, { qualificationUpdatedAt: '2026-09-29T10:00:00.000Z' });
+  const matchProperty = property(21);
+  const matchBefore = evaluateCommercialAlertConditions(evaluation({
+    clients: [matchClient],
+    properties: [matchProperty],
+  }));
+  assert.equal(activeOf('NEW_RELEVANT_MATCH', matchBefore).length, 1);
+  const dismissal: ActivityEntry = {
+    id: 210,
+    actorId: 1,
+    action: 'Match descartado',
+    entityType: 'Cliente',
+    entityId: matchClient.id,
+    diffusionClientId: matchClient.id,
+    diffusionPropertyId: matchProperty.id,
+    detail: 'Descartado por usuario\npropertyRevision=2',
+    createdAt: '2026-09-29T12:00:00.000Z',
+  };
+  const matchAfter = evaluateCommercialAlertConditions(evaluation({
+    clients: [matchClient],
+    properties: [matchProperty],
+    activityLog: [dismissal],
+  }));
+  assert.equal(activeOf('NEW_RELEVANT_MATCH', matchAfter).length, 0, 'descartar el match persiste como actividad real y elimina la condición');
 });
 
 test('Block 2H seguridad/tenant: dedupe incluye organización y actor sólo ve asignaciones autorizadas', () => {

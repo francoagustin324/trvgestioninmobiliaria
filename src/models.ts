@@ -40,7 +40,6 @@ export type OfferOrigin = 'Cliente' | 'Propietario';
 export type OfferStatus = 'Pendiente' | 'Aceptada' | 'Rechazada' | 'Contraofertada' | 'Retirada';
 export type OfferCurrency = 'USD' | 'ARS';
 export type ReservationStatus = 'Activa' | 'Cancelada' | 'Concretada';
-export type CommercialAlertState = 'ACTIVE' | 'RESOLVED' | 'DISMISSED';
 export type CommercialAlertPriority = 'CRÍTICO' | 'ALTO' | 'NORMAL';
 export type CommercialAlertType =
   | 'NEW_LEAD_UNATTENDED'
@@ -264,33 +263,6 @@ export interface Reminder extends SyncRecordMetadata {
   assignedToId?: number; createdById?: number;
 }
 
-export interface CommercialAlert extends SyncRecordMetadata {
-  id: number;
-  organizationId: string;
-  type: CommercialAlertType;
-  entityType: 'client' | 'visit' | 'offer' | 'reservation' | 'match' | 'reminder';
-  entityId: number;
-  ownerId?: number;
-  priority: CommercialAlertPriority;
-  rank: number;
-  reason: string;
-  state: CommercialAlertState;
-  createdAt: string;
-  updatedAt: string;
-  dueAt?: string;
-  resolvedAt?: string;
-  dismissedAt?: string;
-  actionType: CommercialAlertActionType;
-  action: string;
-  target: CommercialAlertTarget;
-  name: string;
-  when: string;
-  dedupeKey: string;
-  conditionVersion: string;
-  clientId?: number;
-  propertyId?: number;
-  sourceId?: number;
-}
 
 export interface ConversationMessage {
   id: number;

@@ -5,9 +5,8 @@ import { assignmentVisible } from './team-policy.js';
 import type {
   ActivityEntry,
   Client,
-  CommercialAlert,
+  CommercialAlertActionType,
   CommercialAlertPriority,
-  CommercialAlertState,
   CommercialAlertTarget,
   CommercialAlertType,
   Offer,
@@ -44,14 +43,14 @@ const PRIORITY_ORDER: Record<CommercialAlertPriority, number> = {
 export interface CommercialAlertCondition {
   organizationId: string;
   type: CommercialAlertType;
-  entityType: CommercialAlert['entityType'];
+  entityType: 'client' | 'visit' | 'offer' | 'reservation' | 'match' | 'reminder';
   entityId: number;
   ownerId?: number;
   priority: CommercialAlertPriority;
   rank: number;
   reason: string;
   action: string;
-  actionType: CommercialAlert['actionType'];
+  actionType: CommercialAlertActionType;
   target: CommercialAlertTarget;
   name: string;
   when: string;
@@ -972,117 +971,4 @@ export function evaluateCommercialAlertConditions(
   }
 
   return deduplicateCommercialConditions(conditions);
-}
-
-function nextAlertId(existing: readonly CommercialAlert[]): number {
-  return Math.max(0, ...existing.map((alert) => Number.isFinite(alert.id) ? alert.id : 0)) + 1;
-}
-
-function samePresentation(alert: CommercialAlert, condition: CommercialAlertCondition): boolean {
-  return alert.priority === condition.priority
-    && alert.rank === condition.rank
-    && alert.reason === condition.reason
-    && alert.action === condition.action
-    && alert.actionType === condition.actionType
-    && alert.target === condition.target
-    && alert.name === condition.name
-    && alert.when === condition.when
-    && alert.dueAt === condition.dueAt
-    && alert.ownerId === condition.ownerId
-    && alert.clientId === condition.clientId
-    && alert.propertyId === condition.propertyId
-    && alert.sourceId === condition.sourceId;
-}
-
-export function reconcileCommercialAlerts(
-  existing: readonly CommercialAlert[],
-  conditions: readonly CommercialAlertCondition[],
-  now = new Date(),
-): CommercialAlert[] {
-  const timestamp = now.toISOString();
-  const activeKeys = new Set(conditions.map((condition) => condition.dedupeKey));
-  const byKey = new Map(existing.map((alert) => [alert.dedupeKey, alert]));
-  const result = existing.map((alert) => ({ ...alert }));
-  let id = nextAlertId(existing);
-
-  for (const condition of conditions) {
-    const current = byKey.get(condition.dedupeKey);
-    if (current) {
-      const index = result.findIndex((alert) => alert.dedupeKey === condition.dedupeKey);
-      if (index < 0) continue;
-      if (current.state !== 'ACTIVE') continue;
-      if (!samePresentation(current, condition)) {
-        result[index] = {
-          ...current,
-          ...condition,
-          state: 'ACTIVE',
-          updatedAt: timestamp,
-          revision: Number(current.revision ?? 0) + 1,
-        };
-      }
-      continue;
-    }
-
-    result.push({
-      id: id++,
-      revision: 0,
-      ...condition,
-      state: 'ACTIVE',
-      createdAt: timestamp,
-      updatedAt: timestamp,
-    });
-  }
-
-  return result.map((alert) => {
-    if (alert.state !== 'ACTIVE' || activeKeys.has(alert.dedupeKey)) return alert;
-    return {
-      ...alert,
-      state: 'RESOLVED' as CommercialAlertState,
-      resolvedAt: timestamp,
-      updatedAt: timestamp,
-      revision: Number(alert.revision ?? 0) + 1,
-    };
-  });
-}
-
-export function reconcileEvaluatedCommercialAlerts(
-  input: CommercialAlertEvaluationInput,
-  existing: readonly CommercialAlert[],
-): CommercialAlert[] {
-  const now = input.now ?? new Date();
-  return reconcileCommercialAlerts(existing, evaluateCommercialAlertConditions(input), now);
-}
-
-export function dismissCommercialAlert(
-  alerts: readonly CommercialAlert[],
-  dedupeKey: string,
-  now = new Date(),
-): CommercialAlert[] {
-  const current = alerts.find((alert) => alert.dedupeKey === dedupeKey);
-  if (!current || current.state !== 'ACTIVE') return alerts.map((alert) => ({ ...alert }));
-  if (current.type !== 'NEW_RELEVANT_MATCH') {
-    throw new Error('Esta alerta representa una obligación comercial vigente y no puede ocultarse manualmente.');
-  }
-  const timestamp = now.toISOString();
-  return alerts.map((alert) => alert.dedupeKey === dedupeKey
-    ? {
-        ...alert,
-        state: 'DISMISSED' as CommercialAlertState,
-        dismissedAt: timestamp,
-        updatedAt: timestamp,
-        revision: Number(alert.revision ?? 0) + 1,
-      }
-    : { ...alert });
-}
-
-export function activeCommercialAlerts(alerts: readonly CommercialAlert[]): CommercialAlert[] {
-  return alerts
-    .filter((alert) => alert.state === 'ACTIVE')
-    .slice()
-    .sort((left, right) => (
-      PRIORITY_ORDER[left.priority] - PRIORITY_ORDER[right.priority]
-      || left.rank - right.rank
-      || left.name.localeCompare(right.name, 'es-AR')
-      || left.dedupeKey.localeCompare(right.dedupeKey)
-    ));
 }
