@@ -21,6 +21,15 @@ interface SyntheticCloudWriteGate {
 
 const SYNTHETIC_CLOUD_WRITE_GATES = new WeakMap<BrowserContext, SyntheticCloudWriteGate>();
 
+interface SharedSyntheticCloud {
+  records: unknown[];
+  postHistory: unknown[];
+}
+
+function sharedSyntheticCloud(): SharedSyntheticCloud {
+  return { records: [], postHistory: [] };
+}
+
 function holdSyntheticCloudWrites(context: BrowserContext): { started: Promise<void>; release: () => void } {
   let signalStarted!: () => void;
   let releasePending!: () => void;
@@ -350,10 +359,9 @@ function syntheticDeleteFilter(records: unknown[], url: URL): unknown[] {
   });
 }
 
-async function installSyntheticAuthority(context: BrowserContext, origin: string): Promise<void> {
-  let syntheticRecords: unknown[] = [];
-  const syntheticPostHistory: unknown[] = [];
-  SYNTHETIC_CLOUD_POST_HISTORY.set(context, syntheticPostHistory);
+async function installSyntheticAuthority(context: BrowserContext, origin: string, shared?: SharedSyntheticCloud): Promise<void> {
+  const cloud = shared ?? sharedSyntheticCloud();
+  SYNTHETIC_CLOUD_POST_HISTORY.set(context, cloud.postHistory);
   const ownerMembership = syntheticMembership(1, USER_ID, 'Franco R2', 'owner');
   const brokerMembership = syntheticMembership(2, 'hotfix-leads-ux-r2-broker', 'Corredor R2', 'agent');
 
@@ -409,15 +417,15 @@ async function installSyntheticAuthority(context: BrowserContext, origin: string
 
     if (url.pathname.endsWith('/rest/v1/propcontrol_records')) {
       if (request.method() === 'GET') {
-        await route.fulfill(syntheticJson(syntheticRecords));
+        await route.fulfill(syntheticJson(cloud.records));
         return;
       }
       if (request.method() === 'POST') {
         const body = request.postDataJSON();
         const postedRecords = Array.isArray(body) ? structuredClone(body) : [structuredClone(body)];
-        syntheticPostHistory.push(...postedRecords);
+        cloud.postHistory.push(...postedRecords);
         const ignoreDuplicates = (request.headers().prefer ?? '').includes('ignore-duplicates');
-        syntheticRecords = upsertSyntheticRecords(syntheticRecords, postedRecords, ignoreDuplicates);
+        cloud.records = upsertSyntheticRecords(cloud.records, postedRecords, ignoreDuplicates);
         const gate = SYNTHETIC_CLOUD_WRITE_GATES.get(context);
         if (gate) {
           gate.signalStarted();
@@ -427,7 +435,7 @@ async function installSyntheticAuthority(context: BrowserContext, origin: string
         return;
       }
       if (request.method() === 'DELETE') {
-        syntheticRecords = syntheticDeleteFilter(syntheticRecords, url);
+        cloud.records = syntheticDeleteFilter(cloud.records, url);
         await route.fulfill({ status: 204, headers: { 'access-control-allow-origin': '*' }, body: '' });
         return;
       }
@@ -490,7 +498,12 @@ async function seedContext(context: BrowserContext): Promise<void> {
   }, { crm: fixture(), generation: GENERATION, identityStorageKey: identityKey, storageKey: LEGACY_STORAGE_KEY });
 }
 
-async function createContext(browser: Browser, viewport: { width: number; height: number }, mobile: boolean): Promise<BrowserContext> {
+async function createContext(
+  browser: Browser,
+  viewport: { width: number; height: number },
+  mobile: boolean,
+  shared?: SharedSyntheticCloud,
+): Promise<BrowserContext> {
   const context = await browser.newContext({
     viewport,
     screen: viewport,
@@ -500,7 +513,7 @@ async function createContext(browser: Browser, viewport: { width: number; height
     timezoneId: 'America/Argentina/Cordoba',
     colorScheme: 'dark',
   });
-  await installSyntheticAuthority(context, `http://127.0.0.1:${PORT}`);
+  await installSyntheticAuthority(context, `http://127.0.0.1:${PORT}`, shared);
   await seedContext(context);
   return context;
 }
@@ -1129,6 +1142,85 @@ test('HOTFIX UX POST-B1.4.2 R3 — mobile tap, target y contraste accesible exac
           await page.waitForSelector(`[data-visit-id="${visitId}"] .pc-visit-confirmed`, { state: 'visible' });
         } finally {
           await context.close();
+        }
+      });
+
+      await t.test('B2 2H multidispositivo: dos sesiones confirman la misma visita y convergen en una sola intención persistida', async () => {
+        const cloud = sharedSyntheticCloud();
+        const contextA = await createContext(browser, { width: 1366, height: 768 }, false, cloud);
+        const contextB = await createContext(browser, { width: 1366, height: 768 }, false, cloud);
+        try {
+          const pageA = await contextA.newPage();
+          const pageB = await contextB.newPage();
+          await Promise.all([load(pageA, url), load(pageB, url)]);
+
+          const openVisit = async (page: Page): Promise<void> => {
+            const search = page.locator('#mvp-lead-search');
+            await search.fill('Lead R2 Cinco');
+            await page.waitForSelector('.mvp-lead-card[data-client-id="505"]', { state: 'visible' });
+            const card = page.locator('.mvp-lead-card[data-client-id="505"]');
+            const actions = card.locator('.mvp-lead-actions-menu');
+            await actions.locator(':scope > summary').click();
+            await actions.locator('[data-open-lead-details="505"]').click();
+            await page.waitForSelector('[data-confirm-visit="9001"]', { state: 'visible' });
+          };
+          await Promise.all([openVisit(pageA), openVisit(pageB)]);
+
+          await Promise.all([
+            pageA.locator('[data-confirm-visit="9001"]').click(),
+            pageB.locator('[data-confirm-visit="9001"]').click(),
+          ]);
+          await Promise.all([
+            pageA.waitForSelector('[data-visit-id="9001"] .pc-visit-confirmed', { state: 'attached' }),
+            pageB.waitForSelector('[data-visit-id="9001"] .pc-visit-confirmed', { state: 'attached' }),
+          ]);
+
+          const postedConfirmations = cloud.postHistory
+            .filter((value) => {
+              const row = value as { entity_type?: unknown; payload?: { action?: unknown } };
+              return row.entity_type === 'activity' && row.payload?.action === 'Visita confirmada';
+            })
+            .map((value) => (value as { payload: { uid?: unknown; operationId?: unknown } }).payload);
+          assert.ok(postedConfirmations.length >= 2, 'ambos dispositivos deben intentar persistir la confirmación');
+          assert.equal(new Set(postedConfirmations.map((payload) => String(payload.uid || ''))).size, 1, 'ambos dispositivos generan el mismo uid determinístico');
+          assert.equal(new Set(postedConfirmations.map((payload) => String(payload.operationId || ''))).size, 1, 'ambos dispositivos generan el mismo operationId determinístico');
+
+          const storedConfirmations = cloud.records.filter((value) => {
+            const row = value as { entity_type?: unknown; payload?: { action?: unknown } };
+            return row.entity_type === 'activity' && row.payload?.action === 'Visita confirmada';
+          });
+          assert.equal(storedConfirmations.length, 1, 'la nube conserva una sola Activity semántica, no dos UIDs equivalentes');
+
+          await Promise.all([pageA.reload({ waitUntil: 'domcontentloaded' }), pageB.reload({ waitUntil: 'domcontentloaded' })]);
+          await Promise.all([
+            pageA.waitForSelector('#crm.active', { state: 'visible' }),
+            pageB.waitForSelector('#crm.active', { state: 'visible' }),
+          ]);
+          const confirmationCount = async (page: Page): Promise<number> => page.evaluate((storageKey) => {
+            const raw = localStorage.getItem(storageKey);
+            if (!raw) return -1;
+            const crm = JSON.parse(raw) as { activityLog?: Array<{ action?: string }> };
+            return (crm.activityLog ?? []).filter((entry) => entry.action === 'Visita confirmada').length;
+          }, TENANT_STORAGE_KEY);
+          await Promise.all([
+            pageA.waitForFunction((storageKey) => {
+              const raw = localStorage.getItem(storageKey);
+              if (!raw) return false;
+              const crm = JSON.parse(raw) as { activityLog?: Array<{ action?: string }> };
+              return (crm.activityLog ?? []).filter((entry) => entry.action === 'Visita confirmada').length === 1;
+            }, TENANT_STORAGE_KEY),
+            pageB.waitForFunction((storageKey) => {
+              const raw = localStorage.getItem(storageKey);
+              if (!raw) return false;
+              const crm = JSON.parse(raw) as { activityLog?: Array<{ action?: string }> };
+              return (crm.activityLog ?? []).filter((entry) => entry.action === 'Visita confirmada').length === 1;
+            }, TENANT_STORAGE_KEY),
+          ]);
+          assert.equal(await confirmationCount(pageA), 1);
+          assert.equal(await confirmationCount(pageB), 1);
+        } finally {
+          await contextA.close();
+          await contextB.close();
         }
       });
 
