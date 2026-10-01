@@ -34,7 +34,7 @@ jobs:
     timeout-minutes: 120
     env:
       PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
-      EXPECTED_TEST_TOTAL: "1497"
+      EXPECTED_TEST_TOTAL: "1498"
     steps:
       - uses: actions/checkout@v7
         with:
