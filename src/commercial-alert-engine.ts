@@ -1,6 +1,6 @@
 import { leadDaysFromToday } from './lead-list-priority.js';
 import { commercialStage, isTerminalClient, localIsoDate } from './lead-pipeline.js';
-import { matchDismissalActive, matchPropertiesForClient } from './property-matching.js';
+import { matchDismissalActive, matchPropertiesForClient, propertyMatchCriteriaKey } from './property-matching.js';
 import { assignmentVisible } from './team-policy.js';
 import type {
   ActivityEntry,
@@ -242,36 +242,45 @@ function alreadyDiffused(client: Client, property: Property): boolean {
   ));
 }
 
+function commercialEntityRelationMatches(
+  entry: ActivityEntry,
+  entityType: 'offer' | 'reservation',
+  entityId: number,
+  entityUid?: string,
+): boolean {
+  if (entry.commercialEntityType !== entityType) return false;
+  if (entityUid && entry.commercialEntityUid) return entry.commercialEntityUid === entityUid;
+  return entry.commercialEntityId === entityId;
+}
+
 function movementActivity(
-  clientId: number,
+  entityType: 'offer' | 'reservation',
+  entityId: number,
+  entityUid: string | undefined,
   activities: readonly ActivityEntry[],
-  pattern: RegExp,
 ): string | undefined {
   return activities
-    .filter((entry) => (
-      entry.entityType === 'Cliente'
-      && entry.entityId === clientId
-      && !isSchedulingOnlyActivity(entry)
-      && pattern.test(entry.action)
-    ))
+    .filter((entry) => commercialEntityRelationMatches(entry, entityType, entityId, entityUid))
     .map((entry) => entry.createdAt)
     .filter((value) => validTimestamp(value) !== null)
     .sort((left, right) => Date.parse(right) - Date.parse(left))[0];
 }
 
 function offerMovementAt(offer: Offer, activities: readonly ActivityEntry[]): string {
+  const synced = offer as Offer & { uid?: string };
   return latestTimestamp([
     offer.updatedAt,
     offer.createdAt,
-    movementActivity(offer.clientId, activities, /oferta|contraoferta|contacto|whatsapp|llamada|mensaje|email/i),
+    movementActivity('offer', offer.id, synced.uid, activities),
   ]) ?? offer.updatedAt ?? offer.createdAt;
 }
 
 function reservationMovementAt(reservation: Reservation, activities: readonly ActivityEntry[]): string {
+  const synced = reservation as Reservation & { uid?: string };
   return latestTimestamp([
     reservation.updatedAt,
     reservation.createdAt,
-    movementActivity(reservation.clientId, activities, /reserva|contacto|whatsapp|llamada|mensaje|email/i),
+    movementActivity('reservation', reservation.id, synced.uid, activities),
   ]) ?? reservation.updatedAt ?? reservation.createdAt;
 }
 
@@ -304,6 +313,65 @@ export function visitConfirmationDetail(visit: Visit): string {
     syncedVisit.uid ? `visitUid=${syncedVisit.uid}` : '',
     `scheduledAt=${visit.scheduledAt}`,
   ].filter(Boolean).join('\n');
+}
+
+function visitResultAction(visit: Visit): string {
+  if (visit.status === 'Realizada') return 'Visita realizada';
+  if (visit.status === 'Cancelada') return 'Visita cancelada';
+  if (visit.status === 'No asistió') return 'Cliente no asistió';
+  return '';
+}
+
+function visitRelationMatches(visit: Visit, entry: ActivityEntry): boolean {
+  if (entry.entityType !== 'Cliente' || entry.entityId !== visit.clientId) return false;
+  const syncedVisit = visit as Visit & { uid?: string };
+  if (entry.commercialEntityType === 'visit') {
+    if (syncedVisit.uid && entry.commercialEntityUid) return entry.commercialEntityUid === syncedVisit.uid;
+    return entry.commercialEntityId === visit.id;
+  }
+  const transaction = entry as ActivityEntry & { visitUid?: string; transactionOwner?: string };
+  return Boolean(
+    syncedVisit.uid
+    && transaction.transactionOwner === 'visit'
+    && transaction.visitUid === syncedVisit.uid
+  );
+}
+
+export function visitResultActivityAt(
+  visit: Visit,
+  activities: readonly ActivityEntry[],
+): string | undefined {
+  const action = visitResultAction(visit);
+  if (!action) return undefined;
+  const exact = activities
+    .filter((entry) => entry.action === action && visitRelationMatches(visit, entry))
+    .map((entry) => entry.createdAt)
+    .filter((value) => validTimestamp(value) !== null)
+    .sort((left, right) => Date.parse(right) - Date.parse(left))[0];
+  if (exact) return exact;
+
+  // Legacy fallback: historical visit writes used the same result timestamp but
+  // did not persist the visit identity on Activity. Only a tightly coupled event
+  // around visit.updatedAt is accepted; arbitrary later WhatsApp/calls never count.
+  const updatedAt = validTimestamp(visit.updatedAt);
+  if (updatedAt === null) return undefined;
+  return activities
+    .filter((entry) => {
+      if (entry.action !== action || entry.entityType !== 'Cliente' || entry.entityId !== visit.clientId) return false;
+      const createdAt = validTimestamp(entry.createdAt);
+      if (createdAt === null) return false;
+      const delta = createdAt - updatedAt;
+      return delta >= -1_000 && delta <= 5 * 60_000;
+    })
+    .map((entry) => entry.createdAt)
+    .sort((left, right) => Date.parse(right) - Date.parse(left))[0];
+}
+
+export function hasValidCommercialCommitment(client: Client, today: string): boolean {
+  return Boolean(
+    client.nextAction?.trim()
+    && leadDaysFromToday(client.nextFollowUp, today) !== null
+  );
 }
 
 function sameActivityIdentity(left: ActivityEntry, right: ActivityEntry): boolean {
@@ -404,34 +472,47 @@ export function evaluateRelevantMatchAlertConditions(
     assignmentAllowed(input as CommercialAlertEvaluationInput, property.assignedToId)
   ));
   const conditions: CommercialAlertCondition[] = [];
-
+  const byCriteria = new Map<string, Client[]>();
   for (const client of clients) {
-    const freshMatch = matchPropertiesForClient(client, properties)
-      .find((match) => (
-        match.level === 'Alta'
-        && !alreadyDiffused(client, match.property)
+    const key = propertyMatchCriteriaKey(client);
+    const group = byCriteria.get(key) ?? [];
+    group.push(client);
+    byCriteria.set(key, group);
+  }
+
+  for (const group of byCriteria.values()) {
+    const representative = group[0];
+    if (!representative) continue;
+    const highMatches = matchPropertiesForClient(representative, properties)
+      .filter((match) => match.level === 'Alta');
+    if (!highMatches.length) continue;
+
+    for (const client of group) {
+      const freshMatch = highMatches.find((match) => (
+        !alreadyDiffused(client, match.property)
         && !matchDismissalActive(client, match.property, activities)
       ));
-    if (!freshMatch) continue;
-    pushCondition(conditions, {
-      organizationId: input.organizationId,
-      type: 'NEW_RELEVANT_MATCH',
-      entityType: 'match',
-      entityId: client.id,
-      ownerId: client.assignedToId,
-      priority: 'NORMAL',
-      rank: 92 - freshMatch.score / 100,
-      reason: `${freshMatch.score}% compatible · ${freshMatch.reasons.slice(0, 2).join(' · ')}`,
-      action: 'Ver oportunidad',
-      actionType: 'REVIEW_MATCH',
-      target: 'matches',
-      name: client.name,
-      when: 'Nuevo match',
-      conditionVersion: matchVersion(client, freshMatch.property),
-      clientId: client.id,
-      propertyId: freshMatch.property.id,
-      sourceId: freshMatch.property.id,
-    });
+      if (!freshMatch) continue;
+      pushCondition(conditions, {
+        organizationId: input.organizationId,
+        type: 'NEW_RELEVANT_MATCH',
+        entityType: 'match',
+        entityId: client.id,
+        ownerId: client.assignedToId,
+        priority: 'NORMAL',
+        rank: 92 - freshMatch.score / 100,
+        reason: `${freshMatch.score}% compatible · ${freshMatch.reasons.slice(0, 2).join(' · ')}`,
+        action: 'Ver oportunidad',
+        actionType: 'REVIEW_MATCH',
+        target: 'matches',
+        name: client.name,
+        when: 'Nuevo match',
+        conditionVersion: matchVersion(client, freshMatch.property),
+        clientId: client.id,
+        propertyId: freshMatch.property.id,
+        sourceId: freshMatch.property.id,
+      });
+    }
   }
 
   return conditions.sort(conditionSort);
@@ -560,12 +641,10 @@ export function evaluateCommercialAlertConditions(
       });
     }
 
-    const hasFutureFollowUp = followUpDays !== null && followUpDays >= 0;
-    const hasUsefulNextAction = Boolean(client.nextAction?.trim());
+    const hasValidCommitment = hasValidCommercialCommitment(client, today);
     if (
       !isNewUnattended
-      && !hasFutureFollowUp
-      && !hasUsefulNextAction
+      && !hasValidCommitment
       && !(followUpDays !== null && followUpDays < 0)
     ) {
       const lastTouch = latestCommercialTouch(client, activities) || createdAt;
@@ -638,9 +717,17 @@ export function evaluateCommercialAlertConditions(
     }
 
     const visitedClient = clients.find((client) => client.id === visit.clientId);
+    const resultActivityAt = visit.status === 'Realizada'
+      ? visitResultActivityAt(visit, activities)
+      : undefined;
     if (
       visit.status === 'Realizada'
-      && (!visit.interest || !visitedClient?.nextAction?.trim() || !visitedClient.nextFollowUp)
+      && (
+        !visit.interest
+        || !resultActivityAt
+        || !visitedClient
+        || !hasValidCommercialCommitment(visitedClient, today)
+      )
     ) {
       pushCondition(conditions, {
         organizationId: input.organizationId,
@@ -650,13 +737,15 @@ export function evaluateCommercialAlertConditions(
         ownerId: visit.assignedToId,
         priority: 'ALTO',
         rank: 30,
-        reason: 'Visita realizada con resultado o próximo paso incompleto',
+        reason: !resultActivityAt
+          ? 'Visita realizada sin evidencia causal de resultado y próximo paso'
+          : 'Visita realizada con resultado o próximo paso incompleto',
         action: 'Completar resultado',
         actionType: 'LOAD_VISIT_RESULT',
         target: 'visits',
         name,
         when: relativeAge(visit.updatedAt, now),
-        conditionVersion: `${visit.updatedAt}:${visit.interest || ''}:${visitedClient?.nextAction || ''}:${visitedClient?.nextFollowUp || ''}`,
+        conditionVersion: `${visit.updatedAt}:${visit.interest || ''}:${resultActivityAt || ''}:${visitedClient?.nextAction || ''}:${visitedClient?.nextFollowUp || ''}`,
         dueAt: visit.scheduledAt,
         clientId: visit.clientId,
         propertyId: visit.propertyId,
@@ -823,7 +912,7 @@ export function evaluateCommercialAlertConditions(
     const stage = commercialStage(client);
     if (
       ['Calificado', 'Visita coordinada', 'Negociación', 'Reservado'].includes(stage)
-      && (!client.nextAction?.trim() || !client.nextFollowUp)
+      && !hasValidCommercialCommitment(client, today)
       && !specificClientBlocks.has(client.id)
     ) {
       pushCondition(conditions, {
