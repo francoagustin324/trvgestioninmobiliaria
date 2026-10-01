@@ -1,0 +1,28 @@
+.management-dashboard{width:100%;max-width:100%;box-sizing:border-box;display:grid;gap:18px;padding:6px 2px 28px;overflow:hidden}
+.mg-header,.mg-section,.mg-card,.mg-period-empty,.mg-quality,.mg-access-error{box-sizing:border-box}
+.mg-header{display:flex;align-items:flex-start;justify-content:space-between;gap:18px}
+.mg-header h2,.mg-section h3{margin:3px 0 4px}.mg-header p{margin:0;max-width:620px;color:#667085}
+.mg-filters{display:flex;align-items:flex-end;gap:12px;flex-wrap:wrap;justify-content:flex-end}
+.mg-periods{display:flex;gap:6px;flex-wrap:wrap}.mg-periods button,.mg-filters select{min-height:44px;border:1px solid #d0d5dd;border-radius:10px;background:#fff;padding:8px 12px;font:inherit}
+.mg-periods button.active{border-color:#101828;font-weight:700}.mg-filters label{display:grid;gap:5px;font-size:12px;font-weight:700;color:#475467}.mg-filters select{min-width:170px}
+.mg-period-empty,.mg-quality,.mg-access-error{padding:12px 14px;border-radius:12px;background:#f8fafc;color:#475467}.mg-quality{font-size:13px}
+.mg-scorecard{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}
+.mg-card{min-width:0;border:1px solid #e4e7ec;border-radius:14px;background:#fff;padding:14px;display:grid;gap:5px}
+.mg-card span{font-size:12px;color:#667085;font-weight:700}.mg-card strong{font-size:24px;line-height:1.1;color:#101828}.mg-card small{font-size:11px;color:#667085}
+.mg-section{min-width:0;border:1px solid #e4e7ec;border-radius:16px;background:#fff;padding:16px}
+.mg-section-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:12px}.mg-section-head small{color:#667085}
+.mg-funnel,.mg-pipeline{display:grid;gap:10px}.mg-funnel article,.mg-pipeline article{display:grid;gap:6px}.mg-funnel article>div:first-child,.mg-pipeline article>div:first-child{display:flex;justify-content:space-between;gap:12px}
+.mg-funnel small{color:#667085}.mg-bar{height:7px;background:#f2f4f7;border-radius:999px;overflow:hidden}.mg-bar i{display:block;height:100%;border-radius:999px;background:#344054}
+.mg-two-columns{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:14px;min-width:0}
+.mg-table-wrap{width:100%;max-width:100%;overflow:hidden}.mg-table{width:100%;border-collapse:collapse;font-size:12px}.mg-table th,.mg-table td{padding:9px 7px;border-bottom:1px solid #eaecf0;text-align:right;white-space:nowrap}.mg-table th:first-child,.mg-table td:first-child{text-align:left}.mg-table thead th{color:#667085;font-weight:700}
+.mg-review-list{display:grid;gap:9px}.mg-review-list article{border:1px solid #eaecf0;border-radius:12px;padding:11px}.mg-review-list ul{margin:7px 0 0;padding-left:18px;color:#475467;font-size:13px}
+.mg-money-grid{display:grid;grid-template-columns:repeat(2,minmax(0,220px));gap:10px}.mg-empty{margin:0;padding:16px 0;color:#667085}
+@media (max-width:1100px){.mg-scorecard{grid-template-columns:repeat(2,minmax(0,1fr))}.mg-two-columns{grid-template-columns:1fr}}
+@media (max-width:720px){
+  .management-dashboard{gap:12px;padding:4px 0 20px}.mg-header{display:grid;gap:12px}.mg-filters{justify-content:stretch;display:grid}.mg-periods{display:grid;grid-template-columns:repeat(2,minmax(0,1fr))}.mg-periods button{width:100%}.mg-filters select{width:100%;min-width:0}
+  .mg-scorecard{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}.mg-card{padding:12px}.mg-card strong{font-size:21px}
+  .mg-section{padding:13px}.mg-section-head{display:grid;gap:4px}.mg-two-columns{gap:12px}
+  .mg-table,.mg-table tbody,.mg-table tr,.mg-table td,.mg-table th{display:block;width:100%;box-sizing:border-box}.mg-table thead{display:none}.mg-table tbody{display:grid;gap:10px}.mg-table tr{border:1px solid #eaecf0;border-radius:12px;padding:8px}.mg-table th,.mg-table td{white-space:normal;border:0;padding:5px 4px;text-align:right;display:grid;grid-template-columns:minmax(90px,1fr) minmax(0,1fr);gap:8px}.mg-table th::before,.mg-table td::before{content:attr(data-label);text-align:left;color:#667085;font-weight:600}.mg-table th:first-child{text-align:right}
+  .mg-money-grid{grid-template-columns:1fr 1fr}.mg-funnel article>div:first-child,.mg-pipeline article>div:first-child{min-width:0}
+}
+@media (max-width:390px){.mg-scorecard{grid-template-columns:1fr 1fr}.mg-card strong{font-size:19px}.mg-money-grid{grid-template-columns:1fr}.mg-periods{grid-template-columns:1fr 1fr}}

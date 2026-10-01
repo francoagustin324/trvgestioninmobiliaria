@@ -137,7 +137,7 @@ function clientActivities(client: Client, activities: readonly ActivityEntry[]):
   return activities.filter((entry) => entry.entityType === 'Cliente' && entry.entityId === client.id);
 }
 
-function isSchedulingOnlyActivity(entry: ActivityEntry): boolean {
+export function isSchedulingOnlyActivity(entry: ActivityEntry): boolean {
   return /seguimiento.*programado|pr[oó]xima acci[oó]n programada/i.test(entry.action);
 }
 
@@ -147,12 +147,15 @@ function latestTimestamp(values: Array<string | undefined>): string | undefined 
     .sort((left, right) => Date.parse(right) - Date.parse(left))[0];
 }
 
-function leadCreatedAt(client: Client, activities: readonly ActivityEntry[]): string | undefined {
-  return clientActivities(client, activities)
+export function leadCreatedAt(client: Client, activities: readonly ActivityEntry[]): string | undefined {
+  const logged = clientActivities(client, activities)
     .filter((entry) => entry.action === 'Lead creado')
     .map((entry) => entry.createdAt)
     .filter((value) => validTimestamp(value) !== null)
     .sort((left, right) => Date.parse(left) - Date.parse(right))[0];
+  if (logged) return logged;
+  const persisted = (client as Client & { createdAt?: string }).createdAt;
+  return validTimestamp(persisted) !== null ? persisted : undefined;
 }
 
 function latestCommercialTouch(client: Client, activities: readonly ActivityEntry[]): string | undefined {
@@ -165,12 +168,32 @@ function latestCommercialTouch(client: Client, activities: readonly ActivityEntr
   ]);
 }
 
-function validCommercialAttention(client: Client, activities: readonly ActivityEntry[]): boolean {
+export function validCommercialAttention(client: Client, activities: readonly ActivityEntry[]): boolean {
   if (client.lastContact) return true;
   return clientActivities(client, activities).some((entry) => (
     !isSchedulingOnlyActivity(entry)
     && /contacto|llamada|mensaje|whatsapp|email|visita|oferta|reserva/i.test(entry.action)
   ));
+}
+
+export function firstValidCommercialAttentionAt(
+  client: Client,
+  activities: readonly ActivityEntry[],
+): string | undefined {
+  const activityTimestamp = clientActivities(client, activities)
+    .filter((entry) => (
+      !isSchedulingOnlyActivity(entry)
+      && /contacto|llamada|mensaje|whatsapp|email|visita|oferta|reserva/i.test(entry.action)
+    ))
+    .map((entry) => entry.createdAt)
+    .filter((value) => validTimestamp(value) !== null)
+    .sort((left, right) => Date.parse(left) - Date.parse(right))[0];
+  const preciseLastContact = client.lastContact?.includes('T') && validTimestamp(client.lastContact) !== null
+    ? client.lastContact
+    : undefined;
+  return [activityTimestamp, preciseLastContact]
+    .filter((value): value is string => Boolean(value))
+    .sort((left, right) => Date.parse(left) - Date.parse(right))[0];
 }
 
 function relativeAge(value: string | undefined, now: Date): string {

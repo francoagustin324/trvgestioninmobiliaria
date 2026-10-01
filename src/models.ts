@@ -365,6 +365,7 @@ export const modules: Array<[ModuleId, string]> = [
   ['agenda', 'Agenda'],
   ['propiedades', 'Propiedades'],
   ['equipo', 'Equipo'],
+  ['reportes', 'Gestión'],
   ['configuracion', 'Configuración'],
 ];
 
