@@ -1040,6 +1040,9 @@ test('HOTFIX UX POST-B1.4.2 R3 — mobile tap, target y contraste accesible exac
           await closeSheet(page, clientId);
           const visitClientId = 505;
           const visitId = 9001;
+          const search = page.locator('#mvp-lead-search');
+          await search.fill('Lead R2 Cinco');
+          await page.waitForSelector(`.mvp-lead-card[data-client-id="${visitClientId}"]`, { state: 'visible' });
           const visitSheet = page.locator(`.mvp-lead-card[data-client-id="${visitClientId}"] details[data-lead-full-sheet="${visitClientId}"]`);
           await visitSheet.locator(':scope > summary').click();
           await page.waitForSelector(`[data-confirm-visit="${visitId}"]`, { state: 'visible' });
