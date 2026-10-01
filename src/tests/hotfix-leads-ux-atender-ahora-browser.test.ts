@@ -1170,10 +1170,30 @@ test('HOTFIX UX POST-B1.4.2 R3 — mobile tap, target y contraste accesible exac
             pageA.locator('[data-confirm-visit="9001"]').click(),
             pageB.locator('[data-confirm-visit="9001"]').click(),
           ]);
-          await Promise.all([
-            pageA.waitForSelector('[data-visit-id="9001"] .pc-visit-confirmed', { state: 'attached' }),
-            pageB.waitForSelector('[data-visit-id="9001"] .pc-visit-confirmed', { state: 'attached' }),
-          ]);
+
+          const waitLocalConfirmation = (page: Page): Promise<void> => page.waitForFunction((storageKey) => {
+            const raw = localStorage.getItem(storageKey);
+            if (!raw) return false;
+            const crm = JSON.parse(raw) as { activityLog?: Array<{ action?: string }> };
+            return (crm.activityLog ?? []).filter((entry) => entry.action === 'Visita confirmada').length === 1;
+          }, TENANT_STORAGE_KEY);
+          await Promise.all([waitLocalConfirmation(pageA), waitLocalConfirmation(pageB)]);
+
+          const confirmationRows = (): unknown[] => cloud.records.filter((value) => {
+            const row = value as { entity_type?: unknown; payload?: { action?: unknown } };
+            return row.entity_type === 'activity' && row.payload?.action === 'Visita confirmada';
+          });
+          const deadline = Date.now() + 15_000;
+          while (
+            cloud.postHistory.filter((value) => {
+              const row = value as { entity_type?: unknown; payload?: { action?: unknown } };
+              return row.entity_type === 'activity' && row.payload?.action === 'Visita confirmada';
+            }).length < 2
+            || confirmationRows().length !== 1
+          ) {
+            if (Date.now() >= deadline) throw new Error('Las dos sesiones no convergieron en una confirmación cloud dentro del plazo.');
+            await new Promise((resolve) => setTimeout(resolve, 25));
+          }
 
           const postedConfirmations = cloud.postHistory
             .filter((value) => {
@@ -1185,11 +1205,7 @@ test('HOTFIX UX POST-B1.4.2 R3 — mobile tap, target y contraste accesible exac
           assert.equal(new Set(postedConfirmations.map((payload) => String(payload.uid || ''))).size, 1, 'ambos dispositivos generan el mismo uid determinístico');
           assert.equal(new Set(postedConfirmations.map((payload) => String(payload.operationId || ''))).size, 1, 'ambos dispositivos generan el mismo operationId determinístico');
 
-          const storedConfirmations = cloud.records.filter((value) => {
-            const row = value as { entity_type?: unknown; payload?: { action?: unknown } };
-            return row.entity_type === 'activity' && row.payload?.action === 'Visita confirmada';
-          });
-          assert.equal(storedConfirmations.length, 1, 'la nube conserva una sola Activity semántica, no dos UIDs equivalentes');
+          assert.equal(confirmationRows().length, 1, 'la nube conserva una sola Activity semántica, no dos UIDs equivalentes');
 
           await Promise.all([pageA.reload({ waitUntil: 'domcontentloaded' }), pageB.reload({ waitUntil: 'domcontentloaded' })]);
           await Promise.all([
@@ -1218,6 +1234,17 @@ test('HOTFIX UX POST-B1.4.2 R3 — mobile tap, target y contraste accesible exac
           ]);
           assert.equal(await confirmationCount(pageA), 1);
           assert.equal(await confirmationCount(pageB), 1);
+
+          const assertResolvedUi = async (page: Page): Promise<void> => {
+            await page.locator('#mvp-lead-search').fill('Lead R2 Cinco');
+            await page.waitForSelector('.mvp-lead-card[data-client-id="505"]', { state: 'visible' });
+            const actions = page.locator('.mvp-lead-card[data-client-id="505"] .mvp-lead-actions-menu');
+            await actions.locator(':scope > summary').click();
+            await actions.locator('[data-open-lead-details="505"]').click();
+            await page.waitForSelector('[data-visit-id="9001"] .pc-visit-confirmed', { state: 'visible' });
+            assert.equal(await page.locator('[data-confirm-visit="9001"]').count(), 0, 'reload no debe resucitar el CTA de confirmación');
+          };
+          await Promise.all([assertResolvedUi(pageA), assertResolvedUi(pageB)]);
         } finally {
           await contextA.close();
           await contextB.close();
