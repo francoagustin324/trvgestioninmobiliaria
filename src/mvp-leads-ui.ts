@@ -114,9 +114,8 @@ function matchRow(match: PropertyMatch): string {
   </article>`;
 }
 
-function matchesForLead(client: Client): string {
+function matchesForLead(client: Client, properties: Property[]): string {
   if (isTerminalClient(client)) return '';
-  const properties = visibleProperties();
   if (!properties.length) return '<p class="mvp-match-empty">Todavía no hay propiedades cargadas para comparar.</p>';
   const matches = matchPropertiesForClient(client, properties).slice(0, 3)
     .filter((match) => !matchDismissalActive(client, match.property, state.crm.activityLog));
@@ -148,7 +147,7 @@ function historyBlock(client: Client): string {
   </details>`;
 }
 
-function card(client: Client): string {
+function card(client: Client, properties: Property[]): string {
   const responsible = readableLeadAssignee(
     client,
     state.crm.teamMembers,
@@ -166,7 +165,7 @@ function card(client: Client): string {
     responsible,
     qualificationPanel: renderLeadQualificationPanel(client),
     history: historyBlock(client),
-    matches: matchesForLead(client),
+    matches: matchesForLead(client, properties),
     navigation,
   });
 }
@@ -319,10 +318,11 @@ function bindLeadCardActions(container: HTMLElement): void {
 
 function updateLeadResults(container: HTMLElement): void {
   const leads = leadRows();
+  const properties = visibleProperties();
   if (expandedClientId !== null && !leads.some((client) => client.id === expandedClientId)) expandedClientId = null;
   const results = container.querySelector<HTMLElement>('#mvp-lead-results');
   const count = container.querySelector<HTMLElement>('#mvp-lead-count');
-  if (results) results.innerHTML = leads.map(card).join('') || '<p class="empty-state">No hay leads para mostrar con estos filtros.</p>';
+  if (results) results.innerHTML = leads.map((client) => card(client, properties)).join('') || '<p class="empty-state">No hay leads para mostrar con estos filtros.</p>';
   if (count) count.textContent = `${leads.length} de ${visibleClients().length} leads`;
   bindLeadCardActions(container);
 }
@@ -493,8 +493,9 @@ export function renderMvpLeads(container: HTMLElement, centerSelectedStage = fal
   if (!force && shouldPreserveCommercialEditor(container)) return;
   const editing = visibleClients().find((client) => client.id === state.editingClientId) ?? null;
   const leads = leadRows();
+  const properties = visibleProperties();
   if (expandedClientId !== null && !leads.some((client) => client.id === expandedClientId)) expandedClientId = null;
-  container.innerHTML = `<div class="mvp-page-heading"><div><h1>Leads</h1><p>Priorizá a quién contactar, resolvé la próxima acción y abrí la ficha completa solo cuando haga falta.</p></div><button type="button" data-toggle="client-form">Nuevo lead</button></div>${leadForm(editing)}${filterPanel()}<div id="mvp-lead-results" class="mvp-lead-list">${leads.map(card).join('') || '<p class="empty-state">No hay leads para mostrar con estos filtros.</p>'}</div>`;
+  container.innerHTML = `<div class="mvp-page-heading"><div><h1>Leads</h1><p>Priorizá a quién contactar, resolvé la próxima acción y abrí la ficha completa solo cuando haga falta.</p></div><button type="button" data-toggle="client-form">Nuevo lead</button></div>${leadForm(editing)}${filterPanel()}<div id="mvp-lead-results" class="mvp-lead-list">${leads.map((client) => card(client, properties)).join('') || '<p class="empty-state">No hay leads para mostrar con estos filtros.</p>'}</div>`;
 
   bindFilters(container);
   bindLeadCardActions(container);

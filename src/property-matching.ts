@@ -294,11 +294,82 @@ export function evaluatePropertyMatch(client: Client, property: Property): Prope
   return { client, property, score, level: matchLevel(score), reasons, warnings };
 }
 
-export function matchPropertiesForClient(client: Client, properties: Property[]): PropertyMatch[] {
-  return properties
+type PropertyMatchTemplate = Omit<PropertyMatch, 'client'>;
+
+const MATCH_PROFILE_CACHE_LIMIT = 96;
+const propertyMatchCache = new WeakMap<Property[], Map<string, PropertyMatchTemplate[]>>();
+
+export function propertyMatchCriteriaKey(client: Client): string {
+  return normalizeText([
+    client.status,
+    client.pipeline,
+    client.temperature,
+    client.interest,
+    client.zones,
+    client.propertyType,
+    client.operation,
+    client.bedrooms,
+    client.currency,
+    client.budget,
+    client.paymentMethod,
+    client.needsFinancing,
+    client.creditPossible,
+    client.creditApprovedAmount,
+    client.purchaseTimeframe,
+    client.purpose,
+    client.knowsArea,
+    client.canMoveForward,
+    client.objections,
+    client.notes,
+    client.urgency,
+    client.garage,
+    client.patio,
+    client.pool,
+    client.requiresCreditReady,
+    client.features,
+    client.preferences,
+  ].filter((value) => value !== undefined && value !== null).join('|'));
+}
+
+function templatesForClient(client: Client, properties: Property[]): PropertyMatchTemplate[] {
+  let cache = propertyMatchCache.get(properties);
+  if (!cache) {
+    cache = new Map();
+    propertyMatchCache.set(properties, cache);
+  }
+  const criteriaKey = propertyMatchCriteriaKey(client);
+  const cached = cache.get(criteriaKey);
+  if (cached) return cached;
+
+  const matches = properties
     .map((property) => evaluatePropertyMatch(client, property))
     .filter((match): match is PropertyMatch => match !== null)
-    .sort((left, right) => right.score - left.score || left.property.price - right.property.price);
+    .sort((left, right) => right.score - left.score || left.property.price - right.property.price)
+    .map(({ property, score, level, reasons, warnings }) => ({
+      property,
+      score,
+      level,
+      reasons: reasons.slice(),
+      warnings: warnings.slice(),
+    }));
+
+  if (cache.size >= MATCH_PROFILE_CACHE_LIMIT) {
+    const oldest = cache.keys().next().value;
+    if (oldest !== undefined) cache.delete(oldest);
+  }
+  cache.set(criteriaKey, matches);
+  return matches;
+}
+
+export function matchPropertiesForClient(client: Client, properties: Property[]): PropertyMatch[] {
+  return templatesForClient(client, properties).map((match) => ({
+    client,
+    property: match.property,
+    score: match.score,
+    level: match.level,
+    reasons: match.reasons.slice(),
+    warnings: match.warnings.slice(),
+  }));
 }
 
 export function matchClientsForProperty(property: Property, clients: Client[]): PropertyMatch[] {

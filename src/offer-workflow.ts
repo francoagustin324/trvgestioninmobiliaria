@@ -188,6 +188,9 @@ function addDerivedActivity(
     entityId: client.id,
     detail: `${compact(client.name, 48)} · ${propertyLabel(property)} · ${moneyLabel(offer)} · ${offer.status}`,
     createdAt: now.toISOString(),
+    commercialEntityType: 'offer',
+    commercialEntityId: offer.id,
+    ...((offer as SyncedOffer).uid ? { commercialEntityUid: (offer as SyncedOffer).uid } : {}),
   };
   crm.activityLog.unshift(entry);
   crm.activityLog = crm.activityLog.slice(0, 250);

@@ -190,11 +190,16 @@ export function coordinateVisit(input: CoordinateVisitInput): CoordinateVisitRes
   return {
     client,
     visit,
-    activity: activity(
-      'Visita coordinada',
-      input.client.id,
-      `${visitPropertyLabel(input.property)} · ${input.localDate.trim()} ${input.localTime.trim()}`,
-    ),
+    activity: {
+      ...activity(
+        'Visita coordinada',
+        input.client.id,
+        `${visitPropertyLabel(input.property)} · ${input.localDate.trim()} ${input.localTime.trim()}`,
+      ),
+      commercialEntityType: 'visit',
+      commercialEntityId: visit.id,
+      ...(visit.uid ? { commercialEntityUid: visit.uid } : {}),
+    },
   };
 }
 
@@ -248,11 +253,16 @@ export function registerVisitResult(input: RegisterVisitResultInput): RegisterVi
   return {
     client,
     visit,
-    activity: activity(
-      outcomeAction(input.status),
-      input.client.id,
-      `${property} · ${parts.date || input.visit.scheduledAt}${parts.time ? ` ${parts.time}` : ''} · ${input.status}${interestDetail}${objectionDetail}`,
-    ),
+    activity: {
+      ...activity(
+        outcomeAction(input.status),
+        input.client.id,
+        `${property} · ${parts.date || input.visit.scheduledAt}${parts.time ? ` ${parts.time}` : ''} · ${input.status}${interestDetail}${objectionDetail}`,
+      ),
+      commercialEntityType: 'visit',
+      commercialEntityId: visit.id,
+      ...((input.visit as SyncedVisit).uid ? { commercialEntityUid: (input.visit as SyncedVisit).uid } : {}),
+    },
   };
 }
 

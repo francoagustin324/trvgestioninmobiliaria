@@ -130,6 +130,9 @@ export interface ActivityEntry extends SyncRecordMetadata {
   diffusionClientUid?: string;
   diffusionChannel?: PropertyDiffusionChannel;
   diffusionStatus?: PropertyDiffusionStatus;
+  commercialEntityType?: 'visit' | 'offer' | 'reservation';
+  commercialEntityId?: number;
+  commercialEntityUid?: string;
 }
 
 export interface PropertyDiffusionLedgerRecord {
