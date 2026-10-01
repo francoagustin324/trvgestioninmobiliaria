@@ -5,6 +5,7 @@ import test from 'node:test';
 import { chromium, type Browser, type BrowserContext, type Page, type Route } from 'playwright';
 import {
   crmToCloudRecords,
+  isSupervisedRecommendationTelemetryPayload,
   membershipContext,
   type CloudMembershipRow,
   type CloudRecordRow,
@@ -521,7 +522,10 @@ class SharedCloudHarness {
           const body = request.postDataJSON();
           const rows = (Array.isArray(body) ? body : [body]) as CloudRecordRow[];
           const label = this.labelFrom(route);
-          const activityCount = rows.filter((row) => row.entity_type === 'activity').length;
+          const activityCount = rows.filter((row) => (
+            row.entity_type === 'activity'
+            && !isSupervisedRecommendationTelemetryPayload(row.payload)
+          )).length;
           if (activityCount) {
             this.activityWrites.set(label, (this.activityWrites.get(label) ?? 0) + activityCount);
           }
