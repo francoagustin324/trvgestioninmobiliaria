@@ -521,7 +521,7 @@ export function renderMvpLeads(container: HTMLElement, centerSelectedStage = fal
     renderMvpLeads(container);
   });
 
-  enhanceLeadList(container, { centerSelectedStage });
+  enhanceLeadList(container, { centerSelectedStage, properties });
   enhanceLeadForm();
   prepareLeadsProfessionalRedesign(container);
   enhanceLeadsProfessionalRedesign(container);

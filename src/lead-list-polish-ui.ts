@@ -1,6 +1,7 @@
-import { renderOperationalAttentionQueue, renderSupervisedAttentionQueue } from './lead-attention-queue.js';
+import { renderOperationalAttentionQueue, renderOperationalAttentionUnavailable } from './lead-attention-queue.js';
 import { confirmScheduledVisit } from './visit-confirmation.js';
 import { instrumentVisibleSupervisedRecommendations } from './lead-recommendation-instrumentation.js';
+import type { Property } from './models.js';
 import { authenticatedTenantMember, state } from './store.js';
 import { visibleClients, visibleProperties, visibleReminders } from './team-access.js';
 
@@ -8,6 +9,7 @@ const desktopQuery = '(min-width: 901px)';
 
 interface LeadListEnhancementOptions {
   centerSelectedStage?: boolean;
+  properties?: Property[];
 }
 
 let activeLeadContainer: HTMLElement | null = null;
@@ -134,18 +136,17 @@ function schedulePipelineGeometryRefresh(container: HTMLElement): void {
   });
 }
 
-function renderAttentionQueue(container: HTMLElement): void {
+function renderAttentionQueue(container: HTMLElement, properties: Property[] = visibleProperties()): void {
   const results = container.querySelector<HTMLElement>('#mvp-lead-results');
   if (!results) return;
   container.querySelector<HTMLElement>('[data-supervised-attention-queue]')?.remove();
   const clients = visibleClients();
   const member = authenticatedTenantMember();
-  const legacyQueue = renderSupervisedAttentionQueue(visibleClients());
   const markup = member
     ? renderOperationalAttentionQueue({
         organizationId: state.crm.organization.id,
         clients,
-        properties: visibleProperties(),
+        properties,
         visits: state.crm.visits,
         offers: state.crm.offers,
         reservations: state.crm.reservations,
@@ -153,7 +154,7 @@ function renderAttentionQueue(container: HTMLElement): void {
         activityLog: state.crm.activityLog,
         actor: { id: member.id, role: member.role },
       }, 3)
-    : legacyQueue;
+    : renderOperationalAttentionUnavailable();
   results.insertAdjacentHTML('beforebegin', markup);
 }
 
@@ -248,7 +249,7 @@ export function enhanceLeadList(container: HTMLElement, options: LeadListEnhance
   placeNewLeadButton(container, breakpoint.matches);
   syncFilterDetails(container);
   enhancePipelines(container, options.centerSelectedStage === true);
-  renderAttentionQueue(container);
+  renderAttentionQueue(container, options.properties);
   bindAttentionQueue(container);
   instrumentVisibleSupervisedRecommendations(container);
   schedulePipelineGeometryRefresh(container);

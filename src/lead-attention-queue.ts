@@ -1,10 +1,10 @@
 import { leadCardAttentionPresentation } from './lead-card-attention.js';
 import { leadDaysFromToday, leadPrimaryAlert, sortLeads, type LeadAlertKind } from './lead-list-priority.js';
 import { commercialStage, isTerminalClient, localIsoDate } from './lead-pipeline.js';
-import { activeCommercialAlerts, evaluateCommercialAlertConditions, type CommercialAlertCondition } from './commercial-alert-engine.js';
+import { evaluateCommercialAlertConditions, type CommercialAlertCondition } from './commercial-alert-engine.js';
 import { matchDismissalActive, matchPropertiesForClient } from './property-matching.js';
 import { assignmentVisible } from './team-policy.js';
-import type { ActivityEntry, Client, CommercialAlert, Offer, Property, Reminder, Reservation, TeamRole, Visit } from './models.js';
+import type { ActivityEntry, Client, Offer, Property, Reminder, Reservation, TeamRole, Visit } from './models.js';
 import { escapeHtml } from './utils.js';
 
 export interface LeadAttentionRecommendation {
@@ -114,7 +114,6 @@ export interface OperationalAttentionItem {
 
 export interface OperationalAttentionInput {
   organizationId?: string;
-  commercialAlerts?: CommercialAlert[];
   clients: Client[];
   properties: Property[];
   visits: Visit[];
@@ -214,27 +213,24 @@ const SPECIFIC_CLOSE_BLOCKERS: readonly OperationalActionKind[] = [
   'advanced-no-action',
 ];
 
-export function operationalAttentionQueue(
+function allOperationalAttentionItems(
   input: OperationalAttentionInput,
-  limit = 8,
 ): OperationalAttentionItem[] {
   const today = input.today ?? localIsoDate(input.now ?? new Date());
   const clients = input.clients.filter((client) => !isTerminalClient(client) && assignmentAllowed(input, client.assignedToId));
-  const alertSource = input.commercialAlerts !== undefined
-    ? activeCommercialAlerts(input.commercialAlerts)
-    : evaluateCommercialAlertConditions({
-        organizationId: input.organizationId || 'local',
-        clients: input.clients,
-        properties: input.properties,
-        visits: input.visits,
-        offers: input.offers,
-        reservations: input.reservations,
-        reminders: input.reminders,
-        activityLog: input.activityLog,
-        actor: input.actor,
-        today,
-        now: input.now,
-      });
+  const alertSource = evaluateCommercialAlertConditions({
+    organizationId: input.organizationId || 'local',
+    clients: input.clients,
+    properties: input.properties,
+    visits: input.visits,
+    offers: input.offers,
+    reservations: input.reservations,
+    reminders: input.reminders,
+    activityLog: input.activityLog,
+    actor: input.actor,
+    today,
+    now: input.now,
+  });
   const items = alertSource.map(alertConditionToOperational);
 
   // 2G conserva sus recordatorios proactivos; no son alertas 2H.
@@ -293,32 +289,66 @@ export function operationalAttentionQueue(
     }
   }
 
-  const sorted = operationalSort(items);
+  return operationalSort(items);
+}
+
+export interface OperationalAttentionQueueView {
+  items: OperationalAttentionItem[];
+  total: number;
+  counts: { critical: number; high: number; normal: number };
+}
+
+export function operationalAttentionQueueView(
+  input: OperationalAttentionInput,
+  limit = 8,
+): OperationalAttentionQueueView {
+  const all = allOperationalAttentionItems(input);
   const perClient = new Map<number, number>();
   const capped = Math.max(0, Math.trunc(limit));
-  const result: OperationalAttentionItem[] = [];
-  for (const item of sorted) {
+  const items: OperationalAttentionItem[] = [];
+  for (const item of all) {
     if (item.clientId) {
       const count = perClient.get(item.clientId) ?? 0;
       if (count >= 2) continue;
       perClient.set(item.clientId, count + 1);
     }
-    result.push(item);
-    if (result.length >= capped) break;
+    items.push(item);
+    if (items.length >= capped) break;
   }
-  return result;
+  return {
+    items,
+    total: all.length,
+    counts: {
+      critical: all.filter((item) => item.priority === 'CRÍTICO').length,
+      high: all.filter((item) => item.priority === 'ALTO').length,
+      normal: all.filter((item) => item.priority === 'NORMAL').length,
+    },
+  };
+}
+
+export function operationalAttentionQueue(
+  input: OperationalAttentionInput,
+  limit = 8,
+): OperationalAttentionItem[] {
+  return operationalAttentionQueueView(input, limit).items;
+}
+
+export function renderOperationalAttentionUnavailable(message = 'No pudimos verificar tu acceso a las acciones comerciales. Recargá la cuenta o volvé a iniciar sesión.'): string {
+  return `<section class="pc-supervised-attention-queue pc-daily-ops-queue" data-supervised-attention-queue data-operational-attention-queue data-operational-attention-unavailable aria-labelledby="pc-daily-ops-title">
+    <header class="pc-daily-ops-heading">
+      <div><strong id="pc-daily-ops-title">QUÉ HACER AHORA</strong><span>Prioridad explicable a partir de actividad, fechas y estado comercial.</span></div>
+    </header>
+    <p class="pc-supervised-attention-empty" role="alert">${escapeHtml(message)}</p>
+    <p class="pc-supervised-attention-status" data-attention-navigation-status role="status" aria-live="polite" hidden></p>
+  </section>`;
 }
 
 export function renderOperationalAttentionQueue(
   input: OperationalAttentionInput,
   limit = 8,
 ): string {
-  const items = operationalAttentionQueue(input, limit);
-  const counts = {
-    critical: items.filter((item) => item.priority === 'CRÍTICO').length,
-    high: items.filter((item) => item.priority === 'ALTO').length,
-    normal: items.filter((item) => item.priority === 'NORMAL').length,
-  };
+  const view = operationalAttentionQueueView(input, limit);
+  const { items, counts, total } = view;
   const body = items.length
     ? `<div class="pc-daily-ops-list">${items.map((item) => `<button type="button" class="pc-supervised-attention-item pc-daily-ops-item priority-${item.priority.toLowerCase().normalize('NFD').replace(/[\\u0300-\\u036f]/g, '')}" data-operational-action="${escapeHtml(item.kind)}"${item.clientId && item.target !== 'agenda' ? ` data-attention-client-id="${item.clientId}"` : ''} data-attention-module="${item.module}" data-attention-target="${item.target}"${item.propertyId ? ` data-attention-property-id="${item.propertyId}"` : ''}${item.sourceId ? ` data-attention-source-id="${item.sourceId}"` : ''} aria-label="${escapeHtml(item.clientId && item.target !== 'agenda' ? `Abrir ficha completa de ${item.name}` : `Abrir acción ${item.action}: ${item.name}`)}">
       <span class="pc-daily-ops-priority">${escapeHtml(item.priority)}</span>
@@ -337,7 +367,10 @@ export function renderOperationalAttentionQueue(
   return `<section class="pc-supervised-attention-queue pc-daily-ops-queue" data-supervised-attention-queue data-operational-attention-queue aria-labelledby="pc-daily-ops-title">
     <header class="pc-daily-ops-heading">
       <div><strong id="pc-daily-ops-title">QUÉ HACER AHORA</strong><span>Prioridad explicable a partir de actividad, fechas y estado comercial.</span></div>
-      ${summary ? `<div class="pc-daily-ops-summary" aria-label="Resumen de prioridades">${summary}</div>` : ''}
+      <div class="pc-daily-ops-heading-meta">
+        ${summary ? `<div class="pc-daily-ops-summary" aria-label="Resumen de prioridades">${summary}</div>` : ''}
+        ${total > items.length ? `<span class="pc-daily-ops-visible-count">Mostrando ${items.length} de ${total} acciones</span>` : ''}
+      </div>
     </header>
     ${body}
     <p class="pc-supervised-attention-status" data-attention-navigation-status role="status" aria-live="polite" hidden></p>
