@@ -47,7 +47,7 @@ function property(id: number): Property {
   };
 }
 
-test('Block 2H benchmark baseline: 1000 clientes x 1000 propiedades', () => {
+test('Block 2H performance gate: 1000 clientes x 1000 propiedades no vuelve al cruce bloqueante', () => {
   const clients=Array.from({length:1000},(_,i)=>client(i+1));
   const properties=Array.from({length:1000},(_,i)=>property(i+1));
   const started=performance.now();
@@ -59,6 +59,10 @@ test('Block 2H benchmark baseline: 1000 clientes x 1000 propiedades', () => {
     actor:{id:1,role:'Dueño'},
   });
   const elapsed=performance.now()-started;
-  console.log(`BLOCK2H_MATCH_BASELINE_MS=${elapsed.toFixed(2)}`);
+  console.log(`BLOCK2H_MATCH_AFTER_MS=${elapsed.toFixed(2)}`);
   assert.equal(result.length,1000);
+  assert.ok(
+    elapsed < 1500,
+    `matching 1000x1000 tardó ${elapsed.toFixed(2)}ms; el gate razonable es <1500ms para impedir regresiones a segundos`,
+  );
 });
