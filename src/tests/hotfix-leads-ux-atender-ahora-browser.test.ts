@@ -1045,8 +1045,12 @@ test('HOTFIX UX POST-B1.4.2 R3 — mobile tap, target y contraste accesible exac
           await page.waitForSelector(`.mvp-lead-card[data-client-id="${visitClientId}"]`, { state: 'visible' });
           const visitCard = page.locator(`.mvp-lead-card[data-client-id="${visitClientId}"]`);
           const visitSheet = visitCard.locator(`details[data-lead-full-sheet="${visitClientId}"]`);
-          const openDetails = visitCard.locator(`[data-open-lead-details="${visitClientId}"]`);
-          assert.equal(await openDetails.isVisible(), true, 'La prueba debe usar el CTA visible real de zero-training.');
+          const actionsMenu = visitCard.locator('.mvp-lead-actions-menu');
+          const actionsMenuToggle = actionsMenu.locator(':scope > summary');
+          assert.equal(await actionsMenuToggle.isVisible(), true, 'El menú de acciones zero-training debe estar visible.');
+          await actionsMenuToggle.click();
+          const openDetails = actionsMenu.locator(`[data-open-lead-details="${visitClientId}"]`);
+          assert.equal(await openDetails.isVisible(), true, 'Ver detalles debe ser visible después de abrir el menú de acciones.');
           await openDetails.click();
           await page.waitForFunction((id) => (
             document.querySelector<HTMLDetailsElement>(`details[data-lead-full-sheet="${id}"]`)?.open === true

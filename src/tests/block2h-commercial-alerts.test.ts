@@ -9,7 +9,7 @@ import {
   visitConfirmationDetail,
   VISIT_CONFIRMED_ACTION,
 } from '../commercial-alert-engine.js';
-import { operationalAttentionQueue } from '../lead-attention-queue.js';
+import { operationalAttentionQueue, renderOperationalAttentionQueue } from '../lead-attention-queue.js';
 import type {
   ActivityEntry,
   Client,
@@ -352,6 +352,19 @@ test('Block 2H A-T: el motor puro detecta las diez condiciones y evita falsos po
     clients: [taskClient],
     reminders: [{ ...mirroredReminder, id: 94, date: '2026-10-02', title: 'Pedir documentación al propietario' }],
   }))).length, 0, 'T: reprogramar tarea a futuro resuelve automáticamente la condición');
+
+  const taskMarkup = renderOperationalAttentionQueue(evaluation({
+    clients: [taskClient],
+    reminders: [{ ...mirroredReminder, id: 95, title: 'Pedir documentación al propietario' }],
+  }), 20);
+  const taskButton = taskMarkup.match(/<button[^>]*data-operational-action="task-overdue"[^>]*>/)?.[0] ?? '';
+  assert.match(taskButton, /data-attention-module="agenda"/, 'T CTA: Resolver tarea navega al módulo Agenda');
+  assert.match(taskButton, /data-attention-target="agenda"/, 'T CTA: conserva destino comercial Agenda');
+  assert.doesNotMatch(
+    taskButton,
+    /data-attention-client-id=/,
+    'T CTA: una tarea ligada a un lead no debe ser interceptada por la navegación a la ficha del lead',
+  );
 
   const offerDominatesGeneric = evaluateCommercialAlertConditions(evaluation({
     clients: [client(40, {
