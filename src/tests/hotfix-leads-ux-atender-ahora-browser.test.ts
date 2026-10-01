@@ -313,6 +313,43 @@ function syntheticJson(body: unknown, status = 200) {
   };
 }
 
+function syntheticRecordIdentity(value: unknown): string {
+  const row = value as { organization_id?: unknown; entity_type?: unknown; entity_key?: unknown };
+  return [row.organization_id, row.entity_type, row.entity_key].map((part) => String(part ?? '')).join('|');
+}
+
+function upsertSyntheticRecords(current: unknown[], incoming: unknown[], ignoreDuplicates: boolean): unknown[] {
+  const byKey = new Map(current.map((row) => [syntheticRecordIdentity(row), structuredClone(row)]));
+  incoming.forEach((row) => {
+    const key = syntheticRecordIdentity(row);
+    if (ignoreDuplicates && byKey.has(key)) return;
+    byKey.set(key, structuredClone(row));
+  });
+  return [...byKey.values()];
+}
+
+function syntheticDeleteFilter(records: unknown[], url: URL): unknown[] {
+  const organization = url.searchParams.get('organization_id')?.replace(/^eq\./, '') ?? '';
+  const entityType = url.searchParams.get('entity_type')?.replace(/^eq\./, '') ?? '';
+  const rawKeys = url.searchParams.get('entity_key') ?? '';
+  const keyMatches = rawKeys.match(/^in\.\((.*)\)$/);
+  const entityKeys = new Set(
+    (keyMatches?.[1] ?? '')
+      .split(',')
+      .map((value) => value.trim().replace(/^"|"$/g, ''))
+      .filter(Boolean),
+  );
+  if (!organization || !entityType || !entityKeys.size) return records;
+  return records.filter((record) => {
+    const row = record as { organization_id?: unknown; entity_type?: unknown; entity_key?: unknown };
+    return !(
+      String(row.organization_id ?? '') === organization
+      && String(row.entity_type ?? '') === entityType
+      && entityKeys.has(String(row.entity_key ?? ''))
+    );
+  });
+}
+
 async function installSyntheticAuthority(context: BrowserContext, origin: string): Promise<void> {
   let syntheticRecords: unknown[] = [];
   const syntheticPostHistory: unknown[] = [];
@@ -379,17 +416,18 @@ async function installSyntheticAuthority(context: BrowserContext, origin: string
         const body = request.postDataJSON();
         const postedRecords = Array.isArray(body) ? structuredClone(body) : [structuredClone(body)];
         syntheticPostHistory.push(...postedRecords);
-        syntheticRecords = postedRecords;
+        const ignoreDuplicates = (request.headers().prefer ?? '').includes('ignore-duplicates');
+        syntheticRecords = upsertSyntheticRecords(syntheticRecords, postedRecords, ignoreDuplicates);
         const gate = SYNTHETIC_CLOUD_WRITE_GATES.get(context);
         if (gate) {
           gate.signalStarted();
           await gate.pending;
         }
-        await route.fulfill(syntheticJson(syntheticRecords, 201));
+        await route.fulfill(syntheticJson([], 201));
         return;
       }
       if (request.method() === 'DELETE') {
-        syntheticRecords = [];
+        syntheticRecords = syntheticDeleteFilter(syntheticRecords, url);
         await route.fulfill({ status: 204, headers: { 'access-control-allow-origin': '*' }, body: '' });
         return;
       }
