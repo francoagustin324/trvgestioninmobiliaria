@@ -206,6 +206,9 @@ const SPECIFIC_FOLLOW_UP_BLOCKERS: readonly OperationalActionKind[] = [
 ];
 
 const SPECIFIC_CLOSE_BLOCKERS: readonly OperationalActionKind[] = [
+  'follow-up-overdue',
+  'visit-confirm',
+  'visit-result',
   'offer-stalled',
   'reservation-attention',
   'advanced-no-action',
