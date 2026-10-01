@@ -306,6 +306,35 @@ export function visitConfirmationDetail(visit: Visit): string {
   ].filter(Boolean).join('\n');
 }
 
+function sameActivityIdentity(left: ActivityEntry, right: ActivityEntry): boolean {
+  if (left.uid && right.uid) return left.uid === right.uid;
+  return left.id === right.id
+    && left.actorId === right.actorId
+    && left.action === right.action
+    && left.entityType === right.entityType
+    && left.entityId === right.entityId
+    && left.createdAt === right.createdAt
+    && left.detail === right.detail;
+}
+
+/**
+ * Revierte únicamente la actividad creada por "Confirmar visita".
+ * No restaura un snapshot completo: así una falla cloud no puede borrar
+ * mutaciones locales posteriores realizadas mientras el request estaba en vuelo.
+ */
+export function withoutVisitConfirmationActivity(
+  activities: readonly ActivityEntry[],
+  confirmation: ActivityEntry,
+): ActivityEntry[] {
+  if (confirmation.action !== VISIT_CONFIRMED_ACTION) return activities.slice();
+  let removed = false;
+  return activities.filter((entry) => {
+    if (removed || !sameActivityIdentity(entry, confirmation)) return true;
+    removed = true;
+    return false;
+  });
+}
+
 function clientMatchCriteriaVersion(client: Client): string {
   return [
     client.qualificationUpdatedAt || '',

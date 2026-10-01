@@ -3,6 +3,7 @@ import {
   visitConfirmationActive,
   visitConfirmationDetail,
   VISIT_CONFIRMED_ACTION,
+  withoutVisitConfirmationActivity,
 } from './commercial-alert-engine.js';
 import { authenticatedTenantMember, state } from './store.js';
 import { addActivityForAuthenticatedTenant } from './team-access.js';
@@ -36,13 +37,24 @@ export async function confirmScheduledVisit(visitId: number): Promise<'confirmed
   }
   if (visitConfirmationActive(visit, state.crm.activityLog)) return 'already-confirmed';
 
-  const before = structuredClone(state.crm);
+  const confirmationDetail = visitConfirmationDetail(visit);
   addActivityForAuthenticatedTenant(scope, {
     action: VISIT_CONFIRMED_ACTION,
     entityType: 'Cliente',
     entityId: visit.clientId,
-    detail: visitConfirmationDetail(visit),
+    detail: confirmationDetail,
   });
+  const confirmationActivity = state.crm.activityLog.find((entry) => (
+    entry.action === VISIT_CONFIRMED_ACTION
+    && entry.actorId === member.id
+    && entry.entityType === 'Cliente'
+    && entry.entityId === visit.clientId
+    && entry.detail === confirmationDetail
+  ));
+  if (!confirmationActivity) {
+    throw new Error('No se pudo identificar la confirmación recién registrada.');
+  }
+  const confirmationRecord = structuredClone(confirmationActivity);
 
   const reason = 'Visita confirmada';
   writeTenantSnapshot(scope, state.crm, { markDirty: true, reason });
@@ -62,12 +74,16 @@ export async function confirmScheduledVisit(visitId: number): Promise<'confirmed
     return 'confirmed';
   } catch (error) {
     if (tenantRuntimeLeaseIsCurrent(runtimeLease)) {
-      state.crm = before;
-      writeTenantSnapshot(scope, state.crm, {
-        markDirty: false,
-        reason: 'Reversión: confirmación de visita no persistida',
-        backup: false,
-      });
+      assertTenantCrmScope(scope, state.crm);
+      const activityLog = withoutVisitConfirmationActivity(state.crm.activityLog, confirmationRecord);
+      if (activityLog.length !== state.crm.activityLog.length) {
+        state.crm.activityLog = activityLog;
+        writeTenantSnapshot(scope, state.crm, {
+          markDirty: true,
+          reason: 'Reversión: confirmación de visita no persistida',
+          backup: false,
+        });
+      }
       document.dispatchEvent(new CustomEvent('trv-render'));
     }
     throw error;

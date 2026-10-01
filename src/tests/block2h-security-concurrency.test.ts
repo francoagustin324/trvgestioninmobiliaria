@@ -5,6 +5,8 @@ import {
   commercialAlertDedupeKey,
   evaluateCommercialAlertConditions,
   reconcileCommercialAlerts,
+  VISIT_CONFIRMED_ACTION,
+  withoutVisitConfirmationActivity,
 } from '../commercial-alert-engine.js';
 import { defaultSettings, type Client, type CommercialAlert, type CrmData, type TeamMember } from '../models.js';
 
@@ -173,4 +175,42 @@ test('Block 2H concurrencia: estados terminales equivalentes convergen sin dupli
   const merged = reconcileCommercialAlerts(deviceA, [], new Date('2026-09-29T12:00:00.000Z'));
   assert.equal(merged.length, 1);
   assert.equal(merged[0]!.state, 'RESOLVED');
+});
+
+
+test('Block 2H concurrencia: rollback de confirmación preserva mutaciones posteriores', () => {
+  const confirmation = {
+    id: 1,
+    uid: '33333333-3333-4333-8333-333333333333',
+    revision: 0,
+    actorId: 7,
+    action: VISIT_CONFIRMED_ACTION,
+    entityType: 'Cliente' as const,
+    entityId: 10,
+    detail: 'visitId=90\nscheduledAt=2026-09-30T15:00:00.000Z',
+    createdAt: '2026-09-29T11:00:00.000Z',
+  };
+  const laterActivity = {
+    id: 2,
+    uid: '44444444-4444-4444-8444-444444444444',
+    revision: 0,
+    actorId: 7,
+    action: 'Seguimiento actualizado',
+    entityType: 'Cliente' as const,
+    entityId: 10,
+    detail: 'Cambio posterior que debe sobrevivir',
+    createdAt: '2026-09-29T11:01:00.000Z',
+  };
+  const current = crm();
+  current.clients = [client(10, 7, { nextAction: 'Cambio posterior', nextFollowUp: '2026-10-03' })];
+  current.activityLog = [laterActivity, confirmation];
+
+  current.activityLog = withoutVisitConfirmationActivity(current.activityLog, confirmation);
+
+  assert.deepEqual(current.activityLog.map((entry) => entry.id), [2], 'rollback elimina sólo la confirmación fallida');
+  assert.equal(current.clients[0]!.nextAction, 'Cambio posterior', 'rollback no pisa una mutación posterior del lead');
+  assert.equal(current.clients[0]!.nextFollowUp, '2026-10-03', 'rollback conserva el seguimiento posterior');
+
+  const secondPass = withoutVisitConfirmationActivity(current.activityLog, confirmation);
+  assert.deepEqual(secondPass, current.activityLog, 'rollback repetido es idempotente y no elimina otra actividad');
 });
