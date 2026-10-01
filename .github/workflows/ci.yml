@@ -34,7 +34,7 @@ jobs:
     timeout-minutes: 120
     env:
       PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
-      EXPECTED_TEST_TOTAL: "21"
+      EXPECTED_TEST_TOTAL: "1498"
     steps:
       - uses: actions/checkout@v7
         with:
@@ -105,12 +105,7 @@ jobs:
         run: |
           set -euo pipefail
           trap 'code=$?; printf "TEST_COMMAND_EXIT_CODE=%s\n" "$code" > ci-test-status.txt' EXIT
-          node --test --test-concurrency=1 \
-            dist/tests/block2h-commercial-alerts.test.js \
-            dist/tests/block2h-security-concurrency.test.js \
-            dist/tests/hotfix-leads-ux-atender-ahora-browser.test.js \
-            dist/tests/block2f-multidevice-playwright.test.js \
-            2>&1 | tee test.log
+          npm run test:ci --silent 2>&1 | tee test.log
       - name: Verificar TAP, cardinalidad y limpieza de procesos
         if: always()
         shell: bash
@@ -192,7 +187,7 @@ jobs:
           from pathlib import Path
 
           text = Path('test.log').read_text(encoding='utf-8', errors='replace')
-          expected = 21
+          expected = 1498
 
           def terminal_metric(name: str) -> int:
               matches = re.findall(rf'^# {re.escape(name)}\s+(\d+)\s*$', text, flags=re.MULTILINE)
