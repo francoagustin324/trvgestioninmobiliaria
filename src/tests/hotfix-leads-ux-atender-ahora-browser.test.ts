@@ -3,12 +3,13 @@ import { spawn, type ChildProcess } from 'node:child_process';
 import { once } from 'node:events';
 import test from 'node:test';
 import { webkit, type Browser, type BrowserContext, type Page } from 'playwright';
-import { initialData, type CrmData, type TeamMember } from '../models.js';
+import { initialData, STORAGE_KEY as CRM_STORAGE_KEY, type CrmData, type TeamMember } from '../models.js';
 
 const USER_ID = 'hotfix-leads-ux-r2-owner';
 const ORG_ID = 'hotfix-leads-ux-r2-org';
 const GENERATION = 'hotfix-leads-ux-r2-generation-a35-1';
-const STORAGE_KEY = `trv-crm-basico:user:${USER_ID}`;
+const LEGACY_STORAGE_KEY = `${CRM_STORAGE_KEY}:user:${USER_ID}`;
+const TENANT_STORAGE_KEY = `${LEGACY_STORAGE_KEY}:org:${ORG_ID}`;
 const PORT = 62753;
 const HIDDEN_SEARCH = '__r2_lead_oculto__';
 const HIDDEN_MESSAGE = 'Este lead está oculto por los filtros actuales. Ajustá o limpiá los filtros para verlo sin perder tu selección.';
@@ -448,7 +449,7 @@ async function seedContext(context: BrowserContext): Promise<void> {
       });
       originalScrollIntoView.call(this, options);
     };
-  }, { crm: fixture(), generation: GENERATION, identityStorageKey: identityKey, storageKey: STORAGE_KEY });
+  }, { crm: fixture(), generation: GENERATION, identityStorageKey: identityKey, storageKey: LEGACY_STORAGE_KEY });
 }
 
 async function createContext(browser: Browser, viewport: { width: number; height: number }, mobile: boolean): Promise<BrowserContext> {
@@ -553,7 +554,7 @@ async function closeSheet(page: Page, clientId: number): Promise<void> {
 }
 
 async function crmSnapshot(page: Page): Promise<string> {
-  return page.evaluate((storageKey) => localStorage.getItem(storageKey) || '', STORAGE_KEY);
+  return page.evaluate((storageKey) => localStorage.getItem(storageKey) || '', TENANT_STORAGE_KEY);
 }
 
 async function whatsAppSnapshot(page: Page): Promise<Array<[string, string | null]>> {
