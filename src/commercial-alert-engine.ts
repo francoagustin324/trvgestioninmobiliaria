@@ -532,7 +532,13 @@ export function evaluateCommercialAlertConditions(
     }
 
     const hasFutureFollowUp = followUpDays !== null && followUpDays >= 0;
-    if (!isNewUnattended && !hasFutureFollowUp && !(followUpDays !== null && followUpDays < 0)) {
+    const hasUsefulNextAction = Boolean(client.nextAction?.trim());
+    if (
+      !isNewUnattended
+      && !hasFutureFollowUp
+      && !hasUsefulNextAction
+      && !(followUpDays !== null && followUpDays < 0)
+    ) {
       const lastTouch = latestCommercialTouch(client, activities) || createdAt;
       const inactiveDays = ageDays(lastTouch, now);
       const threshold = client.temperature === 'Caliente'
