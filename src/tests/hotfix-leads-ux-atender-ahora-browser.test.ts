@@ -223,8 +223,6 @@ function fixture(): CrmData {
   }];
   crm.visits = [{
     id: 9001,
-    uid: '90020000-0000-4000-8000-000000000001',
-    revision: 1,
     clientId: 505,
     propertyId: 9001,
     scheduledAt: '2030-01-11T15:00:00.000Z',
