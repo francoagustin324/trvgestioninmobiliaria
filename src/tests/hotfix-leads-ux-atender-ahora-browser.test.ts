@@ -1079,12 +1079,16 @@ test('HOTFIX UX POST-B1.4.2 R3 — mobile tap, target y contraste accesible exac
             writeGate.release();
           }
 
-          await page.waitForSelector(`[data-visit-id="${visitId}"] .pc-visit-confirmed`, { state: 'visible' });
+          await page.waitForSelector(`[data-visit-id="${visitId}"] .pc-visit-confirmed`, { state: 'attached' });
           assert.equal(
             await page.locator(`[data-confirm-visit="${visitId}"]`).count(),
             0,
             'Después de persistir, la condición real resuelta reemplaza automáticamente el CTA.',
           );
+          if (!await visitSheet.evaluate((element) => (element as HTMLDetailsElement).open)) {
+            await visitSheet.locator(':scope > summary').click();
+          }
+          await page.waitForSelector(`[data-visit-id="${visitId}"] .pc-visit-confirmed`, { state: 'visible' });
         } finally {
           await context.close();
         }

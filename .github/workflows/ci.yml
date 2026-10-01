@@ -187,7 +187,7 @@ jobs:
           from pathlib import Path
 
           text = Path('test.log').read_text(encoding='utf-8', errors='replace')
-          expected = 1497
+          expected = 1498
 
           def terminal_metric(name: str) -> int:
               matches = re.findall(rf'^# {re.escape(name)}\s+(\d+)\s*$', text, flags=re.MULTILINE)
