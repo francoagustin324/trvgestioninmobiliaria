@@ -1043,8 +1043,14 @@ test('HOTFIX UX POST-B1.4.2 R3 — mobile tap, target y contraste accesible exac
           const search = page.locator('#mvp-lead-search');
           await search.fill('Lead R2 Cinco');
           await page.waitForSelector(`.mvp-lead-card[data-client-id="${visitClientId}"]`, { state: 'visible' });
-          const visitSheet = page.locator(`.mvp-lead-card[data-client-id="${visitClientId}"] details[data-lead-full-sheet="${visitClientId}"]`);
-          await visitSheet.locator(':scope > summary').click();
+          const visitCard = page.locator(`.mvp-lead-card[data-client-id="${visitClientId}"]`);
+          const visitSheet = visitCard.locator(`details[data-lead-full-sheet="${visitClientId}"]`);
+          const openDetails = visitCard.locator(`[data-open-lead-details="${visitClientId}"]`);
+          assert.equal(await openDetails.isVisible(), true, 'La prueba debe usar el CTA visible real de zero-training.');
+          await openDetails.click();
+          await page.waitForFunction((id) => (
+            document.querySelector<HTMLDetailsElement>(`details[data-lead-full-sheet="${id}"]`)?.open === true
+          ), visitClientId);
           await page.waitForSelector(`[data-confirm-visit="${visitId}"]`, { state: 'visible' });
 
           const writeGate = holdSyntheticCloudWrites(context);
