@@ -12,7 +12,7 @@ import type {
 } from './models.js';
 import { modules } from './models.js';
 import { authenticatedTenantMember, state } from './store.js';
-import { newSyncRecordMetadata } from './sync-identity.js';
+import { canonicalUuid, newSyncRecordMetadata, normalizeOperationId, normalizeRevision } from './sync-identity.js';
 import {
   activeMembers,
   assignmentVisible,
@@ -182,19 +182,58 @@ export function workload(memberId: number): { clients: number; properties: numbe
 
 type NewActivityEntry = Omit<ActivityEntry, 'id' | 'createdAt' | 'actorId'>;
 
-function appendActivity(entry: NewActivityEntry, actorId: number): void {
+function sameIdempotentActivity(left: ActivityEntry, right: NewActivityEntry, actorId: number): boolean {
+  return left.actorId === actorId
+    && left.action === right.action
+    && left.entityType === right.entityType
+    && left.entityId === right.entityId
+    && left.entityUid === right.entityUid
+    && left.detail === right.detail
+    && left.commercialEntityType === right.commercialEntityType
+    && left.commercialEntityId === right.commercialEntityId
+    && left.commercialEntityUid === right.commercialEntityUid;
+}
+
+function appendActivity(entry: NewActivityEntry, actorId: number): ActivityEntry {
+  const explicitUid = entry.uid === undefined ? undefined : canonicalUuid(entry.uid);
+  const explicitOperationId = entry.operationId === undefined ? undefined : normalizeOperationId(entry.operationId);
+  if (entry.uid !== undefined && !explicitUid) throw new Error('ACTIVITY_UID_INVALID');
+  if (entry.operationId !== undefined && !explicitOperationId) throw new Error('ACTIVITY_OPERATION_ID_INVALID');
+
+  if (explicitUid || explicitOperationId) {
+    const existing = state.crm.activityLog.find((activity) => (
+      Boolean(explicitUid && canonicalUuid(activity.uid) === explicitUid)
+      || Boolean(explicitOperationId && normalizeOperationId(activity.operationId) === explicitOperationId)
+    ));
+    if (existing) {
+      if (!sameIdempotentActivity(existing, entry, actorId)) {
+        throw new Error('ACTIVITY_IDEMPOTENCY_CONFLICT');
+      }
+      return existing;
+    }
+  }
+
+  const metadata = explicitUid
+    ? {
+        uid: explicitUid,
+        revision: normalizeRevision(entry.revision),
+        ...(explicitOperationId ? { operationId: explicitOperationId } : {}),
+      }
+    : newSyncRecordMetadata(explicitOperationId);
   const id = Math.max(0, ...state.crm.activityLog.map((item) => item.id)) + 1;
-  state.crm.activityLog.unshift({
+  const created: ActivityEntry = {
     ...entry,
-    ...newSyncRecordMetadata(entry.operationId),
+    ...metadata,
     id,
     actorId,
     createdAt: new Date().toISOString(),
-  });
+  };
+  state.crm.activityLog.unshift(created);
   state.crm.activityLog = state.crm.activityLog.slice(0, 250);
+  return created;
 }
 
-export function addActivityForAuthenticatedTenant(scope: TenantScope, entry: NewActivityEntry): void {
+export function addActivityForAuthenticatedTenant(scope: TenantScope, entry: NewActivityEntry): ActivityEntry {
   const member = authenticatedTenantMember(scope);
   const matches = state.crm.teamMembers.filter((candidate) => (
     candidate.userId === scope.userId && candidate.status === 'Activo'
@@ -202,17 +241,17 @@ export function addActivityForAuthenticatedTenant(scope: TenantScope, entry: New
   if (!member || matches.length !== 1 || matches[0]?.id !== member.id) {
     throw new Error('AUTHENTICATED_TENANT_MEMBER_REQUIRED');
   }
-  appendActivity(entry, member.id);
+  return appendActivity(entry, member.id);
 }
 
 /**
  * Compatibilidad histórica: aun sin scope explícito, el actor se deriva del
  * usuario autenticado actual. activeMemberId nunca participa.
  */
-export function addActivity(entry: NewActivityEntry): void {
+export function addActivity(entry: NewActivityEntry): ActivityEntry {
   const member = authorizedTenantMember();
   if (!member) throw new Error('AUTHENTICATED_TENANT_MEMBER_REQUIRED');
-  appendActivity(entry, member.id);
+  return appendActivity(entry, member.id);
 }
 
 export function ensureAccessibleModule(): void {

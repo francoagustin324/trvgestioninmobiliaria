@@ -5,6 +5,7 @@ import {
   VISIT_CONFIRMED_ACTION,
   withoutVisitConfirmationActivity,
 } from './commercial-alert-engine.js';
+import type { Visit } from './models.js';
 import { authenticatedTenantMember, state } from './store.js';
 import { addActivityForAuthenticatedTenant } from './team-access.js';
 import { assignmentVisible } from './team-policy.js';
@@ -19,6 +20,48 @@ import {
   tenantRuntimeLeaseIsCurrent,
 } from './tenant-runtime.js';
 
+function uuidFromBytes(bytes: Uint8Array): string {
+  const hex = Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
+  return [
+    hex.slice(0, 8),
+    hex.slice(8, 12),
+    hex.slice(12, 16),
+    hex.slice(16, 20),
+    hex.slice(20, 32),
+  ].join('-');
+}
+
+async function deterministicUuid(seed: string): Promise<string> {
+  if (!globalThis.crypto?.subtle) throw new Error('CRYPTO_DIGEST_REQUIRED');
+  const digest = new Uint8Array(await globalThis.crypto.subtle.digest(
+    'SHA-256',
+    new TextEncoder().encode(seed),
+  ));
+  const bytes = digest.slice(0, 16);
+  bytes[6] = (bytes[6]! & 0x0f) | 0x50;
+  bytes[8] = (bytes[8]! & 0x3f) | 0x80;
+  return uuidFromBytes(bytes);
+}
+
+export async function visitConfirmationIntentIdentity(
+  organizationId: string,
+  visit: Visit,
+): Promise<{ uid: string; operationId: string }> {
+  const syncedVisit = visit as Visit & { uid?: string };
+  const visitIdentity = syncedVisit.uid?.trim() || `legacy:${visit.id}`;
+  const seed = [
+    organizationId,
+    'visit-confirmation',
+    visitIdentity,
+    visit.scheduledAt,
+    VISIT_CONFIRMED_ACTION,
+  ].join('|');
+  const [uid, operationId] = await Promise.all([
+    deterministicUuid(`activity|${seed}`),
+    deterministicUuid(`operation|${seed}`),
+  ]);
+  return { uid, operationId };
+}
 
 export async function confirmScheduledVisit(visitId: number): Promise<'confirmed' | 'already-confirmed'> {
   const scope = requireCurrentTenantScope();
@@ -38,22 +81,21 @@ export async function confirmScheduledVisit(visitId: number): Promise<'confirmed
   if (visitConfirmationActive(visit, state.crm.activityLog)) return 'already-confirmed';
 
   const confirmationDetail = visitConfirmationDetail(visit);
-  addActivityForAuthenticatedTenant(scope, {
+  const identity = await visitConfirmationIntentIdentity(scope.organizationId, visit);
+  assertTenantRuntimeLeaseCurrent(runtimeLease);
+  const syncedVisit = visit as Visit & { uid?: string };
+  const confirmationActivity = addActivityForAuthenticatedTenant(scope, {
+    uid: identity.uid,
+    revision: 0,
+    operationId: identity.operationId,
     action: VISIT_CONFIRMED_ACTION,
     entityType: 'Cliente',
     entityId: visit.clientId,
     detail: confirmationDetail,
+    commercialEntityType: 'visit',
+    commercialEntityId: visit.id,
+    ...(syncedVisit.uid ? { commercialEntityUid: syncedVisit.uid } : {}),
   });
-  const confirmationActivity = state.crm.activityLog.find((entry) => (
-    entry.action === VISIT_CONFIRMED_ACTION
-    && entry.actorId === member.id
-    && entry.entityType === 'Cliente'
-    && entry.entityId === visit.clientId
-    && entry.detail === confirmationDetail
-  ));
-  if (!confirmationActivity) {
-    throw new Error('No se pudo identificar la confirmación recién registrada.');
-  }
   const confirmationRecord = structuredClone(confirmationActivity);
 
   const reason = 'Visita confirmada';

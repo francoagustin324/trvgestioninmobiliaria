@@ -29,7 +29,7 @@ import { enhanceLeadList } from './lead-list-polish-ui.js';
 import { enhanceLeadsProfessionalRedesign } from './leads-professional-redesign.js';
 import { prepareLeadsProfessionalRedesign } from './leads-professional-redesign-blocking-fix.js';
 import { enhanceLeadForm, submitLeadForm } from './lead-create-reliability.js';
-import type { ActivityEntry, Client, CommercialStage, Temperature } from './models.js';
+import type { ActivityEntry, Client, CommercialStage, Property, Temperature } from './models.js';
 import {
   clearReadEntityNavigation,
   currentReadEntityReturnTarget,

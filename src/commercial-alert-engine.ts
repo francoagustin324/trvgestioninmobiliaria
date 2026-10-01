@@ -294,6 +294,13 @@ function confirmationDetailMatches(visit: Visit, detail: string): boolean {
   return Number.isFinite(visitId) && visitId === visit.id;
 }
 
+function confirmationRelationMatches(visit: Visit, entry: ActivityEntry): boolean {
+  if (entry.commercialEntityType !== 'visit') return false;
+  const syncedVisit = visit as Visit & { uid?: string };
+  if (syncedVisit.uid && entry.commercialEntityUid) return entry.commercialEntityUid === syncedVisit.uid;
+  return entry.commercialEntityId === visit.id;
+}
+
 export function visitConfirmationActive(
   visit: Visit,
   activities: readonly ActivityEntry[],
@@ -302,7 +309,7 @@ export function visitConfirmationActive(
     entry.action === VISIT_CONFIRMED_ACTION
     && entry.entityType === 'Cliente'
     && entry.entityId === visit.clientId
-    && confirmationDetailMatches(visit, entry.detail)
+    && (confirmationRelationMatches(visit, entry) || confirmationDetailMatches(visit, entry.detail))
   ));
 }
 
