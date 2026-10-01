@@ -132,7 +132,12 @@ test('Block 2H seguridad: evaluación queda confinada por tenant y responsable',
   assert.notEqual(sameEntityA, sameEntityB, 'mismo entityId entre tenants no colisiona');
 });
 
-test('Block 2H seguridad: membership suspendida o ambigua falla cerrado', () => {
+test('Block 2H seguridad: membership faltante, suspendida o ambigua falla cerrado', () => {
+  assert.throws(
+    () => assertLocalWriteAuthorityCompatible(crm([]), context('Corredor', []), USER_A),
+    /authenticated-member-missing/,
+  );
+
   const suspended = member({ status: 'Suspendido' });
   assert.throws(
     () => assertLocalWriteAuthorityCompatible(crm([suspended]), context('Corredor', [suspended]), USER_A),
