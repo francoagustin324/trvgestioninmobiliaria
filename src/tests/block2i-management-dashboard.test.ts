@@ -20,9 +20,9 @@ function client(id: number, assignedToId: number, createdAt: string, overrides: 
   return {
     id, name: `Lead ${id}`, phone: `549351555${String(id).padStart(4,'0')}`, interest: 'Depto', status: 'Lead',
     temperature: 'Tibio', pipeline: 'Contactado', assignedToId, createdById: assignedToId,
-    ...(overrides as Client),
+    ...overrides,
     createdAt,
-  } as Client;
+  } as Client & { createdAt: string };
 }
 function activity(id: number, clientId: number, action: string, createdAt: string): ActivityEntry {
   return { id, actorId: 1, action, entityType: 'Cliente', entityId: clientId, detail: '', createdAt };
