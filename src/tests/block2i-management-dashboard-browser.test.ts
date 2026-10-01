@@ -2,11 +2,23 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import { webkit } from 'playwright';
-import { managementDashboardMarkup } from '../management-dashboard-ui.js';
 import type { ManagementMetrics } from '../management-metrics.js';
 import type { TeamMember } from '../models.js';
 
 test('Block 2I browser/responsive: Gestión existe en app real y no genera scroll horizontal en 1366 ni 390', async () => {
+  const storage = new Map<string, string>();
+  Object.defineProperty(globalThis, 'localStorage', {
+    configurable: true,
+    value: {
+      get length() { return storage.size; },
+      clear() { storage.clear(); },
+      getItem(key: string) { return storage.get(key) ?? null; },
+      key(index: number) { return [...storage.keys()][index] ?? null; },
+      removeItem(key: string) { storage.delete(key); },
+      setItem(key: string, value: string) { storage.set(key, String(value)); },
+    } satisfies Storage,
+  });
+  const { managementDashboardMarkup } = await import('../management-dashboard-ui.js');
   const main=readFileSync('src/mvp-main.ts','utf8');
   const models=readFileSync('src/models.ts','utf8');
   const css=readFileSync('src/management-dashboard.css','utf8');

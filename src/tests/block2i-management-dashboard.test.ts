@@ -111,7 +111,9 @@ test('Block 2I propiedades: reglas transparentes detectan sin visitas, visitas s
   assert.ok(one?.reasons.includes('Sin visitas registradas'));
   assert.ok(one?.reasons.some((reason)=>reason.includes('días sin actividad')));
   assert.ok(two?.reasons.includes('Tiene visitas pero ninguna oferta'));
-  assert.equal(result.propertyReviews.some((row)=>row.propertyId===3), false);
+  const three=result.propertyReviews.find((row)=>row.propertyId===3);
+  assert.ok(three?.reasons.includes('Sin visitas registradas'), 'sin visitas sigue siendo una señal aunque haya una oferta reciente');
+  assert.equal(three?.reasons.some((reason)=>reason.includes('días sin actividad')), false, 'actividad reciente evita falso positivo de inactividad');
 });
 
 test('Block 2I períodos: Hoy, 7 días, 30 días y este mes son inclusivos y determinísticos', () => {
