@@ -47,7 +47,7 @@ export function renderOperationalAttentionForTenant(
   return renderOperationalAttentionQueue({
     organizationId: scope!.organizationId,
     clients: visible(crm.clients),
-    properties: prefilteredProperties ?? visible(crm.properties),
+    properties: visible(prefilteredProperties ?? crm.properties),
     visits: visible(crm.visits),
     offers: visible(crm.offers),
     reservations: visible(crm.reservations),

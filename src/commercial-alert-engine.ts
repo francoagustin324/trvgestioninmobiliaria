@@ -364,6 +364,16 @@ export function visitResultActivityAt(
   return activities
     .filter((entry) => {
       if (entry.action !== action || entry.entityType !== 'Cliente' || entry.entityId !== visit.clientId) return false;
+      const transaction = entry as ActivityEntry & { visitUid?: string; transactionOwner?: string };
+      if (
+        entry.commercialEntityType === 'visit'
+        || entry.commercialEntityId !== undefined
+        || entry.commercialEntityUid !== undefined
+        || transaction.transactionOwner === 'visit'
+        || transaction.visitUid !== undefined
+      ) {
+        return false;
+      }
       const createdAt = validTimestamp(entry.createdAt);
       if (createdAt === null) return false;
       const delta = createdAt - updatedAt;
