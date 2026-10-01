@@ -156,6 +156,9 @@ test('Block 2H A-T: el motor puro detecta las diez condiciones y evita falsos po
   assert.equal(activeOf('FORGOTTEN_LEAD', evaluateCommercialAlertConditions(evaluation({
     clients: [{ ...forgotten, pipeline: 'Ganado' }],
   }))).length, 0, 'G: lead terminal nunca se marca olvidado');
+  assert.equal(activeOf('FORGOTTEN_LEAD', evaluateCommercialAlertConditions(evaluation({
+    clients: [{ ...forgotten, nextAction: 'Enviar alternativas' }],
+  }))).length, 0, 'G: un nextAction útil impide etiquetar al lead como olvidado');
 
   const visitBase: SyncedVisit = {
     id: 10,
@@ -262,6 +265,11 @@ test('Block 2H A-T: el motor puro detecta las diez condiciones y evita falsos po
     properties: [property(10)],
     reservations: [reservation],
   }))).length, 1, 'O: reserva que requiere intervención alerta');
+  assert.equal(activeOf('RESERVATION_STALLED', evaluateCommercialAlertConditions(evaluation({
+    clients: [reservationClient],
+    properties: [property(10)],
+    reservations: [{ ...reservation, status: 'Concretada' }],
+  }))).length, 0, 'O: reserva concretada resuelve automáticamente la condición');
 
   const advanced = client(7, {
     pipeline: 'Negociación',
@@ -325,6 +333,20 @@ test('Block 2H A-T: el motor puro detecta las diez condiciones y evita falsos po
     clients: [taskClient],
     reminders: [{ ...mirroredReminder, id: 91, title: 'Pedir documentación al propietario' }],
   }))).length, 1, 'T: tarea vencida distinta sí alerta');
+  const completedReminder = {
+    ...mirroredReminder,
+    id: 93,
+    title: 'Pedir documentación al propietario',
+    completedAt: NOW.toISOString(),
+  } as Reminder & { completedAt: string };
+  assert.equal(activeOf('TASK_OVERDUE', evaluateCommercialAlertConditions(evaluation({
+    clients: [taskClient],
+    reminders: [completedReminder],
+  }))).length, 0, 'T: completar tarea resuelve automáticamente la condición');
+  assert.equal(activeOf('TASK_OVERDUE', evaluateCommercialAlertConditions(evaluation({
+    clients: [taskClient],
+    reminders: [{ ...mirroredReminder, id: 94, date: '2026-10-02', title: 'Pedir documentación al propietario' }],
+  }))).length, 0, 'T: reprogramar tarea a futuro resuelve automáticamente la condición');
 
   const offerDominatesGeneric = evaluateCommercialAlertConditions(evaluation({
     clients: [client(40, {
@@ -381,6 +403,17 @@ test('Block 2H A-T: el motor puro detecta las diez condiciones y evita falsos po
   }, 20);
   assert.equal(reservationQueue.some((item) => item.clientId === 6 && item.kind === 'reservation-attention'), true, 'dedupe UI: reserva específica permanece');
   assert.equal(reservationQueue.some((item) => item.clientId === 6 && item.kind === 'close-intervention'), false, 'dedupe UI: reserva específica domina intervención genérica de cierre');
+
+  const reservedOverdueClient = client(43, {
+    pipeline: 'Reservado',
+    nextAction: 'Llamar por documentación',
+    nextFollowUp: '2026-09-28',
+  });
+  const reservedOverdueQueue = operationalAttentionQueue({
+    ...evaluation({ clients: [reservedOverdueClient] }),
+  }, 20);
+  assert.equal(reservedOverdueQueue.some((item) => item.clientId === 43 && item.kind === 'follow-up-overdue'), true, 'dedupe cierre: follow-up específico permanece');
+  assert.equal(reservedOverdueQueue.some((item) => item.clientId === 43 && item.kind === 'close-intervention'), false, 'dedupe cierre: follow-up específico domina intervención genérica');
 
   const visitTaskConditions = evaluateCommercialAlertConditions(evaluation({
     clients: [visitClient],
