@@ -9,6 +9,7 @@ import {
   visitConfirmationDetail,
   VISIT_CONFIRMED_ACTION,
 } from '../commercial-alert-engine.js';
+import { operationalAttentionQueue } from '../lead-attention-queue.js';
 import type {
   ActivityEntry,
   Client,
@@ -117,6 +118,7 @@ test('Block 2H A-T: el motor puro detecta las diez condiciones y evita falsos po
     activityLog: [newLeadCreated],
   }));
   assert.equal(activeOf('NEW_LEAD_UNATTENDED', conditions).length, 1, 'A: lead nuevo genera alerta');
+  assert.equal(activeOf('NEW_LEAD_UNATTENDED', conditions)[0]?.action, 'Atender ahora', 'A: CTA aprobado');
 
   const contacted = { ...newLead, lastContact: TODAY, pipeline: 'Contactado' as const };
   conditions = evaluateCommercialAlertConditions(evaluation({
@@ -139,6 +141,7 @@ test('Block 2H A-T: el motor puro detecta las diez condiciones y evita falsos po
   const overdue = client(2, { nextAction: 'Llamar', nextFollowUp: '2026-09-27' });
   conditions = evaluateCommercialAlertConditions(evaluation({ clients: [overdue] }));
   assert.equal(activeOf('FOLLOW_UP_OVERDUE', conditions).length, 1, 'D: follow-up vencido alerta');
+  assert.equal(activeOf('FOLLOW_UP_OVERDUE', conditions)[0]?.action, 'Hacer seguimiento', 'D: CTA aprobado');
   assert.equal(activeOf('FOLLOW_UP_OVERDUE', evaluateCommercialAlertConditions(evaluation({
     clients: [{ ...overdue, nextFollowUp: '2026-10-03' }],
   }))).length, 0, 'E/F: follow-up futuro o reprogramado no alerta');
@@ -227,6 +230,12 @@ test('Block 2H A-T: el motor puro detecta las diez condiciones y evita falsos po
     properties: [property(10)],
     offers: [stalledOffer],
   }))).length, 1, 'M: oferta activa estancada alerta');
+  const stalledOfferConditions = evaluateCommercialAlertConditions(evaluation({
+    clients: [offerClient],
+    properties: [property(10)],
+    offers: [stalledOffer],
+  }));
+  assert.equal(activeOf('OFFER_STALLED', stalledOfferConditions)[0]?.action, 'Retomar oferta', 'M: CTA aprobado');
   assert.equal(activeOf('OFFER_STALLED', evaluateCommercialAlertConditions(evaluation({
     clients: [offerClient],
     properties: [property(10)],
@@ -273,6 +282,11 @@ test('Block 2H A-T: el motor puro detecta las diez condiciones y evita falsos po
     clients: [matchClient],
     properties: [matchProperty],
   }))).length, 1, 'R: match nuevo relevante alerta');
+  const matchConditions = evaluateCommercialAlertConditions(evaluation({
+    clients: [matchClient],
+    properties: [matchProperty],
+  }));
+  assert.equal(activeOf('NEW_RELEVANT_MATCH', matchConditions)[0]?.action, 'Ver oportunidad', 'R: CTA aprobado');
 
   const matchDismissal: ActivityEntry = {
     id: 80,
@@ -311,6 +325,79 @@ test('Block 2H A-T: el motor puro detecta las diez condiciones y evita falsos po
     clients: [taskClient],
     reminders: [{ ...mirroredReminder, id: 91, title: 'Pedir documentación al propietario' }],
   }))).length, 1, 'T: tarea vencida distinta sí alerta');
+
+  const offerDominatesGeneric = evaluateCommercialAlertConditions(evaluation({
+    clients: [client(40, {
+      pipeline: 'Negociación',
+      lastContact: '2026-09-20',
+      nextAction: undefined,
+      nextFollowUp: undefined,
+    })],
+    properties: [property(40)],
+    offers: [{ ...stalledOffer, id: 40, clientId: 40, propertyId: 40 }],
+  }));
+  assert.equal(activeOf('OFFER_STALLED', offerDominatesGeneric).length, 1, 'dedupe: oferta específica permanece');
+  assert.equal(activeOf('FORGOTTEN_LEAD', offerDominatesGeneric).length, 0, 'dedupe: oferta frenada domina lead olvidado');
+  assert.equal(activeOf('ADVANCED_NO_NEXT_ACTION', offerDominatesGeneric).length, 0, 'dedupe: oferta frenada domina operación genérica');
+
+  const overdueAdvanced = client(41, {
+    pipeline: 'Negociación',
+    lastContact: TODAY,
+    nextAction: undefined,
+    nextFollowUp: '2026-09-28',
+  });
+  const overdueAdvancedConditions = evaluateCommercialAlertConditions(evaluation({ clients: [overdueAdvanced] }));
+  assert.equal(activeOf('FOLLOW_UP_OVERDUE', overdueAdvancedConditions).length, 1, 'dedupe: follow-up específico permanece');
+  assert.equal(activeOf('ADVANCED_NO_NEXT_ACTION', overdueAdvancedConditions).length, 0, 'dedupe: follow-up vencido domina operación genérica');
+
+  const tomorrowVisitClient = client(42, {
+    pipeline: 'Visita coordinada',
+    nextAction: 'Confirmar visita',
+    nextFollowUp: '2026-09-30',
+  });
+  const tomorrowVisit: Visit = {
+    ...visitBase,
+    id: 42,
+    clientId: 42,
+    propertyId: 42,
+    scheduledAt: '2026-09-30T18:00:00.000Z',
+  };
+  const visitQueue = operationalAttentionQueue({
+    ...evaluation({
+      clients: [tomorrowVisitClient],
+      properties: [property(42)],
+      visits: [tomorrowVisit],
+    }),
+  }, 20);
+  assert.equal(visitQueue.some((item) => item.clientId === 42 && item.kind === 'visit-confirm'), true, 'dedupe UI: visita específica permanece');
+  assert.equal(visitQueue.some((item) => item.clientId === 42 && item.kind === 'next-follow-up'), false, 'dedupe UI: visita específica domina próximo seguimiento 2G');
+
+  const reservationQueue = operationalAttentionQueue({
+    ...evaluation({
+      clients: [reservationClient],
+      properties: [property(10)],
+      reservations: [reservation],
+    }),
+  }, 20);
+  assert.equal(reservationQueue.some((item) => item.clientId === 6 && item.kind === 'reservation-attention'), true, 'dedupe UI: reserva específica permanece');
+  assert.equal(reservationQueue.some((item) => item.clientId === 6 && item.kind === 'close-intervention'), false, 'dedupe UI: reserva específica domina intervención genérica de cierre');
+
+  const visitTaskConditions = evaluateCommercialAlertConditions(evaluation({
+    clients: [visitClient],
+    properties: [property(10)],
+    visits: [visitBase],
+    reminders: [{
+      id: 92,
+      date: '2026-09-28',
+      title: 'Confirmar visita',
+      related: visitClient.name,
+      priority: 'Alta',
+      assignedToId: 1,
+      createdById: 1,
+    }],
+  }));
+  assert.equal(activeOf('VISIT_UNCONFIRMED', visitTaskConditions).length, 1, 'dedupe tarea: alerta específica de visita permanece');
+  assert.equal(activeOf('TASK_OVERDUE', visitTaskConditions).length, 0, 'dedupe tarea: recordatorio espejo no duplica la visita');
 });
 
 test('Block 2H dedupe/resolución: misma condición es idempotente y una nueva versión puede reaparecer', () => {
