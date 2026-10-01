@@ -735,6 +735,15 @@ export function evaluateCommercialAlertConditions(
     const movementAt = reservationMovementAt(reservation, activities);
     const staleDays = ageDays(movementAt, now) ?? 0;
     const expiryDays = leadDaysFromToday(reservation.expiresAt, today);
+    const reservationClient = clients.find((client) => client.id === reservation.clientId);
+    const nextStepDays = leadDaysFromToday(reservationClient?.nextFollowUp, today);
+    const hasValidNextStep = Boolean(
+      reservationClient?.nextAction?.trim()
+      && nextStepDays !== null
+      && nextStepDays >= 0
+      && (!reservation.expiresAt || reservationClient.nextFollowUp! <= reservation.expiresAt)
+    );
+    if (hasValidNextStep) continue;
     const needsAttention = (
       (expiryDays !== null && expiryDays <= COMMERCIAL_ALERT_THRESHOLDS.reservationExpiryWindowDays)
       || staleDays >= COMMERCIAL_ALERT_THRESHOLDS.stalledReservationDays
