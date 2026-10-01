@@ -1171,7 +1171,7 @@ test('HOTFIX UX POST-B1.4.2 R3 — mobile tap, target y contraste accesible exac
             pageB.locator('[data-confirm-visit="9001"]').click(),
           ]);
 
-          const waitLocalConfirmation = (page: Page): Promise<void> => page.waitForFunction((storageKey) => {
+          const waitLocalConfirmation = (page: Page) => page.waitForFunction((storageKey) => {
             const raw = localStorage.getItem(storageKey);
             if (!raw) return false;
             const crm = JSON.parse(raw) as { activityLog?: Array<{ action?: string }> };
