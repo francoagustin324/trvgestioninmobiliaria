@@ -270,6 +270,11 @@ test('Block 2H A-T: el motor puro detecta las diez condiciones y evita falsos po
     properties: [property(10)],
     reservations: [{ ...reservation, status: 'Concretada' }],
   }))).length, 0, 'O: reserva concretada resuelve automáticamente la condición');
+  assert.equal(activeOf('RESERVATION_STALLED', evaluateCommercialAlertConditions(evaluation({
+    clients: [{ ...reservationClient, nextAction: 'Revisar documentación de reserva', nextFollowUp: '2026-09-30' }],
+    properties: [property(10)],
+    reservations: [reservation],
+  }))).length, 0, 'O: un próximo paso válido antes del vencimiento resuelve la alerta de reserva');
 
   const advanced = client(7, {
     pipeline: 'Negociación',
