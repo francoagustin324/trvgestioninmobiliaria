@@ -568,6 +568,19 @@ test('Bloque 2A alta progresiva permite email-only, valida contacto, evita dupli
     await form.locator('input[name="name"]').fill('SOLO TELEFONO');
     await form.locator('input[name="phone"]').fill('351 555 8899');
     await form.locator('[data-save-lead]').click();
+    await page.waitForTimeout(800);
+    console.log('BLOCK2A_PHONE_ONLY_DIAG', JSON.stringify(await page.evaluate((storageKey) => {
+      const raw = localStorage.getItem(storageKey);
+      const crm = raw ? JSON.parse(raw) as { clients?: Array<{ name?: string }> } : {};
+      const activeForm = document.querySelector<HTMLFormElement>('#mvp-lead-form:not(.collapsed)');
+      return {
+        clients: (crm.clients ?? []).map((client) => client.name),
+        activeFormConnected: Boolean(activeForm?.isConnected),
+        activeFormError: activeForm?.querySelector<HTMLElement>('[data-lead-error]')?.textContent || '',
+        activeFormStatus: activeForm?.querySelector<HTMLElement>('[data-lead-status]')?.textContent || '',
+        resultText: document.querySelector<HTMLElement>('#mvp-lead-results')?.innerText || '',
+      };
+    }, identity('Dueño').storageKey)));
     await page.locator('#mvp-lead-results').getByText('SOLO TELEFONO', { exact: true }).waitFor({ state: 'visible' });
     saved = await crmFromStorage(page, 'Dueño');
     const phoneOnly = saved.clients.find((client) => client.name === 'SOLO TELEFONO');
