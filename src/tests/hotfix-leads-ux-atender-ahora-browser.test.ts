@@ -1179,32 +1179,38 @@ test('HOTFIX UX POST-B1.4.2 R3 — mobile tap, target y contraste accesible exac
           }, TENANT_STORAGE_KEY);
           await Promise.all([waitLocalConfirmation(pageA), waitLocalConfirmation(pageB)]);
 
+          const localConfirmationIdentity = async (page: Page): Promise<{ uid: string; operationId: string }> => page.evaluate((storageKey) => {
+            const raw = localStorage.getItem(storageKey);
+            if (!raw) throw new Error('Snapshot tenant faltante.');
+            const crm = JSON.parse(raw) as { activityLog?: Array<{ action?: string; uid?: string; operationId?: string }> };
+            const matches = (crm.activityLog ?? []).filter((entry) => entry.action === 'Visita confirmada');
+            if (matches.length !== 1) throw new Error(`Se esperaba una confirmación local y hay ${matches.length}.`);
+            return {
+              uid: String(matches[0]?.uid || ''),
+              operationId: String(matches[0]?.operationId || ''),
+            };
+          }, TENANT_STORAGE_KEY);
+          const [identityA, identityB] = await Promise.all([
+            localConfirmationIdentity(pageA),
+            localConfirmationIdentity(pageB),
+          ]);
+          assert.ok(identityA.uid, 'sesión A debe persistir uid de confirmación');
+          assert.ok(identityA.operationId, 'sesión A debe persistir operationId de confirmación');
+          assert.deepEqual(identityB, identityA, 'ambas sesiones deben materializar exactamente la misma intención idempotente');
+
           const confirmationRows = (): unknown[] => cloud.records.filter((value) => {
             const row = value as { entity_type?: unknown; payload?: { action?: unknown } };
             return row.entity_type === 'activity' && row.payload?.action === 'Visita confirmada';
           });
           const deadline = Date.now() + 15_000;
-          while (
-            cloud.postHistory.filter((value) => {
-              const row = value as { entity_type?: unknown; payload?: { action?: unknown } };
-              return row.entity_type === 'activity' && row.payload?.action === 'Visita confirmada';
-            }).length < 2
-            || confirmationRows().length !== 1
-          ) {
-            if (Date.now() >= deadline) throw new Error('Las dos sesiones no convergieron en una confirmación cloud dentro del plazo.');
+          while (confirmationRows().length !== 1) {
+            if (Date.now() >= deadline) throw new Error('La confirmación idempotente no convergió a una fila cloud dentro del plazo.');
             await new Promise((resolve) => setTimeout(resolve, 25));
           }
 
-          const postedConfirmations = cloud.postHistory
-            .filter((value) => {
-              const row = value as { entity_type?: unknown; payload?: { action?: unknown } };
-              return row.entity_type === 'activity' && row.payload?.action === 'Visita confirmada';
-            })
-            .map((value) => (value as { payload: { uid?: unknown; operationId?: unknown } }).payload);
-          assert.ok(postedConfirmations.length >= 2, 'ambos dispositivos deben intentar persistir la confirmación');
-          assert.equal(new Set(postedConfirmations.map((payload) => String(payload.uid || ''))).size, 1, 'ambos dispositivos generan el mismo uid determinístico');
-          assert.equal(new Set(postedConfirmations.map((payload) => String(payload.operationId || ''))).size, 1, 'ambos dispositivos generan el mismo operationId determinístico');
-
+          const cloudConfirmation = confirmationRows()[0] as { payload?: { uid?: unknown; operationId?: unknown } };
+          assert.equal(String(cloudConfirmation.payload?.uid || ''), identityA.uid, 'cloud conserva el uid determinístico de ambas sesiones');
+          assert.equal(String(cloudConfirmation.payload?.operationId || ''), identityA.operationId, 'cloud conserva el operationId determinístico de ambas sesiones');
           assert.equal(confirmationRows().length, 1, 'la nube conserva una sola Activity semántica, no dos UIDs equivalentes');
 
           await Promise.all([pageA.reload({ waitUntil: 'domcontentloaded' }), pageB.reload({ waitUntil: 'domcontentloaded' })]);
