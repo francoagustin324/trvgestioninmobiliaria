@@ -64,7 +64,7 @@ test('Block 2H performance gate: 1000 clientes variados x 1000 propiedades varia
   assert.ok(new Set(clients.map((item) => item.interest)).size > 900, 'el gate debe usar perfiles comerciales variados');
   assert.ok(new Set(properties.map((item) => `${item.type}|${item.address}|${item.price}`)).size > 900, 'el gate debe usar inventario variado');
   const candidateCounts = clients.map((item) => relevantPropertyCandidatesForClient(item, properties).length);
-  assert.ok(Math.max(...candidateCounts) <= 96, 'ningún perfil puede volver a evaluar las 1000 propiedades completas');
+  assert.ok(Math.max(...candidateCounts) <= 36, 'ningún perfil puede volver a evaluar las 1000 propiedades completas; máximo 36 candidatos');
   const started=performance.now();
   const result=evaluateRelevantMatchAlertConditions({
     organizationId:'11111111-1111-4111-8111-111111111111',

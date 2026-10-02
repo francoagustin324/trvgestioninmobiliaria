@@ -338,7 +338,7 @@ interface RelevantPropertyIndex {
   byTypeBedrooms: Map<string, Property[]>;
 }
 
-const RELEVANT_MATCH_CANDIDATE_LIMIT = 48;
+const RELEVANT_MATCH_CANDIDATE_LIMIT = 36;
 const relevantPropertyIndexCache = new WeakMap<Property[], RelevantPropertyIndex>();
 
 function candidateTypeKey(property: Property): string {
