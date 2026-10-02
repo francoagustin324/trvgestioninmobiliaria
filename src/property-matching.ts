@@ -338,7 +338,7 @@ interface RelevantPropertyIndex {
   byTypeBedrooms: Map<string, Property[]>;
 }
 
-const RELEVANT_MATCH_CANDIDATE_LIMIT = 96;
+const RELEVANT_MATCH_CANDIDATE_LIMIT = 48;
 const relevantPropertyIndexCache = new WeakMap<Property[], RelevantPropertyIndex>();
 
 function candidateTypeKey(property: Property): string {
@@ -365,7 +365,9 @@ function relevantPropertyIndex(properties: Property[]): RelevantPropertyIndex {
     const bedrooms = property.bedrooms ?? extractBedrooms(normalizeText([property.title, property.features, property.notes].join(' ')));
     if (bedrooms) append(byTypeBedrooms, `${type}|${bedrooms}`, property);
   }
-  for (const bucket of byType.values()) bucket.sort((left, right) => left.price - right.price || left.id - right.id);
+  for (const buckets of [byType, byTypeZone, byTypeBedrooms]) {
+    for (const bucket of buckets.values()) bucket.sort((left, right) => left.price - right.price || left.id - right.id);
+  }
   const index = { eligible, byType, byTypeZone, byTypeBedrooms };
   relevantPropertyIndexCache.set(properties, index);
   return index;
@@ -399,6 +401,39 @@ function addCandidate(
   if (!target.has(identity)) target.set(identity, property);
 }
 
+function affordableEnd(bucket: Property[], budget: number | null): number {
+  if (!budget) return bucket.length;
+  const ceiling = budget * 1.1;
+  let low = 0;
+  let high = bucket.length;
+  while (low < high) {
+    const mid = (low + high) >>> 1;
+    if ((bucket[mid]?.price ?? Number.POSITIVE_INFINITY) <= ceiling) low = mid + 1;
+    else high = mid;
+  }
+  return low;
+}
+
+function addCommercialBucket(
+  target: Map<string, Property>,
+  bucket: Property[],
+  budget: number | null,
+  maxAdd: number,
+): void {
+  if (!bucket.length || maxAdd <= 0 || target.size >= RELEVANT_MATCH_CANDIDATE_LIMIT) return;
+  const end = affordableEnd(bucket, budget);
+  if (end <= 0) return;
+  const before = target.size;
+  const half = Math.max(1, Math.floor(maxAdd / 2));
+
+  for (let index = 0; index < Math.min(end, half) && target.size - before < maxAdd; index += 1) {
+    addCandidate(target, bucket[index]!);
+  }
+  for (let index = end - 1; index >= 0 && target.size - before < maxAdd; index -= 1) {
+    addCandidate(target, bucket[index]!);
+  }
+}
+
 export function relevantPropertyCandidatesForClient(
   client: Client,
   properties: Property[],
@@ -417,42 +452,33 @@ export function relevantPropertyCandidatesForClient(
   const typeKey = desiredType ?? null;
   const typeBucket = typeKey ? (index.byType.get(typeKey) ?? []) : index.eligible;
   const selected = new Map<string, Property>();
+  const budget = parseUsdBudget([client.currency, client.budget].filter(Boolean).join(' '));
 
   for (const zone of requestedZones(client, index, typeKey)) {
     const bucket = typeKey
       ? index.byTypeZone.get(`${typeKey}|${zone}`) ?? []
-      : index.eligible.filter((property) => propertyZone(property) === zone);
-    for (const property of bucket) addCandidate(selected, property);
+      : index.eligible.filter((property) => propertyZone(property) === zone).sort((left, right) => left.price - right.price || left.id - right.id);
+    addCommercialBucket(selected, bucket, budget, 12);
   }
 
   const desiredBedrooms = client.bedrooms ?? extractBedrooms(clientText);
   if (desiredBedrooms && typeKey) {
     for (const bedrooms of [desiredBedrooms, desiredBedrooms + 1, desiredBedrooms + 2]) {
-      for (const property of index.byTypeBedrooms.get(`${typeKey}|${bedrooms}`) ?? []) {
-        addCandidate(selected, property);
-      }
+      addCommercialBucket(
+        selected,
+        index.byTypeBedrooms.get(`${typeKey}|${bedrooms}`) ?? [],
+        budget,
+        8,
+      );
     }
   }
 
-  const budget = parseUsdBudget([client.currency, client.budget].filter(Boolean).join(' '));
-  if (budget && typeBucket.length && selected.size < RELEVANT_MATCH_CANDIDATE_LIMIT) {
-    const ceiling = budget * 1.1;
-    let low = 0;
-    let high = typeBucket.length;
-    while (low < high) {
-      const mid = (low + high) >>> 1;
-      if ((typeBucket[mid]?.price ?? Number.POSITIVE_INFINITY) <= ceiling) low = mid + 1;
-      else high = mid;
-    }
-    for (let indexOffset = low - 1; indexOffset >= 0 && selected.size < RELEVANT_MATCH_CANDIDATE_LIMIT; indexOffset -= 1) {
-      addCandidate(selected, typeBucket[indexOffset]!);
-    }
-  }
-
-  for (const property of typeBucket) {
-    if (selected.size >= RELEVANT_MATCH_CANDIDATE_LIMIT) break;
-    addCandidate(selected, property);
-  }
+  addCommercialBucket(
+    selected,
+    typeBucket,
+    budget,
+    RELEVANT_MATCH_CANDIDATE_LIMIT - selected.size,
+  );
   return [...selected.values()];
 }
 
