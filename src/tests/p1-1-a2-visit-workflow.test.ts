@@ -225,6 +225,9 @@ test('P1.1-A2 ActivityEntry derivada usa Cliente y resumen humano', () => {
     entityType: 'Cliente',
     entityId: 10,
     detail: `Docta Etapa 3 · ${scheduledDate} ${scheduledTime}`,
+    commercialEntityType: 'visit',
+    commercialEntityId: scheduled.visit.id,
+    commercialEntityUid: scheduled.visit.uid,
   });
   const done = registerVisitResult({
     visit: scheduled.visit, client: scheduled.client, property: property(), actor: agent,

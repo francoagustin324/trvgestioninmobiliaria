@@ -87,15 +87,19 @@ test('B1.4.1 D/E: terminales quedan fuera y la cola nunca supera tres recomendac
   assert.equal(result.some((item) => item.stage === 'Ganado' || item.stage === 'Perdido'), false);
 });
 
-test('B1.4.1 F/G: producción usa visibleClients global y no los filtros de la lista normal', () => {
+test('B1.4.1 F/G: producción usa autoridad tenant global y no los filtros de la lista normal', () => {
   const polish = readFileSync('src/lead-list-polish-ui.ts', 'utf8');
+  const runtime = readFileSync('src/lead-attention-runtime.ts', 'utf8');
   const queue = readFileSync('src/lead-attention-queue.ts', 'utf8');
-  assert.ok(polish.includes('renderSupervisedAttentionQueue(visibleClients())'));
-  assert.equal(polish.includes('state.crm.clients'), false);
+  assert.ok(polish.includes('renderOperationalAttentionForTenant('));
+  assert.ok(polish.includes('currentTenantScope()'));
+  assert.match(runtime, /resolveOperationalAttentionAuthority/);
+  assert.match(runtime, /assignmentVisible/);
+  assert.equal(runtime.includes('filterLeads'), false);
   assert.equal(queue.includes('filterLeads'), false);
   assert.equal(queue.includes('LeadFilters'), false);
   assert.equal(queue.includes('filters.'), false);
-  assert.ok(queue.includes("sortLeads(active, 'priority', today)"));
+  assert.equal(polish.includes('renderSupervisedAttentionQueue(visibleClients())'), false);
 });
 
 test('B1.4.1 H/I: orden normal y Limpiar conservan recent y orden no cuenta como filtro comercial', () => {
