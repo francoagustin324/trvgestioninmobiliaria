@@ -331,6 +331,141 @@ export function propertyMatchCriteriaKey(client: Client): string {
   ].filter((value) => value !== undefined && value !== null).join('|'));
 }
 
+interface RelevantPropertyIndex {
+  eligible: Property[];
+  byType: Map<string, Property[]>;
+  byTypeZone: Map<string, Property[]>;
+  byTypeBedrooms: Map<string, Property[]>;
+}
+
+const RELEVANT_MATCH_CANDIDATE_LIMIT = 96;
+const relevantPropertyIndexCache = new WeakMap<Property[], RelevantPropertyIndex>();
+
+function candidateTypeKey(property: Property): string {
+  return canonicalPropertyType(property) ?? 'unknown';
+}
+
+function relevantPropertyIndex(properties: Property[]): RelevantPropertyIndex {
+  const cached = relevantPropertyIndexCache.get(properties);
+  if (cached) return cached;
+  const eligible = properties.filter(isEligibleProperty);
+  const byType = new Map<string, Property[]>();
+  const byTypeZone = new Map<string, Property[]>();
+  const byTypeBedrooms = new Map<string, Property[]>();
+  const append = (map: Map<string, Property[]>, key: string, property: Property): void => {
+    const bucket = map.get(key) ?? [];
+    bucket.push(property);
+    map.set(key, bucket);
+  };
+  for (const property of eligible) {
+    const type = candidateTypeKey(property);
+    append(byType, type, property);
+    const zone = propertyZone(property);
+    if (zone) append(byTypeZone, `${type}|${zone}`, property);
+    const bedrooms = property.bedrooms ?? extractBedrooms(normalizeText([property.title, property.features, property.notes].join(' ')));
+    if (bedrooms) append(byTypeBedrooms, `${type}|${bedrooms}`, property);
+  }
+  for (const bucket of byType.values()) bucket.sort((left, right) => left.price - right.price || left.id - right.id);
+  const index = { eligible, byType, byTypeZone, byTypeBedrooms };
+  relevantPropertyIndexCache.set(properties, index);
+  return index;
+}
+
+function requestedZones(client: Client, index: RelevantPropertyIndex, type: string | null): string[] {
+  const direct = String(client.zones ?? '')
+    .split(/[,;|/]+/)
+    .map((value) => normalizeText(value))
+    .filter((value) => value.length >= 3);
+  if (direct.length) return [...new Set(direct)];
+  const text = normalizeText([client.interest, client.preferences, client.notes].join(' '));
+  if (!text) return [];
+  const prefix = `${type ?? 'unknown'}|`;
+  const zones = new Set<string>();
+  for (const key of index.byTypeZone.keys()) {
+    if (type && !key.startsWith(prefix)) continue;
+    const zone = key.slice(key.indexOf('|') + 1);
+    if (zone.length >= 3 && text.includes(zone)) zones.add(zone);
+    if (zones.size >= 4) break;
+  }
+  return [...zones];
+}
+
+function addCandidate(
+  target: Map<string, Property>,
+  property: Property,
+): void {
+  if (target.size >= RELEVANT_MATCH_CANDIDATE_LIMIT) return;
+  const identity = String(property.uid ?? property.id);
+  if (!target.has(identity)) target.set(identity, property);
+}
+
+export function relevantPropertyCandidatesForClient(
+  client: Client,
+  properties: Property[],
+): Property[] {
+  if (!isEligibleClient(client)) return [];
+  const index = relevantPropertyIndex(properties);
+  const clientText = normalizeText([
+    client.interest,
+    client.zones,
+    client.propertyType,
+    client.operation,
+    client.preferences,
+    client.notes,
+  ].join(' '));
+  const desiredType = requestedType(client.propertyType || clientText);
+  const typeKey = desiredType ?? null;
+  const typeBucket = typeKey ? (index.byType.get(typeKey) ?? []) : index.eligible;
+  const selected = new Map<string, Property>();
+
+  for (const zone of requestedZones(client, index, typeKey)) {
+    const bucket = typeKey
+      ? index.byTypeZone.get(`${typeKey}|${zone}`) ?? []
+      : index.eligible.filter((property) => propertyZone(property) === zone);
+    for (const property of bucket) addCandidate(selected, property);
+  }
+
+  const desiredBedrooms = client.bedrooms ?? extractBedrooms(clientText);
+  if (desiredBedrooms && typeKey) {
+    for (const bedrooms of [desiredBedrooms, desiredBedrooms + 1, desiredBedrooms + 2]) {
+      for (const property of index.byTypeBedrooms.get(`${typeKey}|${bedrooms}`) ?? []) {
+        addCandidate(selected, property);
+      }
+    }
+  }
+
+  const budget = parseUsdBudget([client.currency, client.budget].filter(Boolean).join(' '));
+  if (budget && typeBucket.length && selected.size < RELEVANT_MATCH_CANDIDATE_LIMIT) {
+    const ceiling = budget * 1.1;
+    let low = 0;
+    let high = typeBucket.length;
+    while (low < high) {
+      const mid = (low + high) >>> 1;
+      if ((typeBucket[mid]?.price ?? Number.POSITIVE_INFINITY) <= ceiling) low = mid + 1;
+      else high = mid;
+    }
+    for (let indexOffset = low - 1; indexOffset >= 0 && selected.size < RELEVANT_MATCH_CANDIDATE_LIMIT; indexOffset -= 1) {
+      addCandidate(selected, typeBucket[indexOffset]!);
+    }
+  }
+
+  for (const property of typeBucket) {
+    if (selected.size >= RELEVANT_MATCH_CANDIDATE_LIMIT) break;
+    addCandidate(selected, property);
+  }
+  return [...selected.values()];
+}
+
+export function matchRelevantPropertiesForClient(
+  client: Client,
+  properties: Property[],
+): PropertyMatch[] {
+  return relevantPropertyCandidatesForClient(client, properties)
+    .map((property) => evaluatePropertyMatch(client, property))
+    .filter((match): match is PropertyMatch => match !== null)
+    .sort((left, right) => right.score - left.score || left.property.price - right.property.price);
+}
+
 function templatesForClient(client: Client, properties: Property[]): PropertyMatchTemplate[] {
   let cache = propertyMatchCache.get(properties);
   if (!cache) {

@@ -1,6 +1,6 @@
 import { leadDaysFromToday } from './lead-list-priority.js';
 import { commercialStage, isTerminalClient, localIsoDate } from './lead-pipeline.js';
-import { matchDismissalActive, matchPropertiesForClient, propertyMatchCriteriaKey } from './property-matching.js';
+import { matchDismissalActive, matchRelevantPropertiesForClient, propertyMatchCriteriaKey } from './property-matching.js';
 import { assignmentVisible } from './team-policy.js';
 import type {
   ActivityEntry,
@@ -499,7 +499,7 @@ export function evaluateRelevantMatchAlertConditions(
   for (const group of byCriteria.values()) {
     const representative = group[0];
     if (!representative) continue;
-    const highMatches = matchPropertiesForClient(representative, properties)
+    const highMatches = matchRelevantPropertiesForClient(representative, properties)
       .filter((match) => match.level === 'Alta');
     if (!highMatches.length) continue;
 
