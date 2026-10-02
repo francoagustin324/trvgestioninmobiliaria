@@ -48,7 +48,7 @@ function property(id: number): Property {
     address: `${zone}, Córdoba`,
     type,
     operation: 'Venta',
-    price: 85000 + (id % 140) * 1500,
+    price: 85000 + id * 100,
     owner: 'Propietario',
     status: 'Activa',
     ...(bedrooms ? { bedrooms } : {}),
