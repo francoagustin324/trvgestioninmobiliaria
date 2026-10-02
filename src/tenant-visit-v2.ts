@@ -597,6 +597,48 @@ type GenericDelta = Readonly<{
   touched: Set<string>;
 }>;
 
+function idempotentVisitConfirmationEquivalent(
+  left: CloudRecordRow,
+  right: CloudRecordRow,
+): boolean {
+  if (
+    left.organization_id !== right.organization_id
+    || left.entity_type !== 'activity'
+    || right.entity_type !== 'activity'
+    || left.entity_key !== right.entity_key
+    || left.assigned_member_id !== right.assigned_member_id
+  ) return false;
+
+  const leftPayload = record(left.payload);
+  const rightPayload = record(right.payload);
+  if (!leftPayload || !rightPayload) return false;
+  if (leftPayload.action !== 'Visita confirmada' || rightPayload.action !== 'Visita confirmada') return false;
+
+  const leftUid = canonicalUuid(leftPayload.uid);
+  const rightUid = canonicalUuid(rightPayload.uid);
+  const leftOperationId = canonicalUuid(leftPayload.operationId);
+  const rightOperationId = canonicalUuid(rightPayload.operationId);
+  if (
+    !leftUid
+    || leftUid !== rightUid
+    || !leftOperationId
+    || leftOperationId !== rightOperationId
+  ) return false;
+
+  const stableFields = [
+    'revision',
+    'actorId',
+    'entityType',
+    'entityId',
+    'entityUid',
+    'detail',
+    'commercialEntityType',
+    'commercialEntityId',
+    'commercialEntityUid',
+  ] as const;
+  return stableFields.every((field) => leftPayload[field] === rightPayload[field]);
+}
+
 function genericWritable(
   row: Pick<CloudRecordRow, 'entity_type' | 'payload'>,
   visitAuthorityActive: boolean,
@@ -630,7 +672,11 @@ function genericDelta(
     const remote = remoteMap.get(identity);
 
     if (!base && local) {
-      if (remote && concurrencyRowFingerprint(remote) !== concurrencyRowFingerprint(local)) {
+      if (
+        remote
+        && concurrencyRowFingerprint(remote) !== concurrencyRowFingerprint(local)
+        && !idempotentVisitConfirmationEquivalent(remote, local)
+      ) {
         throw new Error('GENERIC_RECORD_CONFLICT');
       }
       if (!remote) inserts.push(local);
@@ -700,7 +746,13 @@ function assertGenericVerification(
       if (remote) throw new Error('GENERIC_DELETE_VERIFICATION_FAILED');
       continue;
     }
-    if (!remote || concurrencyRowFingerprint(remote) !== concurrencyRowFingerprint(local)) {
+    if (
+      !remote
+      || (
+        concurrencyRowFingerprint(remote) !== concurrencyRowFingerprint(local)
+        && !idempotentVisitConfirmationEquivalent(remote, local)
+      )
+    ) {
       throw new Error('GENERIC_WRITE_VERIFICATION_FAILED');
     }
   }
