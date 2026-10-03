@@ -21,6 +21,7 @@ on:
       - feature/ordenbroker-block2g-daily-operations-zero-training
       - feature/ordenbroker-block2h-commercial-alerts-automation
       - fix/ordenbroker-block2h-hardening-audit
+      - fix/ordenbroker-block2h-matching-correctness-performance
   schedule:
     - cron: "0 10 * * *"
   workflow_dispatch:
@@ -35,7 +36,7 @@ jobs:
     timeout-minutes: 120
     env:
       PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
-      EXPECTED_TEST_TOTAL: "1506"
+      EXPECTED_TEST_TOTAL: "1507"
     steps:
       - uses: actions/checkout@v7
         with:
@@ -188,7 +189,7 @@ jobs:
           from pathlib import Path
 
           text = Path('test.log').read_text(encoding='utf-8', errors='replace')
-          expected = 1506
+          expected = 1507
 
           def terminal_metric(name: str) -> int:
               matches = re.findall(rf'^# {re.escape(name)}\s+(\d+)\s*$', text, flags=re.MULTILINE)
