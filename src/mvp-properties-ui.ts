@@ -833,9 +833,11 @@ export function renderMvpProperties(container: HTMLElement, options: MvpProperti
       if (editing) {
         const index = state.crm.properties.findIndex((item) => item.id === editing.id);
         if (index < 0) throw new Error('PROPERTY_EDIT_TARGET_MISSING');
-        state.crm.properties[index] = property as Property;
+        state.crm.properties = state.crm.properties.map((item, currentIndex) => (
+          currentIndex === index ? property as Property : item
+        ));
       } else {
-        state.crm.properties.push(property as Property);
+        state.crm.properties = [...state.crm.properties, property as Property];
       }
 
       assertTenantRuntimeLeaseCurrent(writeContext.runtimeLease);
