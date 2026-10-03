@@ -157,15 +157,16 @@ function card(client: Client, properties: Property[]): string {
   const readTarget = currentReadEntityTarget();
   const returnTarget = currentReadEntityReturnTarget();
   const openedReadOnly = readTarget?.entityType === 'lead' && readTarget.entityId === client.id;
+  const expanded = expandedClientId === client.id || openedReadOnly;
   const navigation = openedReadOnly && returnTarget?.entityType === 'property'
     ? '<div class="mvp-read-return"><button type="button" class="secondary" data-return-read-entity>← Volver a propiedad</button></div>'
     : '';
   return renderCompactLeadCard(client, {
-    expanded: expandedClientId === client.id || openedReadOnly,
+    expanded,
     responsible,
     qualificationPanel: renderLeadQualificationPanel(client),
     history: historyBlock(client),
-    matches: matchesForLead(client, properties),
+    matches: expanded ? matchesForLead(client, properties) : '',
     navigation,
   });
 }
