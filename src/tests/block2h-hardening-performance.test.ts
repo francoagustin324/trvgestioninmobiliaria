@@ -93,3 +93,90 @@ test('Block 2H matching acotado conserva el mejor match exhaustivo en casos repr
     assert.equal(bounded?.score, exhaustive?.score, `perfil ${id}: el score del mejor match debe ser idéntico`);
   }
 });
+
+
+test('Block 2H regression: inventario desordenado sin typeKey no puede ocultar una oportunidad Alta', () => {
+  const buyer: Client = {
+    id: 9001,
+    uid: '10000000-0000-4000-8000-000000009001',
+    revision: 1,
+    name: 'Cliente adversarial',
+    phone: '5493515559001',
+    interest: 'Busca una oportunidad con amenities',
+    status: 'Lead',
+    temperature: 'Caliente',
+    pipeline: 'Calificado',
+    budget: 'USD 100.000',
+    currency: 'USD',
+    paymentMethod: 'Contado',
+    propertyType: 'PH especial',
+    operation: 'Compra',
+    bedrooms: 2,
+    canMoveForward: 'Sí',
+    features: 'pileta balcón terraza cochera',
+    assignedToId: 1,
+    createdById: 1,
+  };
+
+  const affordableDistractors = Array.from({ length: 500 }, (_, index): Property => ({
+    id: index + 1,
+    uid: `30000000-0000-4000-8000-${String(index + 1).padStart(12, '0')}`,
+    revision: 1,
+    title: `PH genérico ${index + 1}`,
+    address: 'Zona genérica, Córdoba',
+    type: 'PH',
+    operation: 'Venta',
+    price: 80000 + index,
+    owner: 'Propietario',
+    status: 'Activa',
+    bedrooms: 1,
+    paymentMethod: 'Financiación',
+    assignedToId: 1,
+    createdById: 1,
+  }));
+
+  const expensiveDistractors = Array.from({ length: 499 }, (_, index): Property => ({
+    id: 501 + index,
+    uid: `40000000-0000-4000-8000-${String(index + 1).padStart(12, '0')}`,
+    revision: 1,
+    title: `PH fuera de presupuesto ${index + 1}`,
+    address: 'Otra zona, Córdoba',
+    type: 'PH',
+    operation: 'Venta',
+    price: 180000 + index,
+    owner: 'Propietario',
+    status: 'Activa',
+    bedrooms: 2,
+    paymentMethod: 'Contado',
+    assignedToId: 1,
+    createdById: 1,
+  }));
+
+  const best: Property = {
+    id: 1000,
+    uid: '50000000-0000-4000-8000-000000001000',
+    revision: 1,
+    title: 'PH oportunidad completa',
+    address: 'Zona objetivo, Córdoba',
+    type: 'PH',
+    operation: 'Venta',
+    price: 95000,
+    owner: 'Propietario',
+    status: 'Activa',
+    bedrooms: 2,
+    paymentMethod: 'Contado',
+    features: 'pileta balcón terraza cochera',
+    assignedToId: 1,
+    createdById: 1,
+  };
+
+  const properties = [...affordableDistractors, ...expensiveDistractors, best];
+  assert.equal(properties.length, 1000);
+  assert.equal(properties.at(-1)?.id, best.id);
+
+  const exhaustive = matchPropertiesForClient(buyer, properties).find((match) => match.level === 'Alta');
+  const bounded = matchRelevantPropertiesForClient(buyer, properties).find((match) => match.level === 'Alta');
+
+  assert.equal(exhaustive?.property.id, best.id, 'el matching exhaustivo debe encontrar la oportunidad Alta');
+  assert.equal(bounded?.property.id, best.id, 'el matching acotado debe conservar la misma oportunidad Alta aunque el array esté desordenado');
+});
