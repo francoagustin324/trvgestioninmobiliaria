@@ -336,6 +336,7 @@ interface RelevantPropertyIndex {
   byType: Map<string, Property[]>;
   byTypeZone: Map<string, Property[]>;
   byTypeBedrooms: Map<string, Property[]>;
+  byBedrooms: Map<string, Property[]>;
 }
 
 const RELEVANT_MATCH_CANDIDATE_LIMIT = 36;
@@ -345,13 +346,18 @@ function candidateTypeKey(property: Property): string {
   return canonicalPropertyType(property) ?? 'unknown';
 }
 
+function propertyPriceOrder(left: Property, right: Property): number {
+  return left.price - right.price || left.id - right.id;
+}
+
 function relevantPropertyIndex(properties: Property[]): RelevantPropertyIndex {
   const cached = relevantPropertyIndexCache.get(properties);
   if (cached) return cached;
-  const eligible = properties.filter(isEligibleProperty);
+  const eligible = properties.filter(isEligibleProperty).sort(propertyPriceOrder);
   const byType = new Map<string, Property[]>();
   const byTypeZone = new Map<string, Property[]>();
   const byTypeBedrooms = new Map<string, Property[]>();
+  const byBedrooms = new Map<string, Property[]>();
   const append = (map: Map<string, Property[]>, key: string, property: Property): void => {
     const bucket = map.get(key) ?? [];
     bucket.push(property);
@@ -363,12 +369,15 @@ function relevantPropertyIndex(properties: Property[]): RelevantPropertyIndex {
     const zone = propertyZone(property);
     if (zone) append(byTypeZone, `${type}|${zone}`, property);
     const bedrooms = property.bedrooms ?? extractBedrooms(normalizeText([property.title, property.features, property.notes].join(' ')));
-    if (bedrooms) append(byTypeBedrooms, `${type}|${bedrooms}`, property);
+    if (bedrooms) {
+      append(byTypeBedrooms, `${type}|${bedrooms}`, property);
+      append(byBedrooms, String(bedrooms), property);
+    }
   }
-  for (const buckets of [byType, byTypeZone, byTypeBedrooms]) {
-    for (const bucket of buckets.values()) bucket.sort((left, right) => left.price - right.price || left.id - right.id);
+  for (const buckets of [byType, byTypeZone, byTypeBedrooms, byBedrooms]) {
+    for (const bucket of buckets.values()) bucket.sort(propertyPriceOrder);
   }
-  const index = { eligible, byType, byTypeZone, byTypeBedrooms };
+  const index = { eligible, byType, byTypeZone, byTypeBedrooms, byBedrooms };
   relevantPropertyIndexCache.set(properties, index);
   return index;
 }
@@ -457,19 +466,17 @@ export function relevantPropertyCandidatesForClient(
   for (const zone of requestedZones(client, index, typeKey)) {
     const bucket = typeKey
       ? index.byTypeZone.get(`${typeKey}|${zone}`) ?? []
-      : index.eligible.filter((property) => propertyZone(property) === zone).sort((left, right) => left.price - right.price || left.id - right.id);
+      : index.eligible.filter((property) => propertyZone(property) === zone).sort(propertyPriceOrder);
     addCommercialBucket(selected, bucket, budget, 12);
   }
 
   const desiredBedrooms = client.bedrooms ?? extractBedrooms(clientText);
-  if (desiredBedrooms && typeKey) {
+  if (desiredBedrooms) {
     for (const bedrooms of [desiredBedrooms, desiredBedrooms + 1, desiredBedrooms + 2]) {
-      addCommercialBucket(
-        selected,
-        index.byTypeBedrooms.get(`${typeKey}|${bedrooms}`) ?? [],
-        budget,
-        8,
-      );
+      const bucket = typeKey
+        ? index.byTypeBedrooms.get(`${typeKey}|${bedrooms}`) ?? []
+        : index.byBedrooms.get(String(bedrooms)) ?? [];
+      addCommercialBucket(selected, bucket, budget, 8);
     }
   }
 
