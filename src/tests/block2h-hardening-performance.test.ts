@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { performance } from 'node:perf_hooks';
 import test from 'node:test';
 import { evaluateRelevantMatchAlertConditions } from '../commercial-alert-engine.js';
@@ -174,9 +175,90 @@ test('Block 2H regression: inventario desordenado sin typeKey no puede ocultar u
   assert.equal(properties.length, 1000);
   assert.equal(properties.at(-1)?.id, best.id);
 
-  const exhaustive = matchPropertiesForClient(buyer, properties).find((match) => match.level === 'Alta');
-  const bounded = matchRelevantPropertiesForClient(buyer, properties).find((match) => match.level === 'Alta');
+  const permutations = [
+    properties,
+    [...properties].reverse(),
+    [...properties.slice(317), ...properties.slice(0, 317)],
+  ];
 
-  assert.equal(exhaustive?.property.id, best.id, 'el matching exhaustivo debe encontrar la oportunidad Alta');
-  assert.equal(bounded?.property.id, best.id, 'el matching acotado debe conservar la misma oportunidad Alta aunque el array esté desordenado');
+  for (const [index, inventory] of permutations.entries()) {
+    const exhaustive = matchPropertiesForClient(buyer, inventory).find((match) => match.level === 'Alta');
+    const bounded = matchRelevantPropertiesForClient(buyer, inventory).find((match) => match.level === 'Alta');
+
+    assert.equal(exhaustive?.property.id, best.id, `permutación ${index}: exhaustive debe encontrar la oportunidad Alta`);
+    assert.equal(bounded?.property.id, best.id, `permutación ${index}: bounded debe conservar la oportunidad Alta`);
+    assert.equal(bounded?.score, exhaustive?.score, `permutación ${index}: el score del mejor match debe coincidir`);
+  }
+
+  const edgeBuyer: Client = {
+    ...buyer,
+    id: 9002,
+    uid: '10000000-0000-4000-8000-000000009002',
+    name: 'Cliente borde de presupuesto',
+    propertyType: 'Departamento',
+    zones: 'Docta',
+  };
+  const edgeTarget: Property = {
+    ...best,
+    id: 2000,
+    uid: '50000000-0000-4000-8000-000000002000',
+    title: 'Departamento borde exacto',
+    address: 'Docta, Córdoba',
+    type: 'Departamento',
+    price: 110000,
+  };
+  const edgeInventory = Array.from({ length: 999 }, (_, index): Property => ({
+    ...property(index + 3000),
+    type: 'Departamento',
+    address: 'Zona descartable, Córdoba',
+    price: 150000 + index,
+    bedrooms: 2,
+  }));
+  edgeInventory.splice(777, 0, edgeTarget);
+
+  const edgeExhaustive = matchPropertiesForClient(edgeBuyer, edgeInventory).find((match) => match.level === 'Alta');
+  const edgeBounded = matchRelevantPropertiesForClient(edgeBuyer, edgeInventory).find((match) => match.level === 'Alta');
+  assert.equal(edgeInventory.length, 1000);
+  assert.equal(edgeExhaustive?.property.id, edgeTarget.id, 'el borde +10% debe seguir siendo una oportunidad válida');
+  assert.equal(edgeBounded?.property.id, edgeTarget.id, 'bounded debe conservar el match ubicado lejos en el inventario');
+});
+
+test('Block 2H Leads render evita N×M cerrado y property saves invalidan caches por identidad', () => {
+  const leadsSource = readFileSync('src/mvp-leads-ui.ts', 'utf8');
+  const propertiesSource = readFileSync('src/mvp-properties-ui.ts', 'utf8');
+
+  assert.match(
+    leadsSource,
+    /const expanded = expandedClientId === client\.id \|\| openedReadOnly;/,
+    'el render debe resolver explícitamente si la ficha está abierta',
+  );
+  assert.match(
+    leadsSource,
+    /matches: expanded \? matchesForLead\(client, properties\) : '',/,
+    'una tarjeta cerrada no debe ejecutar matching exhaustivo',
+  );
+
+  assert.doesNotMatch(
+    propertiesSource,
+    /state\.crm\.properties\[[^\]]+\]\s*=/,
+    'editar una propiedad no puede conservar la identidad del array cacheado',
+  );
+  assert.doesNotMatch(
+    propertiesSource,
+    /state\.crm\.properties\.push\(/,
+    'crear una propiedad no puede mutar in-place el array cacheado',
+  );
+  assert.match(propertiesSource, /state\.crm\.properties = state\.crm\.properties\.map\(/);
+  assert.match(propertiesSource, /state\.crm\.properties = \[\.\.\.state\.crm\.properties, property as Property\]/);
+
+  const properties = Array.from({ length: 1000 }, (_, index) => property(index + 1));
+  const started = performance.now();
+  const oneOpenedLead = matchPropertiesForClient(client(7), properties);
+  const elapsed = performance.now() - started;
+  console.log(`BLOCK2H_LEADS_ONE_OPEN_AFTER_MS=${elapsed.toFixed(2)}`);
+  assert.ok(oneOpenedLead.length >= 0);
+  assert.ok(
+    elapsed < 500,
+    `una única ficha abierta sobre 1000 propiedades tardó ${elapsed.toFixed(2)}ms; no debe acercarse al costo del render 1000x1000`,
+  );
 });
