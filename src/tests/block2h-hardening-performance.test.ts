@@ -223,7 +223,7 @@ test('Block 2H regression: inventario desordenado sin typeKey no puede ocultar u
   assert.equal(edgeBounded?.property.id, edgeTarget.id, 'bounded debe conservar el match ubicado lejos en el inventario');
 });
 
-test('Block 2H Leads render evita N×M cerrado y property saves invalidan caches por identidad', () => {
+test('Block 2H Leads render usa bounded cerrado, exhaustive abierto y property saves invalidan caches por identidad', () => {
   const leadsSource = readFileSync('src/mvp-leads-ui.ts', 'utf8');
   const propertiesSource = readFileSync('src/mvp-properties-ui.ts', 'utf8');
 
@@ -234,8 +234,13 @@ test('Block 2H Leads render evita N×M cerrado y property saves invalidan caches
   );
   assert.match(
     leadsSource,
-    /matches: expanded \? matchesForLead\(client, properties\) : '',/,
-    'una tarjeta cerrada no debe ejecutar matching exhaustivo',
+    /exhaustive[\s\S]*\? matchPropertiesForClient\(client, properties\)[\s\S]*: matchRelevantPropertiesForClient\(client, properties\)/,
+    'la ficha abierta debe preservar exhaustive y la tarjeta cerrada debe usar bounded',
+  );
+  assert.match(
+    leadsSource,
+    /matches: matchesForLead\(client, properties, expanded\),/,
+    'el render productivo debe seleccionar bounded/exhaustive según apertura',
   );
 
   assert.doesNotMatch(
@@ -252,13 +257,25 @@ test('Block 2H Leads render evita N×M cerrado y property saves invalidan caches
   assert.match(propertiesSource, /state\.crm\.properties = \[\.\.\.state\.crm\.properties, property as Property\]/);
 
   const properties = Array.from({ length: 1000 }, (_, index) => property(index + 1));
-  const started = performance.now();
-  const oneOpenedLead = matchPropertiesForClient(client(7), properties);
-  const elapsed = performance.now() - started;
-  console.log(`BLOCK2H_LEADS_ONE_OPEN_AFTER_MS=${elapsed.toFixed(2)}`);
-  assert.ok(oneOpenedLead.length >= 0);
+  const clients = Array.from({ length: 1000 }, (_, index) => client(index + 1));
+
+  const renderStarted = performance.now();
+  const collapsedRows = clients.map((current) => matchRelevantPropertiesForClient(current, properties).slice(0, 3));
+  const renderElapsed = performance.now() - renderStarted;
+  console.log(`BLOCK2H_LEADS_RENDER_AFTER_MS=${renderElapsed.toFixed(2)}`);
+  assert.ok(collapsedRows.some((matches) => matches.length > 0));
+  assert.ok(collapsedRows.every((matches) => matches.length <= 3));
   assert.ok(
-    elapsed < 500,
-    `una única ficha abierta sobre 1000 propiedades tardó ${elapsed.toFixed(2)}ms; no debe acercarse al costo del render 1000x1000`,
+    renderElapsed < 2000,
+    `render operativo de 1000 leads x 1000 propiedades tardó ${renderElapsed.toFixed(2)}ms; no debe volver al cruce exhaustivo de segundos altos`,
+  );
+
+  const openedStarted = performance.now();
+  matchPropertiesForClient(client(7), properties);
+  const openedElapsed = performance.now() - openedStarted;
+  console.log(`BLOCK2H_LEADS_ONE_OPEN_AFTER_MS=${openedElapsed.toFixed(2)}`);
+  assert.ok(
+    openedElapsed < 500,
+    `una única ficha abierta sobre 1000 propiedades tardó ${openedElapsed.toFixed(2)}ms; exhaustive debe quedar acotado al lead abierto`,
   );
 });
