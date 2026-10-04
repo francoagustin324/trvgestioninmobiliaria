@@ -37,7 +37,7 @@ import {
   openEntityReadOnly,
   returnToEntityReadOnly,
 } from './entity-read-navigation.js';
-import { matchPropertiesForClient, type PropertyMatch } from './property-matching.js';
+import { matchPropertiesForClient, matchRelevantPropertiesForClient, type PropertyMatch } from './property-matching.js';
 import { MATCH_DISMISSED_ACTION, matchDismissalActive } from './property-matching.js';
 import { saveData, state } from './store.js';
 import { addActivityForAuthenticatedTenant, memberName, visibleClients, visibleProperties } from './team-access.js';
@@ -114,10 +114,14 @@ function matchRow(match: PropertyMatch): string {
   </article>`;
 }
 
-function matchesForLead(client: Client, properties: Property[]): string {
+function matchesForLead(client: Client, properties: Property[], exhaustive: boolean): string {
   if (isTerminalClient(client)) return '';
   if (!properties.length) return '<p class="mvp-match-empty">Todavía no hay propiedades cargadas para comparar.</p>';
-  const matches = matchPropertiesForClient(client, properties).slice(0, 3)
+  const matches = (
+    exhaustive
+      ? matchPropertiesForClient(client, properties)
+      : matchRelevantPropertiesForClient(client, properties)
+  ).slice(0, 3)
     .filter((match) => !matchDismissalActive(client, match.property, state.crm.activityLog));
   if (!matches.length) return '<p class="mvp-match-empty">No hay coincidencias claras con las propiedades disponibles.</p>';
   const best = matches[0]!;
@@ -166,7 +170,7 @@ function card(client: Client, properties: Property[]): string {
     responsible,
     qualificationPanel: renderLeadQualificationPanel(client),
     history: historyBlock(client),
-    matches: expanded ? matchesForLead(client, properties) : '',
+    matches: matchesForLead(client, properties, expanded),
     navigation,
   });
 }
