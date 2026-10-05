@@ -26,7 +26,7 @@ import {
   renderPublicAuth,
 } from './mvp-auth.js';
 import { canAccessModule } from './team-access.js';
-import { saveData, state } from './store.js';
+import { replacePropertyCollection, saveData, state } from './store.js';
 import { invalidateTenantRuntimeScope } from './tenant-runtime.js';
 import { qs } from './utils.js';
 
@@ -229,7 +229,7 @@ function removeItem(collection: string, id: number): void {
     state.crm.conversations = state.crm.conversations.filter((item) => item.clientId !== id);
   }
   if (collection === 'properties') {
-    state.crm.properties = state.crm.properties.filter((item) => item.id !== id);
+    replacePropertyCollection(state.crm.properties.filter((item) => item.id !== id));
     if (state.editingPropertyId === id) state.editingPropertyId = null;
   }
   if (collection === 'reminders') state.crm.reminders = state.crm.reminders.filter((item) => item.id !== id);
