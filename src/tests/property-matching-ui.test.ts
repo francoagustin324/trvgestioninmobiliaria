@@ -14,39 +14,47 @@ test('Leads usa bounded en cards cerradas y conserva exhaustive en la ficha expa
     /import \{ matchPropertiesForClient, matchRelevantPropertiesForClient, type PropertyMatch \} from '\.\/property-matching\.js';/,
   );
 
-  const matchesStart = leadUi.indexOf('function matchesForLead(client: Client, properties: Property[], exhaustive: boolean): string');
-  const matchesEnd = leadUi.indexOf('function clientHistory', matchesStart);
-  assert.ok(matchesStart >= 0 && matchesEnd > matchesStart, 'debe existir el selector productivo bounded/exhaustive');
-  const matchesBlock = leadUi.slice(matchesStart, matchesEnd);
-
+  const contentStart = leadUi.indexOf('function matchesContentForLead(client: Client, properties: Property[], exhaustive: boolean): string');
+  const contentEnd = leadUi.indexOf('function matchesForLead', contentStart);
+  assert.ok(contentStart >= 0 && contentEnd > contentStart, 'debe existir el selector productivo bounded/exhaustive');
+  const contentBlock = leadUi.slice(contentStart, contentEnd);
   assert.match(
-    matchesBlock,
+    contentBlock,
     /exhaustive\s*\?\s*matchPropertiesForClient\(client, properties\)\s*:\s*matchRelevantPropertiesForClient\(client, properties\)/,
     'expanded debe conservar matching exhaustivo y collapsed debe usar matching bounded/relevant',
   );
-  assert.match(
-    matchesBlock,
-    /\)\.slice\(0, 3\)/,
-    'la UI debe seguir mostrando como máximo tres propiedades compatibles',
-  );
-  assert.ok(matchesBlock.includes('mejor coincidencia'), 'debe conservar el resumen de mejor coincidencia');
-  assert.ok(matchesBlock.includes('matches.map(matchRow)'), 'debe seguir renderizando las coincidencias con la presentación existente');
+  assert.match(contentBlock, /\)\.slice\(0, 3\)/, 'la UI debe seguir mostrando como máximo tres propiedades compatibles');
+  assert.ok(contentBlock.includes('mejor coincidencia'), 'debe conservar el resumen de mejor coincidencia');
+  assert.ok(contentBlock.includes('matches.map(matchRow)'), 'debe seguir renderizando las coincidencias con la presentación existente');
+
+  const wrapperStart = leadUi.indexOf('function matchesForLead(client: Client, properties: Property[], exhaustive: boolean): string');
+  const wrapperEnd = leadUi.indexOf('function refreshLeadMatches', wrapperStart);
+  assert.ok(wrapperStart >= 0 && wrapperEnd > wrapperStart, 'debe existir el slot observable del lead');
+  const wrapperBlock = leadUi.slice(wrapperStart, wrapperEnd);
+  assert.match(wrapperBlock, /data-lead-matches-slot="\$\{client\.id\}"/);
+  assert.match(wrapperBlock, /data-match-mode="\$\{exhaustive \? 'exhaustive' : 'bounded'\}"/);
+
+  const refreshStart = leadUi.indexOf('function refreshLeadMatches(');
+  const refreshEnd = leadUi.indexOf('function clientHistory', refreshStart);
+  assert.ok(refreshStart >= 0 && refreshEnd > refreshStart, 'debe existir refresco focal del bloque de matches');
+  const refreshBlock = leadUi.slice(refreshStart, refreshEnd);
+  assert.match(refreshBlock, /visibleClients\(\)\.find\(\(item\) => item\.id === clientId\)/);
+  assert.match(refreshBlock, /matchesContentForLead\(client, visibleProperties\(\), exhaustive\)/);
+  assert.match(refreshBlock, /bindLeadMatchActions\(slot\)/);
 
   const cardStart = leadUi.indexOf('function card(client: Client, properties: Property[]): string');
   const cardEnd = leadUi.indexOf('function focusLeadForm', cardStart);
   assert.ok(cardStart >= 0 && cardEnd > cardStart, 'debe existir el armado de card del lead');
   const cardBlock = leadUi.slice(cardStart, cardEnd);
+  assert.match(cardBlock, /const expanded = expandedClientId === client\.id \|\| openedReadOnly;/);
+  assert.match(cardBlock, /matches: matchesForLead\(client, properties, expanded\),/);
 
-  assert.match(
-    cardBlock,
-    /const expanded = expandedClientId === client\.id \|\| openedReadOnly;/,
-    'la apertura debe derivarse del lead expandido o lectura explícita',
-  );
-  assert.match(
-    cardBlock,
-    /matches: matchesForLead\(client, properties, expanded\),/,
-    'el modo bounded/exhaustive debe depender del estado real de expansión',
-  );
+  const toggleStart = leadUi.indexOf('function bindFullSheets(container: HTMLElement): void');
+  const toggleEnd = leadUi.indexOf('const followUpActionContainers', toggleStart);
+  assert.ok(toggleStart >= 0 && toggleEnd > toggleStart, 'debe existir binding runtime de details');
+  const toggleBlock = leadUi.slice(toggleStart, toggleEnd);
+  assert.match(toggleBlock, /refreshLeadMatches\(details, clientId, true\)/, 'abrir debe recalcular exhaustive sólo ese lead');
+  assert.match(toggleBlock, /refreshLeadMatches\(details, clientId, false\)/, 'cerrar debe volver al bounded de la card');
 });
 
 test('Leads conserva reasons, warnings, score y navegación de coincidencias', () => {
