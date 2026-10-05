@@ -38,9 +38,12 @@ test('Leads usa bounded en cards cerradas y conserva exhaustive en la ficha expa
   const refreshEnd = leadUi.indexOf('function clientHistory', refreshStart);
   assert.ok(refreshStart >= 0 && refreshEnd > refreshStart, 'debe existir refresco focal del bloque de matches');
   const refreshBlock = leadUi.slice(refreshStart, refreshEnd);
-  assert.match(refreshBlock, /visibleClients\(\)\.find\(\(item\) => item\.id === clientId\)/);
+  assert.match(refreshBlock, /container\.querySelector<HTMLDetailsElement>\(`\[data-lead-full-sheet="\$\{clientId\}"\]`\)/);
   assert.match(refreshBlock, /matchesContentForLead\(client, visibleProperties\(\), exhaustive\)/);
+  assert.match(refreshBlock, /slot\.replaceChildren\(template\.content\.cloneNode\(true\)\)/);
   assert.match(refreshBlock, /bindLeadMatchActions\(slot\)/);
+  assert.match(refreshBlock, /!container\.isConnected/);
+  assert.match(refreshBlock, /!details\?\.isConnected \|\| !slot\?\.isConnected/);
 
   const cardStart = leadUi.indexOf('function card(client: Client, properties: Property[]): string');
   const cardEnd = leadUi.indexOf('function focusLeadForm', cardStart);
@@ -53,8 +56,9 @@ test('Leads usa bounded en cards cerradas y conserva exhaustive en la ficha expa
   const toggleEnd = leadUi.indexOf('const followUpActionContainers', toggleStart);
   assert.ok(toggleStart >= 0 && toggleEnd > toggleStart, 'debe existir binding runtime de details');
   const toggleBlock = leadUi.slice(toggleStart, toggleEnd);
-  assert.match(toggleBlock, /refreshLeadMatches\(details, clientId, true\)/, 'abrir debe recalcular exhaustive sólo ese lead');
-  assert.match(toggleBlock, /refreshLeadMatches\(details, clientId, false\)/, 'cerrar debe volver al bounded de la card');
+  assert.match(toggleBlock, /refreshLeadMatches\(container, clientId, true\)/, 'abrir debe recalcular exhaustive sólo ese lead');
+  assert.match(toggleBlock, /refreshLeadMatches\(container, clientId, false\)/, 'cerrar debe volver al bounded de la card');
+  assert.match(toggleBlock, /!details\.isConnected \|\| !container\.contains\(details\)/, 'callbacks toggle stale deben fallar cerrado');
 });
 
 test('Leads conserva reasons, warnings, score y navegación de coincidencias', () => {
