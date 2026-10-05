@@ -132,7 +132,7 @@ function matchesContentForLead(client: Client, properties: Property[], exhaustiv
 }
 
 function matchesForLead(client: Client, properties: Property[], exhaustive: boolean): string {
-  return `<div class="mvp-lead-matches-slot" data-lead-matches-slot="${client.id}">${matchesContentForLead(client, properties, exhaustive)}</div>`;
+  return `<div class="mvp-lead-matches-slot" data-lead-matches-slot="${client.id}" data-match-mode="${exhaustive ? 'exhaustive' : 'bounded'}">${matchesContentForLead(client, properties, exhaustive)}</div>`;
 }
 
 function refreshLeadMatches(
@@ -143,6 +143,7 @@ function refreshLeadMatches(
   const client = visibleClients().find((item) => item.id === clientId);
   const slot = details.querySelector<HTMLElement>(`[data-lead-matches-slot="${clientId}"]`);
   if (!client || !slot) return;
+  slot.dataset.matchMode = exhaustive ? 'exhaustive' : 'bounded';
   slot.innerHTML = matchesContentForLead(client, visibleProperties(), exhaustive);
   bindLeadMatchActions(slot);
 }
