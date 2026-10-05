@@ -20,8 +20,10 @@ test('Propiedades usa el mismo formato operativo que Leads', () => {
 test('Propiedades permite buscar, crear y editar sin duplicar el registro', () => {
   assert.ok(propertiesUi.includes('mvp-property-search'));
   assert.ok(propertiesUi.includes('state.editingPropertyId'));
-  assert.match(propertiesUi, /state\.crm\.properties = state\.crm\.properties\.map\(/);
-  assert.match(propertiesUi, /state\.crm\.properties = \[\.\.\.state\.crm\.properties, property as Property\]/);
+  assert.match(propertiesUi, /replacePropertyCollection\(state\.crm\.properties\.map\(/);
+  assert.match(propertiesUi, /replacePropertyCollection\(\[\.\.\.state\.crm\.properties, property as Property\]\)/);
+  assert.match(store, /export function replacePropertyCollection\(properties: CrmData\['properties'\]\): void/);
+  assert.match(store, /invalidatePropertyMatchingCaches\(properties\)/);
   assert.doesNotMatch(propertiesUi, /state\.crm\.properties\[index\] = property(?: as Property)?/);
   assert.doesNotMatch(propertiesUi, /state\.crm\.properties\.push\(property(?: as Property)?\)/);
   assert.ok(store.includes('editingPropertyId: null as number | null'));
