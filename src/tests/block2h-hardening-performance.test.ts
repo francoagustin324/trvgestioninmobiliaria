@@ -365,18 +365,23 @@ test('Block 2H cache invalidation dinámica evita resultados stale por el camino
   assert.equal(exhaustiveBefore?.property.id, 9601);
   assert.equal(boundedBefore?.property.id, 9601);
 
-  first.price = 150000;
+  first.price = 105000;
   first.revision = Number(first.revision ?? 0) + 1;
   store.replacePropertyCollection(inventory);
   const exhaustiveAfterPrice = matchPropertiesForClient(buyer, store.state.crm.properties).find((match) => match.property.id === 9601);
   const boundedAfterPrice = matchRelevantPropertiesForClient(buyer, store.state.crm.properties).find((match) => match.property.id === 9601);
-  assert.ok(exhaustiveAfterPrice, 'exhaustive puede conservar el match por señales no-precio');
-  assert.ok(boundedAfterPrice, 'bounded puede conservar el match por señales no-precio');
+  assert.ok(exhaustiveAfterPrice, 'el fixture mantiene el match para observar recomputación de score');
+  assert.ok(boundedAfterPrice, 'bounded mantiene el mismo match luego de la mutación canónica');
+  assert.equal(exhaustiveAfterPrice?.property.price, 105000, 'la consulta debe leer el precio nuevo');
   assert.ok(
     (exhaustiveAfterPrice?.score ?? 0) < (exhaustiveBefore?.score ?? 0),
-    'el camino canónico debe invalidar y reflejar el precio/revision mutados',
+    'el camino canónico debe invalidar el score cacheado y recalcular con el precio nuevo',
   );
-  assert.equal(boundedAfterPrice?.score, exhaustiveAfterPrice?.score);
+  assert.equal(
+    boundedAfterPrice?.score,
+    exhaustiveAfterPrice?.score,
+    'bounded y exhaustive deben converger al score recalculado, no al score stale',
+  );
 
   const added: Property = {
     ...first,
