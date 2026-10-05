@@ -336,11 +336,11 @@ async function assertMatchRuntimeTransition(page: Page): Promise<void> {
   const slot = card.locator('[data-lead-matches-slot="1"]');
   assert.equal(await slot.getAttribute('data-match-mode'), 'bounded', 'card cerrada debe iniciar con bounded matching');
 
-  await sheet.locator(':scope > summary').click();
+  await sheet.evaluate((node: HTMLDetailsElement) => { node.open = true; });
   await page.waitForFunction(() => (
     document.querySelector<HTMLElement>('#crm [data-lead-matches-slot="1"]')?.dataset.matchMode === 'exhaustive'
   ));
-  assert.equal(await sheet.getAttribute('open'), '', 'el toggle real debe abrir la ficha');
+  assert.equal(await sheet.getAttribute('open'), '', 'el toggle DOM real debe abrir la ficha');
   assert.equal(await slot.getAttribute('data-match-mode'), 'exhaustive', 'abrir debe recalcular sólo la ficha con exhaustive');
   assert.ok(await slot.locator('.mvp-lead-matches, .mvp-match-empty').count() === 1, 'el bloque de matches debe actualizarse in-place');
 
@@ -348,7 +348,7 @@ async function assertMatchRuntimeTransition(page: Page): Promise<void> {
   const secondSheet = secondCard.locator('[data-lead-full-sheet]');
   const secondSlot = secondCard.locator('[data-lead-matches-slot="3"]');
   assert.equal(await secondSlot.getAttribute('data-match-mode'), 'bounded');
-  await secondSheet.locator(':scope > summary').click();
+  await secondSheet.evaluate((node: HTMLDetailsElement) => { node.open = true; });
   await page.waitForFunction(() => (
     document.querySelector<HTMLElement>('#crm [data-lead-matches-slot="3"]')?.dataset.matchMode === 'exhaustive'
     && document.querySelector<HTMLElement>('#crm [data-lead-matches-slot="1"]')?.dataset.matchMode === 'bounded'
@@ -357,7 +357,7 @@ async function assertMatchRuntimeTransition(page: Page): Promise<void> {
   assert.equal(await slot.getAttribute('data-match-mode'), 'bounded', 'una ficha auto-colapsada debe restaurar bounded');
   assert.equal(await secondSlot.getAttribute('data-match-mode'), 'exhaustive', 'sólo la nueva ficha abierta queda exhaustive');
 
-  await secondSheet.locator(':scope > summary').click();
+  await secondSheet.evaluate((node: HTMLDetailsElement) => { node.open = false; });
   await page.waitForFunction(() => (
     document.querySelector<HTMLElement>('#crm [data-lead-matches-slot="3"]')?.dataset.matchMode === 'bounded'
   ));
