@@ -344,14 +344,27 @@ test('Block 2H cache invalidation dinámica evita resultados stale en bounded y 
   };
   const inventory: Property[] = [first];
 
-  assert.equal(matchPropertiesForClient(buyer, inventory)[0]?.property.id, 9601);
-  assert.equal(matchRelevantPropertiesForClient(buyer, inventory)[0]?.property.id, 9601);
+  const exhaustiveBefore = matchPropertiesForClient(buyer, inventory)[0];
+  const boundedBefore = matchRelevantPropertiesForClient(buyer, inventory)[0];
+  assert.equal(exhaustiveBefore?.property.id, 9601);
+  assert.equal(boundedBefore?.property.id, 9601);
 
   first.price = 150000;
   first.revision = Number(first.revision ?? 0) + 1;
   invalidatePropertyMatchingCaches(inventory);
-  assert.equal(matchPropertiesForClient(buyer, inventory).some((match) => match.property.id === 9601), false, 'exhaustive debe reflejar precio mutado');
-  assert.equal(matchRelevantPropertiesForClient(buyer, inventory).some((match) => match.property.id === 9601), false, 'bounded debe reflejar precio mutado');
+  const exhaustiveAfterPrice = matchPropertiesForClient(buyer, inventory).find((match) => match.property.id === 9601);
+  const boundedAfterPrice = matchRelevantPropertiesForClient(buyer, inventory).find((match) => match.property.id === 9601);
+  assert.ok(exhaustiveAfterPrice, 'exhaustive puede conservar el match por señales no-precio');
+  assert.ok(boundedAfterPrice, 'bounded puede conservar el match por señales no-precio');
+  assert.ok(
+    (exhaustiveAfterPrice?.score ?? 0) < (exhaustiveBefore?.score ?? 0),
+    'exhaustive debe recalcular y reflejar la penalización por precio mutado',
+  );
+  assert.equal(
+    boundedAfterPrice?.score,
+    exhaustiveAfterPrice?.score,
+    'bounded debe recalcular el mismo score después de invalidar el cache',
+  );
 
   const added: Property = {
     ...first,
