@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import { performance } from 'node:perf_hooks';
 import test from 'node:test';
 import { evaluateRelevantMatchAlertConditions } from '../commercial-alert-engine.js';
-import { matchPropertiesForClient, matchRelevantPropertiesForClient, relevantPropertyCandidatesForClient } from '../property-matching.js';
+import { invalidatePropertyMatchingCaches, matchPropertiesForClient, matchRelevantPropertiesForClient, relevantPropertyCandidatesForClient } from '../property-matching.js';
 import type { Client, Property } from '../models.js';
 
 const ZONES = Array.from({ length: 100 }, (_, index) => `Zona ${String(index + 1).padStart(3, '0')}`);
@@ -223,9 +223,185 @@ test('Block 2H regression: inventario desordenado sin typeKey no puede ocultar u
   assert.equal(edgeBounded?.property.id, edgeTarget.id, 'bounded debe conservar el match ubicado lejos en el inventario');
 });
 
+test('Block 2H Work counterexample: bounded conserva score máximo Alta en precio y orden adversariales', () => {
+  const buyer: Client = {
+    id: 9500,
+    uid: '10000000-0000-4000-8000-000000009500',
+    revision: 1,
+    name: 'Cliente Work counterexample',
+    phone: '5493515559500',
+    interest: 'Busca pileta patio cochera',
+    status: 'Lead',
+    temperature: 'Caliente',
+    pipeline: 'Calificado',
+    budget: 'USD 100.000',
+    currency: 'USD',
+    paymentMethod: 'Contado',
+    propertyType: 'PH especial',
+    operation: 'Compra',
+    bedrooms: 2,
+    canMoveForward: 'Sí',
+    features: 'pileta patio cochera',
+    assignedToId: 1,
+    createdById: 1,
+  };
+  const distractors = Array.from({ length: 999 }, (_, index): Property => ({
+    id: 6000 + index,
+    uid: `61000000-0000-4000-8000-${String(index + 1).padStart(12, '0')}`,
+    revision: 1,
+    title: `PH 2 dormitorios genérico ${index + 1}`,
+    address: 'Zona genérica, Córdoba',
+    type: 'PH',
+    operation: 'Venta',
+    price: 50000 + index * 50,
+    owner: 'Propietario',
+    status: 'Activa',
+    bedrooms: 2,
+    paymentMethod: 'Financiación',
+    assignedToId: 1,
+    createdById: 1,
+  }));
+  const target = (price: number): Property => ({
+    id: 5000,
+    uid: '62000000-0000-4000-8000-000000005000',
+    revision: 1,
+    title: 'PH superior Work',
+    address: 'Zona genérica, Córdoba',
+    type: 'PH',
+    operation: 'Venta',
+    price,
+    owner: 'Propietario',
+    status: 'Activa',
+    bedrooms: 2,
+    paymentMethod: 'Contado',
+    features: 'pileta patio cochera',
+    assignedToId: 1,
+    createdById: 1,
+  });
+  const place = (price: number, position: 'start' | 'middle' | 'end'): Property[] => {
+    const inventory = distractors.map((item) => ({ ...item }));
+    const offset = position === 'start' ? 0 : position === 'middle' ? Math.floor(inventory.length / 2) : inventory.length;
+    inventory.splice(offset, 0, target(price));
+    return inventory;
+  };
+  const middle = place(80000, 'middle');
+  const mixed = Array.from({ length: middle.length }, (_, index) => middle[(index * 37) % middle.length]!);
+  const cases: Array<[string, Property[]]> = [
+    ['precio bajo / inicio', place(60000, 'start')],
+    ['precio medio / medio', middle],
+    ['precio alto / final', place(99900, 'end')],
+    ['ascendente', [...middle].sort((a, b) => a.price - b.price || a.id - b.id)],
+    ['descendente', [...middle].sort((a, b) => b.price - a.price || b.id - a.id)],
+    ['mezclado determinístico', mixed],
+  ];
+  for (const [label, inventory] of cases) {
+    invalidatePropertyMatchingCaches(inventory);
+    const exhaustive = matchPropertiesForClient(buyer, inventory);
+    const bounded = matchRelevantPropertiesForClient(buyer, inventory);
+    assert.equal(exhaustive[0]?.score, 75, `${label}: exhaustive reproduce score 75 Alta`);
+    assert.equal(exhaustive[0]?.level, 'Alta', `${label}: exhaustive debe ser Alta`);
+    assert.equal(bounded[0]?.score, exhaustive[0]?.score, `${label}: bounded debe conservar el score máximo`);
+    assert.equal(bounded[0]?.level, 'Alta', `${label}: bounded no puede degradar Alta a Buena`);
+    assert.ok(relevantPropertyCandidatesForClient(buyer, inventory).length <= 36, `${label}: límite de candidatos debe seguir en 36`);
+  }
+
+  const matchAlerts = evaluateRelevantMatchAlertConditions({
+    organizationId: '11111111-1111-4111-8111-111111111111',
+    clients: [buyer],
+    properties: middle,
+    activityLog: [],
+    actor: { id: 1, role: 'Dueño' },
+  });
+  const opportunity = matchAlerts.find((condition) => condition.type === 'NEW_RELEVANT_MATCH');
+  assert.ok(opportunity, 'NEW_RELEVANT_MATCH debe conservar la oportunidad Alta del contraejemplo Work');
+  assert.equal(opportunity?.propertyId, 5000);
+  assert.match(opportunity?.reason ?? '', /^75% compatible/);
+});
+
+test('Block 2H cache invalidation dinámica evita resultados stale en bounded y exhaustive', () => {
+  const buyer: Client = {
+    ...client(12),
+    id: 9600,
+    propertyType: 'Departamento',
+    zones: 'Zona Cache',
+    bedrooms: 2,
+    budget: 'USD 100.000',
+    paymentMethod: 'Contado',
+    features: 'pileta',
+  };
+  const first: Property = {
+    ...property(9601),
+    id: 9601,
+    uid: '63000000-0000-4000-8000-000000009601',
+    title: 'Cache original',
+    address: 'Zona Cache, Córdoba',
+    type: 'Departamento',
+    price: 90000,
+    bedrooms: 2,
+    paymentMethod: 'Contado',
+    features: 'pileta',
+    status: 'Activa',
+  };
+  const inventory: Property[] = [first];
+
+  assert.equal(matchPropertiesForClient(buyer, inventory)[0]?.property.id, 9601);
+  assert.equal(matchRelevantPropertiesForClient(buyer, inventory)[0]?.property.id, 9601);
+
+  first.price = 150000;
+  first.revision = Number(first.revision ?? 0) + 1;
+  invalidatePropertyMatchingCaches(inventory);
+  assert.equal(matchPropertiesForClient(buyer, inventory).some((match) => match.property.id === 9601), false, 'exhaustive debe reflejar precio mutado');
+  assert.equal(matchRelevantPropertiesForClient(buyer, inventory).some((match) => match.property.id === 9601), false, 'bounded debe reflejar precio mutado');
+
+  const added: Property = {
+    ...first,
+    id: 9602,
+    uid: '63000000-0000-4000-8000-000000009602',
+    title: 'Cache agregado',
+    price: 85000,
+    revision: 1,
+    status: 'Activa',
+  };
+  inventory.push(added);
+  invalidatePropertyMatchingCaches(inventory);
+  assert.equal(matchPropertiesForClient(buyer, inventory)[0]?.property.id, 9602, 'exhaustive debe ver alta nueva');
+  assert.equal(matchRelevantPropertiesForClient(buyer, inventory)[0]?.property.id, 9602, 'bounded debe ver alta nueva');
+
+  added.status = 'Pausada';
+  added.revision = 2;
+  invalidatePropertyMatchingCaches(inventory);
+  assert.equal(matchPropertiesForClient(buyer, inventory).some((match) => match.property.id === 9602), false, 'exhaustive debe quitar propiedad pausada');
+  assert.equal(matchRelevantPropertiesForClient(buyer, inventory).some((match) => match.property.id === 9602), false, 'bounded debe quitar propiedad pausada');
+});
+
+test('Block 2H zona sin typeKey usa índice directo y no full eligible scan por lead', () => {
+  const source = readFileSync('src/property-matching.ts', 'utf8');
+  const candidateStart = source.indexOf('export function relevantPropertyCandidatesForClient');
+  const candidateEnd = source.indexOf('export function matchRelevantPropertiesForClient', candidateStart);
+  assert.ok(candidateStart >= 0 && candidateEnd > candidateStart);
+  const candidateBlock = source.slice(candidateStart, candidateEnd);
+  assert.match(source, /byZone: Map<string, Property\[\]>/, 'el índice debe materializar zona sin depender de tipo');
+  assert.match(source, /zones: \[\.\.\.zones\]\.sort\(\)/, 'la inferencia debe usar catálogo de zonas preconstruido');
+  assert.doesNotMatch(candidateBlock, /index\.eligible\.filter\(/, 'resolver una zona no puede volver a escanear eligible por lead');
+
+  const noTypeBuyer: Client = {
+    ...client(20),
+    id: 9700,
+    propertyType: 'PH especial',
+    zones: 'Zona 050',
+    bedrooms: 2,
+  };
+  const inventory = Array.from({ length: 1000 }, (_, index) => property(index + 1));
+  const candidates = relevantPropertyCandidatesForClient(noTypeBuyer, inventory);
+  assert.ok(candidates.length <= 36);
+  console.log(`BLOCK2H_ZONE_CANDIDATES=${candidates.length}`);
+});
+
 test('Block 2H Leads render usa bounded cerrado, exhaustive abierto y property saves invalidan caches por identidad', () => {
   const leadsSource = readFileSync('src/mvp-leads-ui.ts', 'utf8');
   const propertiesSource = readFileSync('src/mvp-properties-ui.ts', 'utf8');
+  const storeSource = readFileSync('src/store.ts', 'utf8');
+  const mainSource = readFileSync('src/mvp-main.ts', 'utf8');
 
   assert.match(
     leadsSource,
@@ -253,8 +429,11 @@ test('Block 2H Leads render usa bounded cerrado, exhaustive abierto y property s
     /state\.crm\.properties\.push\(/,
     'crear una propiedad no puede mutar in-place el array cacheado',
   );
-  assert.match(propertiesSource, /state\.crm\.properties = state\.crm\.properties\.map\(/);
-  assert.match(propertiesSource, /state\.crm\.properties = \[\.\.\.state\.crm\.properties, property as Property\]/);
+  assert.match(propertiesSource, /replacePropertyCollection\(state\.crm\.properties\.map\(/);
+  assert.match(propertiesSource, /replacePropertyCollection\(\[\.\.\.state\.crm\.properties, property as Property\]\)/);
+  assert.match(storeSource, /export function replacePropertyCollection/);
+  assert.match(storeSource, /invalidatePropertyMatchingCaches\(properties\)/);
+  assert.match(mainSource, /replacePropertyCollection\(state\.crm\.properties\.filter/);
 
   const properties = Array.from({ length: 1000 }, (_, index) => property(index + 1));
   const clients = Array.from({ length: 1000 }, (_, index) => client(index + 1));
