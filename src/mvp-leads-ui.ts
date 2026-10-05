@@ -136,15 +136,20 @@ function matchesForLead(client: Client, properties: Property[], exhaustive: bool
 }
 
 function refreshLeadMatches(
-  details: HTMLDetailsElement,
+  container: HTMLElement,
   clientId: number,
   exhaustive: boolean,
 ): void {
+  if (!container.isConnected) return;
+  const details = container.querySelector<HTMLDetailsElement>(`[data-lead-full-sheet="${clientId}"]`);
+  const slot = details?.querySelector<HTMLElement>(`[data-lead-matches-slot="${clientId}"]`);
   const client = visibleClients().find((item) => item.id === clientId);
-  const slot = details.querySelector<HTMLElement>(`[data-lead-matches-slot="${clientId}"]`);
-  if (!client || !slot) return;
+  if (!details?.isConnected || !slot?.isConnected || !client) return;
+
+  const template = document.createElement('template');
+  template.innerHTML = matchesContentForLead(client, visibleProperties(), exhaustive);
   slot.dataset.matchMode = exhaustive ? 'exhaustive' : 'bounded';
-  slot.innerHTML = matchesContentForLead(client, visibleProperties(), exhaustive);
+  slot.replaceChildren(template.content.cloneNode(true));
   bindLeadMatchActions(slot);
 }
 
@@ -210,18 +215,25 @@ function saveLeadFollowUp(reason: string, container: HTMLElement): void {
 function bindFullSheets(container: HTMLElement): void {
   container.querySelectorAll<HTMLDetailsElement>('[data-lead-full-sheet]').forEach((details) => {
     details.addEventListener('toggle', () => {
+      if (!details.isConnected || !container.contains(details)) return;
       const clientId = Number(details.dataset.leadFullSheet);
       if (!clientId) return;
+
       if (details.open) {
         container.querySelectorAll<HTMLDetailsElement>('[data-lead-full-sheet]').forEach((other) => {
-          if (other !== details && other.open) other.open = false;
+          if (other === details || !other.open) return;
+          other.open = false;
+          const otherClientId = Number(other.dataset.leadFullSheet);
+          if (otherClientId) refreshLeadMatches(container, otherClientId, false);
         });
         expandedClientId = clientId;
-        refreshLeadMatches(details, clientId, true);
+        refreshLeadMatches(container, clientId, true);
       } else {
         if (expandedClientId === clientId) expandedClientId = null;
-        refreshLeadMatches(details, clientId, false);
+        refreshLeadMatches(container, clientId, false);
       }
+
+      if (!details.isConnected || !container.contains(details)) return;
       const label = details.querySelector<HTMLElement>('summary > span');
       if (label) label.textContent = details.open ? 'Ocultar ficha' : 'Ver ficha completa';
       details.querySelector('summary')?.setAttribute('aria-expanded', String(details.open));
