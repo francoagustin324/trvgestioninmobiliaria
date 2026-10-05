@@ -240,8 +240,12 @@ function insertOfferSection(card: HTMLElement, client: Client): void {
   wrapper.innerHTML = renderSection(client);
   const section = wrapper.firstElementChild;
   if (!(section instanceof HTMLElement)) return;
-  const visits = host.querySelector('[data-lead-visits]');
-  const anchor = visits?.nextSibling ?? host.querySelector('.mvp-lead-history, .mvp-lead-matches, .mvp-lead-full-actions');
+  const visits = host.querySelector<HTMLElement>(':scope > [data-lead-visits]');
+  const fallbackAnchor = host.querySelector<HTMLElement>(
+    ':scope > .mvp-lead-history, :scope > .mvp-lead-matches-slot, :scope > .mvp-lead-matches, :scope > .mvp-lead-full-actions',
+  );
+  const anchor = visits?.nextSibling ?? fallbackAnchor;
+  if (anchor && anchor.parentNode !== host) return;
   host.insertBefore(section, anchor);
   bindDeferredForms(section, client);
 }
