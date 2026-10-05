@@ -330,6 +330,27 @@ async function waitForLeads(page: Page, baseUrl: string): Promise<void> {
   await page.waitForFunction(() => document.querySelectorAll('#crm .mvp-lead-compact-card').length === 8);
 }
 
+async function assertMatchRuntimeTransition(page: Page): Promise<void> {
+  const card = page.locator('#crm .mvp-lead-compact-card').filter({ hasText: 'Lucía Martín' });
+  const sheet = card.locator('[data-lead-full-sheet]');
+  const slot = card.locator('[data-lead-matches-slot="1"]');
+  assert.equal(await slot.getAttribute('data-match-mode'), 'bounded', 'card cerrada debe iniciar con bounded matching');
+
+  await sheet.locator(':scope > summary').click();
+  await page.waitForFunction(() => (
+    document.querySelector<HTMLElement>('#crm [data-lead-matches-slot="1"]')?.dataset.matchMode === 'exhaustive'
+  ));
+  assert.equal(await sheet.getAttribute('open'), '', 'el toggle real debe abrir la ficha');
+  assert.equal(await slot.getAttribute('data-match-mode'), 'exhaustive', 'abrir debe recalcular sólo la ficha con exhaustive');
+  assert.ok(await slot.locator('.mvp-lead-matches, .mvp-match-empty').count() === 1, 'el bloque de matches debe actualizarse in-place');
+
+  await sheet.locator(':scope > summary').click();
+  await page.waitForFunction(() => (
+    document.querySelector<HTMLElement>('#crm [data-lead-matches-slot="1"]')?.dataset.matchMode === 'bounded'
+  ));
+  assert.equal(await slot.getAttribute('data-match-mode'), 'bounded', 'cerrar debe volver al modo bounded del card');
+}
+
 async function assertClosedLayout(page: Page, viewport: { width: number; height: number }): Promise<number[]> {
   const metrics = await page.evaluate(() => {
     const cards = [...document.querySelectorAll<HTMLElement>('#crm .mvp-lead-compact-card')];
@@ -725,6 +746,7 @@ test('B1.2.3 valida lista compacta, prioridad y disclosure con la aplicación re
           assert.match(await page.evaluate(() => navigator.userAgent), /Android|Mobile/i);
         }
         await assertClosedLayout(page, viewport);
+        if (viewport.width === 720) await assertMatchRuntimeTransition(page);
         await assertR5MobileMetrics(page, viewport);
         await assertPipelineSelection(page);
         if (screenshotViewports.has(key)) {
