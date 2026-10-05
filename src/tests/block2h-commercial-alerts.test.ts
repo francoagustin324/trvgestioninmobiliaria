@@ -279,11 +279,45 @@ test('Block 2H A-T: el motor puro detecta las diez condiciones y evita falsos po
     properties: [property(10)],
     reservations: [{ ...reservation, status: 'Concretada' }],
   }))).length, 0, 'O: reserva concretada resuelve automáticamente la condición');
+  const unrelatedReservationClient = {
+    ...reservationClient,
+    nextAction: 'Revisar documentación de Property B',
+    nextFollowUp: '2026-09-30',
+  };
+  const unrelatedPropertyActivity: ActivityEntry = {
+    id: 301,
+    actorId: 1,
+    action: 'Documentación recibida de otra propiedad',
+    entityType: 'Cliente',
+    entityId: reservationClient.id,
+    detail: 'Avance causal de Property B, no de Reserva A',
+    createdAt: '2026-09-29T14:00:00.000Z',
+    diffusionPropertyId: 11,
+  };
+  assert.equal(activeOf('RESERVATION_STALLED', evaluateCommercialAlertConditions(evaluation({
+    clients: [unrelatedReservationClient],
+    properties: [property(10), property(11)],
+    reservations: [reservation],
+    activityLog: [unrelatedPropertyActivity],
+  }))).length, 1, 'O: nextAction futuro de otra propiedad no puede silenciar Reserva A');
+
+  const causalReservationActivity: ActivityEntry = {
+    id: 302,
+    actorId: 1,
+    action: 'Documentación de reserva recibida',
+    entityType: 'Cliente',
+    entityId: reservationClient.id,
+    detail: 'Avance causal de Reserva A',
+    createdAt: '2026-09-29T14:10:00.000Z',
+    commercialEntityType: 'reservation',
+    commercialEntityId: reservation.id,
+  };
   assert.equal(activeOf('RESERVATION_STALLED', evaluateCommercialAlertConditions(evaluation({
     clients: [{ ...reservationClient, nextAction: 'Revisar documentación de reserva', nextFollowUp: '2026-09-30' }],
     properties: [property(10)],
     reservations: [reservation],
-  }))).length, 0, 'O: un próximo paso válido antes del vencimiento resuelve la alerta de reserva');
+    activityLog: [causalReservationActivity],
+  }))).length, 0, 'O: un próximo paso respaldado por movimiento causal de Reserva A evita falso positivo');
 
   const advanced = client(7, {
     pipeline: 'Negociación',
