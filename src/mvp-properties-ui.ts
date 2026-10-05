@@ -12,7 +12,7 @@ import {
 import { MAX_PROPERTY_PHOTOS, uploadPropertyPhoto } from './property-photo-upload.js';
 import { propertyShareText, type PropertyWithFicha } from './property-ficha.js';
 import { publishPropertyFicha, type PublishedPropertyFicha } from './public-property-share.js';
-import { authenticatedTenantMember, saveData, state } from './store.js';
+import { authenticatedTenantMember, invalidatePropertyCollectionCache, replacePropertyCollection, saveData, state } from './store.js';
 import { visibleProperties } from './team-access.js';
 import { assertTenantCrmScope, writeTenantSnapshot } from './tenant-storage.js';
 import { newSyncRecordMetadata } from './sync-identity.js';
@@ -480,6 +480,7 @@ function rollbackPropertySave(
   try {
     assertTenantRuntimeLeaseCurrent(context.runtimeLease);
     assertTenantCrmScope(context.scope, previousCrm);
+    invalidatePropertyCollectionCache(state.crm.properties);
     state.crm = previousCrm;
     assertTenantCrmScope(context.scope, state.crm);
     writeTenantSnapshot(context.scope, previousCrm, {
@@ -833,11 +834,11 @@ export function renderMvpProperties(container: HTMLElement, options: MvpProperti
       if (editing) {
         const index = state.crm.properties.findIndex((item) => item.id === editing.id);
         if (index < 0) throw new Error('PROPERTY_EDIT_TARGET_MISSING');
-        state.crm.properties = state.crm.properties.map((item, currentIndex) => (
+        replacePropertyCollection(state.crm.properties.map((item, currentIndex) => (
           currentIndex === index ? property as Property : item
-        ));
+        )));
       } else {
-        state.crm.properties = [...state.crm.properties, property as Property];
+        replacePropertyCollection([...state.crm.properties, property as Property]);
       }
 
       assertTenantRuntimeLeaseCurrent(writeContext.runtimeLease);
