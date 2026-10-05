@@ -218,8 +218,8 @@ function bindFullSheets(container: HTMLElement): void {
         });
         expandedClientId = clientId;
         refreshLeadMatches(details, clientId, true);
-      } else if (expandedClientId === clientId) {
-        expandedClientId = null;
+      } else {
+        if (expandedClientId === clientId) expandedClientId = null;
         refreshLeadMatches(details, clientId, false);
       }
       const label = details.querySelector<HTMLElement>('summary > span');
