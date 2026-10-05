@@ -318,7 +318,22 @@ test('Block 2H Work counterexample: bounded conserva score máximo Alta en preci
   assert.match(opportunity?.reason ?? '', /^75% compatible/);
 });
 
-test('Block 2H cache invalidation dinámica evita resultados stale en bounded y exhaustive', () => {
+test('Block 2H cache invalidation dinámica evita resultados stale por el camino canónico', async () => {
+  if (!('localStorage' in globalThis)) {
+    const values = new Map<string, string>();
+    Object.defineProperty(globalThis, 'localStorage', {
+      configurable: true,
+      value: {
+        get length() { return values.size; },
+        clear() { values.clear(); },
+        getItem(key: string) { return values.get(key) ?? null; },
+        key(index: number) { return [...values.keys()][index] ?? null; },
+        removeItem(key: string) { values.delete(key); },
+        setItem(key: string, value: string) { values.set(String(key), String(value)); },
+      },
+    });
+  }
+  const store = await import('../store.js');
   const buyer: Client = {
     ...client(12),
     id: 9600,
@@ -343,28 +358,25 @@ test('Block 2H cache invalidation dinámica evita resultados stale en bounded y 
     status: 'Activa',
   };
   const inventory: Property[] = [first];
+  store.replacePropertyCollection(inventory);
 
-  const exhaustiveBefore = matchPropertiesForClient(buyer, inventory)[0];
-  const boundedBefore = matchRelevantPropertiesForClient(buyer, inventory)[0];
+  const exhaustiveBefore = matchPropertiesForClient(buyer, store.state.crm.properties)[0];
+  const boundedBefore = matchRelevantPropertiesForClient(buyer, store.state.crm.properties)[0];
   assert.equal(exhaustiveBefore?.property.id, 9601);
   assert.equal(boundedBefore?.property.id, 9601);
 
   first.price = 150000;
   first.revision = Number(first.revision ?? 0) + 1;
-  invalidatePropertyMatchingCaches(inventory);
-  const exhaustiveAfterPrice = matchPropertiesForClient(buyer, inventory).find((match) => match.property.id === 9601);
-  const boundedAfterPrice = matchRelevantPropertiesForClient(buyer, inventory).find((match) => match.property.id === 9601);
+  store.replacePropertyCollection(inventory);
+  const exhaustiveAfterPrice = matchPropertiesForClient(buyer, store.state.crm.properties).find((match) => match.property.id === 9601);
+  const boundedAfterPrice = matchRelevantPropertiesForClient(buyer, store.state.crm.properties).find((match) => match.property.id === 9601);
   assert.ok(exhaustiveAfterPrice, 'exhaustive puede conservar el match por señales no-precio');
   assert.ok(boundedAfterPrice, 'bounded puede conservar el match por señales no-precio');
   assert.ok(
     (exhaustiveAfterPrice?.score ?? 0) < (exhaustiveBefore?.score ?? 0),
-    'exhaustive debe recalcular y reflejar la penalización por precio mutado',
+    'el camino canónico debe invalidar y reflejar el precio/revision mutados',
   );
-  assert.equal(
-    boundedAfterPrice?.score,
-    exhaustiveAfterPrice?.score,
-    'bounded debe recalcular el mismo score después de invalidar el cache',
-  );
+  assert.equal(boundedAfterPrice?.score, exhaustiveAfterPrice?.score);
 
   const added: Property = {
     ...first,
@@ -376,15 +388,20 @@ test('Block 2H cache invalidation dinámica evita resultados stale en bounded y 
     status: 'Activa',
   };
   inventory.push(added);
-  invalidatePropertyMatchingCaches(inventory);
-  assert.equal(matchPropertiesForClient(buyer, inventory)[0]?.property.id, 9602, 'exhaustive debe ver alta nueva');
-  assert.equal(matchRelevantPropertiesForClient(buyer, inventory)[0]?.property.id, 9602, 'bounded debe ver alta nueva');
+  store.replacePropertyCollection(inventory);
+  assert.equal(matchPropertiesForClient(buyer, store.state.crm.properties)[0]?.property.id, 9602, 'exhaustive debe ver alta nueva');
+  assert.equal(matchRelevantPropertiesForClient(buyer, store.state.crm.properties)[0]?.property.id, 9602, 'bounded debe ver alta nueva');
 
   added.status = 'Pausada';
   added.revision = 2;
-  invalidatePropertyMatchingCaches(inventory);
-  assert.equal(matchPropertiesForClient(buyer, inventory).some((match) => match.property.id === 9602), false, 'exhaustive debe quitar propiedad pausada');
-  assert.equal(matchRelevantPropertiesForClient(buyer, inventory).some((match) => match.property.id === 9602), false, 'bounded debe quitar propiedad pausada');
+  store.replacePropertyCollection(inventory);
+  assert.equal(matchPropertiesForClient(buyer, store.state.crm.properties).some((match) => match.property.id === 9602), false, 'exhaustive debe quitar propiedad pausada');
+  assert.equal(matchRelevantPropertiesForClient(buyer, store.state.crm.properties).some((match) => match.property.id === 9602), false, 'bounded debe quitar propiedad pausada');
+
+  inventory.splice(inventory.indexOf(added), 1);
+  store.replacePropertyCollection(inventory);
+  assert.equal(matchPropertiesForClient(buyer, store.state.crm.properties).some((match) => match.property.id === 9602), false, 'exhaustive debe conservar eliminación');
+  assert.equal(matchRelevantPropertiesForClient(buyer, store.state.crm.properties).some((match) => match.property.id === 9602), false, 'bounded debe conservar eliminación');
 });
 
 test('Block 2H zona sin typeKey usa índice directo y no full eligible scan por lead', () => {
@@ -395,6 +412,7 @@ test('Block 2H zona sin typeKey usa índice directo y no full eligible scan por 
   const candidateBlock = source.slice(candidateStart, candidateEnd);
   assert.match(source, /byZone: Map<string, Property\[\]>/, 'el índice debe materializar zona sin depender de tipo');
   assert.match(source, /zones: \[\.\.\.zones\]\.sort\(\)/, 'la inferencia debe usar catálogo de zonas preconstruido');
+  assert.match(candidateBlock, /index\.byZone\.get\(zone\)/, 'sin typeKey debe resolver el bucket de zona directamente');
   assert.doesNotMatch(candidateBlock, /index\.eligible\.filter\(/, 'resolver una zona no puede volver a escanear eligible por lead');
 
   const noTypeBuyer: Client = {
