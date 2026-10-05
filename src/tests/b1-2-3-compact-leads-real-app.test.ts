@@ -344,11 +344,24 @@ async function assertMatchRuntimeTransition(page: Page): Promise<void> {
   assert.equal(await slot.getAttribute('data-match-mode'), 'exhaustive', 'abrir debe recalcular sólo la ficha con exhaustive');
   assert.ok(await slot.locator('.mvp-lead-matches, .mvp-match-empty').count() === 1, 'el bloque de matches debe actualizarse in-place');
 
-  await sheet.locator(':scope > summary').click();
+  const secondCard = page.locator('#crm .mvp-lead-compact-card').filter({ hasText: 'María de los Ángeles Fernández' });
+  const secondSheet = secondCard.locator('[data-lead-full-sheet]');
+  const secondSlot = secondCard.locator('[data-lead-matches-slot="3"]');
+  assert.equal(await secondSlot.getAttribute('data-match-mode'), 'bounded');
+  await secondSheet.locator(':scope > summary').click();
   await page.waitForFunction(() => (
-    document.querySelector<HTMLElement>('#crm [data-lead-matches-slot="1"]')?.dataset.matchMode === 'bounded'
+    document.querySelector<HTMLElement>('#crm [data-lead-matches-slot="3"]')?.dataset.matchMode === 'exhaustive'
+    && document.querySelector<HTMLElement>('#crm [data-lead-matches-slot="1"]')?.dataset.matchMode === 'bounded'
   ));
-  assert.equal(await slot.getAttribute('data-match-mode'), 'bounded', 'cerrar debe volver al modo bounded del card');
+  assert.equal(await sheet.getAttribute('open'), null, 'abrir otra ficha debe colapsar la anterior');
+  assert.equal(await slot.getAttribute('data-match-mode'), 'bounded', 'una ficha auto-colapsada debe restaurar bounded');
+  assert.equal(await secondSlot.getAttribute('data-match-mode'), 'exhaustive', 'sólo la nueva ficha abierta queda exhaustive');
+
+  await secondSheet.locator(':scope > summary').click();
+  await page.waitForFunction(() => (
+    document.querySelector<HTMLElement>('#crm [data-lead-matches-slot="3"]')?.dataset.matchMode === 'bounded'
+  ));
+  assert.equal(await secondSlot.getAttribute('data-match-mode'), 'bounded', 'cerrar debe volver al modo bounded del card');
 }
 
 async function assertClosedLayout(page: Page, viewport: { width: number; height: number }): Promise<number[]> {
