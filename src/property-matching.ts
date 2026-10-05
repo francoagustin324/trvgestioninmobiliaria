@@ -297,7 +297,7 @@ export function evaluatePropertyMatch(client: Client, property: Property): Prope
 type PropertyMatchTemplate = Omit<PropertyMatch, 'client'>;
 
 const MATCH_PROFILE_CACHE_LIMIT = 96;
-const propertyMatchCache = new WeakMap<Property[], Map<string, PropertyMatchTemplate[]>>();
+let propertyMatchCache = new WeakMap<Property[], Map<string, PropertyMatchTemplate[]>>();
 
 export function propertyMatchCriteriaKey(client: Client): string {
   return normalizeText([
@@ -337,10 +337,30 @@ interface RelevantPropertyIndex {
   byTypeZone: Map<string, Property[]>;
   byTypeBedrooms: Map<string, Property[]>;
   byBedrooms: Map<string, Property[]>;
+  byZone: Map<string, Property[]>;
+  bySignal: Map<string, Property[]>;
+  bySignalPair: Map<string, Property[]>;
+  zones: string[];
+}
+
+interface CommercialSignal {
+  token: string;
+  category: 'type' | 'zone' | 'bedrooms' | 'feature' | 'payment';
+  weight: number;
 }
 
 const RELEVANT_MATCH_CANDIDATE_LIMIT = 36;
-const relevantPropertyIndexCache = new WeakMap<Property[], RelevantPropertyIndex>();
+let relevantPropertyIndexCache = new WeakMap<Property[], RelevantPropertyIndex>();
+
+export function invalidatePropertyMatchingCaches(properties?: Property[]): void {
+  if (properties) {
+    propertyMatchCache.delete(properties);
+    relevantPropertyIndexCache.delete(properties);
+    return;
+  }
+  propertyMatchCache = new WeakMap<Property[], Map<string, PropertyMatchTemplate[]>>();
+  relevantPropertyIndexCache = new WeakMap<Property[], RelevantPropertyIndex>();
+}
 
 function candidateTypeKey(property: Property): string {
   return canonicalPropertyType(property) ?? 'unknown';
@@ -348,6 +368,30 @@ function candidateTypeKey(property: Property): string {
 
 function propertyPriceOrder(left: Property, right: Property): number {
   return left.price - right.price || left.id - right.id;
+}
+
+function signalPairKey(left: string, right: string): string {
+  return left < right ? `${left}||${right}` : `${right}||${left}`;
+}
+
+function propertyCommercialSignals(
+  property: Property,
+  type: string,
+  zone: string,
+  bedrooms: number | null,
+): string[] {
+  const propertyText = normalizeText([property.title, property.address, property.features, property.notes].join(' '));
+  const signals = new Set<string>();
+  if (type !== 'unknown') signals.add(`type:${type}`);
+  if (zone) signals.add(`zone:${zone}`);
+  if (bedrooms) signals.add(`bedrooms:${bedrooms}`);
+  for (const [feature] of Object.entries(featureAliases)) {
+    if (propertyHasFeature(propertyText, feature)) signals.add(`feature:${feature}`);
+  }
+  for (const term of requestedPaymentTerms(property.paymentMethod)) {
+    signals.add(`payment:${term}`);
+  }
+  return [...signals];
 }
 
 function relevantPropertyIndex(properties: Property[]): RelevantPropertyIndex {
@@ -358,6 +402,10 @@ function relevantPropertyIndex(properties: Property[]): RelevantPropertyIndex {
   const byTypeZone = new Map<string, Property[]>();
   const byTypeBedrooms = new Map<string, Property[]>();
   const byBedrooms = new Map<string, Property[]>();
+  const byZone = new Map<string, Property[]>();
+  const bySignal = new Map<string, Property[]>();
+  const bySignalPair = new Map<string, Property[]>();
+  const zones = new Set<string>();
   const append = (map: Map<string, Property[]>, key: string, property: Property): void => {
     const bucket = map.get(key) ?? [];
     bucket.push(property);
@@ -367,17 +415,38 @@ function relevantPropertyIndex(properties: Property[]): RelevantPropertyIndex {
     const type = candidateTypeKey(property);
     append(byType, type, property);
     const zone = propertyZone(property);
-    if (zone) append(byTypeZone, `${type}|${zone}`, property);
+    if (zone) {
+      zones.add(zone);
+      append(byZone, zone, property);
+      append(byTypeZone, `${type}|${zone}`, property);
+    }
     const bedrooms = property.bedrooms ?? extractBedrooms(normalizeText([property.title, property.features, property.notes].join(' ')));
     if (bedrooms) {
       append(byTypeBedrooms, `${type}|${bedrooms}`, property);
       append(byBedrooms, String(bedrooms), property);
     }
+    const signals = propertyCommercialSignals(property, type, zone, bedrooms);
+    for (const signal of signals) append(bySignal, signal, property);
+    for (let left = 0; left < signals.length; left += 1) {
+      for (let right = left + 1; right < signals.length; right += 1) {
+        append(bySignalPair, signalPairKey(signals[left]!, signals[right]!), property);
+      }
+    }
   }
-  for (const buckets of [byType, byTypeZone, byTypeBedrooms, byBedrooms]) {
+  for (const buckets of [byType, byTypeZone, byTypeBedrooms, byBedrooms, byZone, bySignal, bySignalPair]) {
     for (const bucket of buckets.values()) bucket.sort(propertyPriceOrder);
   }
-  const index = { eligible, byType, byTypeZone, byTypeBedrooms, byBedrooms };
+  const index = {
+    eligible,
+    byType,
+    byTypeZone,
+    byTypeBedrooms,
+    byBedrooms,
+    byZone,
+    bySignal,
+    bySignalPair,
+    zones: [...zones].sort(),
+  };
   relevantPropertyIndexCache.set(properties, index);
   return index;
 }
@@ -390,15 +459,69 @@ function requestedZones(client: Client, index: RelevantPropertyIndex, type: stri
   if (direct.length) return [...new Set(direct)];
   const text = normalizeText([client.interest, client.preferences, client.notes].join(' '));
   if (!text) return [];
-  const prefix = `${type ?? 'unknown'}|`;
-  const zones = new Set<string>();
-  for (const key of index.byTypeZone.keys()) {
-    if (type && !key.startsWith(prefix)) continue;
-    const zone = key.slice(key.indexOf('|') + 1);
-    if (zone.length >= 3 && text.includes(zone)) zones.add(zone);
-    if (zones.size >= 4) break;
+  const zones: string[] = [];
+  for (const zone of index.zones) {
+    if (type && !index.byTypeZone.has(`${type}|${zone}`)) continue;
+    if (zone.length >= 3 && text.includes(zone)) zones.push(zone);
+    if (zones.length >= 4) break;
   }
-  return [...zones];
+  return zones;
+}
+
+function requestedCommercialSignals(
+  client: Client,
+  zones: readonly string[],
+  desiredType: string | null,
+  desiredBedrooms: number | null,
+): CommercialSignal[] {
+  const clientText = normalizeText([
+    client.interest,
+    client.zones,
+    client.propertyType,
+    client.operation,
+    client.bedrooms ? `${client.bedrooms} dormitorios` : '',
+    client.paymentMethod,
+    client.needsFinancing,
+    client.creditPossible,
+    client.creditApprovedAmount,
+    client.purchaseTimeframe,
+    client.purpose,
+    client.knowsArea,
+    client.canMoveForward,
+    client.objections,
+    client.notes,
+    client.urgency,
+    client.garage,
+    client.patio,
+    client.pool,
+    client.requiresCreditReady,
+    client.features,
+    client.preferences,
+  ].join(' '));
+  const signals = new Map<string, CommercialSignal>();
+  const add = (signal: CommercialSignal): void => {
+    const current = signals.get(signal.token);
+    if (!current || current.weight < signal.weight) signals.set(signal.token, signal);
+  };
+  if (desiredType) add({ token: `type:${desiredType}`, category: 'type', weight: 15 });
+  for (const zone of zones) add({ token: `zone:${zone}`, category: 'zone', weight: 25 });
+  if (desiredBedrooms) {
+    add({ token: `bedrooms:${desiredBedrooms}`, category: 'bedrooms', weight: 15 });
+    add({ token: `bedrooms:${desiredBedrooms + 1}`, category: 'bedrooms', weight: 8 });
+    add({ token: `bedrooms:${desiredBedrooms + 2}`, category: 'bedrooms', weight: 8 });
+  }
+  for (const feature of requestedFeatures(clientText)) {
+    add({ token: `feature:${feature}`, category: 'feature', weight: 4 });
+  }
+  for (const term of requestedPaymentTerms([
+    client.paymentMethod,
+    client.needsFinancing,
+    client.creditPossible,
+    client.creditApprovedAmount,
+  ].filter(Boolean).join(' '))) {
+    add({ token: `payment:${term}`, category: 'payment', weight: 8 });
+  }
+  return [...signals.values()];
 }
 
 function addCandidate(
@@ -462,22 +585,42 @@ export function relevantPropertyCandidatesForClient(
   const typeBucket = typeKey ? (index.byType.get(typeKey) ?? []) : index.eligible;
   const selected = new Map<string, Property>();
   const budget = parseUsdBudget([client.currency, client.budget].filter(Boolean).join(' '));
+  const zones = requestedZones(client, index, typeKey);
+  const desiredBedrooms = client.bedrooms ?? extractBedrooms(clientText);
+  const signals = requestedCommercialSignals(client, zones, typeKey, desiredBedrooms);
 
-  for (const zone of requestedZones(client, index, typeKey)) {
-    const bucket = typeKey
-      ? index.byTypeZone.get(`${typeKey}|${zone}`) ?? []
-      : index.eligible.filter((property) => propertyZone(property) === zone).sort(propertyPriceOrder);
-    addCommercialBucket(selected, bucket, budget, 12);
+  const pairBuckets: Array<{ bucket: Property[]; weight: number; key: string }> = [];
+  for (let left = 0; left < signals.length; left += 1) {
+    for (let right = left + 1; right < signals.length; right += 1) {
+      const a = signals[left]!;
+      const b = signals[right]!;
+      if (a.category === b.category && a.category !== 'feature') continue;
+      const key = signalPairKey(a.token, b.token);
+      const bucket = index.bySignalPair.get(key);
+      if (bucket?.length) pairBuckets.push({ bucket, weight: a.weight + b.weight, key });
+    }
+  }
+  pairBuckets.sort((left, right) => (
+    left.bucket.length - right.bucket.length
+    || right.weight - left.weight
+    || left.key.localeCompare(right.key)
+  ));
+  for (const pair of pairBuckets) {
+    if (selected.size >= 24) break;
+    addCommercialBucket(selected, pair.bucket, budget, Math.min(4, 24 - selected.size));
   }
 
-  const desiredBedrooms = client.bedrooms ?? extractBedrooms(clientText);
-  if (desiredBedrooms) {
-    for (const bedrooms of [desiredBedrooms, desiredBedrooms + 1, desiredBedrooms + 2]) {
-      const bucket = typeKey
-        ? index.byTypeBedrooms.get(`${typeKey}|${bedrooms}`) ?? []
-        : index.byBedrooms.get(String(bedrooms)) ?? [];
-      addCommercialBucket(selected, bucket, budget, 8);
-    }
+  const singleBuckets = signals
+    .map((signal) => ({ signal, bucket: index.bySignal.get(signal.token) ?? [] }))
+    .filter((entry) => entry.bucket.length)
+    .sort((left, right) => (
+      left.bucket.length - right.bucket.length
+      || right.signal.weight - left.signal.weight
+      || left.signal.token.localeCompare(right.signal.token)
+    ));
+  for (const entry of singleBuckets) {
+    if (selected.size >= 32) break;
+    addCommercialBucket(selected, entry.bucket, budget, Math.min(4, 32 - selected.size));
   }
 
   addCommercialBucket(
