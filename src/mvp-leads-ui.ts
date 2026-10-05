@@ -114,7 +114,7 @@ function matchRow(match: PropertyMatch): string {
   </article>`;
 }
 
-function matchesForLead(client: Client, properties: Property[], exhaustive: boolean): string {
+function matchesContentForLead(client: Client, properties: Property[], exhaustive: boolean): string {
   if (isTerminalClient(client)) return '';
   if (!properties.length) return '<p class="mvp-match-empty">Todavía no hay propiedades cargadas para comparar.</p>';
   const matches = (
@@ -129,6 +129,22 @@ function matchesForLead(client: Client, properties: Property[], exhaustive: bool
     <summary><span>${matches.length} ${matches.length === 1 ? 'propiedad compatible' : 'propiedades compatibles'}</span><strong>${best.score}% mejor coincidencia</strong></summary>
     <div class="mvp-match-list">${matches.map(matchRow).join('')}</div>
   </details>`;
+}
+
+function matchesForLead(client: Client, properties: Property[], exhaustive: boolean): string {
+  return `<div class="mvp-lead-matches-slot" data-lead-matches-slot="${client.id}">${matchesContentForLead(client, properties, exhaustive)}</div>`;
+}
+
+function refreshLeadMatches(
+  details: HTMLDetailsElement,
+  clientId: number,
+  exhaustive: boolean,
+): void {
+  const client = visibleClients().find((item) => item.id === clientId);
+  const slot = details.querySelector<HTMLElement>(`[data-lead-matches-slot="${clientId}"]`);
+  if (!client || !slot) return;
+  slot.innerHTML = matchesContentForLead(client, visibleProperties(), exhaustive);
+  bindLeadMatchActions(slot);
 }
 
 function clientHistory(clientId: number): ActivityEntry[] {
@@ -200,8 +216,10 @@ function bindFullSheets(container: HTMLElement): void {
           if (other !== details && other.open) other.open = false;
         });
         expandedClientId = clientId;
+        refreshLeadMatches(details, clientId, true);
       } else if (expandedClientId === clientId) {
         expandedClientId = null;
+        refreshLeadMatches(details, clientId, false);
       }
       const label = details.querySelector<HTMLElement>('summary > span');
       if (label) label.textContent = details.open ? 'Ocultar ficha' : 'Ver ficha completa';
@@ -252,27 +270,7 @@ function bindDelegatedFollowUpActions(container: HTMLElement): void {
   });
 }
 
-function bindLeadCardActions(container: HTMLElement): void {
-  container.querySelectorAll<HTMLButtonElement>('[data-edit-client]').forEach((button) => {
-    button.addEventListener('click', (event) => {
-      event.stopPropagation();
-      const clientId = Number(button.dataset.editClient);
-      if (!clientId || !visibleClients().some((client) => client.id === clientId)) return;
-      clearReadEntityNavigation();
-      state.editingClientId = clientId;
-      state.openForms.client = true;
-      renderMvpLeads(container, false, true);
-      focusLeadForm(container);
-    });
-  });
-  container.querySelectorAll<HTMLButtonElement>('[data-auto-qualify-client]').forEach((button) => {
-    button.addEventListener('click', (event) => {
-      event.stopPropagation();
-      const clientId = Number(button.dataset.autoQualifyClient);
-      if (!clientId || !visibleClients().some((client) => client.id === clientId)) return;
-      requestLeadQualification(clientId);
-    });
-  });
+function bindLeadMatchActions(container: HTMLElement): void {
   container.querySelectorAll<HTMLButtonElement>('[data-open-match-property]').forEach((button) => {
     button.addEventListener('click', (event) => {
       event.stopPropagation();
@@ -307,6 +305,30 @@ function bindLeadCardActions(container: HTMLElement): void {
       saveData(`Match descartado: ${client.name}`);
       renderMvpLeads(container);
       queueMicrotask(() => document.dispatchEvent(new CustomEvent('trv-render')));
+    });
+  });
+}
+
+function bindLeadCardActions(container: HTMLElement): void {
+  bindLeadMatchActions(container);
+  container.querySelectorAll<HTMLButtonElement>('[data-edit-client]').forEach((button) => {
+    button.addEventListener('click', (event) => {
+      event.stopPropagation();
+      const clientId = Number(button.dataset.editClient);
+      if (!clientId || !visibleClients().some((client) => client.id === clientId)) return;
+      clearReadEntityNavigation();
+      state.editingClientId = clientId;
+      state.openForms.client = true;
+      renderMvpLeads(container, false, true);
+      focusLeadForm(container);
+    });
+  });
+  container.querySelectorAll<HTMLButtonElement>('[data-auto-qualify-client]').forEach((button) => {
+    button.addEventListener('click', (event) => {
+      event.stopPropagation();
+      const clientId = Number(button.dataset.autoQualifyClient);
+      if (!clientId || !visibleClients().some((client) => client.id === clientId)) return;
+      requestLeadQualification(clientId);
     });
   });
   container.querySelectorAll<HTMLButtonElement>('[data-return-read-entity]').forEach((button) => {
