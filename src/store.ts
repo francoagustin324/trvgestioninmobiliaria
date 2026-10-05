@@ -12,6 +12,7 @@ import type {
 } from './models.js';
 import { defaultSettings, initialData } from './models.js';
 import { hydrateLegacyPropertyDiffusionLedger } from './property-diffusion-ledger.js';
+import { invalidatePropertyMatchingCaches } from './property-matching.js';
 import {
   assertTenantCrmScope,
   hasTenantLocalBackup,
@@ -298,7 +299,20 @@ export function resetTransientState(): void {
   transientStateResetHandlers.forEach((handler) => handler());
 }
 
+export function invalidatePropertyCollectionCache(
+  properties: CrmData['properties'] = state.crm.properties,
+): void {
+  invalidatePropertyMatchingCaches(properties);
+}
+
+export function replacePropertyCollection(properties: CrmData['properties']): void {
+  invalidatePropertyCollectionCache(state.crm.properties);
+  state.crm.properties = properties;
+  invalidatePropertyCollectionCache(properties);
+}
+
 export function activateStorageForTenant(scope: TenantScope): void {
+  invalidatePropertyCollectionCache(state.crm.properties);
   state.crm = loadData(scope);
   assertTenantCrmScope(scope, state.crm);
   resetTransientState();
@@ -334,6 +348,7 @@ export function replaceDataForTenant(scope: TenantScope, data: CrmData, syncClou
     markDirty: syncCloud,
     reason: syncCloud ? 'Restauración local' : 'Carga desde la nube',
   });
+  invalidatePropertyCollectionCache(state.crm.properties);
   state.crm = normalized;
   resetTransientState();
   if (syncCloud) queueCloudSave(scope, state.crm);
@@ -401,6 +416,7 @@ export function restoreLatestLocalBackupForTenant(
   assertTenantCrmScope(scope, restoredSnapshot);
 
   assertTenantRuntimeLeaseCurrent(runtimeLease);
+  invalidatePropertyCollectionCache(state.crm.properties);
   state.crm = structuredClone(restoredSnapshot);
   resetTransientState();
 
