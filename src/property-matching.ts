@@ -610,6 +610,14 @@ export function relevantPropertyCandidatesForClient(
     addCommercialBucket(selected, pair.bucket, budget, Math.min(4, 24 - selected.size));
   }
 
+  for (const zone of zones) {
+    if (selected.size >= 28) break;
+    const zoneBucket = typeKey
+      ? index.byTypeZone.get(`${typeKey}|${zone}`) ?? []
+      : index.byZone.get(zone) ?? [];
+    addCommercialBucket(selected, zoneBucket, budget, Math.min(4, 28 - selected.size));
+  }
+
   const singleBuckets = signals
     .map((signal) => ({ signal, bucket: index.bySignal.get(signal.token) ?? [] }))
     .filter((entry) => entry.bucket.length)
