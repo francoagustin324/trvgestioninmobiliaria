@@ -71,7 +71,7 @@ test('P1.4-A2.2 prioriza Nueva propiedad y apila acciones sin overflow en móvil
 
 test('P1.4-A2.2 actualiza únicamente el cache-busting directo necesario', () => {
   assert.match(html, /mvp-properties\.css\?v=20260924-block2b-1/);
-  assert.match(html, /mobile-properties-polish\.css\?v=20260906-p1-4-a2-2-1/);
+  assert.match(html, /mobile-properties-polish\.css\?v=20261006-block2h-promo-1/);
   assert.match(html, /mvp-main\.js\?v=20260928-block2f-force-explicit-edit-1/);
   assert.match(html, /property-opportunities\.css\?v=20260925-block2c-1/);
 });
