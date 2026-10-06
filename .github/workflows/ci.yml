@@ -22,6 +22,7 @@ on:
       - feature/ordenbroker-block2h-commercial-alerts-automation
       - fix/ordenbroker-block2h-hardening-audit
       - fix/ordenbroker-block2h-matching-correctness-performance
+      - fix/ordenbroker-ci-browser-flake-stability
   schedule:
     - cron: "0 10 * * *"
   workflow_dispatch:
