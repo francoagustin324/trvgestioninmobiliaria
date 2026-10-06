@@ -17,7 +17,7 @@ function mobileModuleIds(): string[] {
 }
 
 test('carga el ajuste móvil después del skin visual principal', () => {
-  assert.ok(html.includes('/src/mobile-bottom-nav.css?v=20260728-1'));
+  assert.ok(html.includes('/src/mobile-bottom-nav.css?v=20261006-block2h-promo-1'));
   assert.ok(html.indexOf('mobile-bottom-nav.css') > html.indexOf('liquid-glass-skin.css'));
 });
 
