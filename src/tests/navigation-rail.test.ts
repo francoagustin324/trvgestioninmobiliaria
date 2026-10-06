@@ -36,6 +36,6 @@ test('en celular la barra queda visible a la izquierda sin menú desplegable', (
 test('la versión publicada conserva compatibilidad histórica y renueva mvp-main A2.2', () => {
   const compatibilityVersion = html.match(/cloud-compat-bootstrap\.js\?v=([^"']+)/)?.[1];
   const mainVersion = html.match(/mvp-main\.js\?v=([^"']+)/)?.[1];
-  assert.equal(compatibilityVersion, '20260802-1');
+  assert.equal(compatibilityVersion, '20261006-block2h-promo-1');
   assert.equal(mainVersion, '20260928-block2f-force-explicit-edit-1');
 });
