@@ -147,7 +147,7 @@ test('B1.2.6 define la estructura en la hoja responsable e invalida su caché im
   assert.match(compactCss, /grid-template-areas:\s*['"]identity['"]\s*['"]statuses['"]/);
   assert.match(compactCss, /\.mvp-lead-alert::after[^}]*content:\s*attr\(data-mobile-label\)/s);
   assert.match(polishCss, /@media \(min-width: 381px\) and \(max-width: 520px\)/);
-  assert.ok(html.indexOf('lead-list-compact.css?v=20260729-3') < html.indexOf('lead-list-polish.css?v=20260729-1'));
+  assert.ok(html.indexOf('lead-list-compact.css?v=20261006-block2h-promo-1') < html.indexOf('lead-list-polish.css?v=20261006-block2h-promo-1'));
   assert.equal((html.match(/lead-list-compact\.css/g) ?? []).length, 1);
 });
 
