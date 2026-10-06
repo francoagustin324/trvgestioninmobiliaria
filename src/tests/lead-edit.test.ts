@@ -28,5 +28,5 @@ test('la entrada principal usa A2.2 y compatibilidad conserva su versión histó
   const compatibilityVersion = html.match(/\/dist\/cloud-compat-bootstrap\.js\?v=([^"']+)/)?.[1];
   assert.equal(mainVersion, '20260928-block2f-force-explicit-edit-1');
   assert.notEqual(mainVersion, '20260714-22');
-  assert.equal(compatibilityVersion, '20260802-1');
+  assert.equal(compatibilityVersion, '20261006-block2h-promo-1');
 });
