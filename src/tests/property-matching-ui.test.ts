@@ -87,5 +87,5 @@ test('el matching tiene presentación responsive, controles táctiles y recursos
   assert.ok(pipelineCss.includes('.mvp-lead-card.mvp-lead-card-with-matches'));
   assert.ok(mobileLeadsCss.includes('@media (max-width: 520px)'));
   assert.ok(mobileLeadsCss.includes('#crm .mvp-lead-matches > summary'));
-  assert.ok(html.includes('/src/mvp-matching.css?v=20260719-43'));
+  assert.ok(html.includes('/src/mvp-matching.css?v=20261006-block2h-promo-1'));
 });
