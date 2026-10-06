@@ -9,7 +9,7 @@ const shellCss = readFileSync('src/mobile-bottom-nav.css', 'utf8');
 const packageJson = readFileSync('package.json', 'utf8').toLowerCase();
 
 test('carga el pulido móvil de Conversaciones después de las capas existentes', () => {
-  assert.ok(html.includes('/src/mobile-conversations-polish.css?v=20260723-1'));
+  assert.ok(html.includes('/src/mobile-conversations-polish.css?v=20261006-block2h-promo-1'));
   assert.ok(html.indexOf('mobile-conversations-polish.css') > html.indexOf('mvp.css'));
   assert.ok(html.indexOf('mobile-conversations-polish.css') > html.indexOf('mobile-bottom-nav.css'));
   assert.ok(html.indexOf('mobile-conversations-polish.css') > html.indexOf('mobile-properties-polish.css'));
