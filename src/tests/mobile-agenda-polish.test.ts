@@ -11,7 +11,7 @@ const packageJsonText = readFileSync('package.json', 'utf8');
 const packageJson = packageJsonText.toLowerCase();
 
 test('carga el pulido móvil de Agenda después de las capas existentes', () => {
-  assert.ok(html.includes('/src/mobile-agenda-polish.css?v=20260723-1'));
+  assert.ok(html.includes('/src/mobile-agenda-polish.css?v=20261006-block2h-promo-1'));
   assert.ok(html.indexOf('mobile-agenda-polish.css') > html.indexOf('agenda.css'));
   assert.ok(html.indexOf('mobile-agenda-polish.css') > html.indexOf('mobile-bottom-nav.css'));
   assert.ok(html.indexOf('mobile-agenda-polish.css') > html.indexOf('mobile-conversations-polish.css'));
