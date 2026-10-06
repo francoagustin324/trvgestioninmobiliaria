@@ -50,8 +50,8 @@ test('conserva versiones históricas y publica la entrada principal A2.2', () =>
   const mainVersion = html.match(/mvp-main\.js\?v=([^"']+)/)?.[1];
   const recoveryVersion = html.match(/sync-recovery-bootstrap\.js\?v=([^"']+)/)?.[1];
   const agendaVersion = html.match(/agenda\.css\?v=([^"']+)/)?.[1];
-  assert.equal(compatibilityVersion, '20260802-1');
+  assert.equal(compatibilityVersion, '20261006-block2h-promo-1');
   assert.equal(mainVersion, '20260928-block2f-force-explicit-edit-1');
-  assert.equal(recoveryVersion, '20260802-1');
+  assert.equal(recoveryVersion, '20261006-block2h-promo-1');
   assert.equal(agendaVersion, '20260918-trv-daily-use-1');
 });
