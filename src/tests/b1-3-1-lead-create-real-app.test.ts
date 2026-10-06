@@ -568,16 +568,10 @@ test('Bloque 2A alta progresiva permite email-only, valida contacto, evita dupli
     await form.locator('input[name="name"]').fill('SOLO TELEFONO');
     await form.locator('input[name="phone"]').fill('351 555 8899');
     await form.locator('[data-save-lead]').click();
-    await page.waitForFunction((storageKey) => {
-      const raw = localStorage.getItem(storageKey);
-      if (!raw) return false;
-      const crm = JSON.parse(raw) as { clients?: Array<{ name?: string }> };
-      return (crm.clients ?? []).some((client) => client.name === 'SOLO TELEFONO');
-    }, identity('Dueño').storageKey);
     await page.locator('#mvp-lead-results').getByText('SOLO TELEFONO', { exact: true }).waitFor({ state: 'visible' });
     saved = await crmFromStorage(page, 'Dueño');
     const phoneOnly = saved.clients.find((client) => client.name === 'SOLO TELEFONO');
-    assert.ok(phoneOnly);
+    assert.ok(phoneOnly, 'La UI confirmó el lead pero el snapshot tenant no lo contiene.');
     assert.equal(phoneOnly.phone, '5493515558899');
     assert.equal(phoneOnly.email, undefined);
     assert.equal(phoneOnly.interest, '');
