@@ -394,8 +394,11 @@ test('ETAPA 1/2 B0.2 y P0A.1a se validan read-only en PostgreSQL 17 aislado', { 
     return createHash('sha256').update(dump.stdout).digest('hex');
   };
 
-  const lineFor = (output: string, identity: string): string =>
-    output.split(/\r?\n/).find((line) => line.includes(`|${identity}|`)) ?? '';
+  const lineFor = (output: string, section: string, identity: string): string =>
+    output.split(/\r?\n/).find((line) => {
+      const fields = line.split('|');
+      return fields[0] === section && fields[4] === identity;
+    }) ?? '';
 
   const started = spawnSync(
     'docker',
@@ -685,8 +688,8 @@ test('ETAPA 1/2 B0.2 y P0A.1a se validan read-only en PostgreSQL 17 aislado', { 
 
     // Absent detection for integration surfaces; no cron/job or pg_net objects exist yet.
     const absentIntegrationInventory = runPsql(p0aInventorySql);
-    const cronAbsent = lineFor(absentIntegrationInventory, 'pg_cron');
-    const netAbsent = lineFor(absentIntegrationInventory, 'pg_net');
+    const cronAbsent = lineFor(absentIntegrationInventory, 'external_integrations', 'pg_cron');
+    const netAbsent = lineFor(absentIntegrationInventory, 'external_integrations', 'pg_net');
     assert.match(cronAbsent, /"schema_exists": false/);
     assert.match(cronAbsent, /"relation_exists": false/);
     assert.match(netAbsent, /"schema_exists": false/);
@@ -771,8 +774,8 @@ test('ETAPA 1/2 B0.2 y P0A.1a se validan read-only en PostgreSQL 17 aislado', { 
     assert.match(extendedOne, /p0a_webhook_after_update/);
     assert.match(extendedOne, /supabase_migrations\.schema_migrations/);
 
-    const cronPresent = lineFor(extendedOne, 'pg_cron');
-    const netPresent = lineFor(extendedOne, 'pg_net');
+    const cronPresent = lineFor(extendedOne, 'external_integrations', 'pg_cron');
+    const netPresent = lineFor(extendedOne, 'external_integrations', 'pg_net');
     assert.match(cronPresent, /"schema_exists": true/);
     assert.match(cronPresent, /"relation_exists": true/);
     assert.match(netPresent, /"schema_exists": true/);
