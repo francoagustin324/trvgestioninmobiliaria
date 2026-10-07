@@ -297,7 +297,7 @@ from summary;
 -- DESIGN/OFFLINE VALIDATION ONLY IN BASE-P0A.1a.
 with
 target_namespaces as (
-  select namespace.oid, namespace.nspname
+  select namespace.oid, namespace.nspname, namespace.nspowner, namespace.nspacl
   from pg_catalog.pg_namespace as namespace
   where namespace.nspname not in ('pg_catalog', 'information_schema')
     and namespace.nspname !~ '^pg_toast'
