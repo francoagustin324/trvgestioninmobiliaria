@@ -20,7 +20,7 @@ export function authShellHtml(): string {
   return `<div class="auth-modal" id="auth-modal" hidden>
     <div class="auth-dialog" role="dialog" aria-modal="true" aria-labelledby="auth-title">
       <button type="button" class="auth-close" data-auth-close aria-label="Cerrar">×</button>
-      <span class="eyebrow">Cuenta PropControl</span>
+      <span class="eyebrow">Cuenta OrdenBroker</span>
       <h2 id="auth-title">Ingresar</h2>
       <p class="auth-copy">Cada integrante debe usar su propia cuenta para aplicar los permisos de la inmobiliaria.</p>
       <div class="auth-tabs">

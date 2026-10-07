@@ -4,7 +4,7 @@ import { pathToFileURL } from 'node:url';
 import { chromium } from 'playwright';
 
 export const PRODUCTION_ENVIRONMENT = 'joyful-success / production';
-export const ROOT_MARKER = /<title>\s*PropControl\s*\|\s*CRM inmobiliario\s*<\/title>/i;
+export const ROOT_MARKER = /<title>\s*OrdenBroker\s*\|\s*Sistema comercial inmobiliario\s*<\/title>/i;
 export const BROWSER_MARKER = 'main.public-auth-shell #public-auth-form';
 export const MAX_REQUEST_ATTEMPTS = 2;
 export const REQUEST_TIMEOUT_MS = 3_000;
@@ -125,8 +125,8 @@ export async function checkRoot(baseUrl, options = {}) {
   }
   const html = await response.text();
   if (!html.trim()) throw new Error('/ FAIL: HTML vacío.');
-  if (!ROOT_MARKER.test(html)) throw new Error('/ FAIL: falta el marcador estable de PropControl en el HTML.');
-  log('PASS /: HTTP 200, HTML real y marcador PropControl presentes.');
+  if (!ROOT_MARKER.test(html)) throw new Error('/ FAIL: falta el marcador estable de OrdenBroker en el HTML.');
+  log('PASS /: HTTP 200, HTML real y marcador OrdenBroker presentes.');
   return html;
 }
 

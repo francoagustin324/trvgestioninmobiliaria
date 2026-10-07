@@ -134,27 +134,44 @@ test('R2.2C snapshot ownership respeta OFF/ON sin segundo writer', () => {
 });
 
 test('R2.2C adapter fija decisiones OFF/ON y limita fallback schema legacy a OFF', () => {
-  assert.match(cutover, /pushCloudData\(state\.crm, accountKey, false\)/i);
-  assert.match(compatible, /job\.visitAuthorityDecision \?\? await visitTransactionAuthorityActive\(\)/i);
-  assert.match(compatible, /if \(authorityActive\)[\s\S]*pushCloudDataWithVisitAuthority[\s\S]*else[\s\S]*pushModernCloudData/i);
+  const persistStart = cutover.indexOf('async function persistHistoricalCloud');
+  const historicalCoordinateStart = cutover.indexOf('function historicalCoordinate', persistStart);
+  assert.ok(persistStart >= 0 && historicalCoordinateStart > persistStart);
+  const persistHistoricalCloud = cutover.slice(persistStart, historicalCoordinateStart);
+  assert.match(
+    persistHistoricalCloud,
+    /assertTenantRuntimeLeaseCurrent\(runtimeLease\);[\s\S]*writeTenantSnapshot\(runtimeLease\.scope, state\.crm,[\s\S]*const snapshot = structuredClone\(state\.crm\);[\s\S]*await pushCloudData\(runtimeLease\.scope, snapshot, false\);[\s\S]*assertTenantRuntimeLeaseCurrent\(runtimeLease\);/i,
+  );
+  assert.match(persistHistoricalCloud, /catch \(error\) \{[\s\S]*if \(!tenantRuntimeLeaseIsCurrent\(runtimeLease\)\) throw error;/i);
+  assert.doesNotMatch(persistHistoricalCloud, /accountKey|organization_members|limit\s*\(\s*1\s*\)|rows\s*\[\s*0\s*\]/i);
 
   const runCloudPushStart = compatible.indexOf('async function runCloudPush');
-  const latestPendingJobStart = compatible.indexOf('function latestPendingJob', runCloudPushStart);
-  assert.ok(runCloudPushStart >= 0 && latestPendingJobStart > runCloudPushStart);
-  const runCloudPush = compatible.slice(runCloudPushStart, latestPendingJobStart);
-  const authorityDecision = 'const authorityActive = job.visitAuthorityDecision ?? await visitTransactionAuthorityActive();';
-  const authorityIndex = runCloudPush.indexOf(authorityDecision);
-  const tryIndex = runCloudPush.indexOf('try {');
-  assert.ok(authorityIndex >= 0 && tryIndex > authorityIndex, 'capability debe resolverse fuera del fallback legacy');
-  assert.match(runCloudPush, /catch \(error\) \{\s*if \(authorityActive \|\| !isLegacySchemaError\(error\)\) throw error;\s*await pushLegacyCloudData\(job\.snapshot, job\.token\);/);
-  assert.equal((runCloudPush.match(/pushLegacyCloudData\(/g) ?? []).length, 1);
+  const tenantSaveQueueStart = compatible.indexOf('function tenantSaveQueue', runCloudPushStart);
+  assert.ok(runCloudPushStart >= 0 && tenantSaveQueueStart > runCloudPushStart);
+  const runCloudPush = compatible.slice(runCloudPushStart, tenantSaveQueueStart);
+  assert.match(
+    runCloudPush,
+    /const authorityActive = job\.visitAuthorityDecision\s*\?\?\s*await resolveTenantVisitAuthority\(job\.scope, job\.runtimeLease\);/i,
+  );
+  assert.match(
+    runCloudPush,
+    /try \{[\s\S]*pushCloudDataWithVisitAuthorityV2\(\s*job\.scope,\s*job\.snapshot,\s*job\.token,\s*job\.runtimeLease,\s*authorityActive,\s*\);[\s\S]*assertTenantRuntimeLeaseCurrent\(job\.runtimeLease\);[\s\S]*return;[\s\S]*\} catch \(error\)/i,
+  );
+  assert.match(
+    runCloudPush,
+    /catch \(error\) \{[\s\S]*if \(authorityActive \|\| !isLegacySchemaError\(error\)\) throw error;[\s\S]*pushTenantLegacyCloudData\(job\.scope, job\.snapshot, job\.token, job\.runtimeLease\);[\s\S]*\}/i,
+  );
+  assert.doesNotMatch(runCloudPush, /pushTenantModernCloudData/);
+  assert.equal((runCloudPush.match(/pushTenantLegacyCloudData\(/g) ?? []).length, 1);
+  assert.doesNotMatch(runCloudPush, /accountKey|organization_members|limit\s*\(\s*1\s*\)|rows\s*\[\s*0\s*\]/i);
 
   const transactionalCallbacks = [...cutover.matchAll(
     /runTransactionalCloud:\s*async\s*\(\)\s*=>\s*\{([\s\S]*?)\n\s{4}\},\n\s{2}\}\);/g,
   )].map((match) => match[1] ?? '');
   assert.equal(transactionalCallbacks.length, 2);
   for (const callback of transactionalCallbacks) {
-    assert.match(callback, /invokeVisitTransaction/i);
+    assert.match(callback, /invokeVisitTransactionV2/i);
+    assert.match(callback, /assertTenantRuntimeLeaseCurrent\(runtimeLease\)[\s\S]*invokeVisitTransactionV2\(scope,[\s\S]*runtimeLease\)[\s\S]*assertTenantRuntimeLeaseCurrent\(runtimeLease\)/i);
     assert.doesNotMatch(callback, /persistHistoricalCloud|pushCloudData|historicalCoordinate|historicalResolve|runLegacyCloud/i);
   }
 });
@@ -166,23 +183,177 @@ test('R2.2C RPC cloud envía sólo intent y conserva operationId estable para re
   assert.match(cutover, /expectedVisitRevision: normalizeRevision\(input\.visit\.revision\)/i);
 });
 
-test('R2.2C reconciliación latest y post-RPC conserva authority=true hasta cloud push', () => {
-  assert.match(compatible, /const latest = markCloudSaved\([\s\S]*if \(latest\)[\s\S]*propcontrol-cloud-authoritative-snapshot/i);
-  assert.match(cutover, /propcontrol-cloud-authoritative-snapshot[\s\S]*state\.crm = structuredClone\(crm\)[\s\S]*markDirty: false[\s\S]*trv-render/i);
-  assert.match(compatible, /key === 'clients'[\s\S]*delete record\.revision[\s\S]*delete record\.operationId/i);
+test('R2.2C reconciliación latest y post-RPC conserva authority=true hasta cloud push', async () => {
+  assert.match(
+    compatible,
+    /export type CloudSaveJob = Readonly<\{[\s\S]*scope: TenantScope;[\s\S]*snapshot: CrmData;[\s\S]*token: Readonly<SyncSaveToken>;[\s\S]*runtimeLease: TenantRuntimeLease;/i,
+  );
+  assert.match(
+    compatible,
+    /const frozenScope: TenantScope = Object\.freeze\(\{ \.\.\.scope \}\);[\s\S]*const snapshot = deepFreeze\(structuredClone\(crm\)\);[\s\S]*const token = Object\.freeze\(\{ \.\.\.tenantSyncSaveToken\(frozenScope, snapshot\) \}\);[\s\S]*const runtimeLease = captureTenantRuntimeLease\(frozenScope\);[\s\S]*scope: frozenScope,[\s\S]*snapshot,[\s\S]*token,[\s\S]*runtimeLease,/i,
+  );
+  assert.match(
+    compatible,
+    /export function cloudSaveJobIsLatest\(job: CloudSaveJob\): boolean \{[\s\S]*readTenantSyncState\(job\.scope\)[\s\S]*sync\.dirty === false[\s\S]*sync\.verifiedGeneration === job\.token\.generation[\s\S]*sync\.lastCloudFingerprint === job\.token\.fingerprint;/i,
+  );
+  assert.match(
+    compatible,
+    /function emitAuthoritativeSnapshot\(job: CloudSaveJob,[\s\S]*scope: job\.scope,[\s\S]*runtimeLease: job\.runtimeLease,[\s\S]*token: job\.token,[\s\S]*propcontrol-cloud-authoritative-snapshot/i,
+  );
+  assert.match(cutover, /tenantFingerprint\(state\.crm\)[\s\S]*tenantFingerprint\(crm\)[\s\S]*materiallyChanged[\s\S]*if \(materiallyChanged\) state\.crm = structuredClone\(crm\)[\s\S]*writeTenantSnapshot\(runtimeLease\.scope, crm,[\s\S]*markDirty: false[\s\S]*if \(materiallyChanged\) document\.dispatchEvent\(new CustomEvent\('trv-render'\)\)/i);
   assert.doesNotMatch(cutover, /resetTransientState/);
+
+  const snapshotListenerStart = cutover.indexOf("document.addEventListener('propcontrol-cloud-authoritative-snapshot'");
+  const scopeGuardIndex = cutover.indexOf('tenantScopesEqual(activeScope, runtimeLease.scope)', snapshotListenerStart);
+  const leaseGuardIndex = cutover.indexOf('tenantRuntimeLeaseIsCurrent(runtimeLease)', snapshotListenerStart);
+  const fingerprintIndex = cutover.indexOf('tenantFingerprint(state.crm)', snapshotListenerStart);
+  const persistIndex = cutover.indexOf('writeTenantSnapshot(runtimeLease.scope, crm', snapshotListenerStart);
+  const renderIndex = cutover.indexOf("document.dispatchEvent(new CustomEvent('trv-render'))", snapshotListenerStart);
+  assert.ok(snapshotListenerStart >= 0);
+  assert.ok(scopeGuardIndex > snapshotListenerStart && leaseGuardIndex > scopeGuardIndex);
+  assert.ok(fingerprintIndex > leaseGuardIndex);
+  assert.ok(persistIndex > fingerprintIndex);
+  assert.ok(renderIndex > persistIndex);
+
+  const runCloudPushStart = compatible.indexOf('async function runCloudPush');
+  const tenantSaveQueueStart = compatible.indexOf('function tenantSaveQueue', runCloudPushStart);
+  assert.ok(runCloudPushStart >= 0 && tenantSaveQueueStart > runCloudPushStart);
+  const runCloudPush = compatible.slice(runCloudPushStart, tenantSaveQueueStart);
+  const guardedEmits = runCloudPush.match(/if \(cloudSaveJobIsLatest\(job\)\) emitAuthoritativeSnapshot\(job(?:, verified)?\);/g) ?? [];
+  assert.equal(guardedEmits.length, 2, 'V2 y modern/legacy deben emitir snapshot autoritativo sólo si el job sigue latest.');
+  assert.equal((runCloudPush.match(/emitAuthoritativeSnapshot\(/g) ?? []).length, guardedEmits.length, 'No puede existir emit autoritativo incondicional/stale.');
+  assert.match(
+    runCloudPush,
+    /try \{[\s\S]*pushCloudDataWithVisitAuthorityV2\([\s\S]*job\.runtimeLease,[\s\S]*authorityActive,[\s\S]*assertTenantRuntimeLeaseCurrent\(job\.runtimeLease\);[\s\S]*if \(cloudSaveJobIsLatest\(job\)\) emitAuthoritativeSnapshot\(job, verified\);[\s\S]*return;/i,
+  );
+  assert.match(
+    runCloudPush,
+    /catch \(error\)[\s\S]*if \(authorityActive \|\| !isLegacySchemaError\(error\)\) throw error;[\s\S]*pushTenantLegacyCloudData\(job\.scope, job\.snapshot, job\.token, job\.runtimeLease\);[\s\S]*assertTenantRuntimeLeaseCurrent\(job\.runtimeLease\);[\s\S]*if \(cloudSaveJobIsLatest\(job\)\) emitAuthoritativeSnapshot\(job\);/i,
+  );
+  assert.doesNotMatch(runCloudPush, /pushTenantModernCloudData/);
 
   const applyStart = cutover.indexOf('function applyAuthoritativeResult');
   const historicalStart = cutover.indexOf('async function persistHistoricalCloud', applyStart);
   assert.ok(applyStart >= 0 && historicalStart > applyStart);
   const applyAuthoritativeResult = cutover.slice(applyStart, historicalStart);
-  assert.match(applyAuthoritativeResult, /queueCloudSave\(state\.crm, true\);/);
+  assert.match(applyAuthoritativeResult, /queueCloudSave\(runtimeLease\.scope, state\.crm, true\);/);
 
   const queueStart = compatible.indexOf('export function queueCloudSave');
   assert.ok(queueStart >= 0);
   const queueCloudSave = compatible.slice(queueStart);
-  assert.match(queueCloudSave, /queueCloudSave\(crm: CrmData, visitAuthorityDecision\?: boolean\)/);
-  assert.match(queueCloudSave, /pushCloudData\(snapshot, accountKey, visitAuthorityDecision\)/);
+  assert.match(queueCloudSave, /queueCloudSave\(scope: TenantScope, crm: CrmData, visitAuthorityDecision\?: boolean\): void;/);
+  assert.match(queueCloudSave, /const job = createCloudSaveJob\(scope, crm, visitAuthorityDecision\);[\s\S]*tenantRuntimeLeaseIsCurrent\(job\.runtimeLease\)[\s\S]*enqueueCloudSaveJob\(job\)/i);
+
+  class R14MemoryStorage implements Storage {
+    private readonly values = new Map<string, string>();
+    get length(): number { return this.values.size; }
+    clear(): void { this.values.clear(); }
+    getItem(key: string): string | null { return this.values.get(key) ?? null; }
+    key(index: number): string | null { return [...this.values.keys()][index] ?? null; }
+    removeItem(key: string): void { this.values.delete(key); }
+    setItem(key: string, value: string): void { this.values.set(key, value); }
+  }
+
+  Object.defineProperty(globalThis, 'localStorage', {
+    configurable: true,
+    writable: true,
+    value: new R14MemoryStorage(),
+  });
+  class R14DocumentTarget extends EventTarget {
+    readonly head = { append: (_node: unknown) => undefined };
+    getElementById(_id: string): null { return null; }
+    createElement(_tag: string): { id: string; rel: string; href: string } {
+      return { id: '', rel: '', href: '' };
+    }
+  }
+  const documentTarget = new R14DocumentTarget();
+  Object.defineProperty(globalThis, 'document', {
+    configurable: true,
+    writable: true,
+    value: documentTarget as unknown as Document,
+  });
+
+  const [{ initialData }, store, runtime, tenantStorage] = await Promise.all([
+    import('../models.js'),
+    import('../store.js'),
+    import('../tenant-runtime.js'),
+    import('../tenant-storage.js'),
+  ]);
+  await import('../visit-workflow-cutover.js');
+
+  const userId = 'a35-r14-user';
+  const orgA = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+  const orgB = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
+  const scopeA = Object.freeze({ userId, organizationId: orgA });
+  const scopeB = Object.freeze({ userId, organizationId: orgB });
+  const crmA = structuredClone(initialData);
+  crmA.organization.id = orgA;
+  crmA.organization.name = 'R14 Org A';
+  crmA.teamMembers[0]!.userId = userId;
+
+  runtime.installTenantRuntimeScope(scopeA, userId);
+  assert.equal(store.replaceDataForTenant(scopeA, crmA, false), true);
+  const lease = runtime.captureTenantRuntimeLease(scopeA);
+
+  let renderCount = 0;
+  documentTarget.addEventListener('trv-render', () => { renderCount += 1; });
+
+  const equivalentIdentity = store.state.crm;
+  const equivalent = structuredClone(store.state.crm);
+  const equivalentCurrentFingerprint = tenantStorage.tenantFingerprint(store.state.crm);
+  const equivalentAuthoritativeFingerprint = tenantStorage.tenantFingerprint(equivalent);
+  assert.equal(equivalentCurrentFingerprint, equivalentAuthoritativeFingerprint);
+
+  documentTarget.dispatchEvent(new CustomEvent('propcontrol-cloud-authoritative-snapshot', {
+    detail: { crm: equivalent, runtimeLease: lease },
+  }));
+  assert.equal(renderCount, 0, 'Un authoritative self-ACK equivalente no debe rebuildar la UI.');
+  assert.equal(store.state.crm, equivalentIdentity, 'El self-ACK equivalente debe preservar identidad del CRM vigente.');
+  assert.equal(
+    tenantStorage.tenantFingerprint(tenantStorage.readTenantSnapshot(scopeA)),
+    equivalentAuthoritativeFingerprint,
+    'La reconciliación equivalente sí debe persistir el snapshot autoritativo.',
+  );
+
+  const materiallyDistinct = structuredClone(store.state.crm);
+  materiallyDistinct.clients[0]!.notes = 'Cambio remoto material R14';
+  const materialFingerprint = tenantStorage.tenantFingerprint(materiallyDistinct);
+  assert.notEqual(materialFingerprint, tenantStorage.tenantFingerprint(store.state.crm));
+  documentTarget.dispatchEvent(new CustomEvent('propcontrol-cloud-authoritative-snapshot', {
+    detail: { crm: materiallyDistinct, runtimeLease: lease },
+  }));
+  assert.equal(renderCount, 1, 'Un authoritative snapshot materialmente distinto debe renderizar.');
+  assert.equal(store.state.crm.clients[0]!.notes, 'Cambio remoto material R14');
+  assert.equal(tenantStorage.tenantFingerprint(store.state.crm), materialFingerprint);
+
+  const afterMaterialIdentity = store.state.crm;
+  const foreignCrm = structuredClone(store.state.crm);
+  foreignCrm.organization.id = orgB;
+  foreignCrm.organization.name = 'R14 Org B';
+  const foreignLease = Object.freeze({
+    scope: scopeB,
+    generation: lease.generation,
+  });
+  documentTarget.dispatchEvent(new CustomEvent('propcontrol-cloud-authoritative-snapshot', {
+    detail: { crm: foreignCrm, runtimeLease: foreignLease },
+  }));
+  assert.equal(renderCount, 1, 'Un snapshot de otro tenant debe seguir cercado.');
+  assert.equal(store.state.crm, afterMaterialIdentity);
+  assert.equal(store.state.crm.organization.id, orgA);
+  assert.equal(tenantStorage.readTenantSnapshot(scopeB), null);
+
+  const staleLease = runtime.captureTenantRuntimeLease(scopeA);
+  runtime.installTenantRuntimeScope(scopeA, userId);
+  assert.equal(runtime.tenantRuntimeLeaseIsCurrent(staleLease), false);
+  const staleSnapshot = structuredClone(store.state.crm);
+  staleSnapshot.clients[0]!.notes = 'Cambio stale que debe rechazarse';
+  const beforeStaleIdentity = store.state.crm;
+  documentTarget.dispatchEvent(new CustomEvent('propcontrol-cloud-authoritative-snapshot', {
+    detail: { crm: staleSnapshot, runtimeLease: staleLease },
+  }));
+  assert.equal(renderCount, 1, 'Una lease stale debe seguir fail-closed.');
+  assert.equal(store.state.crm, beforeStaleIdentity);
+  assert.equal(store.state.crm.clients[0]!.notes, 'Cambio remoto material R14');
 });
 
 test('R2.2C1 capability ejecuta auth, RLS y OFF/ON en PostgreSQL 17', { timeout: 120_000 }, async () => {

@@ -1,0 +1,150 @@
+name: A3.5 H4 #538 Harness Fix Validation
+
+on:
+  push:
+    branches:
+      - validation/a35-h1-538-lifecycle
+    paths:
+      - src/tests/hotfix-leads-ux-atender-ahora-browser.test.ts
+      - .github/workflows/a35-h1-538-isolated.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: a35-h4-538-validation-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  isolated-538-h4:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
+    steps:
+      - name: Checkout H4 validation branch
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci --silent
+
+      - name: Install required WebKit runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          unset PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD
+          npx playwright install --with-deps webkit
+
+      - name: Build
+        run: npm run build --silent
+
+      - name: Validate isolated #538 with H4 two-run protocol
+        shell: bash
+        run: |
+          set -uo pipefail
+          TEST_FILE="dist/tests/hotfix-leads-ux-atender-ahora-browser.test.js"
+
+          : >"$RUNNER_TEMP/test-538-h4-run-1.tap"
+          : >"$RUNNER_TEMP/test-538-h4-run-2.tap"
+          : >"$RUNNER_TEMP/h4-run-1-server-left.txt"
+          : >"$RUNNER_TEMP/h4-run-1-webkit-left.txt"
+          : >"$RUNNER_TEMP/h4-run-2-server-left.txt"
+          : >"$RUNNER_TEMP/h4-run-2-webkit-left.txt"
+
+          run_once() {
+            local run_number="$1"
+            local log="$RUNNER_TEMP/test-538-h4-run-${run_number}.tap"
+            local server_log="$RUNNER_TEMP/h4-run-${run_number}-server-left.txt"
+            local webkit_log="$RUNNER_TEMP/h4-run-${run_number}-webkit-left.txt"
+            local code=0
+            local server_left=0
+            local webkit_left=0
+
+            echo "H4_RUN_${run_number}_START=$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+            set +e
+            node --test --test-concurrency=1 "$TEST_FILE" >"$log" 2>&1
+            code=$?
+            set -e
+            cat "$log"
+
+            echo "H4_RUN_${run_number}_EXIT_CODE=$code"
+            echo "H4_RUN_${run_number}_PROCESS_EXITED=YES"
+
+            : >"$server_log"
+            if pgrep -af 'node .*dist/server\.js' >"$server_log"; then
+              cat "$server_log"
+              echo "H4_RUN_${run_number}_SERVER_CHILD_LEFT_ALIVE=YES"
+              server_left=1
+            else
+              echo "H4_RUN_${run_number}_SERVER_CHILD_LEFT_ALIVE=NO"
+            fi
+
+            : >"$webkit_log"
+            if pgrep -af 'pw_run|MiniBrowser|WebKitNetworkProcess|WebKitWebProcess' >"$webkit_log"; then
+              cat "$webkit_log"
+              echo "H4_RUN_${run_number}_WEBKIT_PROCESS_LEFT_ALIVE=YES"
+              webkit_left=1
+            else
+              echo "H4_RUN_${run_number}_WEBKIT_PROCESS_LEFT_ALIVE=NO"
+            fi
+
+            if [ "$code" -eq 0 ] && [ "$server_left" -eq 0 ] && [ "$webkit_left" -eq 0 ]; then
+              echo "H4_RUN_${run_number}=GREEN"
+              echo "H4_RUN_${run_number}_OPEN_HANDLE_AFTER_TEST=NO"
+              echo "H4_RUN_${run_number}_HANG_REAPPEARED=NO"
+              echo "H4_RUN_${run_number}_END=$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+              return 0
+            fi
+
+            echo "H4_RUN_${run_number}=RED"
+            if [ "$server_left" -eq 1 ] || [ "$webkit_left" -eq 1 ]; then
+              echo "H4_RUN_${run_number}_OPEN_HANDLE_AFTER_TEST=YES"
+            else
+              echo "H4_RUN_${run_number}_OPEN_HANDLE_AFTER_TEST=NO"
+            fi
+            echo "H4_RUN_${run_number}_HANG_REAPPEARED=NO"
+            echo "H4_RUN_${run_number}_END=$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+            return 1
+          }
+
+          set +e
+          run_once 1
+          RUN_1_CODE=$?
+          set -e
+
+          if [ "$RUN_1_CODE" -ne 0 ]; then
+            echo "H4_RUN_2=NOT_RUN"
+            echo "H4_RUN_2_PROCESS_EXITED=NOT_RUN"
+            echo "H4_RUN_2_PROTOCOL_RESPECTED=YES"
+            exit 1
+          fi
+
+          echo "H4_RUN_2_PROTOCOL_GATE=RUN_1_GREEN"
+          set +e
+          run_once 2
+          RUN_2_CODE=$?
+          set -e
+          echo "H4_RUN_2_PROTOCOL_RESPECTED=YES"
+          exit "$RUN_2_CODE"
+
+      - name: Upload H4 validation evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: a35-h4-538-validation-${{ github.run_id }}
+          if-no-files-found: warn
+          retention-days: 14
+          path: |
+            ${{ runner.temp }}/test-538-h4-run-1.tap
+            ${{ runner.temp }}/test-538-h4-run-2.tap
+            ${{ runner.temp }}/h4-run-1-server-left.txt
+            ${{ runner.temp }}/h4-run-1-webkit-left.txt
+            ${{ runner.temp }}/h4-run-2-server-left.txt
+            ${{ runner.temp }}/h4-run-2-webkit-left.txt

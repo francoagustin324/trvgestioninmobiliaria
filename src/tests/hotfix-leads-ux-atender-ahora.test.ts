@@ -81,14 +81,15 @@ test('HOTFIX UX F: Todos sigue stage=Todas, default recent y Limpiar restaura PR
   assert.match(reset, /assignee:\s*'Todos'/);
 });
 
-test('HOTFIX UX G: selección activa queda centrada, verde sutil y con foreground claro accesible', () => {
+test('HOTFIX UX G: selección activa queda centrada, azul OrdenBroker sutil y con foreground claro accesible', () => {
   assert.match(css, /#crm\.pc-leads-redesign \.mvp-stage-counter\.active/);
   assert.match(css, /display: inline-flex/);
   assert.match(css, /align-items: center/);
   assert.match(css, /justify-content: center/);
-  assert.match(css, /background: rgba\(62, 105, 84, \.09\)/);
-  assert.match(css, /color: #eaf2ec/);
+  assert.match(css, /background: rgba\(41, 107, 233, \.09\)/);
+  assert.match(css, /color: var\(--ink\)/);
   assert.match(css, /#crm\.pc-leads-redesign \.mvp-stage-counter\.active:hover/);
+  assert.match(css, /background: rgba\(41, 107, 233, \.13\)/);
   assert.match(css, /#crm\.pc-leads-redesign \.mvp-stage-counter\.active b/);
   assert.equal(css.includes('!important'), false);
 });
@@ -97,9 +98,9 @@ test('HOTFIX UX H: target mobile real >=44 y cache-bust sólo de CSS modificados
   const mobile = queueCss.slice(queueCss.indexOf('@media (max-width: 720px)'));
   assert.match(mobile, /\.pc-supervised-attention-item\s*\{[\s\S]*?min-height:\s*44px/);
   assert.doesNotMatch(mobile, /\.pc-supervised-attention-item\s*\{[\s\S]*?min-height:\s*16px/);
-  assert.match(html, /lead-attention-queue\.css\?v=20260820-3/);
-  assert.match(html, /hotfix-leads-attention-ux\.css\?v=20260820-3/);
-  assert.match(html, /mvp-main\.js\?v=20260906-p1-4-a2-2-1/);
+  assert.match(html, /lead-attention-queue\.css\?v=20260928-block2g-daily-ops-2/);
+  assert.match(html, /hotfix-leads-attention-ux\.css\?v=20261006-block2h-promo-1/);
+  assert.match(html, /mvp-main\.js\?v=20260928-block2f-force-explicit-edit-1/);
   assert.match(queue, /sortLeads\(active, 'priority', today\)/);
   assert.match(queue, /Math\.min\(3/);
 });

@@ -1,0 +1,247 @@
+import {
+  readActiveOrganizationPreference,
+  resolveActiveOrganization,
+  tenantScopeFromActiveOrganization,
+  type TenantScope,
+} from './active-organization.js';
+import {
+  AUTH_SHARED_GENERATION_STALE,
+  assertSharedAuthGenerationCurrent,
+  assertSharedCloudSessionCurrent,
+  captureSharedAuthGeneration,
+  type SharedCloudSession,
+} from './auth-session-generation.js';
+import {
+  getCloudSession,
+  pullCloudData,
+  pushCloudData,
+} from './cloud-api-compatible.js';
+import {
+  isTenantCloudAuthorityFailure,
+  tenantCloudTransport,
+} from './tenant-cloud-context.js';
+import {
+  assertLocalWriteAuthorityCompatible,
+  TENANT_LOCAL_AUTHORIZATION_STALE,
+} from './cloud-records.js';
+import { fetchMembershipCatalog } from './membership-catalog.js';
+import type { CrmData } from './models.js';
+import { isTenantRecordConflict, tenantRecordConflictUserMessage } from './tenant-property-cas.js';
+import {
+  activateStorageForTenant,
+  replaceDataForTenant,
+  scopedInitialDataForTenant,
+  setActiveMemberId,
+  state,
+} from './store.js';
+import {
+  inspectTenantLegacyMigration,
+  markTenantSyncError,
+  migrateLegacyStorageToTenant,
+  tenantFingerprint,
+  tenantHasPendingLocalChanges,
+} from './tenant-storage.js';
+import {
+  TENANT_RUNTIME_SESSION_MISMATCH,
+  TENANT_RUNTIME_STALE,
+  assertTenantRuntimeLeaseCurrent,
+  captureTenantRuntimeLease,
+  installTenantRuntimeScope,
+  tenantRuntimeLeaseIsCurrent,
+  tenantScopesEqual,
+  type TenantRuntimeLease,
+} from './tenant-runtime.js';
+
+export const TENANT_HYDRATION_SESSION_CHANGED = 'TENANT_HYDRATION_SESSION_CHANGED';
+export const TENANT_LEGACY_STORAGE_RECOVERY_REQUIRED = 'TENANT_LEGACY_STORAGE_RECOVERY_REQUIRED';
+
+const HYDRATION_AUTHORITY_CODES = new Set<string>([
+  AUTH_SHARED_GENERATION_STALE,
+  TENANT_HYDRATION_SESSION_CHANGED,
+  TENANT_LOCAL_AUTHORIZATION_STALE,
+  TENANT_RUNTIME_SESSION_MISMATCH,
+  TENANT_RUNTIME_STALE,
+]);
+
+function assertHydrationAuthCurrent(
+  generation: string,
+  session: SharedCloudSession,
+  expectedUserId = session.userId,
+): void {
+  assertSharedAuthGenerationCurrent(generation);
+  assertSharedCloudSessionCurrent(generation, session);
+  if (session.userId !== expectedUserId) throw new Error(TENANT_HYDRATION_SESSION_CHANGED);
+}
+
+export function isHydrationAuthorityFailure(error: unknown): boolean {
+  if (isTenantCloudAuthorityFailure(error)) return true;
+  if (!error || typeof error !== 'object') return false;
+  const code = String((error as { code?: unknown }).code ?? '');
+  if (HYDRATION_AUTHORITY_CODES.has(code)) return true;
+  return error instanceof Error && HYDRATION_AUTHORITY_CODES.has(error.message);
+}
+
+export async function resolveTenantScopeForAuthenticatedSession(): Promise<TenantScope> {
+  const session = getCloudSession();
+  if (!session) throw new Error('Ingresá a tu cuenta para cargar la inmobiliaria.');
+  const authGeneration = captureSharedAuthGeneration();
+  assertHydrationAuthCurrent(authGeneration, session);
+
+  const memberships = await fetchMembershipCatalog();
+  assertHydrationAuthCurrent(authGeneration, session);
+
+  const context = resolveActiveOrganization({
+    userId: session.userId,
+    memberships,
+    persistedOrganizationPreference: readActiveOrganizationPreference(session.userId),
+  });
+  assertHydrationAuthCurrent(authGeneration, session);
+  return tenantScopeFromActiveOrganization(context);
+}
+
+export function prepareTenantLegacyStorage(scope: TenantScope): void {
+  const inspection = inspectTenantLegacyMigration(scope);
+  if (inspection.classification === 'NO_LEGACY' || inspection.classification === 'TARGET_ALREADY_EXISTS') {
+    return;
+  }
+  if (inspection.classification === 'EXACT_ORG_MATCH') {
+    const migration = migrateLegacyStorageToTenant(scope);
+    if (migration.classification === 'EXACT_ORG_MATCH' && migration.copied) return;
+    throw new Error(`${TENANT_LEGACY_STORAGE_RECOVERY_REQUIRED}:${migration.classification}`);
+  }
+  throw new Error(`${TENANT_LEGACY_STORAGE_RECOVERY_REQUIRED}:${inspection.classification}`);
+}
+
+function activateAuthenticatedMember(scope: TenantScope, runtimeLease: TenantRuntimeLease): void {
+  if (!tenantRuntimeLeaseIsCurrent(runtimeLease) || !tenantScopesEqual(runtimeLease.scope, scope)) return;
+  const member = state.crm.teamMembers.find(
+    (item) => item.userId === scope.userId && item.status !== 'Suspendido',
+  );
+  if (member) setActiveMemberId(member.id);
+}
+
+function emptyOperationalData(crm: CrmData): CrmData {
+  return {
+    ...structuredClone(crm),
+    activityLog: [],
+    clients: [],
+    properties: [],
+    contacts: [],
+    reminders: [],
+    fichas: [],
+    conversations: [],
+  };
+}
+
+function isUntouchedTenantDemoData(scope: TenantScope, crm: CrmData): boolean {
+  return tenantFingerprint(crm) === tenantFingerprint(scopedInitialDataForTenant(scope));
+}
+
+export async function hydrateTenantAfterAuth(): Promise<TenantScope> {
+  const scope = await resolveTenantScopeForAuthenticatedSession();
+  const session = getCloudSession();
+  if (!session || session.userId !== scope.userId) throw new Error(TENANT_HYDRATION_SESSION_CHANGED);
+  const authGeneration = captureSharedAuthGeneration();
+  assertHydrationAuthCurrent(authGeneration, session, scope.userId);
+
+  // A3.4 pre-runtime authority proof: exact current user + organization + ACTIVE
+  // membership is verified in the cloud before any tenant CRM snapshot can be
+  // loaded into state. tenantCloudTransport is itself generation/session fenced.
+  const transport = await tenantCloudTransport(scope);
+  assertHydrationAuthCurrent(authGeneration, session, scope.userId);
+
+  // Legacy inspection/migration may touch tenant-scoped storage, but only after
+  // current authority has been proven and immediately revalidated.
+  assertHydrationAuthCurrent(authGeneration, session, scope.userId);
+  prepareTenantLegacyStorage(scope);
+  assertHydrationAuthCurrent(authGeneration, session, scope.userId);
+
+  // This is the first operation allowed to make local tenant CRM data active.
+  activateStorageForTenant(scope);
+  assertHydrationAuthCurrent(authGeneration, session, scope.userId);
+  installTenantRuntimeScope(scope, scope.userId);
+  const runtimeLease = captureTenantRuntimeLease(scope);
+  const pendingLocalChanges = tenantHasPendingLocalChanges(scope);
+
+  // A3.5 fail-closed ordering: fetched membership metadata is not runtime
+  // authority yet. A dirty local snapshot must prove compatibility against the
+  // fetched cloud context before organization/team/member projection can mutate
+  // state or tenant storage.
+  if (pendingLocalChanges) {
+    try {
+      assertLocalWriteAuthorityCompatible(state.crm, transport.context, scope.userId);
+    } catch (error) {
+      const authorityMessage = error instanceof Error ? error.message : TENANT_LOCAL_AUTHORIZATION_STALE;
+      markTenantSyncError(scope, authorityMessage);
+      throw error;
+    }
+  }
+
+  const untouchedTenantDemo = isUntouchedTenantDemoData(scope, state.crm);
+  const tenantScoped = structuredClone(state.crm);
+  tenantScoped.organization = {
+    ...tenantScoped.organization,
+    id: scope.organizationId,
+    ...(transport.context.organization ? {
+      name: transport.context.organization.name,
+      seatLimit: transport.context.organization.seatLimit,
+      planLabel: transport.context.organization.planLabel,
+    } : {}),
+  };
+  tenantScoped.teamMembers = structuredClone(transport.context.members);
+  if (!replaceDataForTenant(scope, tenantScoped)) assertTenantRuntimeLeaseCurrent(runtimeLease);
+  let localSnapshot = structuredClone(state.crm);
+
+  if (pendingLocalChanges) {
+    try {
+      await pushCloudData(scope, localSnapshot);
+      assertTenantRuntimeLeaseCurrent(runtimeLease);
+      assertHydrationAuthCurrent(authGeneration, session, scope.userId);
+    } catch (error) {
+      if (!tenantRuntimeLeaseIsCurrent(runtimeLease)) {
+        assertTenantRuntimeLeaseCurrent(runtimeLease);
+      }
+      // A transient/offline fallback is permitted only while the exact authority
+      // proven before activation is still current. Authority failures propagate.
+      assertHydrationAuthCurrent(authGeneration, session, scope.userId);
+      if (isHydrationAuthorityFailure(error)) {
+        const authorityMessage = error instanceof Error ? error.message : TENANT_LOCAL_AUTHORIZATION_STALE;
+        markTenantSyncError(scope, authorityMessage);
+        throw error;
+      }
+      const message = isTenantRecordConflict(error)
+        ? tenantRecordConflictUserMessage()
+        : error instanceof Error ? error.message : 'No se pudieron sincronizar los cambios locales.';
+      markTenantSyncError(scope, message);
+      activateAuthenticatedMember(scope, runtimeLease);
+      return scope;
+    }
+  }
+
+  const cloud = await pullCloudData(scope, localSnapshot);
+  assertTenantRuntimeLeaseCurrent(runtimeLease);
+  assertHydrationAuthCurrent(authGeneration, session, scope.userId);
+  if (cloud) {
+    if (!replaceDataForTenant(scope, cloud)) assertTenantRuntimeLeaseCurrent(runtimeLease);
+  } else {
+    const firstData = untouchedTenantDemo
+      ? emptyOperationalData(localSnapshot)
+      : localSnapshot;
+    if (firstData !== localSnapshot) {
+      assertTenantRuntimeLeaseCurrent(runtimeLease);
+      if (!replaceDataForTenant(scope, firstData)) assertTenantRuntimeLeaseCurrent(runtimeLease);
+      localSnapshot = structuredClone(firstData);
+    }
+    await pushCloudData(scope, localSnapshot);
+    assertTenantRuntimeLeaseCurrent(runtimeLease);
+    assertHydrationAuthCurrent(authGeneration, session, scope.userId);
+    const refreshed = await pullCloudData(scope, localSnapshot);
+    assertTenantRuntimeLeaseCurrent(runtimeLease);
+    assertHydrationAuthCurrent(authGeneration, session, scope.userId);
+    if (refreshed && !replaceDataForTenant(scope, refreshed)) assertTenantRuntimeLeaseCurrent(runtimeLease);
+  }
+  assertTenantRuntimeLeaseCurrent(runtimeLease);
+  assertHydrationAuthCurrent(authGeneration, session, scope.userId);
+  activateAuthenticatedMember(scope, runtimeLease);
+  return scope;
+}

@@ -1,0 +1,130 @@
+name: A3.5 H5 R1 F1 Apply
+on:
+  push:
+    branches: [validation/a35-h5-r1-family-sanitization]
+    paths: [.github/workflows/a35-h5-r1-f1-apply.yml]
+permissions:
+  contents: write
+jobs:
+  apply:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+        with: {fetch-depth: 0}
+      - name: Apply targeted F1 harness updates
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          helper_import = "import { installA35H5R1ModernTenantHarness } from './a35-h5-r1-modern-tenant-harness.js';\n"
+
+          def replace_once(text, old, new, file):
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f'{file}: expected exactly one anchor, got {count}: {old[:100]!r}')
+              return text.replace(old, new, 1)
+
+          def add_import(text, file):
+              if helper_import.strip() in text:
+                  return text
+              marker = "from '../models.js';\n"
+              idx = text.find(marker)
+              if idx < 0:
+                  raise SystemExit(f'{file}: models import anchor missing')
+              return text[:idx+len(marker)] + helper_import + text[idx+len(marker):]
+
+          specs = []
+
+          # Existing local crm variables: only install authority with the actor seeded by the same harness.
+          specs.append((
+            'src/tests/b1-2-3-compact-leads-real-app.test.ts',
+            "  const crm = visualCrm();\n",
+            "  const crm = visualCrm();\n  await installA35H5R1ModernTenantHarness(context, crm, 'compact-owner');\n",
+            None, None,
+          ))
+          specs.append((
+            'src/tests/b1-2-3-responsive-matrix-real-app.test.ts',
+            "  const crm = responsiveCrm();\n",
+            "  const crm = responsiveCrm();\n  await installA35H5R1ModernTenantHarness(context, crm, 'b1-2-3-responsive-owner');\n",
+            None, None,
+          ))
+
+          # Single-owner fixtures: bind one exact fixture object to both local seed and synthetic authority.
+          for file, fixture_fn, actor in [
+            ('src/tests/b1-2-4-architecture-runtime.test.ts', 'crmFixture()', "'b124-owner'"),
+            ('src/tests/b1-2-4-responsive-real-app.test.ts', 'crmFixture()', "'b124-owner'"),
+            ('src/tests/b1-2-5-responsive-real-app.test.ts', 'fixture()', "crm.teamMembers[0]?.userId ?? ''"),
+            ('src/tests/b1-2-6-mobile-header-alerts.test.ts', 'fixture()', "crm.teamMembers[0]?.userId ?? ''"),
+            ('src/tests/b1-2-7-responsive-real-app.test.ts', 'fixture()', "crm.teamMembers[0]?.userId ?? ''"),
+          ]:
+              anchor = "  await context.addInitScript(({ data }) => {\n"
+              insert = f"  const crm = {fixture_fn};\n  await installA35H5R1ModernTenantHarness(context, crm, {actor});\n  await context.addInitScript(({{ data }}) => {{\n"
+              specs.append((file, anchor, insert, f"{{ data: {fixture_fn} }}", "{ data: crm }"))
+
+          # Account-menu multi-role fixture.
+          specs.append((
+            'src/tests/b1-2-8-account-menu-responsive-real-app.test.ts',
+            "  await context.addInitScript(({ data, backup, user, email, memberId, keys, sync, marker }) => {\n",
+            "  const crm = crmFixture(role);\n  await installA35H5R1ModernTenantHarness(context, crm, identity.userId);\n  await context.addInitScript(({ data, backup, user, email, memberId, keys, sync, marker }) => {\n",
+            "    data: crmFixture(role),\n", "    data: crm,\n",
+          ))
+
+          # B1.2.9 roster/role semantics: preserve the complete three-member fixture.
+          specs.append((
+            'src/tests/b1-2-9-multiuser-permissions-real-app.test.ts',
+            "  await context.addInitScript(({ data, backup, session, memberId, keys, sync, marker, trackRestricted }) => {\n",
+            "  const crm = crmFixture(role);\n  await installA35H5R1ModernTenantHarness(context, crm, identity.userId);\n  await context.addInitScript(({ data, backup, session, memberId, keys, sync, marker, trackRestricted }) => {\n",
+            "    data: crmFixture(role),\n", "    data: crm,\n",
+          ))
+
+          # B1.3.1 role-aware fixture.
+          specs.append((
+            'src/tests/b1-3-1-lead-create-real-app.test.ts',
+            "  await context.addInitScript(({ crm, session, memberId, keys, markerKey }) => {\n",
+            "  const crm = fixture(role);\n  await installA35H5R1ModernTenantHarness(context, crm, current.userId);\n  await context.addInitScript(({ crm, session, memberId, keys, markerKey }) => {\n",
+            "    crm: fixture(role),\n", "    crm,\n",
+          ))
+
+          for file, anchor, replacement, old_payload, new_payload in specs:
+              path = Path(file)
+              text = add_import(path.read_text(), file)
+              text = replace_once(text, anchor, replacement, file)
+              if old_payload:
+                  text = replace_once(text, old_payload, new_payload, file)
+              path.write_text(text)
+
+          # C13 seeds through a standalone helper rather than createContext.
+          file = 'src/tests/c13-leads-visual-professional-browser.test.ts'
+          path = Path(file)
+          text = add_import(path.read_text(), file)
+          text = replace_once(
+              text,
+              "async function seedContext(context: BrowserContext): Promise<void> {\n  await context.addInitScript(({ crm, storageKey }) => {\n",
+              "async function seedContext(context: BrowserContext): Promise<void> {\n  const crm = fixture();\n  await installA35H5R1ModernTenantHarness(context, crm, USER_ID);\n  await context.addInitScript(({ crm, storageKey }) => {\n",
+              file,
+          )
+          text = replace_once(text, "  }, { crm: fixture(), storageKey: STORAGE_KEY });\n", "  }, { crm, storageKey: STORAGE_KEY });\n", file)
+          path.write_text(text)
+
+          print('F1_TARGETED_FILES=11')
+          PY
+      - name: Commit F1 test harness changes
+        shell: bash
+        run: |
+          git config user.name francoagustin324
+          git config user.email francoagustinsolis@gmail.com
+          git add src/tests/b1-2-3-compact-leads-real-app.test.ts \
+                  src/tests/b1-2-3-responsive-matrix-real-app.test.ts \
+                  src/tests/b1-2-4-architecture-runtime.test.ts \
+                  src/tests/b1-2-4-responsive-real-app.test.ts \
+                  src/tests/b1-2-5-responsive-real-app.test.ts \
+                  src/tests/b1-2-6-mobile-header-alerts.test.ts \
+                  src/tests/b1-2-7-responsive-real-app.test.ts \
+                  src/tests/b1-2-8-account-menu-responsive-real-app.test.ts \
+                  src/tests/b1-2-9-multiuser-permissions-real-app.test.ts \
+                  src/tests/b1-3-1-lead-create-real-app.test.ts \
+                  src/tests/c13-leads-visual-professional-browser.test.ts
+          git diff --cached --check
+          git commit -m 'test: align H5 R1 family 1 tenant bootstrap'
+          git push origin HEAD:validation/a35-h5-r1-family-sanitization

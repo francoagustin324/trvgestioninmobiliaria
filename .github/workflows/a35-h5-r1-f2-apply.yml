@@ -1,0 +1,47 @@
+name: A3.5 H5 R1 F2 Apply
+on:
+  push:
+    branches: [validation/a35-h5-r1-family-sanitization]
+    paths: [.github/workflows/a35-h5-r1-f2-apply.yml]
+permissions:
+  contents: write
+jobs:
+  apply:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+        with: {fetch-depth: 0}
+      - name: Apply F2 phased cloud-outage harness
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          file='src/tests/b1-3-2-android-lead-save-real-app.test.ts'
+          p=Path(file); text=p.read_text()
+          imp="import { activateA35H5R1RecordsOutage, armA35H5R1RecordsOutage, installA35H5R1ModernTenantHarness } from './a35-h5-r1-modern-tenant-harness.js';\n"
+          marker="from '../models.js';\n"
+          if imp.strip() not in text:
+            assert marker in text
+            text=text.replace(marker, marker+imp, 1)
+          old="""  const current = identity(role);\n  const context = await browser.newContext(contextOptions(viewport));\n  await context.addInitScript(({ crm, session, memberId, keys, markerKey }) => {\n"""
+          new="""  const current = identity(role);\n  const context = await browser.newContext(contextOptions(viewport));\n  const crm = fixture(role, clients);\n  await installA35H5R1ModernTenantHarness(context, crm, current.userId);\n  await context.addInitScript(({ crm, session, memberId, keys, markerKey }) => {\n"""
+          assert text.count(old)==1; text=text.replace(old,new,1)
+          assert text.count("    crm: fixture(role, clients),\n")==1
+          text=text.replace("    crm: fixture(role, clients),\n","    crm,\n",1)
+          old="""async function installCloudFailure(context: BrowserContext, latency = 350): Promise<void> {\n  await context.route('**/api/cloud-config', async (route) => {\n    await new Promise((resolve) => setTimeout(resolve, latency));\n    await route.fulfill({\n      status: 503,\n      contentType: 'application/json',\n      body: JSON.stringify({ message: 'Nube B1.3.2 temporalmente no disponible.' }),\n    });\n  });\n}\n\nasync function load(page: Page, url: string): Promise<void> {\n  await page.goto(url, { waitUntil: 'domcontentloaded' });\n  await page.waitForSelector('#crm.active', { state: 'visible', timeout: 25_000 });\n}\n"""
+          new="""async function installCloudFailure(context: BrowserContext, _latency = 350): Promise<void> {\n  armA35H5R1RecordsOutage(context);\n}\n\nasync function load(page: Page, url: string): Promise<void> {\n  await page.goto(url, { waitUntil: 'domcontentloaded' });\n  await page.waitForSelector('#crm.active', { state: 'visible', timeout: 25_000 });\n  activateA35H5R1RecordsOutage(page.context());\n}\n"""
+          assert text.count(old)==1; text=text.replace(old,new,1)
+          old="""  const reopened = await browser.newContext({ ...contextOptions({ width: 390, height: 844 }), storageState });\n  await installCloudFailure(reopened, 80);\n  const page = await reopened.newPage();\n"""
+          new="""  const reopened = await browser.newContext({ ...contextOptions({ width: 390, height: 844 }), storageState });\n  const reopenedCrm = fixture('Dueño');\n  await installA35H5R1ModernTenantHarness(reopened, reopenedCrm, identity('Dueño').userId);\n  await installCloudFailure(reopened, 80);\n  const page = await reopened.newPage();\n"""
+          assert text.count(old)==1; text=text.replace(old,new,1)
+          p.write_text(text)
+          PY
+      - name: Commit F2 test harness change
+        shell: bash
+        run: |
+          git config user.name francoagustin324
+          git config user.email francoagustinsolis@gmail.com
+          git add src/tests/b1-3-2-android-lead-save-real-app.test.ts
+          git diff --cached --check
+          git commit -m 'test: align H5 R1 family 2 phased cloud bootstrap'
+          git push origin HEAD:validation/a35-h5-r1-family-sanitization

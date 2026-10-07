@@ -1,3 +1,4 @@
+import { PRODUCT_BRAND } from './branding.js';
 import type { Client, WhatsAppConversation } from './models.js';
 import { saveData, state } from './store.js';
 import { visibleClients, visibleConversations } from './team-access.js';
@@ -329,7 +330,7 @@ function renderConfirmation(attempt: PendingWhatsAppAttempt): void {
   panel().dataset.contactBlocked = 'false';
   panel().dataset.identityFingerprint = attempt.identity.fingerprint;
   panel().innerHTML = `<header class="whatsapp-contact-heading">
-      <div><span class="eyebrow">Confirmación</span><h2 id="whatsapp-contact-title">¿Enviaste el mensaje a ${escapeHtml(client.name)}?</h2><p>PropControl nunca lo registra automáticamente.</p></div>
+      <div><span class="eyebrow">Confirmación</span><h2 id="whatsapp-contact-title">¿Enviaste el mensaje a ${escapeHtml(client.name)}?</h2><p>${PRODUCT_BRAND.name} nunca lo registra automáticamente.</p></div>
       <button type="button" class="quiet-button" data-whatsapp-not-yet aria-label="Cerrar">×</button>
     </header>
     <div class="whatsapp-return-summary"><span>WhatsApp abierto</span><strong>${escapeHtml(attempt.phone)}</strong><p>${escapeHtml(attempt.message)}</p></div>

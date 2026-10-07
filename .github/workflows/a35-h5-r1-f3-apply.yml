@@ -1,0 +1,41 @@
+name: A3.5 H5 R1 F3 Apply
+on:
+  push:
+    branches: [validation/a35-h5-r1-family-sanitization]
+    paths: [.github/workflows/a35-h5-r1-f3-apply.yml]
+permissions:
+  contents: write
+jobs:
+  apply:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+        with: {fetch-depth: 0}
+      - name: Apply F3 phased cloud-outage harness
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          files=['src/tests/b1-3-3-audit-blockers-real-app.test.ts','src/tests/b1-3-3-real-use-real-app.test.ts']
+          imp="import { activateA35H5R1RecordsOutage, armA35H5R1RecordsOutage, installA35H5R1ModernTenantHarness } from './a35-h5-r1-modern-tenant-harness.js';\n"
+          for file in files:
+            p=Path(file); text=p.read_text(); marker="from '../models.js';\n"
+            if imp.strip() not in text:
+              assert marker in text; text=text.replace(marker, marker+imp, 1)
+            old="""  const context = await browser.newContext(contextOptions(viewport));\n  await context.route('**/api/cloud-config', async (route) => {\n    await route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ message: 'Nube de prueba no disponible.' }) });\n  });\n"""
+            new="""  const context = await browser.newContext(contextOptions(viewport));\n  await installA35H5R1ModernTenantHarness(context, crm, current.userId);\n  armA35H5R1RecordsOutage(context);\n"""
+            assert text.count(old)==1, file; text=text.replace(old,new,1)
+            old_load="""  await page.waitForSelector('#crm.active', { state: 'visible', timeout: 25_000 });\n  await page.locator('#mvp-lead-order').waitFor({ state: 'attached' });\n  await page.waitForFunction(() => document.querySelector<HTMLSelectElement>('#mvp-lead-order')?.value === 'recent');\n"""
+            new_load=old_load+"  activateA35H5R1RecordsOutage(page.context());\n"
+            assert text.count(old_load)==1, file; text=text.replace(old_load,new_load,1)
+            p.write_text(text)
+          PY
+      - name: Commit F3 test harness changes
+        shell: bash
+        run: |
+          git config user.name francoagustin324
+          git config user.email francoagustinsolis@gmail.com
+          git add src/tests/b1-3-3-audit-blockers-real-app.test.ts src/tests/b1-3-3-real-use-real-app.test.ts
+          git diff --cached --check
+          git commit -m 'test: align H5 R1 family 3 phased cloud bootstrap'
+          git push origin HEAD:validation/a35-h5-r1-family-sanitization

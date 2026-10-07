@@ -8,6 +8,7 @@ import { prioritizeActionableMobileAttention } from '../leads-mobile-priority-ux
 
 const USER_ID = 'priority-webkit-owner';
 const ORG_ID = 'priority-webkit-org';
+const GENERATION = 'priority-webkit-generation-a34-1';
 const STORAGE_KEY = `trv-crm-basico:user:${USER_ID}`;
 const WEBKIT_CAPTURE_DIR = 'artifacts/leads-mobile-webkit-validation';
 const PRIORITY_MODULE_URL = '/dist/leads-mobile-priority-ux.js?v=20260809-1';
@@ -114,17 +115,113 @@ async function stopServer(server: ChildProcess): Promise<void> {
   });
 }
 
+function syntheticMembership() {
+  return {
+    organization_id: ORG_ID,
+    member_id: 1,
+    user_id: USER_ID,
+    role: 'owner',
+    status: 'active',
+    display_name: owner().name,
+    email: owner().email,
+    phone: owner().phone,
+    created_at: '2026-08-09T12:00:00.000Z',
+    last_active_at: '2026-09-13T18:00:00.000Z',
+  };
+}
+
+function syntheticJson(body: unknown, status = 200) {
+  return {
+    status,
+    contentType: 'application/json',
+    headers: { 'access-control-allow-origin': '*' },
+    body: JSON.stringify(body),
+  };
+}
+
+async function installSyntheticAuthority(context: BrowserContext, origin: string): Promise<void> {
+  let syntheticRecords: unknown[] = [];
+
+  await context.route('**/api/cloud-config', async (route) => {
+    await route.fulfill(syntheticJson({
+      configured: true,
+      url: origin,
+      publishableKey: 'priority-webkit-publishable-key',
+    }));
+  });
+
+  await context.route('**/rest/v1/**', async (route) => {
+    const request = route.request();
+    const url = new URL(request.url());
+
+    if (request.method() === 'OPTIONS') {
+      await route.fulfill({
+        status: 204,
+        headers: {
+          'access-control-allow-origin': '*',
+          'access-control-allow-headers': '*',
+          'access-control-allow-methods': 'GET,POST,DELETE,OPTIONS',
+        },
+        body: '',
+      });
+      return;
+    }
+
+    if (url.pathname.endsWith('/rest/v1/rpc/activate_my_organization_memberships')) {
+      await route.fulfill(syntheticJson({}));
+      return;
+    }
+
+    if (url.pathname.endsWith('/rest/v1/organization_members')) {
+      await route.fulfill(syntheticJson([syntheticMembership()]));
+      return;
+    }
+
+    if (url.pathname.endsWith('/rest/v1/rpc/visit_transaction_authority_active_v2')) {
+      await route.fulfill(syntheticJson(false));
+      return;
+    }
+
+    if (url.pathname.endsWith('/rest/v1/propcontrol_records')) {
+      if (request.method() === 'GET') {
+        await route.fulfill(syntheticJson(syntheticRecords));
+        return;
+      }
+      if (request.method() === 'POST') {
+        const body = request.postDataJSON();
+        syntheticRecords = Array.isArray(body) ? structuredClone(body) : [structuredClone(body)];
+        await route.fulfill(syntheticJson(syntheticRecords, 201));
+        return;
+      }
+      if (request.method() === 'DELETE') {
+        syntheticRecords = [];
+        await route.fulfill({ status: 204, headers: { 'access-control-allow-origin': '*' }, body: '' });
+        return;
+      }
+    }
+
+    if (url.pathname.endsWith('/rest/v1/fichas')) {
+      await route.fulfill(syntheticJson([]));
+      return;
+    }
+
+    await route.fulfill(syntheticJson({ error: 'UNEXPECTED_SYNTHETIC_ENDPOINT', path: url.pathname }, 500));
+  });
+}
+
 async function seedContext(context: BrowserContext): Promise<void> {
   const actorKey = `cloud:${USER_ID}`;
   const identityKey = `propcontrol-whatsapp-human-identity-v1:${encodeURIComponent(ORG_ID)}:1:${encodeURIComponent(actorKey)}`;
-  await context.addInitScript(({ crm, identityStorageKey, storageKey }) => {
+  await context.addInitScript(({ crm, generation, identityStorageKey, storageKey }) => {
     localStorage.setItem('propcontrol-cloud-session-v1', JSON.stringify({
       accessToken: 'access',
       refreshToken: 'refresh',
       expiresAt: Date.now() + 3_600_000,
       userId: 'priority-webkit-owner',
       email: 'franco@propcontrol.test',
+      __propcontrolAuthGeneration: generation,
     }));
+    localStorage.setItem('propcontrol-cloud-auth-generation-v1', generation);
     localStorage.setItem(storageKey, JSON.stringify(crm));
     localStorage.setItem(`${storageKey}:sync`, JSON.stringify({
       dirty: false,
@@ -141,10 +238,10 @@ async function seedContext(context: BrowserContext): Promise<void> {
       humanName: 'Franco Solis',
       confirmedAt: '2026-08-09T18:00:00.000Z',
     }));
-  }, { crm: fixture(), identityStorageKey: identityKey, storageKey: STORAGE_KEY });
+  }, { crm: fixture(), generation: GENERATION, identityStorageKey: identityKey, storageKey: STORAGE_KEY });
 }
 
-async function chromiumAndroidContext(browser: Browser, width: number): Promise<BrowserContext> {
+async function chromiumAndroidContext(browser: Browser, width: number, origin: string): Promise<BrowserContext> {
   const context = await browser.newContext({
     viewport: { width, height: 844 },
     screen: { width, height: 844 },
@@ -155,11 +252,12 @@ async function chromiumAndroidContext(browser: Browser, width: number): Promise<
     colorScheme: 'dark',
     userAgent: 'Mozilla/5.0 (Linux; Android 14; moto g54 5G) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Mobile Safari/537.36',
   });
+  await installSyntheticAuthority(context, origin);
   await seedContext(context);
   return context;
 }
 
-async function webkitContext(browser: Browser, width: number): Promise<BrowserContext> {
+async function webkitContext(browser: Browser, width: number, origin: string): Promise<BrowserContext> {
   const context = await browser.newContext({
     viewport: { width, height: 844 },
     screen: { width, height: 844 },
@@ -168,6 +266,7 @@ async function webkitContext(browser: Browser, width: number): Promise<BrowserCo
     timezoneId: 'America/Argentina/Cordoba',
     colorScheme: 'dark',
   });
+  await installSyntheticAuthority(context, origin);
   await seedContext(context);
   return context;
 }
@@ -295,7 +394,7 @@ test('WebKit regression #572: scheduleEnhance no expone buckets móviles con cou
   const port = 62040 + Math.floor(Math.random() * 80);
   const server = await startServer(port);
   const browser = await webkit.launch({ headless: true });
-  const context = await webkitContext(browser, 375);
+  const context = await webkitContext(browser, 375, `http://127.0.0.1:${port}`);
 
   try {
     const page = await context.newPage();
@@ -321,7 +420,7 @@ test('Chromium: prioridad accionable queda visible sin swipe y los estados múlt
   const port = 62020 + Math.floor(Math.random() * 80);
   const server = await startServer(port);
   const browser = await chromium.launch({ executablePath, headless: true });
-  const context = await chromiumAndroidContext(browser, 390);
+  const context = await chromiumAndroidContext(browser, 390, `http://127.0.0.1:${port}`);
 
   try {
     const page = await context.newPage();
@@ -370,7 +469,7 @@ test('WebKit automatizado: Leads móvil mantiene prioridad, CTA, pipeline y geom
 
   try {
     for (const width of [375, 390, 430]) {
-      const context = await webkitContext(browser, width);
+      const context = await webkitContext(browser, width, `http://127.0.0.1:${port}`);
       try {
         const page = await context.newPage();
         await load(page, `http://127.0.0.1:${port}`);

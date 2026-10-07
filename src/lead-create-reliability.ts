@@ -1,22 +1,45 @@
+import type { TenantScope } from './active-organization.js';
 import { queueCloudSave } from './cloud-api-compatible.js';
 import { clientFromFormValues, upsertClient } from './client-editor.js';
 import { resolveLeadSchedule } from './lead-create-schedule.js';
 import { activitiesForClientSave, localIsoDate } from './lead-pipeline.js';
-import type { Client } from './models.js';
-import { findDuplicateClient, isPlausiblePhone } from './phone-normalizer.js';
-import { state } from './store.js';
-import { readLocalSnapshot, writeLocalSnapshot } from './sync-safety.js';
-import { activeMember, addActivity, canAccessModule, visibleClients } from './team-access.js';
+import type { Client, TeamMember } from './models.js';
+import { findDuplicateClient, findDuplicateClientByEmail, isPlausiblePhone } from './phone-normalizer.js';
+import { authenticatedTenantMember, state } from './store.js';
+import {
+  assertTenantCrmScope,
+  readTenantSnapshot,
+  tenantFingerprint,
+  writeTenantSnapshot,
+} from './tenant-storage.js';
+import {
+  assertTenantRuntimeLeaseCurrent,
+  captureTenantRuntimeLease,
+  requireCurrentTenantScope,
+  tenantRuntimeLeaseIsCurrent,
+  type TenantRuntimeLease,
+} from './tenant-runtime.js';
+import {
+  addActivityForAuthenticatedTenant,
+  canAccessModule,
+  visibleClients,
+} from './team-access.js';
 import { formValues, nextId, setNotice } from './utils.js';
 
 const submittingForms = new WeakSet<HTMLFormElement>();
+const formTenantContexts = new WeakMap<HTMLFormElement, LeadFormTenantContext>();
 const ENHANCED = 'b131Enhanced';
-const ACTOR = 'b131Actor';
 const EDITING = 'b131Editing';
 const DUPLICATE = 'b132DuplicateClientId';
 const SAVE_DELAY_MS = 120;
 
 type FeedbackKind = 'idle' | 'working' | 'success' | 'error' | 'duplicate';
+
+interface LeadFormTenantContext {
+  scope: TenantScope;
+  runtimeLease: TenantRuntimeLease;
+  viewMemberId: number;
+}
 
 function formError(form: HTMLFormElement): HTMLElement | null {
   return form.querySelector<HTMLElement>('[data-lead-error]');
@@ -71,33 +94,45 @@ function showError(
   focusField(field);
 }
 
-function showDuplicate(form: HTMLFormElement, duplicate: Client, phoneField: HTMLInputElement | null): void {
+function showDuplicate(
+  form: HTMLFormElement,
+  duplicate: Client,
+  field: HTMLInputElement | null,
+  kind: 'phone' | 'email',
+): void {
   clearDuplicateActions(form);
   form.dataset[DUPLICATE] = String(duplicate.id);
-  const message = `Este WhatsApp ya pertenece al lead ${duplicate.name}.`;
+  const visible = visibleClients().some((client) => client.id === duplicate.id);
+  const contactLabel = kind === 'phone' ? 'WhatsApp' : 'email';
+  const message = visible
+    ? `Este ${contactLabel} ya pertenece al lead ${duplicate.name}.`
+    : `Ya existe un lead con este ${contactLabel} en esta inmobiliaria.`;
   const error = formError(form);
   if (error) {
     error.textContent = message;
     error.hidden = false;
   }
   setStatus(form, message, 'duplicate');
-  focusField(phoneField);
+  focusField(field);
 
   const actions = document.createElement('div');
   actions.dataset.leadDuplicateActions = '';
   actions.className = 'b132-duplicate-actions';
 
-  const open = document.createElement('button');
-  open.type = 'button';
-  open.className = 'secondary';
-  open.dataset.openExistingLead = String(duplicate.id);
-  open.textContent = 'Abrir lead existente';
+  if (visible) {
+    const open = document.createElement('button');
+    open.type = 'button';
+    open.className = 'secondary';
+    open.dataset.openExistingLead = String(duplicate.id);
+    open.textContent = 'Abrir lead existente';
+    actions.append(open);
+  }
 
   const correct = document.createElement('button');
   correct.type = 'button';
   correct.className = 'secondary';
-  correct.dataset.correctDuplicatePhone = '';
-  correct.textContent = 'Corregir número';
+  correct.dataset.correctDuplicateContact = kind;
+  correct.textContent = kind === 'phone' ? 'Corregir número' : 'Corregir email';
 
   const cancel = document.createElement('button');
   cancel.type = 'button';
@@ -105,7 +140,7 @@ function showDuplicate(form: HTMLFormElement, duplicate: Client, phoneField: HTM
   cancel.dataset.cancelDuplicateLead = '';
   cancel.textContent = 'Cancelar';
 
-  actions.append(open, correct, cancel);
+  actions.append(correct, cancel);
   formStatus(form)?.after(actions);
 }
 
@@ -120,35 +155,56 @@ function capturedEditingId(form: HTMLFormElement): number | null {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
+function leadFormTenantContext(form: HTMLFormElement): LeadFormTenantContext | null {
+  return formTenantContexts.get(form) ?? null;
+}
+
+function captureLeadFormTenantContext(form: HTMLFormElement): LeadFormTenantContext {
+  const existing = leadFormTenantContext(form);
+  if (existing) return existing;
+  const scope = requireCurrentTenantScope();
+  assertTenantCrmScope(scope, state.crm);
+  const context = Object.freeze({
+    scope: Object.freeze({ ...scope }),
+    runtimeLease: captureTenantRuntimeLease(scope),
+    viewMemberId: state.activeMemberId,
+  });
+  formTenantContexts.set(form, context);
+  return context;
+}
+
+function assertLeadFormTenantCurrent(context: LeadFormTenantContext): void {
+  assertTenantRuntimeLeaseCurrent(context.runtimeLease);
+  assertTenantCrmScope(context.scope, state.crm);
+}
+
+function authenticatedWriteMember(scope: TenantScope): TeamMember {
+  const member = authenticatedTenantMember(scope);
+  const matches = state.crm.teamMembers.filter((candidate) => (
+    candidate.userId === scope.userId && candidate.status === 'Activo'
+  ));
+  if (!member || matches.length !== 1 || matches[0]?.id !== member.id) {
+    throw new Error('AUTHENTICATED_TENANT_MEMBER_REQUIRED');
+  }
+  return member;
+}
+
 function formStillAuthorized(form: HTMLFormElement): boolean {
-  const member = activeMember();
-  const actorId = Number(form.dataset[ACTOR]);
+  const context = leadFormTenantContext(form);
   const editingId = capturedEditingId(form);
-  if (!form.isConnected || member.status !== 'Activo') return false;
+  if (!context || !form.isConnected || !tenantRuntimeLeaseIsCurrent(context.runtimeLease)) return false;
+  // activeMemberId remains a view preference only. A change invalidates the old visual form,
+  // but this value is never used as tenant authority, creator, assignee or activity actor.
+  if (state.activeMemberId !== context.viewMemberId) return false;
   if (!canAccessModule('crm') || state.activeModule !== 'crm' || !state.openForms.client) return false;
-  if (member.id !== actorId || currentEditingId() !== editingId) return false;
+  if (currentEditingId() !== editingId) return false;
   if (editingId !== null && !visibleClients().some((client) => client.id === editingId)) return false;
   return true;
 }
 
-function updateSuggestedSchedule(form: HTMLFormElement): void {
-  if (capturedEditingId(form) !== null) return;
-  const phone = form.elements.namedItem('phone');
-  const action = form.elements.namedItem('nextAction');
+function configureScheduleConstraints(form: HTMLFormElement): void {
   const date = form.elements.namedItem('nextFollowUp');
-  if (!(phone instanceof HTMLInputElement)
-    || !(action instanceof HTMLInputElement)
-    || !(date instanceof HTMLInputElement)) return;
-
-  date.min = localIsoDate();
-  if (date.dataset.b131Manual !== 'true' && (!date.value || date.dataset.b131Suggested === 'true')) {
-    date.value = localIsoDate();
-    date.dataset.b131Suggested = 'true';
-  }
-  if (action.dataset.b131Manual !== 'true' && (!action.value || action.dataset.b131Suggested === 'true')) {
-    action.value = isPlausiblePhone(phone.value) ? 'Contactar por WhatsApp' : 'Contactar por primera vez';
-    action.dataset.b131Suggested = 'true';
-  }
+  if (date instanceof HTMLInputElement) date.min = localIsoDate();
 }
 
 function markManualInput(event: Event): void {
@@ -221,17 +277,19 @@ function bindDuplicateActions(form: HTMLFormElement): void {
       openExistingLead(form, Number(open.dataset.openExistingLead));
       return;
     }
-    if (target.closest('[data-correct-duplicate-phone]')) {
+    const correct = target.closest<HTMLButtonElement>('[data-correct-duplicate-contact]');
+    if (correct) {
       event.preventDefault();
+      const fieldName = correct.dataset.correctDuplicateContact === 'email' ? 'email' : 'phone';
       clearDuplicateActions(form);
       const error = formError(form);
       if (error) { error.hidden = true; error.textContent = ''; }
-      setStatus(form, 'Corregí el número y volvé a guardar.', 'idle');
-      const phone = form.elements.namedItem('phone');
-      if (phone instanceof HTMLInputElement) {
-        phone.removeAttribute('aria-invalid');
-        phone.focus({ preventScroll: false });
-        phone.select();
+      setStatus(form, fieldName === 'email' ? 'Corregí el email y volvé a guardar.' : 'Corregí el número y volvé a guardar.', 'idle');
+      const field = form.elements.namedItem(fieldName);
+      if (field instanceof HTMLInputElement) {
+        field.removeAttribute('aria-invalid');
+        field.focus({ preventScroll: false });
+        field.select();
       }
       return;
     }
@@ -245,13 +303,19 @@ function bindDuplicateActions(form: HTMLFormElement): void {
 export function enhanceLeadForm(): void {
   const form = document.querySelector<HTMLFormElement>('#mvp-lead-form:not(.collapsed)');
   if (!form || form.dataset[ENHANCED] === 'true') return;
-  const member = activeMember();
   const heading = form.querySelector<HTMLElement>('.mvp-form-heading');
   const submit = form.querySelector<HTMLButtonElement>('button[type="submit"]');
   if (!heading || !submit) return;
 
+  try {
+    captureLeadFormTenantContext(form);
+  } catch {
+    showError(form, 'No se pudo fijar el tenant de este formulario. Volvé a abrir Nuevo lead.');
+    submit.disabled = true;
+    return;
+  }
+
   form.dataset[ENHANCED] = 'true';
-  form.dataset[ACTOR] = String(member.id);
   form.dataset[EDITING] = currentEditingId() === null ? '' : String(currentEditingId());
   form.classList.add('b131-lead-form');
   form.noValidate = true;
@@ -274,11 +338,9 @@ export function enhanceLeadForm(): void {
   });
   form.before(backdrop);
 
-  const phone = form.elements.namedItem('phone');
-  if (phone instanceof HTMLInputElement) phone.addEventListener('input', () => updateSuggestedSchedule(form));
   form.addEventListener('input', markManualInput);
   bindDuplicateActions(form);
-  updateSuggestedSchedule(form);
+  configureScheduleConstraints(form);
 
   requestAnimationFrame(() => {
     if (form.isConnected) form.scrollIntoView({ block: 'start', behavior: 'auto' });
@@ -324,15 +386,10 @@ function validateAndResolveSchedule(
 
   const action = values.nextAction?.trim() || '';
   const date = values.nextFollowUp?.trim() || '';
-  if (editingId !== null && !action && !date) return true;
-  if (editingId !== null && Boolean(action) !== Boolean(date)) {
-    const target = action ? form.elements.namedItem('nextFollowUp') : form.elements.namedItem('nextAction');
-    showError(
-      form,
-      'Completá la próxima acción y su fecha, o dejá ambos campos vacíos.',
-      target instanceof HTMLInputElement ? target : null,
-    );
-    return false;
+  if (!action && !date) {
+    values.nextAction = '';
+    values.nextFollowUp = '';
+    return true;
   }
 
   const schedule = resolveLeadSchedule({
@@ -351,22 +408,44 @@ function validateAndResolveSchedule(
   return true;
 }
 
-function locallyContainsClient(client: Client): boolean {
-  const snapshot = readLocalSnapshot();
+function tenantSnapshotContainsClient(
+  context: LeadFormTenantContext,
+  client: Client,
+): boolean {
+  assertLeadFormTenantCurrent(context);
+  const snapshot = readTenantSnapshot(context.scope);
   return Boolean(snapshot?.clients.some((item) => item.id === client.id && item.phone === client.phone));
 }
 
-function rollbackLocalState(previousCrm: typeof state.crm): void {
-  state.crm = previousCrm;
+function rollbackTenantState(
+  context: LeadFormTenantContext,
+  previousCrm: typeof state.crm,
+): void {
+  if (!tenantRuntimeLeaseIsCurrent(context.runtimeLease)) return;
   try {
-    writeLocalSnapshot(previousCrm, {
+    assertTenantRuntimeLeaseCurrent(context.runtimeLease);
+    assertTenantCrmScope(context.scope, previousCrm);
+    state.crm = previousCrm;
+    assertTenantCrmScope(context.scope, state.crm);
+    assertTenantRuntimeLeaseCurrent(context.runtimeLease);
+    writeTenantSnapshot(context.scope, previousCrm, {
       markDirty: true,
       reason: 'Reversión de guardado incompleto',
       backup: false,
     });
   } catch {
-    // El formulario conserva los datos para que el usuario pueda reintentar.
+    // Nunca se cruza a otro tenant para intentar completar un rollback fallido.
   }
+}
+
+function capturedClientStillCurrent(
+  editingId: number | null,
+  previous: Client | null,
+): boolean {
+  if (editingId === null) return previous === null;
+  const current = state.crm.clients.find((client) => client.id === editingId) ?? null;
+  if (!current || !previous) return false;
+  return tenantFingerprint(current) === tenantFingerprint(previous);
 }
 
 function persistLead(
@@ -375,47 +454,75 @@ function persistLead(
   editingId: number | null,
   previous: Client | null,
 ): void {
-  if (!formStillAuthorized(form)) {
-    showError(form, 'El usuario activo cambió. Volvé a abrir el formulario antes de guardar.');
+  const context = leadFormTenantContext(form);
+  if (!context || !formStillAuthorized(form)) {
+    showError(form, 'El tenant o runtime activo cambió. Volvé a abrir el formulario antes de guardar.');
+    restoreSubmit(form);
+    return;
+  }
+
+  if (!capturedClientStillCurrent(editingId, previous)) {
+    showError(form, 'Este Lead cambió mientras se preparaba el guardado. Revisá el estado actual antes de volver a guardar.');
     restoreSubmit(form);
     return;
   }
 
   const phoneField = form.elements.namedItem('phone');
+  const emailField = form.elements.namedItem('email');
   const phoneInput = phoneField instanceof HTMLInputElement ? phoneField : null;
-  const duplicate = findDuplicateClient(state.crm.clients, values.phone || '', editingId);
-  if (duplicate) {
-    showDuplicate(form, duplicate, phoneInput);
+  const emailInput = emailField instanceof HTMLInputElement ? emailField : null;
+  const phoneDuplicate = values.phone ? findDuplicateClient(state.crm.clients, values.phone, editingId) : null;
+  if (phoneDuplicate) {
+    showDuplicate(form, phoneDuplicate, phoneInput, 'phone');
+    restoreSubmit(form);
+    return;
+  }
+  const emailDuplicate = values.email ? findDuplicateClientByEmail(state.crm.clients, values.email, editingId) : null;
+  if (emailDuplicate) {
+    showDuplicate(form, emailDuplicate, emailInput, 'email');
     restoreSubmit(form);
     return;
   }
 
-  const previousCrm = structuredClone(state.crm);
+  let previousCrm: typeof state.crm | null = null;
   try {
-    const member = activeMember();
+    assertLeadFormTenantCurrent(context);
+    const member = authenticatedWriteMember(context.scope);
+    previousCrm = structuredClone(state.crm);
+    assertTenantCrmScope(context.scope, previousCrm);
+
     const id = editingId ?? nextId(state.crm.clients);
     const client = clientFromFormValues(id, values, previous);
     client.assignedToId = previous?.assignedToId ?? member.id;
     client.createdById = previous?.createdById ?? member.id;
 
+    assertLeadFormTenantCurrent(context);
     state.crm.clients = upsertClient(state.crm.clients, client);
-    activitiesForClientSave(previous, client).forEach((activity) => addActivity(activity));
+    activitiesForClientSave(previous, client).forEach((activity) => (
+      addActivityForAuthenticatedTenant(context.scope, activity)
+    ));
 
-    writeLocalSnapshot(state.crm, {
+    assertLeadFormTenantCurrent(context);
+    assertTenantCrmScope(context.scope, state.crm);
+    writeTenantSnapshot(context.scope, state.crm, {
       markDirty: true,
       reason: previous ? `Lead actualizado: ${client.name}` : `Lead creado: ${client.name}`,
     });
-    if (!locallyContainsClient(client)) throw new Error('No se pudo verificar la copia local del lead.');
+    if (!tenantSnapshotContainsClient(context, client)) {
+      throw new Error('No se pudo verificar la copia tenant del lead.');
+    }
 
+    assertLeadFormTenantCurrent(context);
+    queueCloudSave(context.scope, state.crm);
+    assertLeadFormTenantCurrent(context);
     state.editingClientId = null;
     state.openForms.client = false;
-    queueCloudSave(state.crm);
     document.dispatchEvent(new CustomEvent('trv-render'));
     setNotice(previous
       ? `Lead actualizado correctamente. ${client.name} fue actualizado correctamente.`
       : `Lead guardado correctamente. ${client.name} fue creado correctamente.`);
   } catch {
-    rollbackLocalState(previousCrm);
+    if (previousCrm) rollbackTenantState(context, previousCrm);
     showError(form, 'No se pudo guardar el lead. Tus datos siguen en el formulario.');
     restoreSubmit(form);
   }
@@ -430,7 +537,21 @@ export function submitLeadForm(event: SubmitEvent): void {
   clearFeedback(form);
 
   if (!formStillAuthorized(form)) {
-    showError(form, 'Este formulario ya no tiene autorización. Volvé a abrir Nuevo lead.');
+    showError(form, 'Este formulario ya no tiene autorización tenant. Volvé a abrir Nuevo lead.');
+    return;
+  }
+
+  const context = leadFormTenantContext(form);
+  if (!context) {
+    showError(form, 'Este formulario no tiene un tenant capturado. Volvé a abrir Nuevo lead.');
+    return;
+  }
+
+  try {
+    assertLeadFormTenantCurrent(context);
+    authenticatedWriteMember(context.scope);
+  } catch {
+    showError(form, 'La identidad autenticada ya no puede escribir este Lead. Volvé a abrir el formulario.');
     return;
   }
 
@@ -443,21 +564,35 @@ export function submitLeadForm(event: SubmitEvent): void {
   const values = formValues(form);
   const editingId = capturedEditingId(form);
   const phoneField = form.elements.namedItem('phone');
+  const emailField = form.elements.namedItem('email');
   const phoneInput = phoneField instanceof HTMLInputElement ? phoneField : null;
-  if (!isPlausiblePhone(values.phone || '')) {
+  const emailInput = emailField instanceof HTMLInputElement ? emailField : null;
+  const phone = values.phone?.trim() || '';
+  const email = values.email?.trim() || '';
+
+  if (!phone && !email) {
+    showError(form, 'Ingresá al menos un WhatsApp/teléfono o un email.', phoneInput);
+    return;
+  }
+  if (phone && !isPlausiblePhone(phone)) {
     showError(form, 'Ingresá un WhatsApp válido con código de área.', phoneInput);
     return;
   }
 
-  const duplicate = findDuplicateClient(state.crm.clients, values.phone || '', editingId);
-  if (duplicate) {
-    showDuplicate(form, duplicate, phoneInput);
+  const phoneDuplicate = phone ? findDuplicateClient(state.crm.clients, phone, editingId) : null;
+  if (phoneDuplicate) {
+    showDuplicate(form, phoneDuplicate, phoneInput, 'phone');
+    return;
+  }
+  const emailDuplicate = email ? findDuplicateClientByEmail(state.crm.clients, email, editingId) : null;
+  if (emailDuplicate) {
+    showDuplicate(form, emailDuplicate, emailInput, 'email');
     return;
   }
 
   if (!validateAndResolveSchedule(form, values, editingId)) return;
   if (!formStillAuthorized(form)) {
-    showError(form, 'El usuario activo cambió. Volvé a abrir el formulario antes de guardar.');
+    showError(form, 'El tenant o runtime activo cambió. Volvé a abrir el formulario antes de guardar.');
     return;
   }
 
@@ -468,6 +603,7 @@ export function submitLeadForm(event: SubmitEvent): void {
     showError(form, 'El lead ya no está disponible para este usuario.');
     return;
   }
+  const previousSnapshot = previous ? structuredClone(previous) : null;
 
   const submit = form.querySelector<HTMLButtonElement>('[data-save-lead]');
   submittingForms.add(form);
@@ -478,7 +614,19 @@ export function submitLeadForm(event: SubmitEvent): void {
   }
   setStatus(form, 'Guardando…', 'working');
 
-  window.setTimeout(() => persistLead(form, values, editingId, previous), SAVE_DELAY_MS);
+  const persist = (): void => persistLead(form, values, editingId, previousSnapshot);
+  const terminalTransition = values.pipeline === 'Ganado' || values.pipeline === 'Perdido';
+
+  // Un cierre terminal confirmado no puede quedar dentro de la ventana diferida
+  // del editor común: debe fijar estado + snapshot tenant antes de devolver el
+  // control al resto de la UI. Las ediciones activas conservan el delay y el
+  // guard anti-stale de capturedClientStillCurrent().
+  if (terminalTransition) {
+    persist();
+    return;
+  }
+
+  window.setTimeout(persist, SAVE_DELAY_MS);
 }
 
 function scheduleEnhancement(): void {

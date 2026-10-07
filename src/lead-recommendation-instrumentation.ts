@@ -12,16 +12,27 @@ import {
 import {
   persistSupervisedRecommendationLifecycle,
   readSupervisedRecommendationLifecycle,
+  type RecommendationTelemetryTenantContext,
 } from './lead-recommendation-telemetry.js';
-import { state } from './store.js';
-import { activeMember, visibleClients } from './team-access.js';
+import { authenticatedTenantMember, state } from './store.js';
+import { visibleClients } from './team-access.js';
+import {
+  captureTenantRuntimeLease,
+  requireCurrentTenantScope,
+} from './tenant-runtime.js';
 
-function runtimeContext(): RecommendationInstrumentationContext {
+function runtimeContext(): RecommendationTelemetryTenantContext {
+  const scope = requireCurrentTenantScope();
+  const runtimeLease = captureTenantRuntimeLease(scope);
+  const member = authenticatedTenantMember(scope);
+  if (!member) throw new Error('AUTHENTICATED_TENANT_MEMBER_REQUIRED');
   const visible = visibleClients();
   return {
-    organizationId: state.crm.organization.id,
-    actorId: activeMember().id,
+    organizationId: scope.organizationId,
+    actorId: member.id,
     visibleClientIds: new Set(visible.map((client) => client.id)),
+    scope,
+    runtimeLease,
   };
 }
 
@@ -64,7 +75,7 @@ export function instrumentVisibleSupervisedRecommendations(container: HTMLElemen
     const snapshot = readSupervisedRecommendationLifecycle(context);
     const mutation = reconcileRecommendationLifecycle(
       snapshot.state,
-      context,
+      context as RecommendationInstrumentationContext,
       lifecycleInputs(displayed),
       state.crm.activityLog,
       new Date().toISOString(),

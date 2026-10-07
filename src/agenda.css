@@ -52,7 +52,9 @@
 .agenda-card p { margin-bottom: 7px; color: #526273; font-size: .88rem; overflow-wrap: anywhere; }
 .agenda-card small { display: block; color: #64748b; overflow-wrap: anywhere; }
 .agenda-card-actions { display: grid; gap: 8px; }
-.agenda-card-actions > button { width: 100%; min-height: 40px; }
+.agenda-card-actions > button { width: 100%; min-height: 44px; }
+.agenda-card-actions .agenda-open-context { min-height: 44px; }
+.agenda-more-actions > summary { display: flex; align-items: center; min-height: 44px; }
 .agenda-more-actions { border: 1px solid #d9e4ee; border-radius: 12px; background: #f8fafc; }
 .agenda-more-actions > summary { padding: 10px 11px; color: #173951; cursor: pointer; font-size: .8rem; font-weight: 900; list-style-position: inside; }
 .agenda-more-actions-panel { display: grid; gap: 8px; padding: 0 9px 9px; }

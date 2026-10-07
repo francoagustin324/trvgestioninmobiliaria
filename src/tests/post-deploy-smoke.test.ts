@@ -33,7 +33,7 @@ async function withServer(
 }
 
 function rootHtml(extra = ''): string {
-  return `<!doctype html><html><head><title>PropControl | CRM inmobiliario</title>${extra}</head><body><div id="root"></div></body></html>`;
+  return `<!doctype html><html><head><title>OrdenBroker | Sistema comercial inmobiliario</title>${extra}</head><body><div id="root"></div></body></html>`;
 }
 
 function directAssetsHtml(css = '/assets/app.css?v=css-1', js = '/assets/app.js?v=js-1'): string {
@@ -84,7 +84,7 @@ test('4. /health ok=false => FAIL', async () => {
 test('5. raíz 200 + HTML/marcador válido => PASS', async () => {
   await withServer((_request, response) => send(response, 200, 'text/html; charset=utf-8', rootHtml()), async (baseUrl) => {
     const html = await smoke.checkRoot(baseUrl, { maxAttempts: 1 });
-    assert.match(html, /PropControl \| CRM inmobiliario/);
+    assert.match(html, /OrdenBroker \| Sistema comercial inmobiliario/);
   });
 });
 
@@ -96,7 +96,7 @@ test('6. raíz vacía o sin marcador => FAIL', async (t) => {
   });
   await t.test('sin marcador', async () => {
     await withServer((_request, response) => send(response, 200, 'text/html', '<!doctype html><html><title>Otro</title></html>'), async (baseUrl) => {
-      await expectReject(smoke.checkRoot(baseUrl, { maxAttempts: 1 }), /falta el marcador estable de PropControl/);
+      await expectReject(smoke.checkRoot(baseUrl, { maxAttempts: 1 }), /falta el marcador estable de OrdenBroker/);
     });
   });
 });

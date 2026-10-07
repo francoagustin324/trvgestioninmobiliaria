@@ -1,5 +1,8 @@
-import { getCloudMembershipContext, getCloudSession } from './cloud-api.js';
+import type { TenantScope } from './active-organization.js';
+import { getCloudSession } from './cloud-api.js';
 import { organizationScopedEntityKey, type CloudRecordRow } from './cloud-records.js';
+import { tenantCloudTransport } from './tenant-cloud-context.js';
+import { insertTenantCloudRecordsIgnoreDuplicates } from './tenant-cloud-data.js';
 import type {
   RecommendationHumanDecision,
   RecommendationInstrumentationContext,
@@ -11,18 +14,21 @@ import {
   type RecommendationLifecycleMutation,
   type RecommendationLifecycleState,
 } from './lead-recommendation-lifecycle.js';
-import type { TeamRole } from './models.js';
-import { scopedStorageKey } from './sync-safety.js';
+import { STORAGE_KEY, type TeamRole } from './models.js';
+import { tenantStorageNamespace } from './tenant-storage.js';
+import {
+  TENANT_RUNTIME_STALE,
+  assertTenantRuntimeLeaseCurrent,
+  tenantScopesEqual,
+  type TenantRuntimeLease,
+} from './tenant-runtime.js';
 
 const LEGACY_TELEMETRY_STORAGE_SUFFIX = 'supervised-recommendations-v2';
 const LIFECYCLE_STORAGE_SUFFIX = 'supervised-recommendation-lifecycle-v3';
 const TELEMETRY_OUTBOX_SUFFIX = 'supervised-recommendation-outbox-v1';
 
-interface PublicCloudConfig {
-  configured?: boolean;
-  url?: string;
-  publishableKey?: string;
-}
+export const RECOMMENDATION_TELEMETRY_TENANT_CONTEXT_REQUIRED = 'RECOMMENDATION_TELEMETRY_TENANT_CONTEXT_REQUIRED';
+export const RECOMMENDATION_TELEMETRY_AUTHORITY_MISMATCH = 'RECOMMENDATION_TELEMETRY_AUTHORITY_MISMATCH';
 
 export type RecommendationTelemetryEventType = 'RECOMMENDATION_SHOWN' | 'RECOMMENDATION_DECISION';
 
@@ -70,12 +76,18 @@ export interface RecommendationLifecycleSnapshot {
   migratedFromR2: boolean;
 }
 
+export type RecommendationTelemetryTenantContext = RecommendationInstrumentationContext & Readonly<{
+  scope: TenantScope;
+  runtimeLease: TenantRuntimeLease;
+}>;
+
+type RecommendationTelemetryContext = RecommendationInstrumentationContext | RecommendationTelemetryTenantContext;
+
 interface FlushFlight {
   running: Promise<void> | null;
   requestedAgain: boolean;
 }
 
-let cloudConfigPromise: Promise<{ url: string; publishableKey: string }> | null = null;
 const flushFlights = new Map<string, FlushFlight>();
 
 function normalized(value: unknown): string {
@@ -95,20 +107,72 @@ function stableHash(value: string): string {
   return (hash >>> 0).toString(16).padStart(8, '0');
 }
 
-function storageKey(context: RecommendationInstrumentationContext, suffix: string): string {
-  return [scopedStorageKey(), suffix, encodeURIComponent(context.organizationId), String(context.actorId)].join(':');
+function hasTenantContext(context: RecommendationTelemetryContext): context is RecommendationTelemetryTenantContext {
+  const candidate = context as Partial<RecommendationTelemetryTenantContext>;
+  return Boolean(candidate.scope && candidate.runtimeLease);
 }
 
-function lifecycleStorageKey(context: RecommendationInstrumentationContext): string {
-  return storageKey(context, LIFECYCLE_STORAGE_SUFFIX);
+function requireTenantContext(context: RecommendationTelemetryContext): RecommendationTelemetryTenantContext {
+  if (!hasTenantContext(context)) throw new Error(RECOMMENDATION_TELEMETRY_TENANT_CONTEXT_REQUIRED);
+  if (
+    context.organizationId !== context.scope.organizationId
+    || !tenantScopesEqual(context.scope, context.runtimeLease.scope)
+  ) {
+    throw new Error(TENANT_RUNTIME_STALE);
+  }
+  return context;
 }
 
-function legacyStorageKey(context: RecommendationInstrumentationContext): string {
-  return storageKey(context, LEGACY_TELEMETRY_STORAGE_SUFFIX);
+function requireCurrentTenantContext(context: RecommendationTelemetryContext): RecommendationTelemetryTenantContext {
+  const tenant = requireTenantContext(context);
+  assertTenantRuntimeLeaseCurrent(tenant.runtimeLease);
+  return tenant;
 }
 
-function outboxStorageKey(context: RecommendationInstrumentationContext): string {
-  return storageKey(context, TELEMETRY_OUTBOX_SUFFIX);
+function canonicalStorageKey(context: RecommendationTelemetryTenantContext, suffix: string): string {
+  const namespace = tenantStorageNamespace(context.scope);
+  return `${namespace.crmKey}:${suffix}:${context.actorId}`;
+}
+
+function historicalAccountStorageKey(context: RecommendationTelemetryTenantContext, suffix: string): string {
+  return [
+    `${STORAGE_KEY}:user:${context.scope.userId}`,
+    suffix,
+    encodeURIComponent(context.organizationId),
+    String(context.actorId),
+  ].join(':');
+}
+
+function historicalUnscopedStorageKey(context: RecommendationInstrumentationContext, suffix: string): string {
+  return [STORAGE_KEY, suffix, encodeURIComponent(context.organizationId), String(context.actorId)].join(':');
+}
+
+function readStorageValue(context: RecommendationTelemetryContext, suffix: string): string | null {
+  if (!hasTenantContext(context)) {
+    return localStorage.getItem(historicalUnscopedStorageKey(context, suffix));
+  }
+  const tenant = requireCurrentTenantContext(context);
+  const currentKey = canonicalStorageKey(tenant, suffix);
+  const current = localStorage.getItem(currentKey);
+  if (current !== null) return current;
+
+  const historical = localStorage.getItem(historicalAccountStorageKey(tenant, suffix));
+  if (historical === null) return null;
+  requireCurrentTenantContext(tenant);
+  localStorage.setItem(currentKey, historical);
+  return historical;
+}
+
+function lifecycleStorageKey(context: RecommendationTelemetryTenantContext): string {
+  return canonicalStorageKey(context, LIFECYCLE_STORAGE_SUFFIX);
+}
+
+function legacyStorageKey(context: RecommendationTelemetryTenantContext): string {
+  return canonicalStorageKey(context, LEGACY_TELEMETRY_STORAGE_SUFFIX);
+}
+
+function outboxStorageKey(context: RecommendationTelemetryTenantContext): string {
+  return canonicalStorageKey(context, TELEMETRY_OUTBOX_SUFFIX);
 }
 
 function humanDecision(value: unknown): RecommendationHumanDecision {
@@ -174,9 +238,9 @@ function normalizedLifecycle(value: unknown, context: RecommendationInstrumentat
   return { version: 3, cycles };
 }
 
-function migrateLegacyState(context: RecommendationInstrumentationContext): RecommendationLifecycleState | null {
+function migrateLegacyState(context: RecommendationTelemetryContext): RecommendationLifecycleState | null {
   try {
-    const raw = localStorage.getItem(legacyStorageKey(context));
+    const raw = readStorageValue(context, LEGACY_TELEMETRY_STORAGE_SUFFIX);
     if (!raw) return null;
     const parsed: unknown = JSON.parse(raw);
     if (!Array.isArray(parsed)) return emptyRecommendationLifecycleState();
@@ -210,10 +274,10 @@ function migrateLegacyState(context: RecommendationInstrumentationContext): Reco
 }
 
 export function readSupervisedRecommendationLifecycle(
-  context: RecommendationInstrumentationContext,
+  context: RecommendationTelemetryContext,
 ): RecommendationLifecycleSnapshot {
   try {
-    const raw = localStorage.getItem(lifecycleStorageKey(context));
+    const raw = readStorageValue(context, LIFECYCLE_STORAGE_SUFFIX);
     if (raw) {
       const state = normalizedLifecycle(JSON.parse(raw), context);
       if (state) return { state, migratedFromR2: false };
@@ -227,12 +291,13 @@ export function readSupervisedRecommendationLifecycle(
     : { state: emptyRecommendationLifecycleState(), migratedFromR2: false };
 }
 
-function writeLifecycleState(context: RecommendationInstrumentationContext, state: RecommendationLifecycleState): void {
+function writeLifecycleState(context: RecommendationTelemetryTenantContext, state: RecommendationLifecycleState): void {
+  const tenant = requireCurrentTenantContext(context);
   const scoped: RecommendationLifecycleState = {
     version: 3,
-    cycles: state.cycles.filter((cycle) => context.visibleClientIds.has(cycle.clientId)),
+    cycles: state.cycles.filter((cycle) => tenant.visibleClientIds.has(cycle.clientId)),
   };
-  localStorage.setItem(lifecycleStorageKey(context), JSON.stringify(scoped));
+  localStorage.setItem(lifecycleStorageKey(tenant), JSON.stringify(scoped));
 }
 
 function normalizedEvent(value: unknown): SupervisedRecommendationEvent | null {
@@ -269,9 +334,9 @@ function normalizedEvent(value: unknown): SupervisedRecommendationEvent | null {
   };
 }
 
-export function readSupervisedRecommendationOutbox(context: RecommendationInstrumentationContext): SupervisedRecommendationEvent[] {
+export function readSupervisedRecommendationOutbox(context: RecommendationTelemetryContext): SupervisedRecommendationEvent[] {
   try {
-    const parsed: unknown = JSON.parse(localStorage.getItem(outboxStorageKey(context)) || '[]');
+    const parsed: unknown = JSON.parse(readStorageValue(context, TELEMETRY_OUTBOX_SUFFIX) || '[]');
     if (!Array.isArray(parsed)) return [];
     return parsed.map(normalizedEvent).filter((event): event is SupervisedRecommendationEvent => Boolean(
       event && event.organizationId === context.organizationId && event.actorId === context.actorId,
@@ -281,10 +346,11 @@ export function readSupervisedRecommendationOutbox(context: RecommendationInstru
   }
 }
 
-function writeOutbox(context: RecommendationInstrumentationContext, events: SupervisedRecommendationEvent[]): void {
+function writeOutbox(context: RecommendationTelemetryTenantContext, events: SupervisedRecommendationEvent[]): void {
+  const tenant = requireCurrentTenantContext(context);
   localStorage.setItem(
-    outboxStorageKey(context),
-    JSON.stringify(events.filter((event) => event.organizationId === context.organizationId && event.actorId === context.actorId)),
+    outboxStorageKey(tenant),
+    JSON.stringify(events.filter((event) => event.organizationId === tenant.organizationId && event.actorId === tenant.actorId)),
   );
 }
 
@@ -393,9 +459,9 @@ export function supervisedRecommendationCloudRow(event: SupervisedRecommendation
 
 function eventAllowed(event: SupervisedRecommendationEvent, authorization: RecommendationTelemetryAuthorization): boolean {
   if (event.organizationId !== authorization.organizationId) return false;
+  if (event.actorId !== authorization.currentMemberId) return false;
   if (!authorization.activeMemberIds.has(event.actorId)) return false;
   if (!authorization.visibleClientIds.has(event.clientId)) return false;
-  if (authorization.currentRole === 'Corredor' && authorization.currentMemberId !== event.actorId) return false;
   return true;
 }
 
@@ -422,66 +488,50 @@ export async function flushRecommendationEventBatch(
   }
 }
 
-async function publicCloudConfig(): Promise<{ url: string; publishableKey: string }> {
-  cloudConfigPromise ??= (async () => {
-    const response = await fetch('/api/cloud-config', { headers: { Accept: 'application/json' }, cache: 'no-store' });
-    if (!response.ok) throw new Error(`Cloud config ${response.status}`);
-    const config = await response.json() as PublicCloudConfig;
-    if (!config.configured || !config.url || !config.publishableKey) throw new Error('Cloud no configurada para telemetría supervisada.');
-    return { url: config.url.replace(/\/+$/g, ''), publishableKey: config.publishableKey };
-  })();
-  return cloudConfigPromise;
+function assertTransportAuthority(context: RecommendationTelemetryTenantContext, transport: Awaited<ReturnType<typeof tenantCloudTransport>>): void {
+  if (
+    !tenantScopesEqual(transport.scope, context.scope)
+    || transport.context.organizationId !== context.scope.organizationId
+    || transport.context.currentMemberId !== context.actorId
+    || transport.userId !== context.scope.userId
+  ) {
+    throw new Error(RECOMMENDATION_TELEMETRY_AUTHORITY_MISMATCH);
+  }
 }
 
-function cloudHeaders(publishableKey: string, accessToken: string): Record<string, string> {
-  return {
-    apikey: publishableKey,
-    Authorization: `Bearer ${accessToken}`,
-    'Content-Type': 'application/json',
-  };
-}
-
-async function postEventRows(rows: CloudRecordRow[], accessToken: string): Promise<void> {
-  const config = await publicCloudConfig();
-  const target = new URL(`${config.url}/rest/v1/propcontrol_records`);
-  target.searchParams.set('on_conflict', 'organization_id,entity_type,entity_key');
-  const response = await fetch(target, {
-    method: 'POST',
-    headers: {
-      ...cloudHeaders(config.publishableKey, accessToken),
-      Prefer: 'resolution=ignore-duplicates,return=minimal',
-    },
-    body: JSON.stringify(rows),
-  });
-  if (!response.ok) throw new Error(`Telemetría cloud ${response.status}`);
-}
-
-async function flushCloudOutbox(context: RecommendationInstrumentationContext): Promise<boolean> {
-  const pending = readSupervisedRecommendationOutbox(context);
-  if (!pending.length || !getCloudSession()) return true;
+export async function flushRecommendationOutbox(context: RecommendationTelemetryTenantContext): Promise<boolean> {
   try {
-    const membership = await getCloudMembershipContext();
-    const session = getCloudSession();
-    if (!session) return true;
+    const tenant = requireCurrentTenantContext(context);
+    const pending = readSupervisedRecommendationOutbox(tenant);
+    if (!pending.length || !getCloudSession()) return true;
+
+    requireCurrentTenantContext(tenant);
+    const transport = await tenantCloudTransport(tenant.scope);
+    requireCurrentTenantContext(tenant);
+    assertTransportAuthority(tenant, transport);
+
     const authorization: RecommendationTelemetryAuthorization = {
-      organizationId: membership.organizationId,
-      currentMemberId: membership.currentMemberId,
-      currentRole: membership.currentRole,
-      activeMemberIds: new Set(membership.members.filter((member) => member.status === 'Activo').map((member) => member.id)),
-      visibleClientIds: context.visibleClientIds,
+      organizationId: tenant.scope.organizationId,
+      currentMemberId: transport.context.currentMemberId,
+      currentRole: transport.context.currentRole,
+      activeMemberIds: new Set(transport.context.members.filter((member) => member.status === 'Activo').map((member) => member.id)),
+      visibleClientIds: tenant.visibleClientIds,
     };
     const result = await flushRecommendationEventBatch(
       pending,
       authorization,
-      session.userId,
-      (rows) => postEventRows(rows, session.accessToken),
+      transport.userId,
+      (rows) => insertTenantCloudRecordsIgnoreDuplicates(transport, rows, tenant.runtimeLease),
     );
     if (result.failed) return false;
+
+    requireCurrentTenantContext(tenant);
     if (result.sentEventIds.length) {
-      // ACK contra el outbox ACTUAL: un evento agregado durante el POST sobrevive.
-      const current = readSupervisedRecommendationOutbox(context);
+      const current = readSupervisedRecommendationOutbox(tenant);
+      requireCurrentTenantContext(tenant);
       const next = acknowledgeRecommendationEvents(current, result.sentEventIds);
-      if (next.length !== current.length) writeOutbox(context, next);
+      if (next.length !== current.length) writeOutbox(tenant, next);
+      requireCurrentTenantContext(tenant);
     }
     return true;
   } catch (error) {
@@ -490,10 +540,11 @@ async function flushCloudOutbox(context: RecommendationInstrumentationContext): 
   }
 }
 
-/** Single-flight por scope; un render concurrente sólo coalescea otra oportunidad. */
-export function scheduleRecommendationOutboxFlush(context: RecommendationInstrumentationContext): void {
-  if (!getCloudSession()) return;
-  const key = outboxStorageKey(context);
+/** Single-flight por tenant+actor+generación; una segunda oportunidad coalescea dentro del mismo lease. */
+export function scheduleRecommendationOutboxFlush(context: RecommendationTelemetryTenantContext): Promise<void> {
+  if (!getCloudSession()) return Promise.resolve();
+  const tenant = requireCurrentTenantContext(context);
+  const key = `${outboxStorageKey(tenant)}:lease:${tenant.runtimeLease.generation}`;
   let flight = flushFlights.get(key);
   if (!flight) {
     flight = { running: null, requestedAgain: false };
@@ -501,24 +552,26 @@ export function scheduleRecommendationOutboxFlush(context: RecommendationInstrum
   }
   if (flight.running) {
     flight.requestedAgain = true;
-    return;
+    return flight.running;
   }
 
   const activeFlight = flight;
-  activeFlight.running = (async () => {
+  const running = (async () => {
     do {
       activeFlight.requestedAgain = false;
-      const success = await flushCloudOutbox(context);
+      const success = await flushRecommendationOutbox(tenant);
       if (!success) break;
-    } while (activeFlight.requestedAgain && readSupervisedRecommendationOutbox(context).length > 0);
-  })().finally(() => {
+    } while (activeFlight.requestedAgain && readSupervisedRecommendationOutbox(tenant).length > 0);
+  })();
+  activeFlight.running = running.finally(() => {
     activeFlight.running = null;
     if (!activeFlight.requestedAgain) flushFlights.delete(key);
   });
+  return activeFlight.running;
 }
 
 export function persistSupervisedRecommendationLifecycle(
-  context: RecommendationInstrumentationContext,
+  context: RecommendationTelemetryContext,
   snapshot: RecommendationLifecycleSnapshot,
   mutation: RecommendationLifecycleMutation,
 ): void {
@@ -528,21 +581,30 @@ export function persistSupervisedRecommendationLifecycle(
     && context.visibleClientIds.has(event.clientId)
   ));
 
-  // Durabilidad: un evento nuevo entra al outbox ANTES de compactar el estado local.
+  if (!hasTenantContext(context)) {
+    const hasPending = readSupervisedRecommendationOutbox(context).length > 0;
+    if (events.length || mutation.changed > 0 || snapshot.migratedFromR2 || hasPending) {
+      throw new Error(RECOMMENDATION_TELEMETRY_TENANT_CONTEXT_REQUIRED);
+    }
+    return;
+  }
+
+  const tenant = requireCurrentTenantContext(context);
   if (events.length) {
-    const current = readSupervisedRecommendationOutbox(context);
+    const current = readSupervisedRecommendationOutbox(tenant);
     const next = appendUniqueRecommendationEvents(current, events);
-    if (next.length !== current.length) writeOutbox(context, next);
+    if (next.length !== current.length) writeOutbox(tenant, next);
   }
 
   if (mutation.changed > 0 || snapshot.migratedFromR2) {
-    writeLifecycleState(context, mutation.state);
-    if (snapshot.migratedFromR2) localStorage.removeItem(legacyStorageKey(context));
+    writeLifecycleState(tenant, mutation.state);
+    if (snapshot.migratedFromR2) {
+      requireCurrentTenantContext(tenant);
+      localStorage.removeItem(legacyStorageKey(tenant));
+    }
   }
 
-  // No-op render: cero write local. Si hay outbox pendiente, conserva una
-  // oportunidad coalescida de recovery cloud sin polling ni timers permanentes.
-  if (events.length || readSupervisedRecommendationOutbox(context).length > 0) {
-    scheduleRecommendationOutboxFlush(context);
+  if (events.length || readSupervisedRecommendationOutbox(tenant).length > 0) {
+    void scheduleRecommendationOutboxFlush(tenant);
   }
 }

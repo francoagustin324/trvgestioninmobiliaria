@@ -1,12 +1,7 @@
-import { AGENCY_BRAND, PRODUCT_BRAND } from './branding.js';
+import { AGENCY_BRAND } from './branding.js';
 
 export const STORAGE_KEY = 'trv-crm-basico';
-export const WHATSAPP_NUMBER = AGENCY_BRAND.whatsapp;
-export const FICHA_LEGAL = AGENCY_BRAND.publicLegal;
-// Logo de la ficha pública: la casita (logo lindo), manteniendo el nombre TRV.
-export const LOGO_PATH = PRODUCT_BRAND.logo;
-
-export type Temperature = 'Caliente' | 'Tibio' | 'Frío';
+export type Temperature = 'Sin definir' | 'Caliente' | 'Tibio' | 'Frío';
 export type CommercialStage = 'Nuevo' | 'Contactado' | 'Calificado' | 'Visita coordinada' | 'Negociación' | 'Reservado' | 'Ganado' | 'Perdido';
 export type CommercialOutcome = 'won' | 'lost';
 export type DealCurrency = 'USD' | 'ARS';
@@ -34,6 +29,8 @@ export type ConversationStatus = 'Sigue buscando' | 'Esperando vender' | 'Ya com
 export type FollowUpDecision = 'Seguimiento supervisado' | 'Pausar' | 'No contactar' | 'Revisión manual';
 export type AuditSource = 'Automático' | 'Manual';
 export type AuditEngine = 'Reglas de seguridad' | 'Comprensión por conceptos' | 'Manual';
+export type PropertyDiffusionChannel = 'WhatsApp' | 'Email';
+export type PropertyDiffusionStatus = 'PENDIENTE' | 'ENVIADO' | 'RESPONDIO';
 export type TeamRole = 'Dueño' | 'Administrador' | 'Corredor';
 export type TeamMemberStatus = 'Activo' | 'Pendiente de acceso' | 'Suspendido';
 export type AssignmentEntity = 'Cliente' | 'Propiedad' | 'Conversación' | 'Tarea';
@@ -43,6 +40,30 @@ export type OfferOrigin = 'Cliente' | 'Propietario';
 export type OfferStatus = 'Pendiente' | 'Aceptada' | 'Rechazada' | 'Contraofertada' | 'Retirada';
 export type OfferCurrency = 'USD' | 'ARS';
 export type ReservationStatus = 'Activa' | 'Cancelada' | 'Concretada';
+export type CommercialAlertPriority = 'CRÍTICO' | 'ALTO' | 'NORMAL';
+export type CommercialAlertType =
+  | 'NEW_LEAD_UNATTENDED'
+  | 'FOLLOW_UP_OVERDUE'
+  | 'FORGOTTEN_LEAD'
+  | 'VISIT_UNCONFIRMED'
+  | 'VISIT_RESULT_MISSING'
+  | 'OFFER_STALLED'
+  | 'RESERVATION_STALLED'
+  | 'ADVANCED_NO_NEXT_ACTION'
+  | 'NEW_RELEVANT_MATCH'
+  | 'TASK_OVERDUE';
+export type CommercialAlertTarget = 'lead' | 'visits' | 'offers' | 'reservations' | 'matches' | 'agenda';
+export type CommercialAlertActionType =
+  | 'CONTACT_LEAD'
+  | 'REPROGRAM_FOLLOW_UP'
+  | 'RESUME_CONTACT'
+  | 'CONFIRM_VISIT'
+  | 'LOAD_VISIT_RESULT'
+  | 'REVIEW_OFFER'
+  | 'REVIEW_RESERVATION'
+  | 'DEFINE_NEXT_ACTION'
+  | 'REVIEW_MATCH'
+  | 'RESOLVE_TASK';
 
 /**
  * Foundation A7-R1. `id:number` permanece como identidad legacy/backward-compatible.
@@ -62,6 +83,22 @@ export interface OrganizationSettings {
   name: string;
   seatLimit: number | null;
   planLabel: string;
+  commercialPhone?: string;
+  commercialEmail?: string;
+  address?: string;
+  logoPath?: string;
+  legalText?: string;
+  defaultCurrency?: string;
+  defaultZone?: string;
+  shareText?: string;
+}
+
+export interface PublicTenantIdentity {
+  organizationId: string;
+  name: string;
+  commercialPhone: string;
+  logoPath: string;
+  legalText: string;
 }
 
 export interface TeamMember {
@@ -85,10 +122,37 @@ export interface ActivityEntry extends SyncRecordMetadata {
   entityUid?: string;
   detail: string;
   createdAt: string;
+  activityKind?: 'property-diffusion';
+  diffusionPropertyId?: number;
+  diffusionPropertyUid?: string;
+  diffusionClientId?: number;
+  diffusionClientUid?: string;
+  diffusionChannel?: PropertyDiffusionChannel;
+  diffusionStatus?: PropertyDiffusionStatus;
+  commercialEntityType?: 'visit' | 'offer' | 'reservation';
+  commercialEntityId?: number;
+  commercialEntityUid?: string;
+}
+
+export interface PropertyDiffusionLedgerRecord {
+  clientId: number;
+  clientUid?: string;
+  propertyId: number;
+  propertyUid?: string;
+  sendCount: number;
+  firstSentAt: string;
+  lastSentAt: string;
+  lastSentChannel: PropertyDiffusionChannel;
+  lastSentActorId: number;
+  lastResponseAt?: string;
+  lastResponseChannel?: PropertyDiffusionChannel;
+  lastResponseActorId?: number;
+  updatedAt: string;
 }
 
 export interface Client extends SyncRecordMetadata {
   id: number; name: string; phone: string; email?: string; interest: string; status: string;
+  propertyDiffusions?: PropertyDiffusionLedgerRecord[];
   temperature: Temperature; pipeline: CommercialStage | string; lastContact?: string; nextFollowUp?: string;
   nextAction?: string; budget?: string; paymentMethod?: string; purchaseTimeframe?: string; purpose?: string;
   knowsArea?: string; canMoveForward?: string; objections?: string; notes?: string;
@@ -199,6 +263,7 @@ export interface Reminder extends SyncRecordMetadata {
   assignedToId?: number; createdById?: number;
 }
 
+
 export interface ConversationMessage {
   id: number;
   direction: 'inbound' | 'outbound';
@@ -239,6 +304,7 @@ export interface WhatsAppConversation extends SyncRecordMetadata {
 }
 
 export interface FichaPublica {
+  tenant?: PublicTenantIdentity;
   title: string; propertyType?: string; operation?: string; zone?: string; approxAddress?: string;
   price?: string; expenses?: string; bedrooms?: string; bathrooms?: string; garage?: string;
   coveredMeters?: string; totalMeters?: string; age?: string; status?: string; amenities?: string;
@@ -296,9 +362,9 @@ export const defaultSettings: Settings = {
   profileEmail: '',
   profilePhone: '',
   avatar: '',
-  agencyName: AGENCY_BRAND.name,
-  agencyWhatsapp: AGENCY_BRAND.displayWhatsapp,
-  agencyLegal: AGENCY_BRAND.publicLegal,
+  agencyName: '',
+  agencyWhatsapp: '',
+  agencyLegal: '',
   currency: 'USD',
   defaultZone: '',
   shareText: '',
@@ -311,6 +377,14 @@ export const initialData: CrmData = {
     name: AGENCY_BRAND.name,
     seatLimit: null,
     planLabel: 'Piloto sin límite',
+    commercialPhone: AGENCY_BRAND.whatsapp,
+    commercialEmail: '',
+    address: '',
+    logoPath: AGENCY_BRAND.logo,
+    legalText: AGENCY_BRAND.publicLegal,
+    defaultCurrency: 'USD',
+    defaultZone: '',
+    shareText: '',
   },
   teamMembers: [{
     id: 1,
@@ -378,5 +452,10 @@ export const initialData: CrmData = {
       transcriptionStatus: 'No requerida',
     }],
   }],
-  settings: { ...defaultSettings },
+  settings: {
+    ...defaultSettings,
+    agencyName: AGENCY_BRAND.name,
+    agencyWhatsapp: AGENCY_BRAND.displayWhatsapp,
+    agencyLegal: AGENCY_BRAND.publicLegal,
+  },
 };

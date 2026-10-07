@@ -7,6 +7,7 @@ import test from 'node:test';
 import { chromium, type Browser, type BrowserContext, type Page } from 'playwright';
 import { localIsoDate } from '../lead-pipeline.js';
 import { initialData, type Client, type CrmData } from '../models.js';
+import { installA35H5R1ModernTenantHarness } from './a35-h5-r1-modern-tenant-harness.js';
 
 const repositoryRoot = process.cwd();
 const artifactDirectory = join(repositoryRoot, 'artifacts', 'b1-2-3-compact-leads');
@@ -305,6 +306,7 @@ async function createContext(browser: Browser, viewport: { width: number; height
     colorScheme: 'dark',
   });
   const crm = visualCrm();
+  await installA35H5R1ModernTenantHarness(context, crm, 'compact-owner');
   await context.addInitScript(({ data, userId }) => {
     const sessionKey = 'propcontrol-cloud-session-v1';
     const storageKey = `trv-crm-basico:user:${userId}`;
@@ -326,6 +328,40 @@ async function waitForLeads(page: Page, baseUrl: string): Promise<void> {
   await page.goto(baseUrl, { waitUntil: 'domcontentloaded' });
   await page.waitForSelector('#crm.active .mvp-lead-compact-card', { state: 'visible', timeout: 20_000 });
   await page.waitForFunction(() => document.querySelectorAll('#crm .mvp-lead-compact-card').length === 8);
+}
+
+async function assertMatchRuntimeTransition(page: Page): Promise<void> {
+  const card = page.locator('#crm .mvp-lead-compact-card').filter({ hasText: 'Lucía Martín' });
+  const sheet = card.locator('[data-lead-full-sheet]');
+  const slot = card.locator('[data-lead-matches-slot="1"]');
+  assert.equal(await slot.getAttribute('data-match-mode'), 'bounded', 'card cerrada debe iniciar con bounded matching');
+
+  await sheet.evaluate((node: HTMLDetailsElement) => { node.open = true; });
+  await page.waitForFunction(() => (
+    document.querySelector<HTMLElement>('#crm [data-lead-matches-slot="1"]')?.dataset.matchMode === 'exhaustive'
+  ));
+  assert.equal(await sheet.getAttribute('open'), '', 'el toggle DOM real debe abrir la ficha');
+  assert.equal(await slot.getAttribute('data-match-mode'), 'exhaustive', 'abrir debe recalcular sólo la ficha con exhaustive');
+  assert.ok(await slot.locator('.mvp-lead-matches, .mvp-match-empty').count() === 1, 'el bloque de matches debe actualizarse in-place');
+
+  const secondCard = page.locator('#crm .mvp-lead-compact-card').filter({ hasText: 'María de los Ángeles Fernández' });
+  const secondSheet = secondCard.locator('[data-lead-full-sheet]');
+  const secondSlot = secondCard.locator('[data-lead-matches-slot="3"]');
+  assert.equal(await secondSlot.getAttribute('data-match-mode'), 'bounded');
+  await secondSheet.evaluate((node: HTMLDetailsElement) => { node.open = true; });
+  await page.waitForFunction(() => (
+    document.querySelector<HTMLElement>('#crm [data-lead-matches-slot="3"]')?.dataset.matchMode === 'exhaustive'
+    && document.querySelector<HTMLElement>('#crm [data-lead-matches-slot="1"]')?.dataset.matchMode === 'bounded'
+  ));
+  assert.equal(await sheet.getAttribute('open'), null, 'abrir otra ficha debe colapsar la anterior');
+  assert.equal(await slot.getAttribute('data-match-mode'), 'bounded', 'una ficha auto-colapsada debe restaurar bounded');
+  assert.equal(await secondSlot.getAttribute('data-match-mode'), 'exhaustive', 'sólo la nueva ficha abierta queda exhaustive');
+
+  await secondSheet.evaluate((node: HTMLDetailsElement) => { node.open = false; });
+  await page.waitForFunction(() => (
+    document.querySelector<HTMLElement>('#crm [data-lead-matches-slot="3"]')?.dataset.matchMode === 'bounded'
+  ));
+  assert.equal(await secondSlot.getAttribute('data-match-mode'), 'bounded', 'cerrar debe volver al modo bounded del card');
 }
 
 async function assertClosedLayout(page: Page, viewport: { width: number; height: number }): Promise<number[]> {
@@ -582,6 +618,9 @@ async function assertFollowUpActions(page: Page): Promise<void> {
   });
   assert.equal(hitTarget.valid, true, `El botón Completar seguimiento está cubierto: ${JSON.stringify(hitTarget)}`);
   await completeButton.click();
+  const completionDialog = page.locator('dialog[data-followup-completion-dialog][open]');
+  await completionDialog.waitFor({ state: 'visible' });
+  await completionDialog.locator('[data-followup-none]').click();
   await page.waitForFunction(() => {
     const cards = [...document.querySelectorAll<HTMLElement>('#crm .mvp-lead-compact-card')];
     const card = cards.find((item) => item.textContent?.includes('Seguimiento muy vencido'));
@@ -600,24 +639,51 @@ async function assertAutomaticPanel(page: Page, width: number): Promise<void> {
   await panel.waitFor({ state: 'visible' });
   const textarea = panel.locator('[data-qualification-text]');
   await textarea.fill('Busco en Manantiales. Presupuesto USD 120.000, contado, para vivir y puedo avanzar este mes.');
+  const preRerenderTarget = await panel.locator('[data-suggestion-value]:not([disabled]), [data-qualification-text]').last().elementHandle();
+  assert.ok(preRerenderTarget, 'No se encontró el control previo al rerender de Qualification.');
   await panel.locator('[data-analyze-qualification]').click();
   await panel.locator('[data-apply-qualification]').waitFor({ state: 'visible' });
-  const controls = [
-    panel.locator('[data-close-qualification]'),
-    panel.locator('[data-copy-next-question]'),
-    panel.locator('[data-apply-qualification]'),
-  ];
-  for (const control of controls) {
-    if (await control.count()) {
-      await control.scrollIntoViewIfNeeded();
-      const box = await control.boundingBox();
-      assert.ok(box && box.width >= 43.5 && box.height >= 43.5, `Control del panel menor a 44px en ${width}px.`);
+  await panel.locator('.qualification-info').waitFor({ state: 'visible' });
+  await page.waitForFunction((element) => !element.isConnected, preRerenderTarget);
+  const controlMetrics = await page.evaluate(() => {
+    const currentPanel = document.querySelector<HTMLElement>('#crm .lead-qualification-panel');
+    if (!currentPanel || !currentPanel.querySelector('.qualification-info')) {
+      throw new Error('El rerender final de Qualification no está presente para medir controles.');
     }
+    return [
+      ['close', '[data-close-qualification]'],
+      ['copy-next-question', '[data-copy-next-question]'],
+      ['apply', '[data-apply-qualification]'],
+    ].flatMap(([name, selector]) => {
+      const element = currentPanel.querySelector<HTMLElement>(selector!);
+      if (!element) return [];
+      element.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'instant' });
+      const rect = element.getBoundingClientRect();
+      return [{ name, width: rect.width, height: rect.height, connected: element.isConnected }];
+    });
+  });
+  for (const metric of controlMetrics) {
+    assert.ok(metric.connected && metric.width >= 43.5 && metric.height >= 43.5, `Control ${metric.name} del panel menor a 44px en ${width}px: ${JSON.stringify(metric)}`);
   }
   const focusTarget = panel.locator('[data-suggestion-value]:not([disabled]), [data-qualification-text]').last();
-  await focusTarget.focus();
-  await page.waitForTimeout(550);
-  const geometry = await focusTarget.evaluate((element) => {
+  const geometry = await page.evaluate(async () => {
+    const currentPanel = document.querySelector<HTMLElement>('#crm .lead-qualification-panel');
+    if (!currentPanel || !currentPanel.querySelector('.qualification-info')) {
+      throw new Error('El rerender final de Qualification no está presente.');
+    }
+    const initialTargets = Array.from(currentPanel.querySelectorAll<HTMLElement>('[data-suggestion-value]:not([disabled]), [data-qualification-text]'));
+    const initialElement = initialTargets.at(-1);
+    if (!initialElement) throw new Error('No se encontró el control equivalente del rerender final.');
+    initialElement.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'instant' });
+    await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+    const finalPanel = document.querySelector<HTMLElement>('#crm .lead-qualification-panel');
+    if (!finalPanel || !finalPanel.querySelector('.qualification-info')) {
+      throw new Error('El rerender final de Qualification dejó de estar presente tras el scroll.');
+    }
+    const finalTargets = Array.from(finalPanel.querySelectorAll<HTMLElement>('[data-suggestion-value]:not([disabled]), [data-qualification-text]'));
+    const element = finalTargets.at(-1);
+    if (!element) throw new Error('No se encontró el control final de Qualification tras el scroll.');
+    element.focus({ preventScroll: true });
     const rect = element.getBoundingClientRect();
     const nav = document.querySelector<HTMLElement>('.mobile-bottom-nav');
     const navVisible = nav && getComputedStyle(nav).display !== 'none';
@@ -693,6 +759,7 @@ test('B1.2.3 valida lista compacta, prioridad y disclosure con la aplicación re
           assert.match(await page.evaluate(() => navigator.userAgent), /Android|Mobile/i);
         }
         await assertClosedLayout(page, viewport);
+        if (viewport.width === 720) await assertMatchRuntimeTransition(page);
         await assertR5MobileMetrics(page, viewport);
         await assertPipelineSelection(page);
         if (screenshotViewports.has(key)) {
@@ -719,8 +786,11 @@ test('B1.2.3 valida lista compacta, prioridad y disclosure con la aplicación re
           if (viewport.width === 390) {
             await assertFollowUpActions(page);
             await assertAutomaticPanel(page, viewport.width);
-            const panel = page.locator('#crm .lead-qualification-panel');
-            await panel.scrollIntoViewIfNeeded();
+            await page.evaluate(() => {
+              const currentPanel = document.querySelector<HTMLElement>('#crm .lead-qualification-panel');
+              if (!currentPanel) throw new Error('Panel final de Qualification no disponible para captura.');
+              currentPanel.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'instant' });
+            });
             await capture(page, `leads-panel-${key}.png`);
           }
         }

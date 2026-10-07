@@ -1,6 +1,7 @@
 import type { ActivityEntry, Client } from './models.js';
-import { saveData, state } from './store.js';
-import { addActivity, visibleClients } from './team-access.js';
+import { authenticatedTenantMember, saveData, state } from './store.js';
+import { currentTenantScope, requireCurrentTenantScope } from './tenant-runtime.js';
+import { addActivityForAuthenticatedTenant, visibleClients } from './team-access.js';
 import {
   assertCurrentWhatsAppHumanIdentity,
   type WhatsAppHumanIdentitySnapshot,
@@ -53,7 +54,7 @@ type ContactFollowUpClient = Client & {
   whatsappFollowUpChannel?: 'WhatsApp';
 };
 
-function attemptStorageKey(actorId = state.activeMemberId): string {
+function attemptStorageKey(actorId: number): string {
   return `${ATTEMPT_STORAGE_PREFIX}:${state.crm.organization.id}:${actorId}`;
 }
 
@@ -111,7 +112,7 @@ export function markPendingAttemptOpened(attempt: PendingWhatsAppAttempt, now = 
 }
 
 export function dismissPendingWhatsAppAttempt(attempt?: PendingWhatsAppAttempt): void {
-  localStorage.removeItem(attemptStorageKey(attempt?.actorId));
+  if (attempt) localStorage.removeItem(attemptStorageKey(attempt.actorId));
 }
 
 export function dismissPendingWhatsAppAttemptForActor(actorId: number): void {
@@ -132,10 +133,10 @@ export function recordedActivityForAttempt(attemptId: string): ActivityEntry | n
   return state.crm.activityLog.find((entry) => activityAttemptId(entry) === attemptId) ?? null;
 }
 
-function validAttemptShape(attempt: Partial<PendingWhatsAppAttempt>, now: Date): attempt is PendingWhatsAppAttempt {
+function validAttemptShape(attempt: Partial<PendingWhatsAppAttempt>, now: Date, expectedActorId: number): attempt is PendingWhatsAppAttempt {
   return Boolean(
     attempt.id
-    && attempt.actorId === state.activeMemberId
+    && attempt.actorId === expectedActorId
     && attempt.clientId
     && attempt.phone
     && attempt.message
@@ -147,12 +148,15 @@ function validAttemptShape(attempt: Partial<PendingWhatsAppAttempt>, now: Date):
 }
 
 export function loadPendingWhatsAppAttemptResult(now = new Date()): PendingWhatsAppAttemptLoadResult {
-  const key = attemptStorageKey();
+  const scope = currentTenantScope();
+  const member = authenticatedTenantMember(scope);
+  if (!scope || !member) return { attempt: null, invalidated: false, reason: '' };
+  const key = attemptStorageKey(member.id);
   const raw = localStorage.getItem(key);
   if (!raw) return { attempt: null, invalidated: false, reason: '' };
   try {
     const attempt = JSON.parse(raw) as Partial<PendingWhatsAppAttempt>;
-    if (!validAttemptShape(attempt, now) || recordedActivityForAttempt(attempt.id)) {
+    if (!validAttemptShape(attempt, now, member.id) || recordedActivityForAttempt(attempt.id)) {
       localStorage.removeItem(key);
       return { attempt: null, invalidated: true, reason: 'El intento pendiente ya no es válido o venció.' };
     }
@@ -196,7 +200,7 @@ export function registerWhatsAppContact(
   }
 
   const activityId = Math.max(0, ...state.crm.activityLog.map((entry) => entry.id)) + 1;
-  addActivity({
+  addActivityForAuthenticatedTenant(requireCurrentTenantScope(), {
     action: 'Contacto por WhatsApp',
     entityType: 'Cliente',
     entityId: client.id,
@@ -254,7 +258,7 @@ export function scheduleWhatsAppFollowUp(
   client.whatsappFollowUpChannel = 'WhatsApp';
 
   if (!state.crm.activityLog.some((entry) => entry.detail.includes(`${FOLLOW_UP_MARKER} ${attempt.id}`))) {
-    addActivity({
+    addActivityForAuthenticatedTenant(requireCurrentTenantScope(), {
       action: 'Seguimiento por WhatsApp programado',
       entityType: 'Cliente',
       entityId: client.id,

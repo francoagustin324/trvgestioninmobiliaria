@@ -18,6 +18,7 @@ export interface CompactLeadCardContext {
   qualificationPanel: string;
   history: string;
   matches: string;
+  navigation?: string;
 }
 
 interface LeadFact {
@@ -33,6 +34,7 @@ function text(value: string | undefined, fallback = 'No confirmado'): string {
 }
 
 function temperatureIcon(temperature: string): string {
+  if (temperature === 'Sin definir') return '';
   const slug = temperature === 'Caliente' ? 'cliente-caliente'
     : temperature === 'Frío' ? 'cliente-frio'
       : 'cliente-tibio';
@@ -47,9 +49,12 @@ function creditDetail(client: Client): string {
 
 function quickActions(client: Client): string {
   const digits = client.phone.replace(/\D/g, '');
+  const phoneActions = digits
+    ? `<a class="mvp-contact-btn wa" href="https://wa.me/${digits}" target="_blank" rel="noopener noreferrer" title="WhatsApp · ${escapeHtml(formatPhone(client.phone))}" aria-label="Enviar WhatsApp">${appIcons.whatsapp}</a>
+    <a class="mvp-contact-btn call" href="tel:+${digits}" title="Llamar · ${escapeHtml(formatPhone(client.phone))}" aria-label="Llamar">${appIcons.phone}</a>`
+    : '';
   return `<div class="mvp-lead-quick-actions" aria-label="Acciones rápidas de ${escapeHtml(client.name)}">
-    <a class="mvp-contact-btn wa" href="https://wa.me/${digits}" target="_blank" rel="noopener noreferrer" title="WhatsApp · ${escapeHtml(formatPhone(client.phone))}" aria-label="Enviar WhatsApp">${appIcons.whatsapp}</a>
-    <a class="mvp-contact-btn call" href="tel:+${digits}" title="Llamar · ${escapeHtml(formatPhone(client.phone))}" aria-label="Llamar">${appIcons.phone}</a>
+    ${phoneActions}
     ${client.email ? `<a class="mvp-contact-btn mail" href="mailto:${escapeHtml(client.email)}" title="${escapeHtml(client.email)}" aria-label="Enviar email">${appIcons.mail}</a>` : ''}
     <button type="button" class="secondary mvp-auto-qualify-button" data-auto-qualify-client="${client.id}">Calificar automáticamente</button>
   </div>`;
@@ -97,6 +102,7 @@ function fullSheet(
   return `<details class="mvp-lead-full-sheet" data-lead-full-sheet="${client.id}"${context.expanded ? ' open' : ''}>
     <summary aria-expanded="${context.expanded ? 'true' : 'false'}"><span>${context.expanded ? 'Ocultar ficha' : 'Ver ficha completa'}</span><small>Datos secundarios, historial y propiedades</small></summary>
     <div class="mvp-lead-full-content">
+      ${context.navigation || ''}
       <div class="mvp-lead-full-grid">
         <div><span>Zona</span><strong>${text(client.zones)}</strong></div>
         <div><span>Finalidad</span><strong>${text(client.purpose)}</strong></div>
@@ -174,7 +180,7 @@ export function renderCompactLeadCard(client: Client, context: CompactLeadCardCo
     : '<div class="mvp-lead-alert" data-lead-alert-kind="none" hidden aria-hidden="true"></div>';
   const nextAction = attention.showAction
     ? `<div class="mvp-lead-next-action state-${attention.followUpState}" data-lead-attention-kind="${attention.alertKind}" aria-label="${escapeHtml(attention.actionTitle)}" title="${escapeHtml(attention.actionTitle)}">
-        <div><span>Próxima acción</span><strong>${escapeHtml(attention.actionLabel)}</strong>${attention.showDate ? `<small>${escapeHtml(attention.dateLabel)}</small>` : ''}</div>
+        <div><span>${escapeHtml(attention.actionHeading)}</span><strong>${escapeHtml(attention.actionLabel)}</strong>${attention.showDate ? `<small>${escapeHtml(attention.dateLabel)}</small>` : ''}</div>
         ${followUpMenu(client)}
       </div>`
     : '';

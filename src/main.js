@@ -46,7 +46,7 @@ const daysSince = (date) => hasValue(date) ? Math.floor((new Date(today) - new D
 app.innerHTML = `
   <main class="app-shell premium-shell">
     <aside class="sidebar premium-sidebar" aria-label="Navegación principal">
-      <div class="brand"><img class="brand-logo" src="${logoPath}" alt="Logo TRV Gestión Inmobiliaria"><div><strong>TRV CRM</strong><span>SaaS inmobiliario</span></div></div>
+      <div class="brand"><img class="brand-logo" src="${logoPath}" alt="Logo TRV Gestión Inmobiliaria"><div><strong>OrdenBroker</strong><span>SaaS inmobiliario</span></div></div>
       <nav class="premium-nav">${modules.map(([id, label]) => `<button class="nav-button ${id === activeModule ? 'active' : ''}" data-module="${id}">${label}</button>`).join('')}</nav>
       <div class="sidebar-card"><h3>Semáforo comercial</h3><p>Leads, propiedades, fichas y seguimiento comercial en un tablero premium.</p></div>
     </aside>

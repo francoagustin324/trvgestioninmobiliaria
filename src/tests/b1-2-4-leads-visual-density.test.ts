@@ -218,8 +218,9 @@ test('el pulido se integra explícitamente al render de Leads sin observación g
   assert.match(polish, /WeakSet<HTMLDetailsElement>/);
   assert.match(polish, /WeakSet<HTMLElement>/);
   const insertion = leads.indexOf('container.innerHTML =');
-  const integration = leads.indexOf('enhanceLeadList(container, { centerSelectedStage });');
+  const integration = leads.indexOf('enhanceLeadList(container, { centerSelectedStage, properties });');
   assert.ok(insertion >= 0 && integration > insertion, 'El pulido debe ejecutarse después de insertar el DOM de Leads.');
+  assert.match(leads, /const properties = visibleProperties\(\);/, 'El render comparte un único snapshot visible de propiedades entre cards y QUÉ HACER AHORA.');
 });
 
 test('el pulido mantiene intactas las integraciones comerciales existentes', () => {

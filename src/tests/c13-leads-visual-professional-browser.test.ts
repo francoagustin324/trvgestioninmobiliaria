@@ -4,6 +4,7 @@ import { existsSync, mkdirSync } from 'node:fs';
 import test from 'node:test';
 import { chromium, type BrowserContext, type Locator, type Page } from 'playwright';
 import { initialData, type CrmData, type TeamMember } from '../models.js';
+import { installA35H5R1ModernTenantHarness } from './a35-h5-r1-modern-tenant-harness.js';
 
 const USER_ID = 'c13-visual-owner';
 const ORG_ID = 'c13-visual-org';
@@ -158,6 +159,8 @@ async function stopServer(server: ChildProcess): Promise<void> {
 }
 
 async function seedContext(context: BrowserContext): Promise<void> {
+  const crm = fixture();
+  await installA35H5R1ModernTenantHarness(context, crm, USER_ID);
   await context.addInitScript(({ crm, storageKey }) => {
     localStorage.setItem('propcontrol-cloud-session-v1', JSON.stringify({
       accessToken: 'access',
@@ -174,7 +177,7 @@ async function seedContext(context: BrowserContext): Promise<void> {
       lastCloudVersion: '2026-08-21T18:00:00.000Z',
     }));
     localStorage.setItem('propcontrol-active-team-member-v1', '1');
-  }, { crm: fixture(), storageKey: STORAGE_KEY });
+  }, { crm, storageKey: STORAGE_KEY });
 }
 
 async function load(page: Page, url: string): Promise<void> {
@@ -235,20 +238,18 @@ async function inspectViewport(page: Page, url: string, width: number, height: n
   await page.setViewportSize({ width, height });
   await load(page, url);
 
-  const heading = page.locator('.pc-supervised-attention-heading');
-  assert.equal((await heading.locator('strong').textContent())?.trim(), 'LEADS PRIORITARIOS');
-  const fullCopy = heading.locator('.pc-supervised-attention-copy-full');
-  const compactCopy = heading.locator('.pc-supervised-attention-copy-compact');
+  const heading = page.locator('.pc-daily-ops-heading');
+  assert.equal((await heading.locator('strong').textContent())?.trim(), 'QUÉ HACER AHORA');
+  const explanatoryCopy = heading.locator(':scope > div:first-child > span');
   if (width <= 720) {
-    assert.equal(await compactCopy.isVisible(), true, `${width}: copy compacto visible.`);
-    assert.equal((await compactCopy.textContent())?.trim(), 'Contactos para gestionar primero.');
+    assert.equal(await explanatoryCopy.isVisible(), false, `${width}: copy explicativo se oculta para mantener jerarquía móvil compacta.`);
   } else {
-    assert.equal(await fullCopy.isVisible(), true, `${width}: copy completo visible.`);
-    assert.equal((await fullCopy.textContent())?.trim(), 'Gestioná primero los contactos que requieren acción.');
+    assert.equal(await explanatoryCopy.isVisible(), true, `${width}: copy explicativo visible en desktop.`);
+    assert.equal((await explanatoryCopy.textContent())?.trim(), 'Prioridad explicable a partir de actividad, fechas y estado comercial.');
   }
 
-  const priorityCards = page.locator('.pc-supervised-attention-item');
-  assert.equal(await priorityCards.count(), 3, `${width}: se conserva máximo y fixture top-3.`);
+  const priorityCards = page.locator('.pc-daily-ops-item');
+  assert.equal(await priorityCards.count(), 3, `${width}: la vista inicial conserva top-3 operativo.`);
   for (let index = 0; index < 3; index += 1) {
     const card = priorityCards.nth(index);
     await assertTarget(card, `${width}: prioridad ${index + 1}`);

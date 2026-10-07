@@ -203,7 +203,14 @@ test('R4.29 payload minimizado', () => { const payload = JSON.stringify(supervis
 
 test('R4.30 Won/Lost human-only e ignored diferido', () => { const lifecycle = readFileSync('src/lead-recommendation-lifecycle.ts', 'utf8'); const runtime = readFileSync('src/lead-recommendation-instrumentation.ts', 'utf8'); for (const forbidden of ["pipeline = 'Ganado'", "pipeline = 'Perdido'", "'ignored'", 'setTimeout']) { assert.equal(lifecycle.includes(forbidden), false); assert.equal(runtime.includes(forbidden), false); } });
 
-test('R4.31 B1.4.1 max3/order priority intacto', () => { const queue = supervisedAttentionQueue([client(1, { nextFollowUp: '2026-08-18', nextAction: 'Llamar', pipeline: 'Contactado' }), client(2, { pipeline: 'Nuevo', lastContact: undefined }), client(3, { nextFollowUp: TODAY, nextAction: 'Llamar', pipeline: 'Contactado' }), client(4, { pipeline: 'Ganado' }), client(5, { pipeline: 'Perdido' })], TODAY, 99); assert.equal(queue.length, 3); const source = readFileSync('src/lead-attention-queue.ts', 'utf8'); assert.match(source, /sortLeads\(active, 'priority', today\)/); assert.equal(source.includes('score'), false); });
+test('R4.31 B1.4.1 max3/order priority intacto', () => {
+  const queue = supervisedAttentionQueue([client(1, { nextFollowUp: '2026-08-18', nextAction: 'Llamar', pipeline: 'Contactado' }), client(2, { pipeline: 'Nuevo', lastContact: undefined }), client(3, { nextFollowUp: TODAY, nextAction: 'Llamar', pipeline: 'Contactado' }), client(4, { pipeline: 'Ganado' }), client(5, { pipeline: 'Perdido' })], TODAY, 99);
+  assert.equal(queue.length, 3);
+  const source = readFileSync('src/lead-attention-queue.ts', 'utf8');
+  const legacySource = source.slice(0, source.indexOf('export type OperationalPriority'));
+  assert.match(legacySource, /sortLeads\(active, 'priority', today\)/);
+  assert.equal(legacySource.includes('score'), false);
+});
 
 test('R4.32 normal Leads recent / Mas recientes intacto', () => { const source = readFileSync('src/mvp-leads-ui.ts', 'utf8'); const initial = source.slice(source.indexOf('let filters: LeadListFilters'), source.indexOf('let expandedClientId')); assert.match(initial, /order:\s*'recent'/); assert.match(source, /Más recientes/); });
 

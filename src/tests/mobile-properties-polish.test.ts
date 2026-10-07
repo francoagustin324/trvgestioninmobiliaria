@@ -10,7 +10,7 @@ const main = readFileSync('src/mvp-main.ts', 'utf8');
 const packageJson = readFileSync('package.json', 'utf8').toLowerCase();
 
 test('carga el pulido móvil de Propiedades después de las capas existentes', () => {
-  assert.ok(html.includes('/src/mobile-properties-polish.css?v=20260906-p1-4-a2-2-1'));
+  assert.ok(html.includes('/src/mobile-properties-polish.css?v=20261006-block2h-promo-1'));
   assert.ok(html.indexOf('mobile-properties-polish.css') > html.indexOf('mvp-properties.css'));
   assert.ok(html.indexOf('mobile-properties-polish.css') > html.indexOf('mobile-bottom-nav.css'));
 });
@@ -70,8 +70,10 @@ test('reutiliza el espacio inferior global y safe area sin duplicarlo', () => {
   assert.equal(css.includes('--pc-mobile-nav-height'), false);
 });
 
-test('no cambia URLs públicas, dependencias ni stack técnico', () => {
-  assert.ok(ui.includes('publishPropertyFicha(property)'));
+test('no cambia URLs públicas, dependencias ni stack técnico y conserva publicación tenant-aware', () => {
+  assert.ok(ui.includes('publishAndRememberPropertyFicha(property, scope, runtimeLease)'));
+  assert.ok(ui.includes('captureTenantRuntimeLease(scope)'));
+  assert.ok(ui.includes('assertPropertyShareOperationCurrent(scope, runtimeLease)'));
   assert.ok(ui.includes('published.url'));
   assert.equal(css.includes('/ficha/'), false);
   assert.equal(packageJson.includes('"react"'), false);

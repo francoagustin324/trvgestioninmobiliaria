@@ -4,6 +4,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import test from 'node:test';
 import { chromium, webkit, type Browser, type BrowserContext, type Page } from 'playwright';
 import { initialData, type CrmData, type TeamMember } from '../models.js';
+import { installA35H5R1ModernTenantHarness } from './a35-h5-r1-modern-tenant-harness.js';
 
 const USER_ID = 'text-geometry-owner';
 const ORG_ID = 'text-geometry-org';
@@ -116,6 +117,8 @@ async function stopServer(server: ChildProcess): Promise<void> {
 }
 
 async function seedContext(context: BrowserContext): Promise<void> {
+  const crm = fixture();
+  await installA35H5R1ModernTenantHarness(context, crm, USER_ID);
   const actorKey = `cloud:${USER_ID}`;
   const identityKey = `propcontrol-whatsapp-human-identity-v1:${encodeURIComponent(ORG_ID)}:1:${encodeURIComponent(actorKey)}`;
   await context.addInitScript(({ crm, identityStorageKey, storageKey }) => {
@@ -142,7 +145,7 @@ async function seedContext(context: BrowserContext): Promise<void> {
       humanName: 'Franco Solis',
       confirmedAt: '2026-08-10T18:00:00.000Z',
     }));
-  }, { crm: fixture(), identityStorageKey: identityKey, storageKey: STORAGE_KEY });
+  }, { crm, identityStorageKey: identityKey, storageKey: STORAGE_KEY });
 }
 
 async function chromiumContext(browser: Browser, width: number): Promise<BrowserContext> {

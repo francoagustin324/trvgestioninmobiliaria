@@ -1,0 +1,57 @@
+name: A3.5 H5 R1 Inspect Families
+
+on:
+  push:
+    branches:
+      - validation/a35-h5-r1-family-sanitization
+    paths:
+      - .github/workflows/a35-h5-r1-inspect.yml
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - name: Inspect remaining family harnesses
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          files = [
+            'src/tests/b1-2-3-compact-leads-real-app.test.ts',
+            'src/tests/b1-2-3-responsive-matrix-real-app.test.ts',
+            'src/tests/b1-2-4-architecture-runtime.test.ts',
+            'src/tests/b1-2-4-responsive-real-app.test.ts',
+            'src/tests/b1-2-5-responsive-real-app.test.ts',
+            'src/tests/b1-2-6-mobile-header-alerts.test.ts',
+            'src/tests/b1-2-7-responsive-real-app.test.ts',
+            'src/tests/b1-2-8-account-menu-responsive-real-app.test.ts',
+            'src/tests/b1-2-9-multiuser-permissions-real-app.test.ts',
+            'src/tests/b1-3-1-lead-create-real-app.test.ts',
+            'src/tests/c13-leads-visual-professional-browser.test.ts',
+            'src/tests/b1-3-2-android-lead-save-real-app.test.ts',
+            'src/tests/b1-3-3-audit-blockers-real-app.test.ts',
+            'src/tests/b1-3-3-real-use-real-app.test.ts',
+            'src/tests/followup-hotfix-browser.test.ts',
+          ]
+          needles = (
+            'organization =', 'organizationId', 'userId', 'memberId', 'sessionKey',
+            'activeMemberKey', 'whatsapp', 'human', 'contextFor', 'createContext',
+            'seedContext', 'browser.newContext', "route('**/api/cloud-config'", 'installCloudFailure',
+            'waitForSelector', 'startServer', 'browser = await', 'chromium.launch',
+          )
+          for file in files:
+            p = Path(file)
+            lines = p.read_text().splitlines()
+            print('\n' + '='*110)
+            print(file)
+            print('='*110)
+            for i,line in enumerate(lines,1):
+              if any(n in line for n in needles):
+                lo=max(1,i-3); hi=min(len(lines),i+8)
+                print(f'--- L{lo}-L{hi} around L{i} ---')
+                for j in range(lo,hi+1): print(f'{j:04d}: {lines[j-1]}')
+          PY

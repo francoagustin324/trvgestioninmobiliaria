@@ -138,7 +138,7 @@ function duplicateGroupHtml(group: DuplicateClientGroup): string {
       <div><span class="eyebrow">Mismo teléfono</span><h4>${escapeHtml(formatPhone(group.clients[0]?.phone ?? group.identity))}</h4></div>
       <strong>${group.clients.length} registros</strong>
     </div>
-    <p class="duplicate-explanation">Elegí cuál conservar. PropControl completará campos vacíos, mantendrá el seguimiento más urgente y guardará los datos de los otros registros dentro de las observaciones.</p>
+    <p class="duplicate-explanation">Elegí cuál conservar. OrdenBroker completará campos vacíos, mantendrá el seguimiento más urgente y guardará los datos de los otros registros dentro de las observaciones.</p>
     <div class="duplicate-client-list">${group.clients.map((client) => duplicateClientRow(client, recommended.id)).join('')}</div>
   </article>`;
 }
@@ -153,7 +153,7 @@ function duplicateAuditHtml(): string {
   if (!groups.length) {
     return `<details class="duplicate-audit is-clean">
       <summary><span><b>Control de duplicados históricos</b><small>La base no tiene teléfonos repetidos.</small></span><span class="duplicate-summary-actions"><strong>Base limpia</strong>${backupAction}</span></summary>
-      <p>No se encontraron clientes anteriores con el mismo número normalizado. PropControl seguirá bloqueando nuevos duplicados.</p>
+      <p>No se encontraron clientes anteriores con el mismo número normalizado. OrdenBroker seguirá bloqueando nuevos duplicados.</p>
     </details>`;
   }
 

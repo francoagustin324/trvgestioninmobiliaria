@@ -8,6 +8,7 @@ import { chromium, type Browser, type BrowserContext, type Locator, type Page } 
 import { renderCompactLeadCard } from '../lead-card-compact-ui.js';
 import { localIsoDate } from '../lead-pipeline.js';
 import { initialData, type Client, type CrmData } from '../models.js';
+import { installA35H5R1ModernTenantHarness } from './a35-h5-r1-modern-tenant-harness.js';
 
 const viewports = [
   { width: 320, height: 568 },
@@ -146,7 +147,7 @@ test('B1.2.6 define la estructura en la hoja responsable e invalida su caché im
   assert.match(compactCss, /grid-template-areas:\s*['"]identity['"]\s*['"]statuses['"]/);
   assert.match(compactCss, /\.mvp-lead-alert::after[^}]*content:\s*attr\(data-mobile-label\)/s);
   assert.match(polishCss, /@media \(min-width: 381px\) and \(max-width: 520px\)/);
-  assert.ok(html.indexOf('lead-list-compact.css?v=20260729-3') < html.indexOf('lead-list-polish.css?v=20260729-1'));
+  assert.ok(html.indexOf('lead-list-compact.css?v=20261006-block2h-promo-1') < html.indexOf('lead-list-polish.css?v=20261006-block2h-promo-1'));
   assert.equal((html.match(/lead-list-compact\.css/g) ?? []).length, 1);
 });
 
@@ -213,6 +214,8 @@ async function contextFor(browser: Browser, viewport: typeof viewports[number]):
     locale: 'es-AR',
     colorScheme: 'dark',
   });
+  const crm = fixture();
+  await installA35H5R1ModernTenantHarness(context, crm, crm.teamMembers[0]?.userId ?? '');
   await context.addInitScript(({ data }) => {
     const userId = 'b126-owner';
     const key = `trv-crm-basico:user:${userId}`;
@@ -220,7 +223,7 @@ async function contextFor(browser: Browser, viewport: typeof viewports[number]):
     localStorage.setItem(key, JSON.stringify(data));
     localStorage.setItem(`${key}:sync`, JSON.stringify({ dirty: false, localUpdatedAt: new Date().toISOString(), lastCloudSavedAt: new Date().toISOString() }));
     localStorage.setItem('propcontrol-active-team-member-v1', '1');
-  }, { data: fixture() });
+  }, { data: crm });
   return context;
 }
 

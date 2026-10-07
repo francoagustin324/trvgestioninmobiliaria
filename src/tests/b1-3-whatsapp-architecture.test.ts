@@ -32,7 +32,7 @@ test('B1.3 integra resultado e historial sin crear una colección comercial para
 test('B1.3 nunca interpreta abrir WhatsApp como envío confirmado', () => {
   assert.ok(ui.includes("window.open(whatsappUrl(opened.phone, opened.message), '_blank'"));
   assert.ok(ui.includes('¿Enviaste el mensaje a'));
-  assert.ok(ui.includes('PropControl nunca lo registra automáticamente.'));
+  assert.ok(ui.includes('${PRODUCT_BRAND.name} nunca lo registra automáticamente.'));
   assert.ok(ui.includes('registerWhatsAppContact(attempt)'));
   assert.equal(ui.includes('openChannel(); register'), false);
 });

@@ -1,10 +1,12 @@
 import { organizeAccountMenuProductActions } from './account-menu-product.js';
+import { clearReadEntityNavigation } from './entity-read-navigation.js';
 import type { ModuleId } from './models.js';
 import { modules } from './models.js';
 import { PRODUCT_BRAND } from './branding.js';
 import { renderAgenda } from './agenda-ui.js';
 import { decodePublicFicha, renderPublicMode } from './public-ficha.js';
 import { loadPublicPropertyFicha } from './public-property-share.js';
+import { consumeExtensionPropertyImport } from './extension-import-ui.js';
 import { renderMvpLeads } from './mvp-leads-ui.js';
 import { enhanceLeadForm } from './lead-create-reliability.js';
 import { renderMvpPropertiesWorkspace } from './mvp-properties-workspace.js';
@@ -24,7 +26,8 @@ import {
   renderPublicAuth,
 } from './mvp-auth.js';
 import { canAccessModule } from './team-access.js';
-import { saveData, state } from './store.js';
+import { replacePropertyCollection, saveData, state } from './store.js';
+import { invalidateTenantRuntimeScope } from './tenant-runtime.js';
 import { qs } from './utils.js';
 
 const root = qs<HTMLElement>('#root');
@@ -73,7 +76,7 @@ function renderShell(): void {
       <button type="button" class="mobile-nav-trigger" data-mobile-nav-toggle aria-controls="app-sidebar" aria-expanded="false"><span>Menú</span></button>
       <div class="app-brand" aria-label="${PRODUCT_BRAND.name}">
         <img class="app-brand-logo" src="${PRODUCT_BRAND.logo}" alt="">
-        <span class="app-brand-copy"><strong>${PRODUCT_BRAND.name}</strong><small>CRM inmobiliario</small></span>
+        <span class="app-brand-copy"><strong>${PRODUCT_BRAND.name}</strong><small>${PRODUCT_BRAND.tagline}</small></span>
       </div>
       <div class="app-topbar-spacer" aria-hidden="true"></div>
       <div id="cloud-account"></div>
@@ -180,6 +183,12 @@ function showNotice(message: string): void {
   window.setTimeout(() => { notice.hidden = true; }, 4500);
 }
 
+function renderSafeBootstrapFailure(message: string): void {
+  root.innerHTML = '<main class="public-page"><div class="public-error"><h1>No se pudo cargar la cuenta</h1><p data-bootstrap-error></p><a href="/login">Volver a ingresar</a></div></main>';
+  const detail = root.querySelector<HTMLElement>('[data-bootstrap-error]');
+  if (detail) detail.textContent = message;
+}
+
 function allowedModules(): ModuleId[] {
   return modules.map(([id]) => id).filter((id) => canAccessModule(id));
 }
@@ -189,9 +198,9 @@ function ensureActiveModule(): void {
   if (!allowed.includes(state.activeModule)) state.activeModule = allowed[0] ?? 'crm';
 }
 
-function render(): void {
+function render(forceLeadEditor = false): void {
   ensureActiveModule();
-  renderMvpLeads(qs<HTMLElement>('#crm'));
+  renderMvpLeads(qs<HTMLElement>('#crm'), false, forceLeadEditor);
   renderMvpConversations(qs<HTMLElement>('#whatsapp'));
   renderAgenda(qs<HTMLElement>('#agenda'));
   renderMvpPropertiesWorkspace(qs<HTMLElement>('#propiedades'));
@@ -220,7 +229,7 @@ function removeItem(collection: string, id: number): void {
     state.crm.conversations = state.crm.conversations.filter((item) => item.clientId !== id);
   }
   if (collection === 'properties') {
-    state.crm.properties = state.crm.properties.filter((item) => item.id !== id);
+    replacePropertyCollection(state.crm.properties.filter((item) => item.id !== id));
     if (state.editingPropertyId === id) state.editingPropertyId = null;
   }
   if (collection === 'reminders') state.crm.reminders = state.crm.reminders.filter((item) => item.id !== id);
@@ -232,7 +241,7 @@ function bindEvents(): void {
   if (eventsBound) return;
   eventsBound = true;
   installPropertyPhotoUxGuard();
-  document.addEventListener('trv-render', render);
+  document.addEventListener('trv-render', () => render());
   document.addEventListener('propcontrol-account-menu-rendered', finalizeAccountMenu);
   document.addEventListener('propcontrol-cloud-status', (event) => {
     const detail = (event as CustomEvent<{ message?: string }>).detail;
@@ -254,28 +263,31 @@ function bindEvents(): void {
       return;
     }
     const editId = Number(target.closest<HTMLElement>('[data-edit-client]')?.dataset.editClient);
-    if (editId) { state.activeModule = 'crm'; state.editingClientId = editId; state.openForms.client = true; render(); return; }
+    if (editId) { clearReadEntityNavigation(); state.activeModule = 'crm'; state.editingClientId = editId; state.openForms.client = true; render(true); return; }
     if (target.closest('[data-cancel-client-edit]')) { state.editingClientId = null; state.openForms.client = false; render(); return; }
     const toggle = target.closest<HTMLElement>('[data-toggle]')?.dataset.toggle;
-    if (toggle === 'client-form') { state.editingClientId = null; state.openForms.client = !state.openForms.client; render(); return; }
-    if (toggle === 'property-form') { state.editingPropertyId = null; state.openForms.property = !state.openForms.property; render(); return; }
+    if (toggle === 'client-form') { clearReadEntityNavigation(); state.editingClientId = null; state.openForms.client = !state.openForms.client; render(); return; }
+    if (toggle === 'property-form') { clearReadEntityNavigation(); state.editingPropertyId = null; state.openForms.property = !state.openForms.property; render(); return; }
     if (toggle === 'reminder-form') { state.openForms.reminder = !state.openForms.reminder; render(); return; }
     const deleteButton = target.closest<HTMLElement>('[data-delete]');
     const collection = deleteButton?.dataset.delete;
     const id = Number(deleteButton?.dataset.id);
-    if (collection && id && window.confirm('¿Eliminar este registro? PropControl guardará una copia local anterior.')) removeItem(collection, id);
+    if (collection && id && window.confirm('¿Eliminar este registro? OrdenBroker guardará una copia local anterior.')) removeItem(collection, id);
   });
   window.addEventListener('resize', () => { if (window.innerWidth > 980) setMobileNavigation(false); });
 }
 
 async function bootstrap(): Promise<void> {
+  const extensionToken = location.hash.startsWith('#extension-import=') ? location.hash.slice('#extension-import='.length) : '';
+  const extensionError = location.hash.startsWith('#extension-error=') ? location.hash.slice('#extension-error='.length) : '';
+
   if (isInvitationPage()) {
     await renderInvitationAuth(root);
     return;
   }
   const shortFichaMatch = location.pathname.match(/^\/ficha\/([a-z0-9-]+)\/?$/i);
   if (shortFichaMatch?.[1]) {
-    document.title = 'Ficha de propiedad | PropControl';
+    document.title = `Ficha de propiedad | ${PRODUCT_BRAND.name}`;
     root.innerHTML = '<main class="public-page"><div class="public-error"><h1>Cargando ficha…</h1><p>Un momento.</p></div></main>';
     try {
       renderPublicMode(root, await loadPublicPropertyFicha(shortFichaMatch[1].toLowerCase()));
@@ -289,21 +301,50 @@ async function bootstrap(): Promise<void> {
     return;
   }
   if (!hasAuthenticatedSession()) {
-    if (!isLoginPage() && !isRegisterPage()) history.replaceState(null, '', '/login');
+    const pendingExtensionHash = extensionToken || extensionError ? location.hash : '';
+    if (!isLoginPage() && !isRegisterPage()) history.replaceState(null, '', '/login' + pendingExtensionHash);
     renderPublicAuth(root);
     return;
   }
-  if (isLoginPage() || isRegisterPage()) history.replaceState(null, '', '/');
+  if (isLoginPage() || isRegisterPage()) {
+    history.replaceState(null, '', extensionToken || extensionError ? '/' + location.hash : '/');
+  }
+
   try {
     await hydrateAuthenticatedSession();
-    renderShell();
-    bindEvents();
-    render();
   } catch (error) {
-    renderShell();
-    bindEvents();
-    render();
-    showNotice(error instanceof Error ? error.message : 'No se pudo cargar la cuenta.');
+    invalidateTenantRuntimeScope();
+    renderSafeBootstrapFailure(error instanceof Error ? error.message : 'No se pudo cargar la cuenta.');
+    return;
+  }
+
+  if (extensionToken) {
+    state.activeModule = 'propiedades';
+    state.editingPropertyId = null;
+    state.openForms.property = true;
+  }
+
+  renderShell();
+  bindEvents();
+  render();
+
+  if (extensionError) {
+    let message = 'La extensión no pudo leer esta publicación.';
+    try { message = decodeURIComponent(extensionError); } catch { /* mantener mensaje seguro */ }
+    history.replaceState(null, '', location.pathname + location.search);
+    showNotice(message);
+  }
+
+  if (extensionToken) {
+    try {
+      const payload = await consumeExtensionPropertyImport(extensionToken);
+      const provider = ({ mercadolibre: 'MercadoLibre', zonaprop: 'Zonaprop', 'ficha-info': 'ficha.info', tokko: 'Tokko', generic: 'otro portal' })[payload.provider];
+      showNotice('Datos importados desde ' + provider + '. Revisá la propiedad y guardala.');
+      window.requestAnimationFrame(() => document.querySelector('#mvp-property-form')?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
+    } catch (error) {
+      history.replaceState(null, '', location.pathname + location.search);
+      showNotice(error instanceof Error ? error.message : 'No se pudo recibir la propiedad desde la extensión.');
+    }
   }
 }
 

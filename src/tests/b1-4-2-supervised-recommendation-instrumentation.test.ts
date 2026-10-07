@@ -204,7 +204,9 @@ test('R2.9 tres shown salen en un único batch, sin tres ciclos de membership', 
   const result = await flushRecommendationEventBatch(events, auth([1, 2, 3]), 'user-1', async (batch) => { calls += 1; rows += batch.length; });
   assert.equal(calls, 1); assert.equal(rows, 3); assert.equal(result.remaining.length, 0);
   const source = readFileSync('src/lead-recommendation-telemetry.ts', 'utf8');
-  assert.equal((source.match(/await getCloudMembershipContext\(\)/g) || []).length, 1);
+  assert.doesNotMatch(source, /\bgetCloudMembershipContext\b/);
+  assert.doesNotMatch(source, /\bfetchMembershipRows\b/);
+  assert.equal((source.match(/\btenantCloudTransport\s*\(\s*tenant\.scope\s*\)/g) || []).length, 1);
 });
 
 test('R2.10 fake cloud histórico distingue CRM/telemetría y usa upsert compuesto', () => {
@@ -303,8 +305,24 @@ test('R2 CRM isolation: R1+R2 telemetría fuera de activityLog/stale y read-merg
   assert.deepEqual(Object.keys(loaded).sort(), ['activityLog', 'clients', 'contacts', 'conversations', 'fichas', 'offers', 'organization', 'properties', 'reservations', 'reminders', 'settings', 'teamMembers', 'visits'].sort()); assert.equal(loaded.activityLog.length, 1);
   const stale = staleCloudRecords(rows, crmToCloudRecords(loaded, cloudContext, 'user-1'));
   assert.equal(stale.some((row) => row.entity_key === eventRow.entity_key || row.entity_key === oldRow.entity_key), false);
+
   const telemetry = readFileSync('src/lead-recommendation-telemetry.ts', 'utf8');
-  assert.equal(telemetry.includes('mergeSupervisedRecommendationTelemetry'), false); assert.equal(telemetry.includes("method: 'GET'"), false); assert.match(telemetry, /resolution=ignore-duplicates/);
+  assert.equal(telemetry.includes('mergeSupervisedRecommendationTelemetry'), false);
+  assert.doesNotMatch(telemetry, /method\s*:\s*['"]GET['"]/);
+  assert.doesNotMatch(telemetry, /method\s*:\s*['"]POST['"]/);
+  assert.equal(telemetry.includes('/rest/v1/propcontrol_records'), false);
+  assert.match(telemetry, /\binsertTenantCloudRecordsIgnoreDuplicates\s*\(/);
+
+  const cloudData = readFileSync('src/tenant-cloud-data.ts', 'utf8');
+  const writerStart = cloudData.indexOf('export async function insertTenantCloudRecordsIgnoreDuplicates');
+  const writerEnd = cloudData.indexOf('\nasync function deleteStaleRecords', writerStart);
+  assert.ok(writerStart >= 0 && writerEnd > writerStart);
+  const writer = cloudData.slice(writerStart, writerEnd);
+  assert.match(writer, /assertRowsTenant\(transport\.scope, records\)/);
+  assert.match(writer, /assertCloudWriterLease\(transport\.scope, runtimeLease\)/);
+  assert.match(writer, /target\.searchParams\.set\('on_conflict', 'organization_id,entity_type,entity_key'\)/);
+  assert.match(writer, /resolution=ignore-duplicates,return=minimal/);
+  assert.match(writer, /await parseTenantCloudJson\(response\)/);
 });
 
 test('R2 outbox: dedupe por eventId conserva retries y evidencias físicas distintas', () => {

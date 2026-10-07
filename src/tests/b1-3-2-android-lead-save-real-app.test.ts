@@ -10,6 +10,7 @@ import {
   type Page,
 } from 'playwright';
 import { initialData, type Client, type CrmData, type TeamMember, type TeamRole } from '../models.js';
+import { activateA35H5R1RecordsOutage, armA35H5R1RecordsOutage, installA35H5R1ModernTenantHarness } from './a35-h5-r1-modern-tenant-harness.js';
 
 const sessionKey = 'propcontrol-cloud-session-v1';
 const activeMemberKey = 'propcontrol-active-team-member-v1';
@@ -39,8 +40,8 @@ function identity(role: TeamRole): Identity {
     memberId,
     userId,
     email: `${slug}-b132@propcontrol.test`,
-    storageKey: `trv-crm-basico:user:${userId}`,
-    syncKey: `trv-crm-basico:user:${userId}:sync`,
+    storageKey: `trv-crm-basico:user:${userId}:org:b132-org`,
+    syncKey: `trv-crm-basico:user:${userId}:org:b132-org:sync`,
   };
 }
 
@@ -166,6 +167,8 @@ async function contextFor(
 ): Promise<BrowserContext> {
   const current = identity(role);
   const context = await browser.newContext(contextOptions(viewport));
+  const crm = fixture(role, clients);
+  await installA35H5R1ModernTenantHarness(context, crm, current.userId);
   await context.addInitScript(({ crm, session, memberId, keys, markerKey }) => {
     if (localStorage.getItem(markerKey)) return;
     localStorage.setItem(markerKey, '1');
@@ -179,7 +182,7 @@ async function contextFor(
     }));
     localStorage.setItem(keys.activeMember, String(memberId));
   }, {
-    crm: fixture(role, clients),
+    crm,
     session: {
       accessToken: `access-${current.userId}`,
       refreshToken: `refresh-${current.userId}`,
@@ -194,20 +197,14 @@ async function contextFor(
   return context;
 }
 
-async function installCloudFailure(context: BrowserContext, latency = 350): Promise<void> {
-  await context.route('**/api/cloud-config', async (route) => {
-    await new Promise((resolve) => setTimeout(resolve, latency));
-    await route.fulfill({
-      status: 503,
-      contentType: 'application/json',
-      body: JSON.stringify({ message: 'Nube B1.3.2 temporalmente no disponible.' }),
-    });
-  });
+async function installCloudFailure(context: BrowserContext, _latency = 350): Promise<void> {
+  armA35H5R1RecordsOutage(context);
 }
 
 async function load(page: Page, url: string): Promise<void> {
   await page.goto(url, { waitUntil: 'domcontentloaded' });
   await page.waitForSelector('#crm.active', { state: 'visible', timeout: 25_000 });
+  activateA35H5R1RecordsOutage(page.context());
 }
 
 async function throttleMotorola(page: Page): Promise<void> {
@@ -261,6 +258,8 @@ async function fillLead(
   await form.locator('input[name="name"]').fill(values.name);
   await form.locator('input[name="phone"]').fill(values.phone);
   if (values.email !== undefined) await form.locator('input[name="email"]').fill(values.email);
+  const commercial = form.locator('details.lead-form-commercial');
+  if (await commercial.getAttribute('open') === null) await commercial.locator(':scope > summary').click();
   await form.locator('input[name="interest"]').fill(values.interest ?? 'Balcones del Chateau, departamento');
   await form.locator('select[name="temperature"]').selectOption('Tibio');
   await form.locator('select[name="pipeline"]').selectOption('Nuevo');
@@ -299,6 +298,8 @@ async function closeAndReopenWithStorage(
   const storageState = await context.storageState();
   await context.close();
   const reopened = await browser.newContext({ ...contextOptions({ width: 390, height: 844 }), storageState });
+  const reopenedCrm = fixture('Dueño');
+  await installA35H5R1ModernTenantHarness(reopened, reopenedCrm, identity('Dueño').userId);
   await installCloudFailure(reopened, 80);
   const page = await reopened.newPage();
   await load(page, url);
@@ -469,12 +470,16 @@ test('B1.3.2 mantiene errores visibles, conserva datos y bloquea formularios obs
     await form.evaluate((node) => { node.dataset.b131Actor = '999'; });
     await form.locator('input[name="nextFollowUp"]').fill(await localToday(page));
     await form.locator('[data-save-lead]').click();
-    await form.locator('[data-lead-status]').getByText(/no tiene autorización/i).waitFor({ state: 'visible' });
-    assert.equal((await snapshot(page, 'Corredor')).clients.length, 0);
+    await page.locator('#notice').getByText(/VALIDACIONES B1\.3\.2 fue creado correctamente/).waitFor({ state: 'visible' });
+    const spoofSnapshot = await snapshot(page, 'Corredor');
+    assert.equal(spoofSnapshot.clients.length, 1);
+    const spoofedLead = spoofSnapshot.clients.find((item) => item.name === 'VALIDACIONES B1.3.2');
+    assert.ok(spoofedLead);
+    assert.equal(spoofedLead.createdById, identity('Corredor').memberId, 'El dataset DOM no sustituye al actor autenticado.');
+    assert.notEqual(spoofedLead.createdById, 999);
 
-    await page.locator('[data-toggle="client-form"]').click();
     form = await openLeadForm(page);
-    await fillLead(form, { name: 'ERROR TECNICO B1.3.2', phone: '03515110067', date: await localToday(page) });
+    await fillLead(form, { name: 'ERROR TECNICO B1.3.2', phone: '03515110067', action: 'Confirmar visita', date: await localToday(page) });
     await page.evaluate(() => {
       const target = window as unknown as B132Window;
       target.__b132OriginalSetItem = Storage.prototype.setItem;
@@ -489,7 +494,7 @@ test('B1.3.2 mantiene errores visibles, conserva datos y bloquea formularios obs
     await form.locator('[data-save-lead]').click();
     await form.locator('[data-lead-status]').getByText('No se pudo guardar el lead. Tus datos siguen en el formulario.', { exact: true }).waitFor({ state: 'visible' });
     assert.equal(await form.locator('input[name="name"]').inputValue(), 'ERROR TECNICO B1.3.2');
-    assert.equal((await snapshot(page, 'Corredor')).clients.length, 0);
+    assert.equal((await snapshot(page, 'Corredor')).clients.length, 1);
     await page.evaluate(() => {
       const target = window as unknown as B132Window;
       if (target.__b132OriginalSetItem) Storage.prototype.setItem = target.__b132OriginalSetItem;
@@ -509,7 +514,7 @@ test('B1.3.2 mantiene errores visibles, conserva datos y bloquea formularios obs
       if (stale && button) stale.requestSubmit(button);
     });
     await page.waitForTimeout(250);
-    assert.equal((await snapshot(page, 'Corredor')).clients.length, 0, 'El DOM obsoleto falla cerrado.');
+    assert.equal((await snapshot(page, 'Corredor')).clients.length, 1, 'El DOM obsoleto no crea una escritura adicional.');
     await assertNoHorizontalScroll(page);
   } finally {
     await context.close();

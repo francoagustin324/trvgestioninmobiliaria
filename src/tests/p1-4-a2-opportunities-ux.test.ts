@@ -25,7 +25,7 @@ test('P1.4-A2/A2.2 mantiene descubrible el acceso comercial desde Propiedades co
 
 test('P1.4-A2.1 separa Paso 1, selector y propiedad seleccionada con semántica clara', () => {
   assert.match(uiSource, /Buscar clientes para una propiedad/);
-  assert.match(uiSource, /Elegí una propiedad y PropControl te muestra los clientes compatibles según el matching actual\./);
+  assert.ok(uiSource.includes('Elegí una propiedad y ${PRODUCT_BRAND.name} te muestra los clientes compatibles según el matching actual.'));
   assert.match(uiSource, /opportunity-step-kicker">PASO 1/);
   assert.match(uiSource, /opportunity-property-step-title">Elegí la propiedad que querés trabajar/);
   assert.match(uiSource, /class="opportunity-property-field"/);
@@ -80,7 +80,9 @@ test('P1.4-A2 integra Oportunidades con los tokens visuales oficiales sin volver
 test('P1.4-A2 conserva selección local, apertura de ficha y contratos P1.4-A1', () => {
   assert.match(uiSource, /const selectedClientIds = new Set<number>\(\)/);
   assert.match(uiSource, /data-opportunity-select/);
-  assert.match(uiSource, /data-edit-client="\$\{client\.id\}"/);
+  assert.match(uiSource, /data-open-opportunity-client="\$\{client\.id\}"/);
+  assert.doesNotMatch(uiSource, /data-edit-client="\$\{client\.id\}"/);
+  assert.match(uiSource, /openEntityReadOnly\(\s*\{ entityType: 'lead', entityId: clientId \},\s*\{ returnTarget: \{ entityType: 'property', entityId: propertyId \} \},\s*\)/);
   assert.match(uiSource, /selectedClientIds\.add\(clientId\)/);
   assert.match(uiSource, /selectedClientIds\.delete\(clientId\)/);
   assert.match(uiSource, /buildPropertyOpportunities\(property, clients\)/);
@@ -99,7 +101,7 @@ test('P1.4-A2 mantiene las regresiones browser que cubren filtros, selección, d
 });
 
 test('P1.4-A2.2 mantiene cache-busting vigente y retira el bootstrap de reinyección', () => {
-  assert.match(indexSource, /property-opportunities\.css\?v=20260906-p1-4-a2-1-1/);
-  assert.match(indexSource, /mvp-main\.js\?v=20260906-p1-4-a2-2-1/);
+  assert.match(indexSource, /property-opportunities\.css\?v=20260925-block2c-1/);
+  assert.match(indexSource, /mvp-main\.js\?v=20260928-block2f-force-explicit-edit-1/);
   assert.doesNotMatch(indexSource, /property-opportunities-bootstrap\.js/);
 });

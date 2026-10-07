@@ -3,14 +3,52 @@ import { spawn, type ChildProcess } from 'node:child_process';
 import { once } from 'node:events';
 import test from 'node:test';
 import { webkit, type Browser, type BrowserContext, type Page } from 'playwright';
-import { initialData, type CrmData, type TeamMember } from '../models.js';
+import { initialData, STORAGE_KEY as CRM_STORAGE_KEY, type CrmData, type TeamMember } from '../models.js';
 
 const USER_ID = 'hotfix-leads-ux-r2-owner';
 const ORG_ID = 'hotfix-leads-ux-r2-org';
-const STORAGE_KEY = `trv-crm-basico:user:${USER_ID}`;
+const GENERATION = 'hotfix-leads-ux-r2-generation-a35-1';
+const LEGACY_STORAGE_KEY = `${CRM_STORAGE_KEY}:user:${USER_ID}`;
+const TENANT_STORAGE_KEY = `${LEGACY_STORAGE_KEY}:org:${ORG_ID}`;
 const PORT = 62753;
 const HIDDEN_SEARCH = '__r2_lead_oculto__';
 const HIDDEN_MESSAGE = 'Este lead está oculto por los filtros actuales. Ajustá o limpiá los filtros para verlo sin perder tu selección.';
+const SYNTHETIC_CLOUD_POST_HISTORY = new WeakMap<BrowserContext, unknown[]>();
+interface SyntheticCloudWriteGate {
+  signalStarted: () => void;
+  pending: Promise<void>;
+}
+
+const SYNTHETIC_CLOUD_WRITE_GATES = new WeakMap<BrowserContext, SyntheticCloudWriteGate>();
+
+interface SharedSyntheticCloud {
+  records: unknown[];
+  postHistory: unknown[];
+}
+
+function sharedSyntheticCloud(): SharedSyntheticCloud {
+  return { records: [], postHistory: [] };
+}
+
+function holdSyntheticCloudWrites(context: BrowserContext): { started: Promise<void>; release: () => void } {
+  let signalStarted!: () => void;
+  let releasePending!: () => void;
+  const started = new Promise<void>((resolve) => { signalStarted = resolve; });
+  const pending = new Promise<void>((resolve) => { releasePending = resolve; });
+  const gate: SyntheticCloudWriteGate = { signalStarted, pending };
+  SYNTHETIC_CLOUD_WRITE_GATES.set(context, gate);
+  let released = false;
+  return {
+    started,
+    release: () => {
+      if (released) return;
+      released = true;
+      if (SYNTHETIC_CLOUD_WRITE_GATES.get(context) === gate) SYNTHETIC_CLOUD_WRITE_GATES.delete(context);
+      releasePending();
+    },
+  };
+}
+
 
 interface ScrollCall {
   clientId: string;
@@ -37,6 +75,20 @@ interface StageContrastMetric {
   stage: string;
   centered: boolean;
   brown: boolean;
+}
+
+interface PriorityLeadContrastMetric {
+  backgroundImage: string;
+  backgroundColor: string;
+  nameColor: string;
+  reasonColor: string;
+  actionColor: string;
+  nameBackground: string;
+  reasonBackground: string;
+  actionBackground: string;
+  nameRatio: number;
+  reasonRatio: number;
+  actionRatio: number;
 }
 
 interface HorizontalMetrics {
@@ -164,7 +216,32 @@ function fixture(): CrmData {
   ];
   crm.reminders = [];
   crm.conversations = [];
-  crm.properties = [];
+  crm.properties = [{
+    id: 9001,
+    uid: '90010000-0000-4000-8000-000000000001',
+    revision: 1,
+    title: 'Departamento Centro R2',
+    address: 'Centro, Córdoba',
+    type: 'Departamento',
+    operation: 'Venta',
+    price: 55000,
+    owner: 'Propietario R2',
+    status: 'Activa',
+    bedrooms: 1,
+    assignedToId: 1,
+    createdById: 1,
+  }];
+  crm.visits = [{
+    id: 9001,
+    clientId: 505,
+    propertyId: 9001,
+    scheduledAt: '2030-01-11T15:00:00.000Z',
+    status: 'Coordinada',
+    assignedToId: 1,
+    createdById: 1,
+    createdAt: '2026-09-13T12:00:00.000Z',
+    updatedAt: '2026-09-13T12:00:00.000Z',
+  }];
   crm.contacts = [];
   crm.fichas = [];
   crm.settings = {
@@ -200,12 +277,12 @@ async function startServer(): Promise<ChildProcess> {
     server.stderr?.setEncoding('utf8');
     server.stdout?.on('data', (chunk: string) => {
       stdout += chunk;
-      if (stdout.includes('PropControl listo en')) resolve();
+      if (stdout.includes('OrdenBroker listo en')) resolve();
     });
     server.stderr?.on('data', (chunk: string) => { stderr += chunk; });
     server.once('error', reject);
     server.once('exit', (code, signal) => {
-      if (!stdout.includes('PropControl listo en')) {
+      if (!stdout.includes('OrdenBroker listo en')) {
         reject(new Error(`Servidor R2 finalizó antes de estar listo: code=${code} signal=${signal} stderr=${stderr}`));
       }
     });
@@ -221,17 +298,171 @@ async function stopServer(server: ChildProcess): Promise<void> {
   await exited;
 }
 
+function syntheticMembership(id: number, userId: string, name: string, role: 'owner' | 'agent') {
+  return {
+    organization_id: ORG_ID,
+    member_id: id,
+    user_id: userId,
+    role,
+    status: 'active',
+    display_name: name,
+    email: `${userId}@propcontrol.test`,
+    phone: null,
+    created_at: '2026-08-20T12:00:00.000Z',
+    last_active_at: '2026-09-13T18:00:00.000Z',
+  };
+}
+
+function syntheticJson(body: unknown, status = 200) {
+  return {
+    status,
+    contentType: 'application/json',
+    headers: { 'access-control-allow-origin': '*' },
+    body: JSON.stringify(body),
+  };
+}
+
+function syntheticRecordIdentity(value: unknown): string {
+  const row = value as { organization_id?: unknown; entity_type?: unknown; entity_key?: unknown };
+  return [row.organization_id, row.entity_type, row.entity_key].map((part) => String(part ?? '')).join('|');
+}
+
+function upsertSyntheticRecords(current: unknown[], incoming: unknown[], ignoreDuplicates: boolean): unknown[] {
+  const byKey = new Map(current.map((row) => [syntheticRecordIdentity(row), structuredClone(row)]));
+  incoming.forEach((row) => {
+    const key = syntheticRecordIdentity(row);
+    if (ignoreDuplicates && byKey.has(key)) return;
+    byKey.set(key, structuredClone(row));
+  });
+  return [...byKey.values()];
+}
+
+function syntheticDeleteFilter(records: unknown[], url: URL): unknown[] {
+  const organization = url.searchParams.get('organization_id')?.replace(/^eq\./, '') ?? '';
+  const entityType = url.searchParams.get('entity_type')?.replace(/^eq\./, '') ?? '';
+  const rawKeys = url.searchParams.get('entity_key') ?? '';
+  const keyMatches = rawKeys.match(/^in\.\((.*)\)$/);
+  const entityKeys = new Set(
+    (keyMatches?.[1] ?? '')
+      .split(',')
+      .map((value) => value.trim().replace(/^"|"$/g, ''))
+      .filter(Boolean),
+  );
+  if (!organization || !entityType || !entityKeys.size) return records;
+  return records.filter((record) => {
+    const row = record as { organization_id?: unknown; entity_type?: unknown; entity_key?: unknown };
+    return !(
+      String(row.organization_id ?? '') === organization
+      && String(row.entity_type ?? '') === entityType
+      && entityKeys.has(String(row.entity_key ?? ''))
+    );
+  });
+}
+
+async function installSyntheticAuthority(context: BrowserContext, origin: string, shared?: SharedSyntheticCloud): Promise<void> {
+  const cloud = shared ?? sharedSyntheticCloud();
+  SYNTHETIC_CLOUD_POST_HISTORY.set(context, cloud.postHistory);
+  const ownerMembership = syntheticMembership(1, USER_ID, 'Franco R2', 'owner');
+  const brokerMembership = syntheticMembership(2, 'hotfix-leads-ux-r2-broker', 'Corredor R2', 'agent');
+
+  await context.route('**/api/cloud-config', async (route) => {
+    await route.fulfill(syntheticJson({
+      configured: true,
+      url: origin,
+      publishableKey: 'hotfix-leads-ux-r2-publishable-key',
+    }));
+  });
+
+  await context.route('**/rest/v1/**', async (route) => {
+    const request = route.request();
+    const url = new URL(request.url());
+
+    if (request.method() === 'OPTIONS') {
+      await route.fulfill({
+        status: 204,
+        headers: {
+          'access-control-allow-origin': '*',
+          'access-control-allow-headers': '*',
+          'access-control-allow-methods': 'GET,POST,DELETE,OPTIONS',
+        },
+        body: '',
+      });
+      return;
+    }
+
+    if (url.pathname.endsWith('/rest/v1/rpc/activate_my_organization_memberships')) {
+      await route.fulfill(syntheticJson({}));
+      return;
+    }
+
+    if (url.pathname.endsWith('/rest/v1/organization_members')) {
+      const userFilter = url.searchParams.get('user_id');
+      const organizationFilter = url.searchParams.get('organization_id');
+      if (userFilter === `eq.${USER_ID}`) {
+        await route.fulfill(syntheticJson([ownerMembership]));
+        return;
+      }
+      if (organizationFilter === `eq.${ORG_ID}`) {
+        await route.fulfill(syntheticJson([ownerMembership, brokerMembership]));
+        return;
+      }
+      await route.fulfill(syntheticJson([ownerMembership]));
+      return;
+    }
+
+    if (url.pathname.endsWith('/rest/v1/rpc/visit_transaction_authority_active_v2')) {
+      await route.fulfill(syntheticJson(false));
+      return;
+    }
+
+    if (url.pathname.endsWith('/rest/v1/propcontrol_records')) {
+      if (request.method() === 'GET') {
+        await route.fulfill(syntheticJson(cloud.records));
+        return;
+      }
+      if (request.method() === 'POST') {
+        const body = request.postDataJSON();
+        const postedRecords = Array.isArray(body) ? structuredClone(body) : [structuredClone(body)];
+        cloud.postHistory.push(...postedRecords);
+        const ignoreDuplicates = (request.headers().prefer ?? '').includes('ignore-duplicates');
+        cloud.records = upsertSyntheticRecords(cloud.records, postedRecords, ignoreDuplicates);
+        const gate = SYNTHETIC_CLOUD_WRITE_GATES.get(context);
+        if (gate) {
+          gate.signalStarted();
+          await gate.pending;
+        }
+        await route.fulfill(syntheticJson([], 201));
+        return;
+      }
+      if (request.method() === 'DELETE') {
+        cloud.records = syntheticDeleteFilter(cloud.records, url);
+        await route.fulfill({ status: 204, headers: { 'access-control-allow-origin': '*' }, body: '' });
+        return;
+      }
+    }
+
+    if (url.pathname.endsWith('/rest/v1/fichas')) {
+      await route.fulfill(syntheticJson([]));
+      return;
+    }
+
+    await route.fulfill(syntheticJson({ error: 'UNEXPECTED_SYNTHETIC_ENDPOINT', path: url.pathname }, 500));
+  });
+}
+
 async function seedContext(context: BrowserContext): Promise<void> {
   const actorKey = `cloud:${USER_ID}`;
   const identityKey = `propcontrol-whatsapp-human-identity-v1:${encodeURIComponent(ORG_ID)}:1:${encodeURIComponent(actorKey)}`;
-  await context.addInitScript(({ crm, identityStorageKey, storageKey }) => {
+  await context.addInitScript(({ crm, generation, identityStorageKey, storageKey }) => {
     localStorage.setItem('propcontrol-cloud-session-v1', JSON.stringify({
       accessToken: 'access-r2',
       refreshToken: 'refresh-r2',
       expiresAt: Date.now() + 3_600_000,
       userId: 'hotfix-leads-ux-r2-owner',
       email: 'hotfix-leads-ux-r2-owner@propcontrol.test',
+      __propcontrolAuthGeneration: generation,
     }));
+    localStorage.setItem('propcontrol-cloud-auth-generation-v1', generation);
     localStorage.setItem(storageKey, JSON.stringify(crm));
     localStorage.setItem(`${storageKey}:sync`, JSON.stringify({
       dirty: false,
@@ -264,10 +495,15 @@ async function seedContext(context: BrowserContext): Promise<void> {
       });
       originalScrollIntoView.call(this, options);
     };
-  }, { crm: fixture(), identityStorageKey: identityKey, storageKey: STORAGE_KEY });
+  }, { crm: fixture(), generation: GENERATION, identityStorageKey: identityKey, storageKey: LEGACY_STORAGE_KEY });
 }
 
-async function createContext(browser: Browser, viewport: { width: number; height: number }, mobile: boolean): Promise<BrowserContext> {
+async function createContext(
+  browser: Browser,
+  viewport: { width: number; height: number },
+  mobile: boolean,
+  shared?: SharedSyntheticCloud,
+): Promise<BrowserContext> {
   const context = await browser.newContext({
     viewport,
     screen: viewport,
@@ -277,6 +513,7 @@ async function createContext(browser: Browser, viewport: { width: number; height
     timezoneId: 'America/Argentina/Cordoba',
     colorScheme: 'dark',
   });
+  await installSyntheticAuthority(context, `http://127.0.0.1:${PORT}`, shared);
   await seedContext(context);
   return context;
 }
@@ -301,7 +538,7 @@ async function targetClientId(page: Page): Promise<number> {
   const value = await page.locator('#crm .pc-supervised-attention-item[data-attention-client-id]').first().getAttribute('data-attention-client-id');
   const clientId = Number(value || 0);
   assert.ok(clientId > 0, `ATENDER AHORA debe exponer un clientId real; recibido ${value}.`);
-  assert.equal(clientId, 501, `El fixture R2 debe priorizar al lead 501; recibido ${value}.`);
+  assert.equal(clientId, 502, `El fixture R2 debe priorizar al lead nuevo sin atender 502 por encima del follow-up vencido 501; recibido ${value}.`);
   return clientId;
 }
 
@@ -368,7 +605,7 @@ async function closeSheet(page: Page, clientId: number): Promise<void> {
 }
 
 async function crmSnapshot(page: Page): Promise<string> {
-  return page.evaluate((storageKey) => localStorage.getItem(storageKey) || '', STORAGE_KEY);
+  return page.evaluate((storageKey) => localStorage.getItem(storageKey) || '', TENANT_STORAGE_KEY);
 }
 
 async function whatsAppSnapshot(page: Page): Promise<Array<[string, string | null]>> {
@@ -409,6 +646,27 @@ async function telemetrySnapshot(page: Page): Promise<{ entries: Array<[string, 
     entries.sort(([left], [right]) => left.localeCompare(right));
     eventTypes.sort();
     return { entries, eventTypes };
+  });
+}
+
+function syntheticRecommendationTelemetrySnapshot(context: BrowserContext): Array<{
+  entityType: string;
+  recordKind: string;
+  eventType: string;
+  eventId: string;
+}> {
+  return (SYNTHETIC_CLOUD_POST_HISTORY.get(context) || []).flatMap((value) => {
+    if (!value || typeof value !== 'object') return [];
+    const record = value as Record<string, unknown>;
+    if (record.entity_type !== 'activity' || !record.payload || typeof record.payload !== 'object') return [];
+    const payload = record.payload as Record<string, unknown>;
+    if (payload.recordKind !== 'supervised_recommendation_event') return [];
+    return [{
+      entityType: String(record.entity_type),
+      recordKind: String(payload.recordKind),
+      eventType: String(payload.eventType || ''),
+      eventId: String(payload.eventId || ''),
+    }];
   });
 }
 
@@ -471,7 +729,7 @@ function assertTodosMetrics(metrics: Awaited<ReturnType<typeof todosMetrics>>, l
   assert.ok(metrics.display === 'flex' || metrics.display === 'inline-flex', `${label}: display inesperado ${metrics.display}.`);
   assert.equal(metrics.alignItems, 'center', `${label}: align-items debe ser center.`);
   assert.equal(metrics.justifyContent, 'center', `${label}: justify-content debe ser center.`);
-  assert.match(metrics.background, /62\s*,\s*105\s*,\s*84/, `${label}: debe conservar fondo verde sutil.`);
+  assert.match(metrics.background, /41\s*,\s*107\s*,\s*233/, `${label}: debe usar fondo azul OrdenBroker sutil.`);
   assert.doesNotMatch(metrics.background, /110\s*,\s*90\s*,\s*36/, `${label}: no debe volver el fondo marrón anterior.`);
   assert.ok(metrics.buttonTextDelta <= 1.5, `${label}: texto Todos descentrado ${metrics.buttonTextDelta}px.`);
   assert.ok(metrics.buttonCountDelta <= 1.5, `${label}: contador descentrado ${metrics.buttonCountDelta}px.`);
@@ -585,6 +843,135 @@ function assertContrast(metric: StageContrastMetric, label: string): void {
   assert.equal(metric.stage, 'Todas', `${label}: stage debe seguir siendo Todas.`);
 }
 
+function parseRgb(value: string): { r: number; g: number; b: number } {
+  const match = value.match(/rgba?\(([^)]+)\)/);
+  const captured = match?.[1];
+  if (!captured) throw new Error(`Color no interpretable: ${value}`);
+  const parts = captured.split(/[ ,/]+/).filter(Boolean).map(Number);
+  return { r: parts[0] ?? 0, g: parts[1] ?? 0, b: parts[2] ?? 0 };
+}
+
+function contrastRatio(foreground: { r: number; g: number; b: number }, background: { r: number; g: number; b: number }): number {
+  const channel = (value: number): number => {
+    const normalized = value / 255;
+    return normalized <= 0.04045 ? normalized / 12.92 : ((normalized + 0.055) / 1.055) ** 2.4;
+  };
+  const luminance = (color: { r: number; g: number; b: number }): number => (
+    0.2126 * channel(color.r) + 0.7152 * channel(color.g) + 0.0722 * channel(color.b)
+  );
+  const lighter = Math.max(luminance(foreground), luminance(background));
+  const darker = Math.min(luminance(foreground), luminance(background));
+  return (lighter + 0.05) / (darker + 0.05);
+}
+
+async function priorityLeadContrastMetric(page: Page): Promise<PriorityLeadContrastMetric> {
+  const button = page.locator('#crm button.pc-supervised-attention-item[data-attention-client-id]').first();
+  const geometry = await button.evaluate((element) => {
+    const buttonRect = element.getBoundingClientRect();
+    const sample = (selector: string) => {
+      const node = element.querySelector<HTMLElement>(selector);
+      if (!node) throw new Error(`No existe ${selector} en lead prioritario.`);
+      const rect = node.getBoundingClientRect();
+      return {
+        color: getComputedStyle(node).color,
+        x: rect.left - buttonRect.left + rect.width / 2,
+        y: rect.top - buttonRect.top + rect.height / 2,
+      };
+    };
+    const style = getComputedStyle(element);
+    return {
+      width: buttonRect.width,
+      height: buttonRect.height,
+      backgroundImage: style.backgroundImage,
+      backgroundColor: style.backgroundColor,
+      name: sample('.pc-supervised-attention-name'),
+      reason: sample('.pc-supervised-attention-reason'),
+      action: sample('.pc-supervised-attention-action'),
+    };
+  });
+
+  const selectors = ['.pc-supervised-attention-name', '.pc-supervised-attention-reason', '.pc-supervised-attention-action'];
+  const previousVisibility = await button.evaluate((element, selectors) => selectors.map((selector) => {
+    const node = element.querySelector<HTMLElement>(selector);
+    if (!node) throw new Error(`No existe ${selector} para captura de contraste.`);
+    const previous = node.style.visibility;
+    node.style.visibility = 'hidden';
+    return previous;
+  }), selectors);
+
+  let png: Buffer;
+  try {
+    png = await button.screenshot({ animations: 'disabled' });
+  } finally {
+    await button.evaluate((element, payload) => {
+      payload.selectors.forEach((selector, index) => {
+        const node = element.querySelector<HTMLElement>(selector);
+        if (node) node.style.visibility = payload.previous[index] ?? '';
+      });
+    }, { selectors, previous: previousVisibility });
+  }
+
+  const sampled = await page.evaluate(async ({ dataUrl, width, height, points }) => {
+    const image = await new Promise<HTMLImageElement>((resolve, reject) => {
+      const current = new Image();
+      current.onload = () => resolve(current);
+      current.onerror = () => reject(new Error('No se pudo decodificar screenshot PNG del lead prioritario.'));
+      current.src = dataUrl;
+    });
+    const canvas = document.createElement('canvas');
+    canvas.width = image.naturalWidth;
+    canvas.height = image.naturalHeight;
+    const context = canvas.getContext('2d', { willReadFrequently: true });
+    if (!context) throw new Error('Canvas 2D no disponible para contraste.');
+    context.drawImage(image, 0, 0);
+    const scaleX = image.naturalWidth / width;
+    const scaleY = image.naturalHeight / height;
+    const read = (point: { x: number; y: number }) => {
+      const x = Math.max(0, Math.min(image.naturalWidth - 1, Math.round(point.x * scaleX)));
+      const y = Math.max(0, Math.min(image.naturalHeight - 1, Math.round(point.y * scaleY)));
+      const pixel = context.getImageData(x, y, 1, 1).data;
+      return { r: pixel[0] ?? 0, g: pixel[1] ?? 0, b: pixel[2] ?? 0 };
+    };
+    return {
+      name: read(points.name),
+      reason: read(points.reason),
+      action: read(points.action),
+    };
+  }, {
+    dataUrl: `data:image/png;base64,${png.toString('base64')}`,
+    width: geometry.width,
+    height: geometry.height,
+    points: {
+      name: geometry.name,
+      reason: geometry.reason,
+      action: geometry.action,
+    },
+  });
+
+  const serialize = (color: { r: number; g: number; b: number }): string => `rgb(${color.r}, ${color.g}, ${color.b})`;
+  return {
+    backgroundImage: geometry.backgroundImage,
+    backgroundColor: geometry.backgroundColor,
+    nameColor: geometry.name.color,
+    reasonColor: geometry.reason.color,
+    actionColor: geometry.action.color,
+    nameBackground: serialize(sampled.name),
+    reasonBackground: serialize(sampled.reason),
+    actionBackground: serialize(sampled.action),
+    nameRatio: contrastRatio(parseRgb(geometry.name.color), sampled.name),
+    reasonRatio: contrastRatio(parseRgb(geometry.reason.color), sampled.reason),
+    actionRatio: contrastRatio(parseRgb(geometry.action.color), sampled.action),
+  };
+}
+
+function assertPriorityLeadContrast(metric: PriorityLeadContrastMetric, label: string): void {
+  assert.equal(metric.backgroundImage, 'none', `${label}: el card prioritario no debe heredar el gradient del botón primario.`);
+  assert.match(metric.backgroundColor, /rgba\(255,\s*255,\s*255,\s*0\.035\)/, `${label}: debe conservar el fondo translúcido previsto.`);
+  assert.ok(metric.nameRatio >= 4.5, `${label}: contraste nombre ${metric.nameRatio.toFixed(2)} < 4.5.`);
+  assert.ok(metric.reasonRatio >= 4.5, `${label}: contraste motivo ${metric.reasonRatio.toFixed(2)} < 4.5.`);
+  assert.ok(metric.actionRatio >= 4.5, `${label}: contraste próximo paso ${metric.actionRatio.toFixed(2)} < 4.5.`);
+}
+
 async function horizontalMetrics(page: Page, clientId?: number): Promise<HorizontalMetrics> {
   return page.evaluate((id) => {
     const rect = (element: Element | null): { x: number; width: number } | null => {
@@ -632,223 +1019,428 @@ function assertHorizontal(metrics: HorizontalMetrics, label: string, contentExpe
 
 test('HOTFIX UX POST-B1.4.2 R3 — mobile tap, target y contraste accesible exact-SHA', async (t) => {
   const server = await startServer();
-  const browser = await webkit.launch({ headless: true });
-  const url = `http://127.0.0.1:${PORT}`;
 
   try {
-    await t.test('A desktop: Todos conserva visual neutro, centrado, stage=Todas y contraste >=4.5', async () => {
-      const context = await createContext(browser, { width: 1366, height: 768 }, false);
-      try {
-        const page = await context.newPage();
-        await load(page, url);
-        assertTodosMetrics(await todosMetrics(page), 'desktop');
-        const normal = await stageContrastMetric(page);
-        assertContrast(normal, 'desktop normal');
-        const todos = page.locator('#crm .mvp-stage-counter[data-stage-quick="Todas"]');
-        await todos.hover();
-        const hover = await stageContrastMetric(page);
-        assertContrast(hover, 'desktop hover');
-        console.log(`R3_CONTRAST desktop ${JSON.stringify({ normal, hover })}`);
-      } finally {
-        await context.close();
-      }
-    });
+    const browser = await webkit.launch({ headless: true });
+    const url = `http://127.0.0.1:${PORT}`;
 
-    await t.test('B desktop: click real abre clientId exacto, foco/scroll y cero mutación CRM/telemetría', async () => {
-      const context = await createContext(browser, { width: 1366, height: 768 }, false);
-      try {
-        const page = await context.newPage();
-        await load(page, url);
-        const clientId = await targetClientId(page);
-        assert.equal(await page.locator('#crm .pc-supervised-attention-item[data-attention-client-id]').count(), 3, 'ATENDER AHORA debe respetar max3.');
-        const queueButton = page.locator(`#crm button.pc-supervised-attention-item[data-attention-client-id="${clientId}"]`).first();
-        assert.equal(await queueButton.evaluate((element) => element.tagName), 'BUTTON');
-        assert.equal(await queueButton.getAttribute('type'), 'button');
-        assert.match(await queueButton.getAttribute('aria-label') || '', /Abrir ficha completa de Lead R2 Prioritario/);
-
-        const crmBefore = await crmSnapshot(page);
-        const whatsappBefore = await whatsAppSnapshot(page);
-        const telemetryBefore = await telemetrySnapshot(page);
-        assert.ok(telemetryBefore.eventTypes.includes('RECOMMENDATION_SHOWN'), 'Debe aislarse SHOWN legítimo del render inicial.');
-        assert.equal(telemetryBefore.eventTypes.includes('RECOMMENDATION_DECISION'), false, 'Render inicial no debe contener DECISION.');
-
-        await clearScrollEvidence(page);
-        await queueButton.click();
-        await assertOpened(page, clientId);
-
-        assert.equal(await crmSnapshot(page), crmBefore, 'Navegar no debe mutar CRM persistido.');
-        assert.deepEqual(await whatsAppSnapshot(page), whatsappBefore, 'Navegar no debe mutar estado comercial WhatsApp.');
-        assert.deepEqual(await telemetrySnapshot(page), telemetryBefore, 'Navegar no debe mutar lifecycle/outbox ni generar DECISION.');
-      } finally {
-        await context.close();
-      }
-    });
-
-    await t.test('C desktop: Enter y Space heredan activación nativa y abren el lead correcto', async () => {
-      const context = await createContext(browser, { width: 1366, height: 768 }, false);
-      try {
-        const page = await context.newPage();
-        await load(page, url);
-        const clientId = await targetClientId(page);
-        const queueButton = page.locator(`#crm button.pc-supervised-attention-item[data-attention-client-id="${clientId}"]`).first();
-
-        await clearScrollEvidence(page);
-        await queueButton.focus();
-        assert.equal(await queueButton.evaluate((element) => document.activeElement === element), true);
-        await page.keyboard.press('Enter');
-        await assertOpened(page, clientId);
-
-        await closeSheet(page, clientId);
-        await queueButton.focus();
-        assert.equal(await queueButton.evaluate((element) => document.activeElement === element), true);
-        await page.keyboard.press('Space');
-        await assertOpened(page, clientId);
-      } finally {
-        await context.close();
-      }
-    });
-
-    await t.test('D desktop: hidden-by-filter conserva filtros, card oculta y aviso accesible', async () => {
-      const context = await createContext(browser, { width: 1366, height: 768 }, false);
-      try {
-        const page = await context.newPage();
-        await load(page, url);
-        const clientId = await targetClientId(page);
-        const filtersBaseline = await filterSnapshot(page);
-        assert.deepEqual(filtersBaseline, { search: '', stage: 'Todas', temperature: 'Todas', assignee: 'Todos', order: 'recent' });
-
-        const search = page.locator('#mvp-lead-search');
-        assert.equal(await search.isVisible(), true, 'El filtro usado debe ser UI real visible.');
-        await search.fill(HIDDEN_SEARCH);
-        await page.waitForFunction((id) => !document.querySelector(`#mvp-lead-results .mvp-lead-card[data-client-id="${id}"]`), clientId);
-
-        const filtersBefore = await filterSnapshot(page);
-        assert.deepEqual(filtersBefore, { ...filtersBaseline, search: HIDDEN_SEARCH });
-        const crmBefore = await crmSnapshot(page);
-        const telemetryBefore = await telemetrySnapshot(page);
-
-        await page.locator(`#crm button.pc-supervised-attention-item[data-attention-client-id="${clientId}"]`).first().click();
-        await page.waitForFunction((message) => {
-          const status = document.querySelector<HTMLElement>('[data-attention-navigation-status]');
-          return Boolean(status && !status.hidden && status.textContent?.trim() === message && status.getAttribute('role') === 'status' && status.getAttribute('aria-live') === 'polite');
-        }, HIDDEN_MESSAGE);
-
-        assert.deepEqual(await filterSnapshot(page), filtersBefore, 'ATENDER AHORA no debe resetear filtros.');
-        assert.equal(await page.locator(`#mvp-lead-results .mvp-lead-card[data-client-id="${clientId}"]`).count(), 0, 'Lead debe seguir oculto.');
-        assert.equal(await crmSnapshot(page), crmBefore, 'Lead oculto no debe mutar CRM.');
-        assert.deepEqual(await telemetrySnapshot(page), telemetryBefore, 'Lead oculto no debe generar DECISION.');
-      } finally {
-        await context.close();
-      }
-    });
-
-    await t.test('E targets: desktop, 390x844 y 320x568 miden >=44px en todas las recomendaciones visibles', async () => {
-      const specs = [
-        { name: 'desktop', viewport: { width: 1366, height: 768 }, mobile: false },
-        { name: '390x844', viewport: { width: 390, height: 844 }, mobile: true },
-        { name: '320x568', viewport: { width: 320, height: 568 }, mobile: true },
-      ];
-      const collected: Array<{ name: string; metrics: TargetMetrics }> = [];
-      for (const spec of specs) {
-        const context = await createContext(browser, spec.viewport, spec.mobile);
+    try {
+      await t.test('A desktop: Todos conserva visual neutro, centrado, stage=Todas y contraste >=4.5', async () => {
+        const context = await createContext(browser, { width: 1366, height: 768 }, false);
         try {
           const page = await context.newPage();
           await load(page, url);
-          collected.push({ name: spec.name, metrics: await targetMetrics(page) });
+          assertTodosMetrics(await todosMetrics(page), 'desktop');
+          const normal = await stageContrastMetric(page);
+          assertContrast(normal, 'desktop normal');
+          const todos = page.locator('#crm .mvp-stage-counter[data-stage-quick="Todas"]');
+          await todos.hover();
+          const hover = await stageContrastMetric(page);
+          assert.match(hover.backgroundColor, /41\s*,\s*107\s*,\s*233/, 'desktop hover: debe usar azul OrdenBroker.');
+          assertContrast(hover, 'desktop hover');
+          const priority = await priorityLeadContrastMetric(page);
+          assertPriorityLeadContrast(priority, 'desktop priority');
+          assertHorizontal(await horizontalMetrics(page), 'desktop priority', false);
+          console.log(`R3_CONTRAST desktop ${JSON.stringify({ normal, hover })}`);
+          console.log(`R3_PRIORITY_CONTRAST desktop ${JSON.stringify(priority)}`);
         } finally {
           await context.close();
         }
-      }
-      collected.forEach(({ name, metrics }) => {
-        console.log(`R3_TARGET ${name} ${JSON.stringify(metrics)}`);
-        assertTargetMetrics(metrics, name);
       });
-    });
 
-    await t.test('F contraste mobile: 390x844 y 320x568 label/contador >=4.5, centrados y sin marrón', async () => {
-      const specs = [
-        { name: '390x844', viewport: { width: 390, height: 844 } },
-        { name: '320x568', viewport: { width: 320, height: 568 } },
-      ];
-      const collected: Array<{ name: string; visual: Awaited<ReturnType<typeof todosMetrics>>; contrast: StageContrastMetric }> = [];
-      for (const spec of specs) {
-        const context = await createContext(browser, spec.viewport, true);
+      await t.test('B desktop: click real abre clientId exacto, foco/scroll y cero mutación CRM/telemetría', async () => {
+        const context = await createContext(browser, { width: 1366, height: 768 }, false);
         try {
           const page = await context.newPage();
           await load(page, url);
-          collected.push({ name: spec.name, visual: await todosMetrics(page), contrast: await stageContrastMetric(page) });
+          const clientId = await targetClientId(page);
+          assert.equal(await page.locator('#crm .pc-supervised-attention-item[data-attention-client-id]').count(), 3, 'ATENDER AHORA debe respetar max3.');
+          const queueButton = page.locator(`#crm button.pc-supervised-attention-item[data-attention-client-id="${clientId}"]`).first();
+          assert.equal(await queueButton.evaluate((element) => element.tagName), 'BUTTON');
+          assert.equal(await queueButton.getAttribute('type'), 'button');
+          assert.match(await queueButton.getAttribute('aria-label') || '', /Abrir ficha completa de Lead R2 Dos/);
+
+          const crmBefore = await crmSnapshot(page);
+          const whatsappBefore = await whatsAppSnapshot(page);
+          const telemetryBefore = await telemetrySnapshot(page);
+          const syntheticTelemetryBefore = syntheticRecommendationTelemetrySnapshot(context);
+          assert.ok(
+            syntheticTelemetryBefore.some((event) => event.entityType === 'activity'
+              && event.recordKind === 'supervised_recommendation_event'
+              && event.eventType === 'RECOMMENDATION_SHOWN'),
+            'Debe aislarse SHOWN legítimo del render inicial en el synthetic cloud.',
+          );
+          assert.equal(
+            syntheticTelemetryBefore.some((event) => event.eventType === 'RECOMMENDATION_DECISION'),
+            false,
+            'Render inicial no debe contener DECISION.',
+          );
+
+          await clearScrollEvidence(page);
+          await queueButton.click();
+          await assertOpened(page, clientId);
+
+          assert.equal(await crmSnapshot(page), crmBefore, 'Navegar no debe mutar CRM persistido.');
+          assert.deepEqual(await whatsAppSnapshot(page), whatsappBefore, 'Navegar no debe mutar estado comercial WhatsApp.');
+          assert.deepEqual(await telemetrySnapshot(page), telemetryBefore, 'Navegar no debe mutar lifecycle/outbox local.');
+          assert.deepEqual(
+            syntheticRecommendationTelemetrySnapshot(context),
+            syntheticTelemetryBefore,
+            'Navegar no debe generar nueva telemetría cloud ni DECISION.',
+          );
+
+          await closeSheet(page, clientId);
+          const visitClientId = 505;
+          const visitId = 9001;
+          const search = page.locator('#mvp-lead-search');
+          await search.fill('Lead R2 Cinco');
+          await page.waitForSelector(`.mvp-lead-card[data-client-id="${visitClientId}"]`, { state: 'visible' });
+          const visitCard = page.locator(`.mvp-lead-card[data-client-id="${visitClientId}"]`);
+          const visitSheet = visitCard.locator(`details[data-lead-full-sheet="${visitClientId}"]`);
+          const actionsMenu = visitCard.locator('.mvp-lead-actions-menu');
+          const actionsMenuToggle = actionsMenu.locator(':scope > summary');
+          assert.equal(await actionsMenuToggle.isVisible(), true, 'El menú de acciones zero-training debe estar visible.');
+          await actionsMenuToggle.click();
+          const openDetails = actionsMenu.locator(`[data-open-lead-details="${visitClientId}"]`);
+          assert.equal(await openDetails.isVisible(), true, 'Ver detalles debe ser visible después de abrir el menú de acciones.');
+          await openDetails.click();
+          await page.waitForFunction((id) => (
+            document.querySelector<HTMLDetailsElement>(`details[data-lead-full-sheet="${id}"]`)?.open === true
+          ), visitClientId);
+          await page.waitForSelector(`[data-confirm-visit="${visitId}"]`, { state: 'visible' });
+
+          const writeGate = holdSyntheticCloudWrites(context);
+          const confirmButton = page.locator(`[data-confirm-visit="${visitId}"]`);
+          try {
+            await confirmButton.click();
+            await writeGate.started;
+            assert.equal(await confirmButton.isVisible(), true, 'Mientras cloud no confirma, el CTA original debe seguir visible.');
+            assert.equal(await confirmButton.isDisabled(), true, 'Mientras persiste, el CTA queda bloqueado para evitar doble submit.');
+            assert.equal(
+              await page.locator(`[data-visit-id="${visitId}"] .pc-visit-confirmed`).count(),
+              0,
+              'La UI no puede mostrar éxito antes de la persistencia cloud.',
+            );
+            assert.match(
+              await crmSnapshot(page),
+              /Visita confirmada/,
+              'La intención queda persistida localmente antes de esperar confirmación cloud.',
+            );
+          } finally {
+            writeGate.release();
+          }
+
+          await page.waitForSelector(`[data-visit-id="${visitId}"] .pc-visit-confirmed`, { state: 'attached' });
+          assert.equal(
+            await page.locator(`[data-confirm-visit="${visitId}"]`).count(),
+            0,
+            'Después de persistir, la condición real resuelta reemplaza automáticamente el CTA.',
+          );
+          if (!await visitSheet.evaluate((element) => (element as HTMLDetailsElement).open)) {
+            await visitSheet.locator(':scope > summary').click();
+          }
+          await page.waitForSelector(`[data-visit-id="${visitId}"] .pc-visit-confirmed`, { state: 'visible' });
         } finally {
           await context.close();
         }
-      }
-      collected.forEach(({ name, visual, contrast }) => {
-        assertTodosMetrics(visual, name);
-        assertContrast(contrast, name);
-        console.log(`R3_CONTRAST ${name} ${JSON.stringify(contrast)}`);
       });
-    });
 
-    await t.test('G tap mobile 390x844: tap real abre exactamente la ficha correcta y mantiene foco/estado accesible', async () => {
-      const context = await createContext(browser, { width: 390, height: 844 }, true);
-      try {
-        const page = await context.newPage();
-        await load(page, url);
-        const clientId = await targetClientId(page);
-        const button = page.locator(`#crm button.pc-supervised-attention-item[data-attention-client-id="${clientId}"]`).first();
-        await clearScrollEvidence(page);
-        await button.tap();
-        await assertOpened(page, clientId);
-        const content = page.locator(`.mvp-lead-card[data-client-id="${clientId}"] .mvp-lead-full-content`);
-        assert.equal(await content.isVisible(), true, 'Ficha mobile debe ser visible.');
-        assert.ok((await content.innerText()).trim().length > 0, 'Ficha mobile debe contener información legible.');
-      } finally {
-        await context.close();
-      }
-    });
+      await t.test('B2 2H multidispositivo: dos sesiones confirman la misma visita y convergen en una sola intención persistida', async () => {
+        const cloud = sharedSyntheticCloud();
+        const contextA = await createContext(browser, { width: 1366, height: 768 }, false, cloud);
+        const contextB = await createContext(browser, { width: 1366, height: 768 }, false, cloud);
+        try {
+          const pageA = await contextA.newPage();
+          const pageB = await contextB.newPage();
+          await Promise.all([load(pageA, url), load(pageB, url)]);
 
-    await t.test('H overflow 390x844: cero overflow antes y después del tap; cola/buttons/stages/ficha dentro de viewport', async () => {
-      const context = await createContext(browser, { width: 390, height: 844 }, true);
-      try {
-        const page = await context.newPage();
-        await load(page, url);
-        const before = await horizontalMetrics(page);
-        console.log(`R3_OVERFLOW 390x844 before ${JSON.stringify(before)}`);
-        assertHorizontal(before, '390x844 before', false);
+          const openVisit = async (page: Page): Promise<void> => {
+            const search = page.locator('#mvp-lead-search');
+            await search.fill('Lead R2 Cinco');
+            await page.waitForSelector('.mvp-lead-card[data-client-id="505"]', { state: 'visible' });
+            const card = page.locator('.mvp-lead-card[data-client-id="505"]');
+            const actions = card.locator('.mvp-lead-actions-menu');
+            await actions.locator(':scope > summary').click();
+            await actions.locator('[data-open-lead-details="505"]').click();
+            await page.waitForSelector('[data-confirm-visit="9001"]', { state: 'visible' });
+          };
+          await Promise.all([openVisit(pageA), openVisit(pageB)]);
 
-        const clientId = await targetClientId(page);
-        await clearScrollEvidence(page);
-        await page.locator(`#crm button.pc-supervised-attention-item[data-attention-client-id="${clientId}"]`).first().tap();
-        await assertOpened(page, clientId);
-        const after = await horizontalMetrics(page, clientId);
-        console.log(`R3_OVERFLOW 390x844 after ${JSON.stringify(after)}`);
-        assertHorizontal(after, '390x844 after', true);
-      } finally {
-        await context.close();
-      }
-    });
+          await Promise.all([
+            pageA.locator('[data-confirm-visit="9001"]').click(),
+            pageB.locator('[data-confirm-visit="9001"]').click(),
+          ]);
 
-    await t.test('I overflow 320x568: cero overflow antes y después del tap; cola/buttons/stages/ficha dentro de viewport', async () => {
-      const context = await createContext(browser, { width: 320, height: 568 }, true);
-      try {
-        const page = await context.newPage();
-        await load(page, url);
-        const before = await horizontalMetrics(page);
-        console.log(`R3_OVERFLOW 320x568 before ${JSON.stringify(before)}`);
-        assertHorizontal(before, '320x568 before', false);
+          const waitLocalConfirmation = (page: Page) => page.waitForFunction((storageKey) => {
+            const raw = localStorage.getItem(storageKey);
+            if (!raw) return false;
+            const crm = JSON.parse(raw) as { activityLog?: Array<{ action?: string }> };
+            return (crm.activityLog ?? []).filter((entry) => entry.action === 'Visita confirmada').length === 1;
+          }, TENANT_STORAGE_KEY);
+          await Promise.all([waitLocalConfirmation(pageA), waitLocalConfirmation(pageB)]);
 
-        const clientId = await targetClientId(page);
-        await clearScrollEvidence(page);
-        await page.locator(`#crm button.pc-supervised-attention-item[data-attention-client-id="${clientId}"]`).first().tap();
-        await assertOpened(page, clientId);
-        const after = await horizontalMetrics(page, clientId);
-        console.log(`R3_OVERFLOW 320x568 after ${JSON.stringify(after)}`);
-        assertHorizontal(after, '320x568 after', true);
-      } finally {
-        await context.close();
-      }
-    });
+          const localConfirmationIdentity = async (page: Page): Promise<{ uid: string; operationId: string }> => page.evaluate((storageKey) => {
+            const raw = localStorage.getItem(storageKey);
+            if (!raw) throw new Error('Snapshot tenant faltante.');
+            const crm = JSON.parse(raw) as { activityLog?: Array<{ action?: string; uid?: string; operationId?: string }> };
+            const matches = (crm.activityLog ?? []).filter((entry) => entry.action === 'Visita confirmada');
+            if (matches.length !== 1) throw new Error(`Se esperaba una confirmación local y hay ${matches.length}.`);
+            return {
+              uid: String(matches[0]?.uid || ''),
+              operationId: String(matches[0]?.operationId || ''),
+            };
+          }, TENANT_STORAGE_KEY);
+          const [identityA, identityB] = await Promise.all([
+            localConfirmationIdentity(pageA),
+            localConfirmationIdentity(pageB),
+          ]);
+          assert.ok(identityA.uid, 'sesión A debe persistir uid de confirmación');
+          assert.ok(identityA.operationId, 'sesión A debe persistir operationId de confirmación');
+          assert.deepEqual(identityB, identityA, 'ambas sesiones deben materializar exactamente la misma intención idempotente');
+
+          const confirmationRows = (): unknown[] => cloud.records.filter((value) => {
+            const row = value as { entity_type?: unknown; payload?: { action?: unknown } };
+            return row.entity_type === 'activity' && row.payload?.action === 'Visita confirmada';
+          });
+          const deadline = Date.now() + 15_000;
+          while (confirmationRows().length !== 1) {
+            if (Date.now() >= deadline) throw new Error('La confirmación idempotente no convergió a una fila cloud dentro del plazo.');
+            await new Promise((resolve) => setTimeout(resolve, 25));
+          }
+
+          const cloudConfirmation = confirmationRows()[0] as { payload?: { uid?: unknown; operationId?: unknown } };
+          assert.equal(String(cloudConfirmation.payload?.uid || ''), identityA.uid, 'cloud conserva el uid determinístico de ambas sesiones');
+          assert.equal(String(cloudConfirmation.payload?.operationId || ''), identityA.operationId, 'cloud conserva el operationId determinístico de ambas sesiones');
+          assert.equal(confirmationRows().length, 1, 'la nube conserva una sola Activity semántica, no dos UIDs equivalentes');
+
+          await Promise.all([pageA.reload({ waitUntil: 'domcontentloaded' }), pageB.reload({ waitUntil: 'domcontentloaded' })]);
+          await Promise.all([
+            pageA.waitForSelector('#crm.active', { state: 'visible' }),
+            pageB.waitForSelector('#crm.active', { state: 'visible' }),
+          ]);
+          const confirmationCount = async (page: Page): Promise<number> => page.evaluate((storageKey) => {
+            const raw = localStorage.getItem(storageKey);
+            if (!raw) return -1;
+            const crm = JSON.parse(raw) as { activityLog?: Array<{ action?: string }> };
+            return (crm.activityLog ?? []).filter((entry) => entry.action === 'Visita confirmada').length;
+          }, TENANT_STORAGE_KEY);
+          await Promise.all([
+            pageA.waitForFunction((storageKey) => {
+              const raw = localStorage.getItem(storageKey);
+              if (!raw) return false;
+              const crm = JSON.parse(raw) as { activityLog?: Array<{ action?: string }> };
+              return (crm.activityLog ?? []).filter((entry) => entry.action === 'Visita confirmada').length === 1;
+            }, TENANT_STORAGE_KEY),
+            pageB.waitForFunction((storageKey) => {
+              const raw = localStorage.getItem(storageKey);
+              if (!raw) return false;
+              const crm = JSON.parse(raw) as { activityLog?: Array<{ action?: string }> };
+              return (crm.activityLog ?? []).filter((entry) => entry.action === 'Visita confirmada').length === 1;
+            }, TENANT_STORAGE_KEY),
+          ]);
+          assert.equal(await confirmationCount(pageA), 1);
+          assert.equal(await confirmationCount(pageB), 1);
+
+          const assertResolvedUi = async (page: Page): Promise<void> => {
+            await page.locator('#mvp-lead-search').fill('Lead R2 Cinco');
+            await page.waitForSelector('.mvp-lead-card[data-client-id="505"]', { state: 'visible' });
+            const actions = page.locator('.mvp-lead-card[data-client-id="505"] .mvp-lead-actions-menu');
+            await actions.locator(':scope > summary').click();
+            await actions.locator('[data-open-lead-details="505"]').click();
+            await page.waitForSelector('[data-visit-id="9001"] .pc-visit-confirmed', { state: 'visible' });
+            assert.equal(await page.locator('[data-confirm-visit="9001"]').count(), 0, 'reload no debe resucitar el CTA de confirmación');
+          };
+          await Promise.all([assertResolvedUi(pageA), assertResolvedUi(pageB)]);
+        } finally {
+          await contextA.close();
+          await contextB.close();
+        }
+      });
+
+      await t.test('C desktop: Enter y Space heredan activación nativa y abren el lead correcto', async () => {
+        const context = await createContext(browser, { width: 1366, height: 768 }, false);
+        try {
+          const page = await context.newPage();
+          await load(page, url);
+          const clientId = await targetClientId(page);
+          const queueButton = page.locator(`#crm button.pc-supervised-attention-item[data-attention-client-id="${clientId}"]`).first();
+
+          await clearScrollEvidence(page);
+          await queueButton.focus();
+          assert.equal(await queueButton.evaluate((element) => document.activeElement === element), true);
+          await page.keyboard.press('Enter');
+          await assertOpened(page, clientId);
+
+          await closeSheet(page, clientId);
+          await queueButton.focus();
+          assert.equal(await queueButton.evaluate((element) => document.activeElement === element), true);
+          await page.keyboard.press('Space');
+          await assertOpened(page, clientId);
+        } finally {
+          await context.close();
+        }
+      });
+
+      await t.test('D desktop: hidden-by-filter conserva filtros, card oculta y aviso accesible', async () => {
+        const context = await createContext(browser, { width: 1366, height: 768 }, false);
+        try {
+          const page = await context.newPage();
+          await load(page, url);
+          const clientId = await targetClientId(page);
+          const filtersBaseline = await filterSnapshot(page);
+          assert.deepEqual(filtersBaseline, { search: '', stage: 'Todas', temperature: 'Todas', assignee: 'Todos', order: 'recent' });
+
+          const search = page.locator('#mvp-lead-search');
+          assert.equal(await search.isVisible(), true, 'El filtro usado debe ser UI real visible.');
+          await search.fill(HIDDEN_SEARCH);
+          await page.waitForFunction((id) => !document.querySelector(`#mvp-lead-results .mvp-lead-card[data-client-id="${id}"]`), clientId);
+
+          const filtersBefore = await filterSnapshot(page);
+          assert.deepEqual(filtersBefore, { ...filtersBaseline, search: HIDDEN_SEARCH });
+          const crmBefore = await crmSnapshot(page);
+          const telemetryBefore = await telemetrySnapshot(page);
+
+          await page.locator(`#crm button.pc-supervised-attention-item[data-attention-client-id="${clientId}"]`).first().click();
+          await page.waitForFunction((message) => {
+            const status = document.querySelector<HTMLElement>('[data-attention-navigation-status]');
+            return Boolean(status && !status.hidden && status.textContent?.trim() === message && status.getAttribute('role') === 'status' && status.getAttribute('aria-live') === 'polite');
+          }, HIDDEN_MESSAGE);
+
+          assert.deepEqual(await filterSnapshot(page), filtersBefore, 'ATENDER AHORA no debe resetear filtros.');
+          assert.equal(await page.locator(`#mvp-lead-results .mvp-lead-card[data-client-id="${clientId}"]`).count(), 0, 'Lead debe seguir oculto.');
+          assert.equal(await crmSnapshot(page), crmBefore, 'Lead oculto no debe mutar CRM.');
+          assert.deepEqual(await telemetrySnapshot(page), telemetryBefore, 'Lead oculto no debe generar DECISION.');
+        } finally {
+          await context.close();
+        }
+      });
+
+      await t.test('E targets: desktop, 390x844, 360x740 y 320x568 miden >=44px en todas las recomendaciones visibles', async () => {
+        const specs = [
+          { name: 'desktop', viewport: { width: 1366, height: 768 }, mobile: false },
+          { name: '390x844', viewport: { width: 390, height: 844 }, mobile: true },
+          { name: '360x740', viewport: { width: 360, height: 740 }, mobile: true },
+          { name: '320x568', viewport: { width: 320, height: 568 }, mobile: true },
+        ];
+        const collected: Array<{ name: string; metrics: TargetMetrics }> = [];
+        for (const spec of specs) {
+          const context = await createContext(browser, spec.viewport, spec.mobile);
+          try {
+            const page = await context.newPage();
+            await load(page, url);
+            collected.push({ name: spec.name, metrics: await targetMetrics(page) });
+          } finally {
+            await context.close();
+          }
+        }
+        collected.forEach(({ name, metrics }) => {
+          console.log(`R3_TARGET ${name} ${JSON.stringify(metrics)}`);
+          assertTargetMetrics(metrics, name);
+        });
+      });
+
+      await t.test('F contraste mobile: 390x844, 360x740 y 320x568 conservan stage y cards prioritarias >=4.5 sin overflow', async () => {
+        const specs = [
+          { name: '390x844', viewport: { width: 390, height: 844 } },
+          { name: '360x740', viewport: { width: 360, height: 740 } },
+          { name: '320x568', viewport: { width: 320, height: 568 } },
+        ];
+        const collected: Array<{
+          name: string;
+          visual: Awaited<ReturnType<typeof todosMetrics>>;
+          contrast: StageContrastMetric;
+          priority: PriorityLeadContrastMetric;
+          horizontal: HorizontalMetrics;
+        }> = [];
+        for (const spec of specs) {
+          const context = await createContext(browser, spec.viewport, true);
+          try {
+            const page = await context.newPage();
+            await load(page, url);
+            collected.push({
+              name: spec.name,
+              visual: await todosMetrics(page),
+              contrast: await stageContrastMetric(page),
+              priority: await priorityLeadContrastMetric(page),
+              horizontal: await horizontalMetrics(page),
+            });
+          } finally {
+            await context.close();
+          }
+        }
+        collected.forEach(({ name, visual, contrast, priority, horizontal }) => {
+          assertTodosMetrics(visual, name);
+          assertContrast(contrast, name);
+          assertPriorityLeadContrast(priority, `${name} priority`);
+          assertHorizontal(horizontal, `${name} priority`, false);
+          console.log(`R3_CONTRAST ${name} ${JSON.stringify(contrast)}`);
+          console.log(`R3_PRIORITY_CONTRAST ${name} ${JSON.stringify(priority)}`);
+        });
+      });
+
+      await t.test('G tap mobile 390x844: tap real abre exactamente la ficha correcta y mantiene foco/estado accesible', async () => {
+        const context = await createContext(browser, { width: 390, height: 844 }, true);
+        try {
+          const page = await context.newPage();
+          await load(page, url);
+          const clientId = await targetClientId(page);
+          const button = page.locator(`#crm button.pc-supervised-attention-item[data-attention-client-id="${clientId}"]`).first();
+          await clearScrollEvidence(page);
+          await button.tap();
+          await assertOpened(page, clientId);
+          const content = page.locator(`.mvp-lead-card[data-client-id="${clientId}"] .mvp-lead-full-content`);
+          assert.equal(await content.isVisible(), true, 'Ficha mobile debe ser visible.');
+          assert.ok((await content.innerText()).trim().length > 0, 'Ficha mobile debe contener información legible.');
+        } finally {
+          await context.close();
+        }
+      });
+
+      await t.test('H overflow 390x844: cero overflow antes y después del tap; cola/buttons/stages/ficha dentro de viewport', async () => {
+        const context = await createContext(browser, { width: 390, height: 844 }, true);
+        try {
+          const page = await context.newPage();
+          await load(page, url);
+          const before = await horizontalMetrics(page);
+          console.log(`R3_OVERFLOW 390x844 before ${JSON.stringify(before)}`);
+          assertHorizontal(before, '390x844 before', false);
+
+          const clientId = await targetClientId(page);
+          await clearScrollEvidence(page);
+          await page.locator(`#crm button.pc-supervised-attention-item[data-attention-client-id="${clientId}"]`).first().tap();
+          await assertOpened(page, clientId);
+          const after = await horizontalMetrics(page, clientId);
+          console.log(`R3_OVERFLOW 390x844 after ${JSON.stringify(after)}`);
+          assertHorizontal(after, '390x844 after', true);
+        } finally {
+          await context.close();
+        }
+      });
+
+      await t.test('I overflow 320x568: cero overflow antes y después del tap; cola/buttons/stages/ficha dentro de viewport', async () => {
+        const context = await createContext(browser, { width: 320, height: 568 }, true);
+        try {
+          const page = await context.newPage();
+          await load(page, url);
+          const before = await horizontalMetrics(page);
+          console.log(`R3_OVERFLOW 320x568 before ${JSON.stringify(before)}`);
+          assertHorizontal(before, '320x568 before', false);
+
+          const clientId = await targetClientId(page);
+          await clearScrollEvidence(page);
+          await page.locator(`#crm button.pc-supervised-attention-item[data-attention-client-id="${clientId}"]`).first().tap();
+          await assertOpened(page, clientId);
+          const after = await horizontalMetrics(page, clientId);
+          console.log(`R3_OVERFLOW 320x568 after ${JSON.stringify(after)}`);
+          assertHorizontal(after, '320x568 after', true);
+        } finally {
+          await context.close();
+        }
+      });
+    } finally {
+      await browser.close();
+    }
   } finally {
-    await browser.close();
     await stopServer(server);
   }
 });

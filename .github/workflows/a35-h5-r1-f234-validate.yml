@@ -1,0 +1,118 @@
+name: A3.5 H5 R1 F2 F3 F4 Validate
+on:
+  push:
+    branches: [validation/a35-h5-r1-family-sanitization]
+    paths: [.github/workflows/a35-h5-r1-f234-validate.yml]
+permissions:
+  contents: read
+env:
+  PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
+jobs:
+  validate-f2:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with: {node-version: 22, cache: npm}
+      - run: npm ci --silent
+      - name: Build F2
+        run: npm run build --silent
+      - name: Run F2 isolated
+        shell: bash
+        run: |
+          set -uo pipefail
+          log="$RUNNER_TEMP/f2.tap"
+          set +e
+          timeout 900s node --test --test-concurrency=1 dist/tests/b1-3-2-android-lead-save-real-app.test.js >"$log" 2>&1
+          code=$?
+          set -e
+          cat "$log"
+          echo "F2_EXIT=$code" | tee "$RUNNER_TEMP/f2-summary.txt"
+          if grep -Eq "waiting for (locator|selector).*#crm\.active" "$log"; then echo 'F2_BOOTSTRAP=RED' | tee -a "$RUNNER_TEMP/f2-summary.txt"; else echo 'F2_BOOTSTRAP=REACHED_OR_GREEN' | tee -a "$RUNNER_TEMP/f2-summary.txt"; fi
+          if pgrep -af 'node .*dist/server\.js' >"$RUNNER_TEMP/f2-server-left.txt"; then echo 'F2_SERVER_LEFT=YES' | tee -a "$RUNNER_TEMP/f2-summary.txt"; cat "$RUNNER_TEMP/f2-server-left.txt"; pkill -f 'node .*dist/server\.js' || true; else echo 'F2_SERVER_LEFT=NO' | tee -a "$RUNNER_TEMP/f2-summary.txt"; fi
+          exit "$code"
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: a35-h5-r1-f2-${{ github.run_id }}
+          retention-days: 14
+          path: |
+            ${{ runner.temp }}/f2.tap
+            ${{ runner.temp }}/f2-summary.txt
+            ${{ runner.temp }}/f2-server-left.txt
+
+  validate-f3:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with: {node-version: 22, cache: npm}
+      - run: npm ci --silent
+      - name: Build F3
+        run: npm run build --silent
+      - name: Run F3 files isolated
+        shell: bash
+        run: |
+          set -uo pipefail
+          red=0
+          i=0
+          : > "$RUNNER_TEMP/f3-summary.txt"
+          for file in b1-3-3-audit-blockers-real-app.test.js b1-3-3-real-use-real-app.test.js; do
+            i=$((i+1)); log="$RUNNER_TEMP/f3-$i.tap"
+            set +e
+            timeout 900s node --test --test-concurrency=1 "dist/tests/$file" >"$log" 2>&1
+            code=$?
+            set -e
+            cat "$log"
+            echo "F3_FILE_${i}=$file EXIT=$code" | tee -a "$RUNNER_TEMP/f3-summary.txt"
+            if grep -Eq "waiting for (locator|selector).*#crm\.active" "$log"; then echo "F3_FILE_${i}_BOOTSTRAP=RED" | tee -a "$RUNNER_TEMP/f3-summary.txt"; else echo "F3_FILE_${i}_BOOTSTRAP=REACHED_OR_GREEN" | tee -a "$RUNNER_TEMP/f3-summary.txt"; fi
+            if [ "$code" -ne 0 ]; then red=$((red+1)); fi
+            if pgrep -af 'node .*dist/server\.js' >"$RUNNER_TEMP/f3-$i-server-left.txt"; then echo "F3_FILE_${i}_SERVER_LEFT=YES" | tee -a "$RUNNER_TEMP/f3-summary.txt"; cat "$RUNNER_TEMP/f3-$i-server-left.txt"; pkill -f 'node .*dist/server\.js' || true; else echo "F3_FILE_${i}_SERVER_LEFT=NO" | tee -a "$RUNNER_TEMP/f3-summary.txt"; fi
+          done
+          echo "F3_FILES_RED=$red" | tee -a "$RUNNER_TEMP/f3-summary.txt"
+          if [ "$red" -ne 0 ]; then exit 1; fi
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: a35-h5-r1-f3-${{ github.run_id }}
+          retention-days: 14
+          path: |
+            ${{ runner.temp }}/f3-*.tap
+            ${{ runner.temp }}/f3-summary.txt
+            ${{ runner.temp }}/f3-*-server-left.txt
+
+  validate-f4:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with: {node-version: 22, cache: npm}
+      - run: npm ci --silent
+      - name: Build F4
+        run: npm run build --silent
+      - name: Run F4 isolated
+        shell: bash
+        run: |
+          set -uo pipefail
+          log="$RUNNER_TEMP/f4.tap"
+          set +e
+          timeout 900s node --test --test-concurrency=1 dist/tests/followup-hotfix-browser.test.js >"$log" 2>&1
+          code=$?
+          set -e
+          cat "$log"
+          echo "F4_EXIT=$code" | tee "$RUNNER_TEMP/f4-summary.txt"
+          if grep -Eq "waiting for (locator|selector).*#crm\.active" "$log"; then echo 'F4_BOOTSTRAP=RED' | tee -a "$RUNNER_TEMP/f4-summary.txt"; else echo 'F4_BOOTSTRAP=REACHED_OR_GREEN' | tee -a "$RUNNER_TEMP/f4-summary.txt"; fi
+          if pgrep -af 'node .*dist/server\.js' >"$RUNNER_TEMP/f4-server-left.txt"; then echo 'F4_SERVER_LEFT=YES' | tee -a "$RUNNER_TEMP/f4-summary.txt"; cat "$RUNNER_TEMP/f4-server-left.txt"; pkill -f 'node .*dist/server\.js' || true; else echo 'F4_SERVER_LEFT=NO' | tee -a "$RUNNER_TEMP/f4-summary.txt"; fi
+          exit "$code"
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: a35-h5-r1-f4-${{ github.run_id }}
+          retention-days: 14
+          path: |
+            ${{ runner.temp }}/f4.tap
+            ${{ runner.temp }}/f4-summary.txt
+            ${{ runner.temp }}/f4-server-left.txt

@@ -18,6 +18,7 @@ import { escapeHtml } from './utils.js';
 const STYLE_ID = 'propcontrol-commercial-close-styles';
 const BOUND = 'commercialCloseBound';
 let pendingReopenClientId: number | null = null;
+let pendingCloseIntent: Readonly<{ clientId: number; targetStage: 'Ganado' | 'Perdido' }> | null = null;
 let documentBound = false;
 let observedCrm: HTMLElement | null = null;
 let observer: MutationObserver | null = null;
@@ -28,7 +29,7 @@ function installStyles(): void {
   const link = document.createElement('link');
   link.id = STYLE_ID;
   link.rel = 'stylesheet';
-  link.href = '/src/commercial-close.css?v=20260903-p1-2-a1';
+  link.href = '/src/commercial-close.css?v=20260918-trv-daily-use-1';
   document.head.append(link);
 }
 
@@ -107,11 +108,33 @@ function renderCloseBlock(client: Client): string {
 function injectCloseCards(container: HTMLElement): void {
   visibleClients().forEach((client) => {
     const stage = stageForClient(client);
-    if (stage === 'Activo') return;
     const card = container.querySelector<HTMLElement>(`.mvp-lead-card[data-client-id="${client.id}"]`);
     const content = card?.querySelector<HTMLElement>('.mvp-lead-full-content');
     const actions = card?.querySelector<HTMLElement>('.mvp-lead-full-actions');
     if (!card || !content || !actions) return;
+
+    if (stage === 'Activo') {
+      if (!actions.querySelector('[data-close-operation-stage]')) {
+        const lost = document.createElement('button');
+        lost.type = 'button';
+        lost.className = 'secondary pc-close-operation-action';
+        lost.dataset.closeOperationStage = 'Perdido';
+        lost.dataset.closeOperationClient = String(client.id);
+        lost.textContent = 'Perdido';
+
+        const won = document.createElement('button');
+        won.type = 'button';
+        won.className = 'pc-close-operation-action';
+        won.dataset.closeOperationStage = 'Ganado';
+        won.dataset.closeOperationClient = String(client.id);
+        won.textContent = 'Ganado';
+
+        actions.prepend(lost);
+        actions.prepend(won);
+      }
+      return;
+    }
+
     if (!content.querySelector('[data-commercial-close-card]')) {
       const history = content.querySelector('.mvp-lead-history');
       if (history) history.insertAdjacentHTML('beforebegin', renderCloseBlock(client));
@@ -332,7 +355,21 @@ function bindDialogControls(form: HTMLFormElement, dialog: HTMLDialogElement, in
         field?.focus();
         return;
       }
-      form.dataset.commercialCloseConfirmed = target || '';
+      if (target !== 'Ganado' && target !== 'Perdido') {
+        modalError(dialog, 'El estado de cierre dejó de ser válido. Volvé a intentar.');
+        return;
+      }
+      const stage = form.elements.namedItem('pipeline');
+      if (!(stage instanceof HTMLSelectElement)) {
+        modalError(dialog, 'No se pudo confirmar la etapa comercial del cierre.');
+        return;
+      }
+      // El modal es la intención humana confirmada. Reafirmamos esa intención en
+      // el campo canónico justo antes del submit para que una capa visual que haya
+      // resincronizado el select mientras el modal estaba abierto no pueda guardar
+      // Calificado/Negociación junto con metadata terminal.
+      stage.value = target;
+      form.dataset.commercialCloseConfirmed = target;
       closeDialog(dialog);
       form.requestSubmit();
     });
@@ -433,6 +470,20 @@ function bindLeadForm(form: HTMLFormElement): void {
     pendingReopenClientId = null;
     const client = clientById(state.editingClientId!);
     if (client) window.requestAnimationFrame(() => openReopenDialog(form, client, initialStage));
+    return;
+  }
+
+  if (pendingCloseIntent?.clientId === state.editingClientId) {
+    const intent = pendingCloseIntent;
+    pendingCloseIntent = null;
+    // El click del CTA ya fue desacoplado del DOM viejo. Sobre el formulario
+    // nuevo conservamos el contrato histórico del cierre: fijar la etapa y
+    // disparar su change para que toda la validación/captura existente participe.
+    window.requestAnimationFrame(() => {
+      if (!form.isConnected) return;
+      stage.value = intent.targetStage;
+      stage.dispatchEvent(new Event('change', { bubbles: true }));
+    });
   }
 }
 
@@ -441,6 +492,32 @@ function bindDocumentActions(): void {
   documentBound = true;
   document.addEventListener('click', (event) => {
     const target = event.target as HTMLElement;
+
+    const closeButton = target.closest<HTMLButtonElement>('[data-close-operation-stage]');
+    if (closeButton) {
+      const clientId = Number(closeButton.dataset.closeOperationClient);
+      const targetStage = closeButton.dataset.closeOperationStage;
+      const client = clientById(clientId);
+      if (!clientId || !client || stageForClient(client) !== 'Activo') return;
+      if (targetStage !== 'Ganado' && targetStage !== 'Perdido') return;
+      event.preventDefault();
+      event.stopPropagation();
+      pendingCloseIntent = { clientId, targetStage };
+      // Evitamos reemplazar el DOM de Leads dentro del mismo dispatch del click.
+      // Al terminar el evento, reubicamos el botón Editar en el DOM vigente y
+      // dejamos que el formulario nuevo consuma la intención de cierre.
+      queueMicrotask(() => {
+        const currentCard = document.querySelector<HTMLElement>(`.mvp-lead-card[data-client-id="${clientId}"]`);
+        const edit = currentCard?.querySelector<HTMLButtonElement>('[data-edit-client]');
+        if (!edit) {
+          pendingCloseIntent = null;
+          return;
+        }
+        edit.click();
+      });
+      return;
+    }
+
     const button = target.closest<HTMLButtonElement>('[data-reopen-operation]');
     if (!button) return;
     const clientId = Number(button.dataset.reopenOperation);

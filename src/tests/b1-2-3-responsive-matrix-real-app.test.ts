@@ -7,6 +7,7 @@ import test from 'node:test';
 import { chromium, type Browser, type BrowserContext, type Page } from 'playwright';
 import { localIsoDate } from '../lead-pipeline.js';
 import { initialData, type Client, type CrmData } from '../models.js';
+import { installA35H5R1ModernTenantHarness } from './a35-h5-r1-modern-tenant-harness.js';
 
 const repositoryRoot = process.cwd();
 const artifactDirectory = join(repositoryRoot, 'artifacts', 'b1-2-3-responsive-matrix');
@@ -215,6 +216,7 @@ async function createContext(browser: Browser, viewport: { width: number; height
     colorScheme: 'dark',
   });
   const crm = responsiveCrm();
+  await installA35H5R1ModernTenantHarness(context, crm, 'b1-2-3-responsive-owner');
   await context.addInitScript(({ data, userId }) => {
     const storageKey = `trv-crm-basico:user:${userId}`;
     localStorage.setItem('propcontrol-cloud-session-v1', JSON.stringify({

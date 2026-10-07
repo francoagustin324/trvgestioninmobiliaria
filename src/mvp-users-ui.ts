@@ -1,6 +1,9 @@
 import type { TeamMember, TeamRole } from './models.js';
 import { getCloudSession, inviteTeamMember, updateTeamMemberAccess } from './cloud-api.js';
-import { saveData, state } from './store.js';
+import { authenticatedTenantMember, saveData, state } from './store.js';
+import { assertTenantCrmScope } from './tenant-storage.js';
+import { assertTenantRuntimeLeaseCurrent, captureTenantRuntimeLease, requireCurrentTenantScope, type TenantRuntimeLease } from './tenant-runtime.js';
+import type { TenantScope } from './active-organization.js';
 import {
   canAccessModule,
   canAdministerTeam,
@@ -22,9 +25,9 @@ function roleOptions(member: TeamMember): string {
   return `<option${member.role === 'Corredor' ? ' selected' : ''}>Corredor</option><option${member.role === 'Administrador' ? ' selected' : ''}>Administrador</option>`;
 }
 
-function userRow(member: TeamMember): string {
-  const roleEditable = canChangeTeamMemberRole(member);
-  const statusEditable = canChangeTeamMemberStatus(member);
+function userRow(member: TeamMember, actor: TeamMember): string {
+  const roleEditable = canChangeTeamMemberRole(member, actor);
+  const statusEditable = canChangeTeamMemberStatus(member, actor);
   return `<article class="mvp-user-row"><div class="mvp-user-avatar">${escapeHtml(member.name.slice(0, 2).toUpperCase())}</div><div class="mvp-user-info"><strong>${escapeHtml(member.name)}</strong><span>${escapeHtml(member.email || 'Correo pendiente')}</span></div><label>Rol<select data-user-role="${member.id}"${roleEditable ? '' : ' disabled'}>${roleOptions(member)}</select></label><span class="mvp-user-status">${escapeHtml(member.status)}</span>${statusEditable ? `<button type="button" class="secondary" data-user-status="${member.id}">${member.status === 'Suspendido' ? 'Reactivar' : 'Suspender'}</button>` : ''}</article>`;
 }
 
@@ -40,18 +43,29 @@ function clearUnauthorizedTeamUi(container: HTMLElement): void {
   container.replaceChildren();
 }
 
+function authenticatedTeamActor(scope: TenantScope, runtimeLease: TenantRuntimeLease): TeamMember {
+  assertTenantRuntimeLeaseCurrent(runtimeLease);
+  assertTenantCrmScope(scope, state.crm);
+  const actor = authenticatedTenantMember(scope);
+  if (!actor) throw new Error('AUTHENTICATED_TENANT_MEMBER_REQUIRED');
+  return actor;
+}
+
 export function renderMvpUsers(container: HTMLElement): void {
-  if (!canAccessModule('equipo')) {
+  const renderScope = requireCurrentTenantScope();
+  const renderLease = captureTenantRuntimeLease(renderScope);
+  const actor = authenticatedTeamActor(renderScope, renderLease);
+  if (!canAccessModule('equipo', actor)) {
     clearUnauthorizedTeamUi(container);
     return;
   }
 
-  const canManage = canAdministerTeam();
+  const canManage = canAdministerTeam(actor);
   const sessionReady = Boolean(getCloudSession());
-  container.innerHTML = `<div class="mvp-page-heading"><div><h1>Administración de usuarios</h1><p>Administrá accesos y roles de la inmobiliaria.</p></div>${canManage ? '<button type="button" data-toggle-user-form>Invitar usuario</button>' : ''}</div>${canManage ? `<form id="mvp-user-form" class="mvp-user-form ${state.openForms.member ? '' : 'collapsed'}"><div class="mvp-form-heading"><h2>Invitar usuario</h2><button type="button" class="quiet-button" data-toggle-user-form>Cerrar</button></div><label>Nombre<input name="name" required></label><label>Correo<input name="email" type="email" required></label><label>Rol<select name="role"><option>Corredor</option>${canInviteTeamRole('Administrador') ? '<option>Administrador</option>' : ''}</select></label><button type="submit"${sessionReady ? '' : ' disabled'}>${sessionReady ? 'Enviar invitación' : 'Ingresá para invitar'}</button><div data-user-feedback class="auth-message"></div></form>` : ''}<div class="mvp-user-list">${state.crm.teamMembers.map(userRow).join('')}</div>`;
+  container.innerHTML = `<div class="mvp-page-heading"><div><h1>Administración de usuarios</h1><p>Administrá accesos y roles de la inmobiliaria.</p></div>${canManage ? '<button type="button" data-toggle-user-form>Invitar usuario</button>' : ''}</div>${canManage ? `<form id="mvp-user-form" class="mvp-user-form ${state.openForms.member ? '' : 'collapsed'}"><div class="mvp-form-heading"><h2>Invitar usuario</h2><button type="button" class="quiet-button" data-toggle-user-form>Cerrar</button></div><label>Nombre<input name="name" required></label><label>Correo<input name="email" type="email" required></label><label>Rol<select name="role"><option>Corredor</option>${canInviteTeamRole('Administrador', actor) ? '<option>Administrador</option>' : ''}</select></label><button type="submit"${sessionReady ? '' : ' disabled'}>${sessionReady ? 'Enviar invitación' : 'Ingresá para invitar'}</button><div data-user-feedback class="auth-message"></div></form>` : ''}<div class="mvp-user-list">${state.crm.teamMembers.map((member) => userRow(member, actor)).join('')}</div>`;
 
   container.querySelectorAll<HTMLElement>('[data-toggle-user-form]').forEach((button) => button.addEventListener('click', () => {
-    if (!canAdministerTeam()) {
+    if (!canAdministerTeam(authenticatedTeamActor(renderScope, renderLease))) {
       clearUnauthorizedTeamUi(container);
       return;
     }
@@ -61,7 +75,8 @@ export function renderMvpUsers(container: HTMLElement): void {
 
   container.querySelector<HTMLFormElement>('#mvp-user-form')?.addEventListener('submit', (event) => {
     event.preventDefault();
-    if (!canAdministerTeam() || !getCloudSession()) {
+    const submitActor = authenticatedTeamActor(renderScope, renderLease);
+    if (!canAdministerTeam(submitActor) || !getCloudSession()) {
       clearUnauthorizedTeamUi(container);
       return;
     }
@@ -69,7 +84,7 @@ export function renderMvpUsers(container: HTMLElement): void {
     const values = formValues(form);
     const email = field(values, 'email').trim().toLowerCase();
     const role = field(values, 'role') as Exclude<TeamRole, 'Dueño'>;
-    if (!canInviteTeamRole(role)) {
+    if (!canInviteTeamRole(role, submitActor)) {
       setFeedback(container, 'No tenés permiso para asignar ese rol.', true);
       return;
     }
@@ -80,9 +95,10 @@ export function renderMvpUsers(container: HTMLElement): void {
     const submit = form.querySelector<HTMLButtonElement>('button[type="submit"]');
     if (submit) submit.disabled = true;
     setFeedback(container, 'Enviando invitación…');
-    void inviteTeamMember({ name: field(values, 'name').trim(), email, role })
+    void inviteTeamMember({ name: field(values, 'name').trim(), email, role }, renderScope, renderLease)
       .then((member) => {
-        if (!canAdministerTeam()) return;
+        const currentActor = authenticatedTeamActor(renderScope, renderLease);
+        if (!canAdministerTeam(currentActor)) return;
         replaceMember(member);
         state.openForms.member = false;
         saveData();
@@ -97,20 +113,22 @@ export function renderMvpUsers(container: HTMLElement): void {
   container.querySelectorAll<HTMLSelectElement>('[data-user-role]').forEach((select) => select.addEventListener('change', () => {
     const id = Number(select.dataset.userRole);
     const target = state.crm.teamMembers.find((member) => member.id === id);
-    if (!target || !canChangeTeamMemberRole(target)) {
+    const changeActor = authenticatedTeamActor(renderScope, renderLease);
+    if (!target || !canChangeTeamMemberRole(target, changeActor)) {
       document.dispatchEvent(new CustomEvent('trv-render'));
       return;
     }
     const nextRole = select.value as Exclude<TeamRole, 'Dueño'>;
-    if (!canInviteTeamRole(nextRole)) {
+    if (!canInviteTeamRole(nextRole, changeActor)) {
       document.dispatchEvent(new CustomEvent('trv-render'));
       return;
     }
     const previous = target.role;
     select.disabled = true;
-    void updateTeamMemberAccess(id, { role: nextRole })
+    void updateTeamMemberAccess(id, { role: nextRole }, renderScope, renderLease)
       .then((updated) => {
-        if (!canChangeTeamMemberRole(target)) return;
+        const currentActor = authenticatedTeamActor(renderScope, renderLease);
+        if (!canChangeTeamMemberRole(target, currentActor)) return;
         replaceMember(updated);
         saveData();
         document.dispatchEvent(new CustomEvent('trv-render'));
@@ -125,15 +143,17 @@ export function renderMvpUsers(container: HTMLElement): void {
   container.querySelectorAll<HTMLButtonElement>('[data-user-status]').forEach((button) => button.addEventListener('click', () => {
     const id = Number(button.dataset.userStatus);
     const target = state.crm.teamMembers.find((member) => member.id === id);
-    if (!target || !canChangeTeamMemberStatus(target)) {
+    const statusActor = authenticatedTeamActor(renderScope, renderLease);
+    if (!target || !canChangeTeamMemberStatus(target, statusActor)) {
       document.dispatchEvent(new CustomEvent('trv-render'));
       return;
     }
     button.disabled = true;
     const status = target.status === 'Suspendido' ? 'Activo' : 'Suspendido';
-    void updateTeamMemberAccess(id, { status })
+    void updateTeamMemberAccess(id, { status }, renderScope, renderLease)
       .then((updated) => {
-        if (!canChangeTeamMemberStatus(target)) return;
+        const currentActor = authenticatedTeamActor(renderScope, renderLease);
+        if (!canChangeTeamMemberStatus(target, currentActor)) return;
         replaceMember(updated);
         saveData();
         document.dispatchEvent(new CustomEvent('trv-render'));

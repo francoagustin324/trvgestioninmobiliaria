@@ -8,6 +8,7 @@ import {
   matchPropertiesForClient,
   parseUsdBudget,
 } from '../property-matching.js';
+import { propertyMatchingDataIssues } from '../property-opportunities.js';
 
 function client(overrides: Partial<Client> = {}): Client {
   return {
@@ -109,4 +110,33 @@ test('encuentra compradores compatibles para una propiedad y excluye cerrados', 
   ];
   const matches = matchClientsForProperty(property(), clients);
   assert.deepEqual(matches.map((match) => match.client.id), [1]);
+});
+
+
+test('Bloque 2B permite matching básico con tipo, ubicación y precio sin completar datos secundarios', () => {
+  const minimal = property({
+    title: 'Dúplex rápido Docta',
+    address: 'Docta, Córdoba',
+    type: 'Dúplex',
+    operation: 'Venta',
+    price: 120000,
+    owner: '',
+    status: 'Activa',
+    bedrooms: undefined,
+    bathrooms: undefined,
+    paymentMethod: undefined,
+    features: undefined,
+  });
+  const buyer = client({
+    interest: 'Busco dúplex en Docta',
+    propertyType: 'Dúplex',
+    zones: 'Docta',
+    budget: 'USD 130.000',
+    bedrooms: undefined,
+    paymentMethod: undefined,
+  });
+  assert.deepEqual(propertyMatchingDataIssues(minimal), []);
+  const matches = matchClientsForProperty(minimal, [buyer]);
+  assert.equal(matches.length, 1);
+  assert.equal(matches[0]?.client.id, buyer.id);
 });

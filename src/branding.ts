@@ -1,16 +1,18 @@
 export const PRODUCT_BRAND = {
-  name: 'PropControl',
-  tagline: 'Control comercial para inmobiliarias',
+  name: 'OrdenBroker',
+  tagline: 'Tu inmobiliaria, bajo control',
   phrase: 'Ordená. Seguí. Cerrá.',
-  logo: '/src/assets/logo-propcontrol.png',
-  wordmark: '/src/assets/propcontrol-logo.svg',
+  logo: '/src/assets/ordenbroker-mark.png',
+  wordmark: '/src/assets/ordenbroker-wordmark.png',
   colors: {
-    deepBlue: '#0D1B2A',
-    corporateBlue: '#1E3A5F',
-    gold: '#D4A017',
+    navy: '#0F1B35',
+    deepBlue: '#103676',
+    primary: '#0958ED',
+    secondary: '#296BE9',
+    slate: '#616C7E',
+    bluishGray: '#98A9C5',
+    border: '#DBDFE4',
     white: '#FFFFFF',
-    lightGray: '#F2F4F7',
-    mediumGray: '#6B7280',
   },
 } as const;
 

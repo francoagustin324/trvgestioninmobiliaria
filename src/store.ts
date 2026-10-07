@@ -1,4 +1,5 @@
 import { queueCloudSave } from './cloud-api-compatible.js';
+import type { TenantScope } from './active-organization.js';
 import type {
   ActivityEntry,
   ConversationMessage,
@@ -10,13 +11,24 @@ import type {
   WhatsAppConversation,
 } from './models.js';
 import { defaultSettings, initialData } from './models.js';
+import { hydrateLegacyPropertyDiffusionLedger } from './property-diffusion-ledger.js';
+import { invalidatePropertyMatchingCaches } from './property-matching.js';
 import {
-  activateAccountStorage,
-  hasLocalBackup as hasStoredLocalBackup,
-  readLocalSnapshot,
-  restoreLatestBackup,
-  writeLocalSnapshot,
-} from './sync-safety.js';
+  assertTenantCrmScope,
+  hasTenantLocalBackup,
+  readTenantSnapshot,
+  restoreLatestTenantBackup,
+  writeTenantSnapshot,
+} from './tenant-storage.js';
+import {
+  assertTenantRuntimeLeaseCurrent,
+  captureTenantRuntimeLease,
+  currentTenantScope,
+  requireCurrentTenantScope,
+  TENANT_RUNTIME_STALE,
+  tenantScopesEqual,
+  type TenantRuntimeLease,
+} from './tenant-runtime.js';
 import {
   canonicalUuid,
   normalizedSyncMetadata,
@@ -73,9 +85,17 @@ function normalizedConversation(value: Partial<WhatsAppConversation>, fallbackId
 function normalizedOrganization(value: Partial<OrganizationSettings> | undefined): OrganizationSettings {
   return {
     id: String(value?.id || initialData.organization.id),
-    name: String(value?.name || initialData.organization.name),
+    name: String(value?.name ?? '').trim(),
     seatLimit: Number.isFinite(value?.seatLimit) && Number(value?.seatLimit) > 0 ? Number(value?.seatLimit) : null,
     planLabel: String(value?.planLabel || initialData.organization.planLabel),
+    commercialPhone: String(value?.commercialPhone ?? '').trim(),
+    commercialEmail: String(value?.commercialEmail ?? '').trim(),
+    address: String(value?.address ?? '').trim(),
+    logoPath: String(value?.logoPath ?? '').trim(),
+    legalText: String(value?.legalText ?? '').trim(),
+    defaultCurrency: String(value?.defaultCurrency || 'USD').trim(),
+    defaultZone: String(value?.defaultZone ?? '').trim(),
+    shareText: String(value?.shareText ?? '').trim(),
   };
 }
 
@@ -97,7 +117,6 @@ function normalizedTeamMembers(value: unknown): TeamMember[] {
       lastActiveAt: record.lastActiveAt ? String(record.lastActiveAt) : undefined,
     } satisfies TeamMember;
   });
-  if (!members.some((member) => member.role === 'Dueño')) members[0] = { ...members[0]!, role: 'Dueño', status: 'Activo' };
   return members;
 }
 
@@ -112,6 +131,17 @@ function normalizedActivityLog(value: unknown): ActivityEntry[] {
       entityType: item.entityType || 'Equipo',
       entityId: Number.isFinite(item.entityId) ? Number(item.entityId) : undefined,
       ...(hasOwn(item, 'entityUid') ? { entityUid: canonicalUuid(item.entityUid) } : {}),
+      ...(item.activityKind === 'property-diffusion' ? { activityKind: 'property-diffusion' as const } : {}),
+      ...(Number.isFinite(item.diffusionPropertyId) ? { diffusionPropertyId: Number(item.diffusionPropertyId) } : {}),
+      ...(hasOwn(item, 'diffusionPropertyUid') ? { diffusionPropertyUid: canonicalUuid(item.diffusionPropertyUid) } : {}),
+      ...(Number.isFinite(item.diffusionClientId) ? { diffusionClientId: Number(item.diffusionClientId) } : {}),
+      ...(hasOwn(item, 'diffusionClientUid') ? { diffusionClientUid: canonicalUuid(item.diffusionClientUid) } : {}),
+      ...(item.diffusionChannel === 'WhatsApp' || item.diffusionChannel === 'Email'
+        ? { diffusionChannel: item.diffusionChannel }
+        : {}),
+      ...(item.diffusionStatus === 'PENDIENTE' || item.diffusionStatus === 'ENVIADO' || item.diffusionStatus === 'RESPONDIO'
+        ? { diffusionStatus: item.diffusionStatus }
+        : {}),
       detail: String(item.detail || ''),
       createdAt: String(item.createdAt || new Date().toISOString()),
     }));
@@ -120,16 +150,26 @@ function normalizedActivityLog(value: unknown): ActivityEntry[] {
 function normalizedData(value: Partial<CrmData>): CrmData {
   const teamMembers = normalizedTeamMembers(value.teamMembers);
   const ownerId = teamMembers.find((member) => member.role === 'Dueño')?.id ?? teamMembers[0]?.id ?? 1;
-  return {
-    organization: normalizedOrganization(value.organization),
-    teamMembers,
-    activityLog: normalizedActivityLog(value.activityLog),
-    clients: Array.isArray(value.clients) ? value.clients.map((client) => ({
+  const activityLog = normalizedActivityLog(value.activityLog);
+  const clients = Array.isArray(value.clients) ? value.clients.map((client) => {
+    const normalizedClient = {
       ...client,
       ...normalizedSyncMetadata(client),
       assignedToId: Number(client.assignedToId ?? ownerId),
       createdById: Number(client.createdById ?? ownerId),
-    })) : [],
+    };
+    const propertyDiffusions = hydrateLegacyPropertyDiffusionLedger(normalizedClient, activityLog);
+    if (!propertyDiffusions.length) delete normalizedClient.propertyDiffusions;
+    return {
+      ...normalizedClient,
+      ...(propertyDiffusions.length ? { propertyDiffusions } : {}),
+    };
+  }) : [];
+  return {
+    organization: normalizedOrganization(value.organization),
+    teamMembers,
+    activityLog,
+    clients,
     properties: Array.isArray(value.properties) ? value.properties.map((property) => ({
       ...property,
       ...normalizedSyncMetadata(property),
@@ -179,9 +219,39 @@ function normalizedData(value: Partial<CrmData>): CrmData {
   };
 }
 
-function loadData(): CrmData {
-  const local = readLocalSnapshot();
-  return local ? normalizedData(local) : normalizedData(structuredClone(initialData));
+export function scopedInitialDataForTenant(scope: TenantScope): CrmData {
+  const initial = structuredClone(initialData);
+  initial.organization = {
+    ...initial.organization,
+    id: scope.organizationId,
+    name: '',
+    commercialPhone: '',
+    commercialEmail: '',
+    address: '',
+    logoPath: '',
+    legalText: '',
+    defaultCurrency: 'USD',
+    defaultZone: '',
+    shareText: '',
+  };
+  initial.teamMembers = [{
+    ...initial.teamMembers[0]!,
+    name: 'Usuario',
+    email: '',
+    phone: undefined,
+  }];
+  initial.settings = {
+    ...initial.settings,
+    agencyName: '',
+    agencyWhatsapp: '',
+    agencyLegal: '',
+  };
+  return normalizedData(initial);
+}
+
+function loadData(scope: TenantScope): CrmData {
+  const local = readTenantSnapshot(scope);
+  return local ? normalizedData(local) : scopedInitialDataForTenant(scope);
 }
 
 function loadActiveMemberId(crm: CrmData): number {
@@ -193,7 +263,7 @@ function loadActiveMemberId(crm: CrmData): number {
     ?? 1;
 }
 
-const loadedCrm = loadData();
+const loadedCrm = normalizedData(structuredClone(initialData));
 
 export const state = {
   crm: loadedCrm,
@@ -210,19 +280,51 @@ export const state = {
   openForms: { client: false, property: false, contact: false, reminder: false, ficha: false, member: false },
 };
 
-function resetTransientState(): void {
+type TransientStateResetHandler = () => void;
+
+const transientStateResetHandlers = new Set<TransientStateResetHandler>();
+
+export function registerTransientStateReset(handler: TransientStateResetHandler): () => void {
+  transientStateResetHandlers.add(handler);
+  return () => transientStateResetHandlers.delete(handler);
+}
+
+export function resetTransientState(): void {
   state.activeMemberId = loadActiveMemberId(state.crm);
   state.editingClientId = null;
   state.editingPropertyId = null;
   state.selectedConversationId = null;
   state.selectedContactId = null;
   state.editingContactId = null;
+  transientStateResetHandlers.forEach((handler) => handler());
 }
 
-export function activateStorageForCurrentSession(): void {
-  activateAccountStorage();
-  state.crm = loadData();
+export function invalidatePropertyCollectionCache(
+  properties: CrmData['properties'] = state.crm.properties,
+): void {
+  invalidatePropertyMatchingCaches(properties);
+}
+
+export function replacePropertyCollection(properties: CrmData['properties']): void {
+  invalidatePropertyCollectionCache(state.crm.properties);
+  state.crm.properties = properties;
+  invalidatePropertyCollectionCache(properties);
+}
+
+export function activateStorageForTenant(scope: TenantScope): void {
+  invalidatePropertyCollectionCache(state.crm.properties);
+  state.crm = loadData(scope);
+  assertTenantCrmScope(scope, state.crm);
   resetTransientState();
+}
+
+/**
+ * Transitional compatibility surface for latent callers/tests. It never derives
+ * tenant from session, CRM or membership order: it can only use the already
+ * installed runtime authority and therefore fails closed before C1 bootstrap.
+ */
+export function activateStorageForCurrentSession(): void {
+  activateStorageForTenant(requireCurrentTenantScope());
 }
 
 export function setActiveMemberId(memberId: number): void {
@@ -237,39 +339,101 @@ export function setActiveMemberId(memberId: number): void {
     : null;
 }
 
-export function replaceData(data: CrmData, syncCloud = false): void {
-  state.crm = normalizedData(data);
-  resetTransientState();
-  writeLocalSnapshot(state.crm, {
+export function replaceDataForTenant(scope: TenantScope, data: CrmData, syncCloud = false): boolean {
+  if (!tenantScopesEqual(currentTenantScope(), scope)) return false;
+  assertTenantCrmScope(scope, data);
+  const normalized = normalizedData(data);
+  assertTenantCrmScope(scope, normalized);
+  writeTenantSnapshot(scope, normalized, {
     markDirty: syncCloud,
     reason: syncCloud ? 'Restauración local' : 'Carga desde la nube',
   });
-  if (syncCloud) queueCloudSave(state.crm);
+  invalidatePropertyCollectionCache(state.crm.properties);
+  state.crm = normalized;
+  resetTransientState();
+  if (syncCloud) queueCloudSave(scope, state.crm);
+  return true;
+}
+
+export function replaceData(data: CrmData, syncCloud = false): void {
+  const scope = requireCurrentTenantScope();
+  if (!replaceDataForTenant(scope, data, syncCloud)) {
+    throw new Error('TENANT_RUNTIME_STALE');
+  }
 }
 
 export function saveData(reason = 'Cambio local'): void {
-  writeLocalSnapshot(state.crm, { markDirty: true, reason });
-  queueCloudSave(state.crm);
+  const scope = requireCurrentTenantScope();
+  assertTenantCrmScope(scope, state.crm);
+  writeTenantSnapshot(scope, state.crm, { markDirty: true, reason });
+  queueCloudSave(scope, state.crm);
 }
 
 export function hasLocalBackup(): boolean {
-  return hasStoredLocalBackup();
+  const scope = currentTenantScope();
+  return scope ? hasTenantLocalBackup(scope) : false;
 }
 
-export function canRestoreLatestLocalBackup(): boolean {
-  const member = state.crm.teamMembers.find(
-    (item) => item.id === state.activeMemberId && item.status !== 'Suspendido',
+/**
+ * Authorization identity for tenant-sensitive local capabilities.
+ * activeMemberId / TEAM_VIEW_KEY remain a visual preference only and never
+ * participate in this lookup.
+ */
+export function authenticatedTenantMember(
+  scope: TenantScope | null = currentTenantScope(),
+): TeamMember | null {
+  if (!scope || !tenantScopesEqual(currentTenantScope(), scope)) return null;
+  if (state.crm.organization.id !== scope.organizationId) return null;
+  const matches = state.crm.teamMembers.filter(
+    (member) => member.userId === scope.userId && member.status === 'Activo',
   );
+  return matches.length === 1 ? matches[0]! : null;
+}
+
+export function canRestoreLatestLocalBackup(
+  scope: TenantScope | null = currentTenantScope(),
+): boolean {
+  const member = authenticatedTenantMember(scope);
   return Boolean(member && roleCanManageTeam(member.role));
 }
 
-export function restoreLatestLocalBackup(): boolean {
-  if (!canRestoreLatestLocalBackup()) return false;
-  const restored = restoreLatestBackup();
+export function restoreLatestLocalBackupForTenant(
+  scope: TenantScope,
+  runtimeLease: TenantRuntimeLease,
+): boolean {
+  if (!tenantScopesEqual(scope, runtimeLease.scope)) throw new Error(TENANT_RUNTIME_STALE);
+  assertTenantRuntimeLeaseCurrent(runtimeLease);
+  if (!canRestoreLatestLocalBackup(scope)) return false;
+
+  // restoreLatestTenantBackup consumes the exact tenant backup and writes only
+  // inside that tenant namespace. The lease is therefore revalidated directly
+  // before entering that synchronous material section.
+  assertTenantRuntimeLeaseCurrent(runtimeLease);
+  const restored = restoreLatestTenantBackup(scope);
   if (!restored) return false;
-  state.crm = normalizedData(restored);
+  assertTenantCrmScope(scope, restored);
+  const restoredSnapshot = normalizedData(restored);
+  assertTenantCrmScope(scope, restoredSnapshot);
+
+  assertTenantRuntimeLeaseCurrent(runtimeLease);
+  invalidatePropertyCollectionCache(state.crm.properties);
+  state.crm = structuredClone(restoredSnapshot);
   resetTransientState();
-  writeLocalSnapshot(state.crm, { markDirty: true, reason: 'Restauración confirmada', backup: false });
-  queueCloudSave(state.crm);
+
+  assertTenantRuntimeLeaseCurrent(runtimeLease);
+  writeTenantSnapshot(scope, restoredSnapshot, {
+    markDirty: true,
+    reason: 'Restauración confirmada',
+    backup: false,
+  });
+
+  assertTenantRuntimeLeaseCurrent(runtimeLease);
+  queueCloudSave(scope, restoredSnapshot);
   return true;
+}
+
+export function restoreLatestLocalBackup(): boolean {
+  const scope = requireCurrentTenantScope();
+  const runtimeLease = captureTenantRuntimeLease(scope);
+  return restoreLatestLocalBackupForTenant(scope, runtimeLease);
 }

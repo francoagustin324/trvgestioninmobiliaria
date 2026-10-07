@@ -7,6 +7,7 @@ import { initialData, type CrmData, type TeamMember } from '../models.js';
 
 const USER_ID = 'desktop-zero-training-owner';
 const ORG_ID = 'desktop-zero-training-org';
+const GENERATION = 'desktop-zero-training-generation-a34-1';
 const STORAGE_KEY = `trv-crm-basico:user:${USER_ID}`;
 const BASELINE_DISTANCE = 504.13;
 const TARGET_1366_DISTANCE = BASELINE_DISTANCE * 0.8;
@@ -155,17 +156,139 @@ async function stopServer(server: ChildProcess): Promise<void> {
   });
 }
 
+function syntheticOwnerMembership() {
+  return {
+    organization_id: ORG_ID,
+    member_id: 1,
+    user_id: USER_ID,
+    role: 'owner',
+    status: 'active',
+    display_name: owner().name,
+    email: owner().email,
+    phone: owner().phone,
+    created_at: '2026-08-11T12:00:00.000Z',
+    last_active_at: '2026-09-13T18:00:00.000Z',
+  };
+}
+
+function syntheticSecondMembership() {
+  const member = secondMember();
+  return {
+    organization_id: ORG_ID,
+    member_id: member.id,
+    user_id: member.userId,
+    role: 'owner',
+    status: 'active',
+    display_name: member.name,
+    email: member.email,
+    phone: member.phone,
+    created_at: member.createdAt,
+    last_active_at: '2026-09-13T18:00:00.000Z',
+  };
+}
+
+function syntheticJson(body: unknown, status = 200) {
+  return {
+    status,
+    contentType: 'application/json',
+    headers: { 'access-control-allow-origin': '*' },
+    body: JSON.stringify(body),
+  };
+}
+
+async function installSyntheticAuthority(context: BrowserContext, origin: string): Promise<void> {
+  let syntheticRecords: unknown[] = [];
+
+  await context.route('**/api/cloud-config', async (route) => {
+    await route.fulfill(syntheticJson({
+      configured: true,
+      url: origin,
+      publishableKey: 'desktop-zero-training-publishable-key',
+    }));
+  });
+
+  await context.route('**/rest/v1/**', async (route) => {
+    const request = route.request();
+    const url = new URL(request.url());
+
+    if (request.method() === 'OPTIONS') {
+      await route.fulfill({
+        status: 204,
+        headers: {
+          'access-control-allow-origin': '*',
+          'access-control-allow-headers': '*',
+          'access-control-allow-methods': 'GET,POST,DELETE,OPTIONS',
+        },
+        body: '',
+      });
+      return;
+    }
+
+    if (url.pathname.endsWith('/rest/v1/rpc/activate_my_organization_memberships')) {
+      await route.fulfill(syntheticJson({}));
+      return;
+    }
+
+    if (url.pathname.endsWith('/rest/v1/organization_members')) {
+      const userFilter = url.searchParams.get('user_id');
+      const organizationFilter = url.searchParams.get('organization_id');
+      if (userFilter === `eq.${USER_ID}`) {
+        await route.fulfill(syntheticJson([syntheticOwnerMembership()]));
+        return;
+      }
+      if (organizationFilter === `eq.${ORG_ID}`) {
+        await route.fulfill(syntheticJson([syntheticOwnerMembership(), syntheticSecondMembership()]));
+        return;
+      }
+      await route.fulfill(syntheticJson({ error: 'UNEXPECTED_ORGANIZATION_MEMBERS_QUERY', search: url.search }, 500));
+      return;
+    }
+
+    if (url.pathname.endsWith('/rest/v1/rpc/visit_transaction_authority_active_v2')) {
+      await route.fulfill(syntheticJson(false));
+      return;
+    }
+
+    if (url.pathname.endsWith('/rest/v1/propcontrol_records')) {
+      if (request.method() === 'GET') {
+        await route.fulfill(syntheticJson(syntheticRecords));
+        return;
+      }
+      if (request.method() === 'POST') {
+        const body = request.postDataJSON();
+        syntheticRecords = Array.isArray(body) ? structuredClone(body) : [structuredClone(body)];
+        await route.fulfill(syntheticJson(syntheticRecords, 201));
+        return;
+      }
+      if (request.method() === 'DELETE') {
+        syntheticRecords = [];
+        await route.fulfill({ status: 204, headers: { 'access-control-allow-origin': '*' }, body: '' });
+        return;
+      }
+    }
+
+    if (url.pathname.endsWith('/rest/v1/fichas')) {
+      await route.fulfill(syntheticJson([]));
+      return;
+    }
+
+    await route.fulfill(syntheticJson({ error: 'UNEXPECTED_SYNTHETIC_ENDPOINT', path: url.pathname }, 500));
+  });
+}
+
 async function seedContext(context: BrowserContext): Promise<void> {
   const actorKey = `cloud:${USER_ID}`;
   const identityKey = `propcontrol-whatsapp-human-identity-v1:${encodeURIComponent(ORG_ID)}:1:${encodeURIComponent(actorKey)}`;
-  await context.addInitScript(({ crm, identityStorageKey, storageKey }) => {
+  await context.addInitScript(({ crm, generation, identityStorageKey, storageKey }) => {
     localStorage.setItem('propcontrol-cloud-session-v1', JSON.stringify({
       accessToken: 'access',
       refreshToken: 'refresh',
       expiresAt: Date.now() + 3_600_000,
       userId: 'desktop-zero-training-owner',
       email: 'franco@propcontrol.test',
+      __propcontrolAuthGeneration: generation,
     }));
+    localStorage.setItem('propcontrol-cloud-auth-generation-v1', generation);
     localStorage.setItem(storageKey, JSON.stringify(crm));
     localStorage.setItem(`${storageKey}:sync`, JSON.stringify({
       dirty: false,
@@ -182,7 +305,7 @@ async function seedContext(context: BrowserContext): Promise<void> {
       humanName: 'Franco Solis',
       confirmedAt: '2026-08-11T18:00:00.000Z',
     }));
-  }, { crm: fixture(), identityStorageKey: identityKey, storageKey: STORAGE_KEY });
+  }, { crm: fixture(), generation: GENERATION, identityStorageKey: identityKey, storageKey: STORAGE_KEY });
 }
 
 async function load(page: Page, url: string): Promise<void> {
@@ -305,6 +428,7 @@ test('PR143 desktop cero capacitación Chromium + regresión móvil', { timeout:
     timezoneId: 'America/Argentina/Cordoba',
     colorScheme: 'dark',
   });
+  await installSyntheticAuthority(context, `http://127.0.0.1:${port}`);
   await seedContext(context);
 
   try {
@@ -336,6 +460,13 @@ test('PR143 desktop cero capacitación Chromium + regresión móvil', { timeout:
 
     await filterSummary.click();
     await waitForFilterPanelVisible(page);
+    const assigneeOptions = await page.locator('#mvp-lead-assignee-filter option').evaluateAll((options) => options.map((option) => ({
+      value: (option as HTMLOptionElement).value,
+      label: option.textContent?.trim() ?? '',
+    })));
+    assert.ok(assigneeOptions.some((option) => option.value === '1'), `Falta member 1 en asignados: ${JSON.stringify(assigneeOptions)}`);
+    assert.ok(assigneeOptions.some((option) => option.value === '2'), `Falta member 2 en asignados: ${JSON.stringify(assigneeOptions)}`);
+    console.log(`PR143_ASSIGNEE_OPTIONS=${JSON.stringify(assigneeOptions)}`);
     for (const selector of ['#mvp-lead-stage-filter', '#mvp-lead-temperature-filter', '#mvp-lead-assignee-filter', '#mvp-lead-order']) {
       const control = page.locator(selector);
       assert.equal(await control.isVisible(), true, `${selector} debe estar accesible.`);
@@ -564,6 +695,7 @@ test('PR143 WebKit desktop 1280/1440', { timeout: 120_000 }, async () => {
     timezoneId: 'America/Argentina/Cordoba',
     colorScheme: 'dark',
   });
+  await installSyntheticAuthority(context, `http://127.0.0.1:${port}`);
   await seedContext(context);
 
   try {
@@ -603,7 +735,7 @@ test('PR143 cache bust: todo runtime modificado cambia URL servida', () => {
   assert.match(index, /\/src\/leads-desktop-zero-training\.css\?v=20260811-1/);
   assert.match(index, /\/dist\/leads-professional-redesign-blocking-fix\.js\?v=20260816-1/);
   assert.doesNotMatch(index, /\/dist\/leads-professional-redesign-blocking-fix\.js\?v=20260805-1/);
-  assert.match(index, /\/dist\/leads-professional-redesign\.js\?v=20260908-1/);
+  assert.match(index, /\/dist\/leads-professional-redesign\.js\?v=20260924-block2a-1/);
   assert.doesNotMatch(index, /\/dist\/leads-professional-redesign\.js\?v=20260805-1/);
-  assert.match(index, /\/dist\/mvp-main\.js\?v=20260906-p1-4-a2-2-1/);
+  assert.match(index, /\/dist\/mvp-main\.js\?v=20260928-block2f-force-explicit-edit-1/);
 });

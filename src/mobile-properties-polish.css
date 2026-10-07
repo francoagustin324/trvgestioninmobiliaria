@@ -218,7 +218,7 @@
     grid-column: 1 / -1;
     order: 1;
     min-height: 48px;
-    color: var(--brand-ink);
+    color: var(--ob-white);
     border-color: transparent;
     background: linear-gradient(150deg, var(--brand-bright), var(--brand));
     box-shadow: var(--glass-hi);

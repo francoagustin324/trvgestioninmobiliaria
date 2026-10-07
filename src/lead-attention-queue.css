@@ -8,7 +8,7 @@
   margin: 6px 0 8px;
   padding: 6px 8px;
   overflow: hidden;
-  border: 1px solid rgba(198, 171, 120, 0.22);
+  border: 1px solid rgba(9, 88, 237, 0.22);
   border-radius: 12px;
   background: rgba(255, 255, 255, 0.025);
 }
@@ -22,14 +22,14 @@
 }
 
 .pc-supervised-attention-heading strong {
-  color: var(--brand-bright, #dec593);
+  color: var(--brand-bright, #296BE9);
   font-size: 0.72rem;
   line-height: 1.1;
   letter-spacing: 0.055em;
 }
 
 .pc-supervised-attention-heading span {
-  color: var(--ink-soft, #97aca0);
+  color: var(--ink-soft, #98A9C5);
   font-size: 0.67rem;
   line-height: 1.2;
 }
@@ -71,7 +71,7 @@
 }
 
 .pc-supervised-attention-reason {
-  color: var(--ink-soft, #97aca0);
+  color: var(--ink-soft, #98A9C5);
   font-size: 0.69rem;
   line-height: 1.15;
 }
@@ -88,14 +88,14 @@
 }
 
 .pc-supervised-attention-action b {
-  color: var(--brand-bright, #dec593);
+  color: var(--brand-bright, #296BE9);
 }
 
 .pc-supervised-attention-empty {
   min-width: 0;
   margin: 0;
   align-self: center;
-  color: var(--ink-soft, #97aca0);
+  color: var(--ink-soft, #98A9C5);
   font-size: 0.74rem;
   line-height: 1.3;
 }
@@ -169,5 +169,177 @@
 
   #crm.pc-leads-redesign .pc-attention-section {
     gap: 3px;
+  }
+}
+
+
+/* Block 2G: cola operativa diaria sobre la atención existente. */
+.pc-daily-ops-queue {
+  grid-template-columns: minmax(0, 1fr);
+  gap: 10px;
+  padding: 12px;
+  border-color: rgba(224, 198, 134, 0.28);
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.pc-daily-ops-heading {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+}
+
+.pc-daily-ops-heading > div:first-child {
+  min-width: 0;
+}
+
+.pc-daily-ops-heading strong {
+  display: block;
+  color: #f4d889;
+  font-size: 0.78rem;
+  letter-spacing: 0.07em;
+}
+
+.pc-daily-ops-heading span {
+  color: var(--ink-soft, #98A9C5);
+  font-size: 0.72rem;
+}
+
+.pc-daily-ops-summary {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.pc-daily-ops-summary :is(b, span) {
+  padding: 4px 8px;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.045);
+  color: var(--ink, #eaf2ec);
+  font-size: 0.68rem;
+  white-space: nowrap;
+}
+
+.pc-daily-ops-list {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  min-width: 0;
+}
+
+.pc-daily-ops-item.pc-supervised-attention-item {
+  min-height: 74px;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-areas:
+    "priority name when"
+    "reason reason reason"
+    "action action action";
+  align-items: center;
+  gap: 4px 8px;
+  padding: 9px 11px;
+  border-radius: 12px;
+  text-align: left;
+}
+
+.pc-daily-ops-priority {
+  grid-area: priority;
+  justify-self: start;
+  padding: 3px 6px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  font-size: 0.61rem;
+  font-weight: 850;
+  letter-spacing: 0.04em;
+}
+
+.pc-daily-ops-item .pc-supervised-attention-name {
+  grid-area: name;
+  font-size: 0.82rem;
+}
+
+.pc-daily-ops-item .pc-supervised-attention-reason {
+  grid-area: reason;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.pc-daily-ops-when {
+  grid-area: when;
+  color: var(--ink-soft, #98A9C5);
+  font-size: 0.67rem;
+  white-space: nowrap;
+}
+
+.pc-daily-ops-item .pc-supervised-attention-action {
+  grid-area: action;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  font-weight: 750;
+}
+
+.pc-daily-ops-item.priority-critico {
+  border-color: rgba(236, 117, 94, 0.42);
+  background: rgba(236, 117, 94, 0.08);
+}
+
+.pc-daily-ops-item.priority-alto {
+  border-color: rgba(244, 216, 137, 0.34);
+  background: rgba(244, 216, 137, 0.055);
+}
+
+.pc-daily-ops-item.priority-normal {
+  border-color: rgba(86, 137, 239, 0.28);
+}
+
+@media (max-width: 720px) {
+  .pc-daily-ops-queue {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 6px;
+    margin: 4px 0 8px;
+    padding: 7px;
+    overflow-x: hidden;
+  }
+
+  .pc-daily-ops-heading {
+    align-items: flex-start;
+  }
+
+  .pc-daily-ops-heading > div:first-child > span {
+    display: none;
+  }
+
+  .pc-daily-ops-summary {
+    gap: 4px;
+  }
+
+  .pc-daily-ops-summary :is(b, span) {
+    padding: 3px 6px;
+    font-size: 0.61rem;
+  }
+
+  .pc-daily-ops-list {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 4px;
+  }
+
+  .pc-daily-ops-item.pc-supervised-attention-item {
+    min-height: 48px;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    grid-template-areas:
+      "priority name when"
+      "reason reason reason"
+      "action action action";
+    gap: 2px 6px;
+    padding: 3px 7px;
+  }
+
+  .pc-daily-ops-item .pc-supervised-attention-name,
+  .pc-daily-ops-item .pc-supervised-attention-reason,
+  .pc-daily-ops-item .pc-supervised-attention-action {
+    font-size: 0.68rem;
+    line-height: 1.2;
   }
 }

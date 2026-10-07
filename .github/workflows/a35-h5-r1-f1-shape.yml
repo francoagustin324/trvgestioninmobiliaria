@@ -1,0 +1,31 @@
+name: A3.5 H5 R1 F1 Shape
+on:
+  push:
+    branches: [validation/a35-h5-r1-family-sanitization]
+    paths: [.github/workflows/a35-h5-r1-f1-shape.yml]
+permissions:
+  contents: read
+jobs:
+  inspect:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          files = [
+          'src/tests/b1-2-3-compact-leads-real-app.test.ts','src/tests/b1-2-3-responsive-matrix-real-app.test.ts',
+          'src/tests/b1-2-4-architecture-runtime.test.ts','src/tests/b1-2-4-responsive-real-app.test.ts',
+          'src/tests/b1-2-5-responsive-real-app.test.ts','src/tests/b1-2-6-mobile-header-alerts.test.ts',
+          'src/tests/b1-2-7-responsive-real-app.test.ts','src/tests/b1-2-8-account-menu-responsive-real-app.test.ts',
+          'src/tests/b1-2-9-multiuser-permissions-real-app.test.ts','src/tests/b1-3-1-lead-create-real-app.test.ts',
+          'src/tests/c13-leads-visual-professional-browser.test.ts']
+          for f in files:
+            lines=Path(f).read_text().splitlines()
+            print('\nFILE='+f)
+            for i,l in enumerate(lines):
+              if ('async function createContext' in l or 'async function contextFor' in l or 'async function seedContext' in l):
+                for x in lines[i:min(len(lines),i+85)]: print(x)
+                break
+          PY

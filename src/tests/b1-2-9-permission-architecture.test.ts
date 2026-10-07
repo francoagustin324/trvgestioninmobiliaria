@@ -46,8 +46,8 @@ test('B1.2.9 centraliza capacidades administrativas sobre la política existente
     assert.match(access, new RegExp(`export function ${capability}\\(`));
   }
 
-  assert.match(access, /return canManageTeam\(member\) && canAccessSettings\(member\);/);
-  assert.match(access, /return canManageTeam\(member\) && canAccessModule\('equipo', member\);/);
+  assert.match(access, /export function canUseRecovery\(\): boolean \{\s+const member = authenticatedTenantMember\(\);\s+return Boolean\(\s+member\s+&& roleCanManageTeam\(member\.role\)\s+&& roleCanAccessModule\(member\.role, 'configuracion'\),\s+\);\s+\}/);
+  assert.match(access, /return canManageTeam\(candidate\) && canAccessModule\('equipo', candidate\);/);
   assert.match(access, /roleCanManageTeam\(member\.role\)/);
 });
 
@@ -65,22 +65,25 @@ test('B1.2.9 protege Configuración, recuperación y Equipo al renderizar y al e
   assert.match(recovery, /stopImmediatePropagation\(\)/);
   assert.match(recovery, /\[data-account-restore\], \[data-settings-security-recovery\]/);
 
-  assert.match(users, /if \(!canAccessModule\('equipo'\)\) \{/);
-  assert.match(users, /if \(!canAdministerTeam\(\) \|\| !getCloudSession\(\)\)/);
-  assert.match(users, /if \(!target \|\| !canChangeTeamMemberRole\(target\)\)/);
-  assert.match(users, /if \(!target \|\| !canChangeTeamMemberStatus\(target\)\)/);
+  assert.match(users, /const actor = authenticatedTeamActor\(renderScope, renderLease\);\s+if \(!canAccessModule\('equipo', actor\)\) \{/);
+  assert.match(users, /const submitActor = authenticatedTeamActor\(renderScope, renderLease\);\s+if \(!canAdministerTeam\(submitActor\) \|\| !getCloudSession\(\)\)/);
+  assert.match(users, /const changeActor = authenticatedTeamActor\(renderScope, renderLease\);\s+if \(!target \|\| !canChangeTeamMemberRole\(target, changeActor\)\)/);
+  assert.match(users, /const statusActor = authenticatedTeamActor\(renderScope, renderLease\);\s+if \(!target \|\| !canChangeTeamMemberStatus\(target, statusActor\)\)/);
+  assert.match(users, /const actor = authenticatedTenantMember\(scope\);\s+if \(!actor\) throw new Error\('AUTHENTICATED_TENANT_MEMBER_REQUIRED'\);/);
 
-  const guardPosition = store.indexOf('if (!canRestoreLatestLocalBackup()) return false;');
-  const mutationPosition = store.indexOf('const restored = restoreLatestBackup();');
-  assert.ok(guardPosition >= 0, 'Falta el guard de ejecución de recuperación.');
-  assert.ok(mutationPosition > guardPosition, 'La autorización debe evaluarse antes de leer o aplicar la copia.');
+  const guardPosition = store.indexOf('if (!canRestoreLatestLocalBackup(scope)) return false;');
+  const mutationPosition = store.indexOf('const restored = restoreLatestTenantBackup(scope);');
+  assert.ok(guardPosition >= 0, 'Falta el guard tenant-aware de ejecución de recuperación.');
+  assert.ok(mutationPosition > guardPosition, 'La autorización tenant-aware debe evaluarse antes de leer o aplicar la copia.');
+  assert.match(store, /if \(!tenantScopesEqual\(scope, runtimeLease\.scope\)\) throw new Error\(TENANT_RUNTIME_STALE\);/);
+  assert.match(store, /assertTenantRuntimeLeaseCurrent\(runtimeLease\);[\s\S]*if \(!canRestoreLatestLocalBackup\(scope\)\) return false;[\s\S]*assertTenantRuntimeLeaseCurrent\(runtimeLease\);[\s\S]*const restored = restoreLatestTenantBackup\(scope\);/);
   assert.match(store, /roleCanManageTeam\(member\.role\)/);
 });
 
 test('B1.2.9 conserva la autorización del servidor para administración de Equipo', () => {
   const server = source('server/team-management.ts');
-  assert.match(server, /if \(!\['owner', 'admin'\]\.includes\(normalizedRole\(membership\.role\)\)\) throw new Error\('No tenés permiso para administrar usuarios\.'\);/);
-  assert.match(server, /if \(normalizedRole\(requester\.role\) === 'admin' && existingRole !== 'agent'\)/);
-  assert.match(server, /if \(normalizedRole\(requester\.role\) === 'admin' && normalizedRole\(targetMember\.role\) !== 'agent'\)/);
-  assert.match(server, /if \(normalizedRole\(requester\.role\) === 'admin' && role !== 'agent'\)/);
+  assert.match(server, /query\.searchParams\.set\('status', 'eq\.active'\);[\s\S]*if \(rows\.length !== 1\) throw new Error\('No tenés una membership ACTIVE exacta para esta inmobiliaria\.'\);[\s\S]*const role = exactMembershipRole\(requester\.role\);\s+if \(role !== 'owner' && role !== 'admin'\) throw new Error\('No tenés permiso para administrar usuarios\.'\);/);
+  assert.match(server, /if \(exactMembershipRole\(requester\.role\) === 'admin' && existingRole !== 'agent'\)/);
+  assert.match(server, /if \(exactMembershipRole\(requester\.role\) === 'admin' && normalizedRole\(targetMember\.role\) !== 'agent'\)/);
+  assert.match(server, /if \(exactMembershipRole\(requester\.role\) === 'admin' && role !== 'agent'\)/);
 });

@@ -4,6 +4,7 @@ import { existsSync } from 'node:fs';
 import test from 'node:test';
 import { chromium, type Browser, type BrowserContext, type Page } from 'playwright';
 import { initialData, type CrmData, type TeamMember } from '../models.js';
+import { installA35H5R1ModernTenantHarness } from './a35-h5-r1-modern-tenant-harness.js';
 
 const USER_ID = 'zero-training-visual-owner';
 const ORG_ID = 'zero-training-visual-org';
@@ -76,6 +77,8 @@ async function contextFor(browser: Browser, viewport: { width: number; height: n
   const identityKey = `propcontrol-whatsapp-human-identity-v1:${encodeURIComponent(ORG_ID)}:1:${encodeURIComponent(actorKey)}`;
   const mobile = viewport.width <= 430;
   const context = await browser.newContext({ viewport, isMobile: mobile, hasTouch: mobile, locale: 'es-AR', timezoneId: 'America/Argentina/Cordoba', colorScheme: 'dark' });
+  const crm = fixture();
+  await installA35H5R1ModernTenantHarness(context, crm, USER_ID);
   await context.addInitScript(({ crm, identityStorageKey }) => {
     localStorage.setItem('propcontrol-cloud-session-v1', JSON.stringify({ accessToken: 'access', refreshToken: 'refresh', expiresAt: Date.now() + 3_600_000, userId: 'zero-training-visual-owner', email: 'franco.visual@propcontrol.test' }));
     localStorage.setItem('trv-crm-basico:user:zero-training-visual-owner', JSON.stringify(crm));
@@ -83,7 +86,7 @@ async function contextFor(browser: Browser, viewport: { width: number; height: n
     localStorage.setItem('propcontrol-active-team-member-v1', '1');
     localStorage.setItem(identityStorageKey, JSON.stringify({ version: 1, organizationId: 'zero-training-visual-org', memberId: 1, actorKey: 'cloud:zero-training-visual-owner', humanName: 'Franco Solis', confirmedAt: '2026-08-07T18:00:00.000Z' }));
     Object.defineProperty(window, 'open', { configurable: true, value: (url?: string | URL) => { (window as TestWindow).__zeroTrainingVisualOpenedUrl = String(url || ''); return null; } });
-  }, { crm: fixture(), identityStorageKey: identityKey });
+  }, { crm, identityStorageKey: identityKey });
   return context;
 }
 

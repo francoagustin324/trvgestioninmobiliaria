@@ -10,7 +10,7 @@ const compactCss = readFileSync('src/lead-list-compact.css', 'utf8');
 const compactCard = readFileSync('src/lead-card-compact-ui.ts', 'utf8');
 
 test('carga el pulido de Leads después de la navegación móvil y de la calificación', () => {
-  assert.ok(html.includes('/src/mobile-leads-polish.css?v=20260728-1'));
+  assert.ok(html.includes('/src/mobile-leads-polish.css?v=20261006-block2h-promo-1'));
   assert.ok(html.indexOf('mobile-leads-polish.css') > html.indexOf('mobile-bottom-nav.css'));
   assert.ok(html.indexOf('mobile-leads-polish.css') > html.indexOf('lead-qualification.css'));
   assert.ok(html.indexOf('lead-list-compact.css') > html.indexOf('mobile-leads-polish.css'));

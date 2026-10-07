@@ -5,10 +5,13 @@ import test from 'node:test';
 import { chromium, type Browser, type BrowserContext, type Page } from 'playwright';
 import '../lead-source.js';
 import { initialData, type CrmData } from '../models.js';
+import { tenantStorageNamespace } from '../tenant-storage.js';
+import { installA35H5R1ModernTenantHarness } from './a35-h5-r1-modern-tenant-harness.js';
 
 const repositoryRoot = process.cwd();
 const userId = 'p1-3-a1-browser-user';
 const storageKey = `trv-crm-basico:user:${userId}`;
+const tenantReadbackKey = tenantStorageNamespace({ userId, organizationId: 'p1-3-a1-browser-org' }).crmKey;
 
 function browserCrm(): CrmData {
   const crm = structuredClone(initialData);
@@ -190,6 +193,7 @@ async function stopServer(server: ChildProcess): Promise<void> {
 async function createContext(browser: Browser, viewport: { width: number; height: number }): Promise<BrowserContext> {
   const context = await browser.newContext({ viewport, locale: 'es-AR' });
   const data = browserCrm();
+  await installA35H5R1ModernTenantHarness(context, data, userId);
   await context.addInitScript(({ crm, accountUserId, accountStorageKey }) => {
     localStorage.setItem('propcontrol-cloud-session-v1', JSON.stringify({
       accessToken: 'p1-3-a1-browser-token',
@@ -217,7 +221,7 @@ async function openApp(page: Page, baseUrl: string): Promise<void> {
 }
 
 async function localCrm(page: Page): Promise<CrmData> {
-  return page.evaluate((key) => JSON.parse(localStorage.getItem(key) || '{}') as CrmData, storageKey);
+  return page.evaluate((key) => JSON.parse(localStorage.getItem(key) || '{}') as CrmData, tenantReadbackKey);
 }
 
 test('P1.3-A1 browser desktop: filtro de origen, Para reactivar y seguimiento canónico', { timeout: 120_000 }, async (t) => {
@@ -270,8 +274,12 @@ test('P1.3-A1 browser desktop: filtro de origen, Para reactivar y seguimiento ca
     assert.equal(crm.activityLog.filter((entry) => entry.entityId === 1 && entry.action === 'Seguimiento reprogramado').length, 1);
 
     await page.locator('[data-toggle="client-form"]').click();
+    const quickForm = page.locator('#mvp-lead-form:not(.collapsed)');
+    const commercial = quickForm.locator('details.lead-form-commercial');
+    assert.equal(await commercial.getAttribute('open'), null, 'Origen queda en datos comerciales secundarios.');
+    await commercial.locator(':scope > summary').click();
     await page.waitForSelector('#mvp-lead-form:not(.collapsed) [name="leadSource"]', { state: 'visible' });
-    assert.equal(await page.locator('#mvp-lead-form [name="leadSource"]').getAttribute('required'), '');
+    assert.equal(await page.locator('#mvp-lead-form [name="leadSource"]').getAttribute('required'), null);
     await page.locator('#mvp-lead-form [name="leadSource"]').selectOption('Otro');
     assert.equal(await page.locator('#mvp-lead-form [name="leadSourceDetail"]').getAttribute('required'), '');
 

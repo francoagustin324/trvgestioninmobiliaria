@@ -1,3 +1,4 @@
+import { PRODUCT_BRAND } from './branding.js';
 import type { CrmData } from './models.js';
 import { STORAGE_KEY } from './models.js';
 import { prepareCrmSyncContracts } from './sync-identity.js';
@@ -282,13 +283,13 @@ export function assertRemoteIsSafe(
     const remoteTime = Date.parse(remoteVersion);
     const localBaseTime = Date.parse(state.lastCloudVersion);
     if (!Number.isNaN(remoteTime) && !Number.isNaN(localBaseTime) && remoteTime > localBaseTime) {
-      throw new Error('Hay cambios más nuevos en la nube. PropControl frenó el guardado para no sobrescribir información. Tus datos locales siguen protegidos.');
+      throw new Error(`Hay cambios más nuevos en la nube. ${PRODUCT_BRAND.name} frenó el guardado para no sobrescribir información. Tus datos locales siguen protegidos.`);
     }
     return;
   }
 
   if (localFingerprint && remoteFingerprint && localFingerprint !== remoteFingerprint) {
-    throw new Error('Encontramos datos distintos en este dispositivo y en la nube. PropControl no reemplazó ninguno. Tus datos locales siguen protegidos.');
+    throw new Error(`Encontramos datos distintos en este dispositivo y en la nube. ${PRODUCT_BRAND.name} no reemplazó ninguno. Tus datos locales siguen protegidos.`);
   }
 }
 

@@ -10,6 +10,7 @@ import {
   resolveOrganizationConfiguration,
   resolveOrganizationName,
   resolvePersonalIdentity,
+  resolveTenantCommercialIdentity,
   type OrganizationConfiguration,
   type OrganizationMembership,
   type UserPreferences,
@@ -173,10 +174,23 @@ test('agencyName funciona como fallback legacy', () => {
   assert.deepEqual(resolved, { name: 'Inmobiliaria legacy', source: 'settings_legacy' });
 });
 
-test('overdueDays queda marcado como legacy sin efecto actual', () => {
+test('preferencias legacy sin efecto se ocultan sin borrar su valor y siguen visibles los datos efectivos del tenant', () => {
   assert.equal(classifyLegacySettingField('overdueDays').ownership, 'legacy_only');
   assert.equal(legacySettingFieldEffect('overdueDays'), 'no_effect');
   assert.equal(isLegacySettingFieldCurrentlyConsumed('overdueDays'), false);
+
+  const ui = readFileSync('src/settings-ui.ts', 'utf8');
+  for (const field of ['profileEmail', 'profilePhone', 'currency', 'defaultZone', 'shareText', 'overdueDays']) {
+    assert.equal(ui.includes(`name="${field}"`), false, field);
+  }
+  for (const field of ['profileName', 'agencyName', 'agencyWhatsapp', 'agencyLogoPath', 'agencyLegal']) {
+    assert.equal(ui.includes(`name="${field}"`), true, field);
+  }
+  assert.ok(ui.includes('...currentSettings(),'));
+  assert.ok(ui.includes('...state.crm.organization,'));
+  assert.ok(ui.includes('data-avatar-input'));
+  assert.ok(ui.includes('canAccessSettings()'));
+  assert.ok(ui.includes("saveData('Configuración actualizada')"));
 });
 
 test('las resoluciones no mutan los objetos recibidos', () => {
@@ -287,6 +301,11 @@ test('crmToCloudRecords conserva exactamente el resumen de serialización actual
     { type: 'conversation', key: `${context.organizationId}:1`, assignee: 1, payloadId: 1, createdBy: 'user-1' },
   ]);
   assert.equal(records.some((record) => record.payload === crm.settings), false);
+  const organizationRecord = records.find((record) => record.entity_type === 'organization');
+  assert.ok(organizationRecord);
+  assert.equal((organizationRecord.payload as Record<string, unknown>).commercialPhone, initialData.organization.commercialPhone);
+  assert.equal((organizationRecord.payload as Record<string, unknown>).logoPath, initialData.organization.logoPath);
+  assert.equal((organizationRecord.payload as Record<string, unknown>).legalText, initialData.organization.legalText);
 });
 
 test('cloudRecordsToCrm conserva settings desde el fallback actual', () => {
@@ -327,6 +346,25 @@ test('la configuración organizacional nueva tiene prioridad sobre legacy y defa
   assert.equal(result.defaultCurrency, 'EUR');
   assert.equal(result.defaultZone, 'Nueva Córdoba');
   assert.equal(result.shareText, 'Mensaje nuevo');
+
+  const runtime = resolveTenantCommercialIdentity({
+    organization: {
+      id: 'organization-b',
+      name: 'Inmobiliaria Norte Test',
+      seatLimit: null,
+      planLabel: 'Plan',
+      commercialPhone: '5493512222222',
+      logoPath: '',
+      legalText: 'Legal B',
+    },
+  });
+  assert.deepEqual(runtime, {
+    organizationId: 'organization-b',
+    name: 'Inmobiliaria Norte Test',
+    commercialPhone: '5493512222222',
+    logoPath: '',
+    legalText: 'Legal B',
+  });
 });
 
 test('la configuración organizacional usa legacy antes de defaults seguros', () => {

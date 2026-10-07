@@ -1,18 +1,18 @@
 :root {
-  --pc-ink: #0b1726;
-  --pc-navy: #102a43;
-  --pc-blue: #1f4f78;
-  --pc-gold-strong: #c99318;
-  --pc-gold-light: #f4d77a;
+  --pc-ink: var(--ob-navy);
+  --pc-navy: var(--ob-deep-blue);
+  --pc-blue: var(--ob-primary);
+  --pc-gold-strong: var(--ob-primary);
+  --pc-gold-light: var(--ob-secondary);
   --pc-surface-strong: #ffffff;
   --pc-surface-soft: #f4f7fb;
-  --pc-line: #dbe4ee;
-  --pc-text-muted: #64748b;
+  --pc-line: var(--ob-border);
+  --pc-text-muted: var(--ob-slate);
   --pc-radius-xl: 26px;
   --pc-radius-lg: 20px;
   --pc-radius-md: 14px;
-  --pc-shadow-soft: 0 16px 45px rgba(15, 39, 64, .08);
-  --pc-shadow-card: 0 10px 28px rgba(15, 39, 64, .07);
+  --pc-shadow-soft: 0 16px 45px rgba(15, 27, 53, .08);
+  --pc-shadow-card: 0 10px 28px rgba(15, 27, 53, .07);
 }
 
 html {
@@ -28,7 +28,7 @@ body {
   overflow-x: clip;
   color: var(--pc-ink);
   background:
-    radial-gradient(circle at 95% 0%, rgba(31, 79, 120, .13), transparent 31rem),
+    radial-gradient(circle at 95% 0%, rgba(9, 88, 237, .13), transparent 31rem),
     linear-gradient(180deg, #f8fafc 0%, #eef3f8 100%);
 }
 
@@ -74,7 +74,7 @@ textarea {
 
 .premium-sidebar {
   border-right: 1px solid rgba(255, 255, 255, .08);
-  box-shadow: 18px 0 50px rgba(11, 23, 38, .12);
+  box-shadow: 18px 0 50px rgba(15, 27, 53, .12);
 }
 
 .premium-sidebar nav { gap: 7px; }
@@ -92,7 +92,7 @@ textarea {
   inset: 9px auto 9px 0;
   width: 4px;
   border-radius: 999px;
-  background: rgba(11, 23, 38, .58);
+  background: rgba(15, 27, 53, .58);
 }
 
 .premium-content {
@@ -190,14 +190,14 @@ textarea {
 }
 
 button:not(.delete):not(.nav-button):not(.quiet-button):not(.auth-close) {
-  border: 1px solid rgba(180, 124, 8, .28);
-  background: linear-gradient(135deg, #f7dd8d 0%, #d5a42d 100%);
-  box-shadow: 0 8px 18px rgba(201, 147, 24, .16);
+  border: 1px solid rgba(9, 88, 237, .28);
+  background: linear-gradient(135deg, var(--ob-secondary) 0%, var(--ob-primary) 100%);
+  box-shadow: 0 8px 18px rgba(9, 88, 237, .16);
 }
 
 button:not(.delete):not(.nav-button):not(.quiet-button):not(.auth-close):hover {
   transform: translateY(-1px);
-  box-shadow: 0 11px 24px rgba(201, 147, 24, .22);
+  box-shadow: 0 11px 24px rgba(9, 88, 237, .22);
 }
 
 input,
@@ -207,7 +207,7 @@ textarea {
   border-color: #d6e0ea;
   border-radius: var(--pc-radius-md);
   background: #fff;
-  box-shadow: 0 1px 0 rgba(15, 39, 64, .02);
+  box-shadow: 0 1px 0 rgba(15, 27, 53, .02);
 }
 
 textarea { min-height: 106px; }
@@ -224,7 +224,7 @@ textarea { min-height: 106px; }
 .property-card {
   padding: 16px;
   border-color: #e0e8f0;
-  box-shadow: 0 8px 20px rgba(15, 39, 64, .045);
+  box-shadow: 0 8px 20px rgba(15, 27, 53, .045);
 }
 
 .crm-card p,

@@ -1,0 +1,106 @@
+name: A3.5 H5 R1 Consolidated Legacy Validation
+
+on:
+  push:
+    branches: [validation/a35-h5-r1-family-sanitization]
+    paths: [.github/workflows/a35-h5-r1-consolidated.yml]
+
+permissions:
+  contents: read
+
+env:
+  PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
+
+jobs:
+  consolidated:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install dependencies
+        run: npm ci --silent
+      - name: Global build
+        run: npm run build --silent
+      - name: Run 18 affected legacy files isolated
+        shell: bash
+        run: |
+          set -uo pipefail
+          SUMMARY="$RUNNER_TEMP/a35-h5-r1-consolidated-summary.txt"
+          : > "$SUMMARY"
+          files=(
+            b1-2-2-mobile-leads-real-app.test.js
+            b1-2-3-compact-leads-real-app.test.js
+            b1-2-3-responsive-matrix-real-app.test.js
+            b1-2-4-architecture-runtime.test.js
+            b1-2-4-responsive-real-app.test.js
+            b1-2-5-responsive-real-app.test.js
+            b1-2-6-mobile-header-alerts.test.js
+            b1-2-7-responsive-real-app.test.js
+            b1-2-8-account-menu-backdrop-real-app.test.js
+            b1-2-8-account-menu-responsive-real-app.test.js
+            b1-2-9-multiuser-permissions-real-app.test.js
+            b1-3-1-lead-create-real-app.test.js
+            b1-3-2-android-lead-save-real-app.test.js
+            b1-3-3-audit-blockers-real-app.test.js
+            b1-3-3-mobile-postproduction-hotfix.test.js
+            b1-3-3-real-use-real-app.test.js
+            c13-leads-visual-professional-browser.test.js
+            followup-hotfix-browser.test.js
+          )
+          file_green=0
+          file_red=0
+          server_left=0
+          i=0
+          for name in "${files[@]}"; do
+            i=$((i+1))
+            log="$RUNNER_TEMP/r1-consolidated-${i}.tap"
+            echo "FILE_${i}=$name" | tee -a "$SUMMARY"
+            set +e
+            timeout 900s node --test --test-concurrency=1 "dist/tests/$name" >"$log" 2>&1
+            code=$?
+            set -e
+            cat "$log"
+            echo "FILE_${i}_EXIT=$code" | tee -a "$SUMMARY"
+            if [ "$code" -eq 0 ]; then
+              file_green=$((file_green+1))
+              echo "FILE_${i}_STATUS=GREEN" | tee -a "$SUMMARY"
+            else
+              file_red=$((file_red+1))
+              echo "FILE_${i}_STATUS=RED" | tee -a "$SUMMARY"
+            fi
+            if grep -Eq "waiting for locator\('#crm\.active'\)|waiting for selector.*#crm\.active([^[:alnum:]_.-]|$)|waiting for locator\('\[data-account-toggle\]'\)|waiting for selector.*mvp-lead-(card|compact-card)" "$log"; then
+              echo "FILE_${i}_INITIAL_BOOTSTRAP_SELECTOR_FAILURE=YES" | tee -a "$SUMMARY"
+            else
+              echo "FILE_${i}_INITIAL_BOOTSTRAP_SELECTOR_FAILURE=NO" | tee -a "$SUMMARY"
+            fi
+            if pgrep -af 'node .*dist/server\.js' >"$RUNNER_TEMP/r1-consolidated-${i}-server-left.txt"; then
+              server_left=$((server_left+1))
+              echo "FILE_${i}_SERVER_LEFT=YES" | tee -a "$SUMMARY"
+              cat "$RUNNER_TEMP/r1-consolidated-${i}-server-left.txt"
+              pkill -f 'node .*dist/server\.js' || true
+            else
+              echo "FILE_${i}_SERVER_LEFT=NO" | tee -a "$SUMMARY"
+            fi
+          done
+          echo "FILES_TOTAL=${#files[@]}" | tee -a "$SUMMARY"
+          echo "FILES_GREEN=$file_green" | tee -a "$SUMMARY"
+          echo "FILES_RED=$file_red" | tee -a "$SUMMARY"
+          echo "SERVER_LEFT_COUNT=$server_left" | tee -a "$SUMMARY"
+          cat "$SUMMARY"
+          exit 0
+      - name: Upload consolidated evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: a35-h5-r1-consolidated-${{ github.run_id }}
+          retention-days: 14
+          path: |
+            ${{ runner.temp }}/a35-h5-r1-consolidated-summary.txt
+            ${{ runner.temp }}/r1-consolidated-*.tap
+            ${{ runner.temp }}/r1-consolidated-*-server-left.txt

@@ -57,10 +57,7 @@ export function validateLeadSourceSelection(
   current?: Client | null,
 ): { ok: true } | { ok: false; field: 'leadSource' | 'leadSourceDetail'; message: string } {
   const rawSource = hasOwn(values, 'leadSource') ? values.leadSource?.trim() || '' : current?.leadSource || '';
-  if (!rawSource) {
-    if (current) return { ok: true };
-    return { ok: false, field: 'leadSource', message: 'Elegí el origen comercial del lead.' };
-  }
+  if (!rawSource) return { ok: true };
   if (!isLeadSource(rawSource)) {
     return { ok: false, field: 'leadSource', message: 'Elegí un origen válido.' };
   }
@@ -81,7 +78,6 @@ export function applyLeadSourceMetadata(
   const explicitSource = hasOwn(values, 'leadSource');
   const rawSource = explicitSource ? values.leadSource?.trim() || '' : current?.leadSource || '';
   if (explicitSource && rawSource && !isLeadSource(rawSource)) throw new Error('Origen de lead inválido.');
-  if (explicitSource && !current && !rawSource) throw new Error('El origen del lead es obligatorio.');
 
   const leadSource = isLeadSource(rawSource) ? rawSource : undefined;
   const leadSourceDetail = hasOwn(values, 'leadSourceDetail')

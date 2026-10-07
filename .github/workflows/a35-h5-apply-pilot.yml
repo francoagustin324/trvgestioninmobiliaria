@@ -1,0 +1,95 @@
+name: A3.5 H5 Apply Three-File Pilot
+
+on:
+  push:
+    branches:
+      - validation/a35-h5-legacy-bootstrap-pilot
+    paths:
+      - .github/workflows/a35-h5-apply-pilot.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply-pilot:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Apply minimal modern bootstrap to three pilots
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          def once(source: str, old: str, new: str, label: str) -> str:
+            if source.count(old) != 1:
+              raise SystemExit(f'{label}: expected exactly one anchor, got {source.count(old)}')
+            return source.replace(old, new, 1)
+
+          authority_template = '''\nfunction h5SyntheticJson(body: unknown, status = 200) {\n  return {\n    status,\n    contentType: 'application/json',\n    headers: { 'access-control-allow-origin': '*' },\n    body: JSON.stringify(body),\n  };\n}\n\nasync function h5InstallSyntheticAuthority(\n  context: BrowserContext,\n  origin: string,\n  organizationId: string,\n  member: { id: number; userId: string; name: string; email?: string; phone?: string; role?: string },\n): Promise<void> {\n  let syntheticRecords: unknown[] = [];\n  await context.route('**/api/cloud-config', async (route) => {\n    await route.fulfill(h5SyntheticJson({ configured: true, url: origin, publishableKey: 'h5-pilot-publishable-key' }));\n  });\n  await context.route('**/rest/v1/**', async (route) => {\n    const request = route.request();\n    const url = new URL(request.url());\n    if (request.method() === 'OPTIONS') {\n      await route.fulfill({\n        status: 204,\n        headers: {\n          'access-control-allow-origin': '*',\n          'access-control-allow-headers': '*',\n          'access-control-allow-methods': 'GET,POST,DELETE,OPTIONS',\n        },\n        body: '',\n      });\n      return;\n    }\n    if (url.pathname.endsWith('/rest/v1/rpc/activate_my_organization_memberships')) {\n      await route.fulfill(h5SyntheticJson({}));\n      return;\n    }\n    if (url.pathname.endsWith('/rest/v1/organization_members')) {\n      await route.fulfill(h5SyntheticJson([{\n        organization_id: organizationId,\n        member_id: member.id,\n        user_id: member.userId,\n        role: member.role === 'Administrador' ? 'admin' : member.role === 'Corredor' ? 'agent' : 'owner',\n        status: 'active',\n        display_name: member.name,\n        email: member.email || null,\n        phone: member.phone || null,\n        created_at: '2026-08-01T12:00:00.000Z',\n        last_active_at: '2026-09-16T12:00:00.000Z',\n      }]));\n      return;\n    }\n    if (url.pathname.endsWith('/rest/v1/rpc/visit_transaction_authority_active_v2')) {\n      await route.fulfill(h5SyntheticJson(false));\n      return;\n    }\n    if (url.pathname.endsWith('/rest/v1/propcontrol_records')) {\n      if (request.method() === 'GET') {\n        await route.fulfill(h5SyntheticJson(syntheticRecords));\n        return;\n      }\n      if (request.method() === 'POST') {\n        const body = request.postDataJSON();\n        syntheticRecords = Array.isArray(body) ? structuredClone(body) : [structuredClone(body)];\n        await route.fulfill(h5SyntheticJson(syntheticRecords, 201));\n        return;\n      }\n      if (request.method() === 'DELETE') {\n        syntheticRecords = [];\n        await route.fulfill({ status: 204, headers: { 'access-control-allow-origin': '*' }, body: '' });\n        return;\n      }\n    }\n    if (url.pathname.endsWith('/rest/v1/fichas')) {\n      await route.fulfill(h5SyntheticJson([]));\n      return;\n    }\n    await route.fulfill(h5SyntheticJson({ error: 'UNEXPECTED_H5_SYNTHETIC_ENDPOINT', path: url.pathname }, 500));\n  });\n}\n'''
+
+          # Pilot 1 — Group 1/2
+          p = Path('src/tests/b1-2-2-mobile-leads-real-app.test.ts')
+          s = p.read_text()
+          s = once(s, "const mobileUserAgent = 'Mozilla/5.0 (Linux; Android 14; Pixel 7 Build/AP2A.240705.004) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Mobile Safari/537.36';\n", "const mobileUserAgent = 'Mozilla/5.0 (Linux; Android 14; Pixel 7 Build/AP2A.240705.004) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Mobile Safari/537.36';\nconst H5_AUTH_GENERATION = 'b122-h5-auth-generation';\n", 'b122 generation const')
+          s = once(s, "async function createContext(browser: Browser, viewport: { width: number; height: number }): Promise<BrowserContext> {", authority_template + "\nasync function createContext(browser: Browser, viewport: { width: number; height: number }, origin: string): Promise<BrowserContext> {", 'b122 authority insert')
+          s = once(s, "  const crm = visualCrm();\n  await context.addInitScript(({ data, userId }) => {", "  const crm = visualCrm();\n  const member = crm.teamMembers[0]!;\n  await h5InstallSyntheticAuthority(context, origin, crm.organization.id, member);\n  await context.addInitScript(({ data, generation, userId }) => {", 'b122 authority call')
+          s = once(s, "      email: 'franco@example.test',\n    }));\n    localStorage.setItem(storageKey, JSON.stringify(data));", "      email: 'franco@example.test',\n      __propcontrolAuthGeneration: generation,\n    }));\n    localStorage.setItem('propcontrol-cloud-auth-generation-v1', generation);\n    localStorage.setItem(storageKey, JSON.stringify(data));", 'b122 generation seed')
+          s = once(s, "  }, { data: crm, userId: 'mobile-visual-user' });", "  }, { data: crm, generation: H5_AUTH_GENERATION, userId: 'mobile-visual-user' });", 'b122 generation arg')
+          s = once(s, "      const context = await createContext(browser, viewport);", "      const context = await createContext(browser, viewport, baseUrl);", 'b122 callsite')
+          p.write_text(s)
+
+          # Pilot 2 — Group 3 account menu
+          p = Path('src/tests/b1-2-8-account-menu-backdrop-real-app.test.ts')
+          s = p.read_text()
+          s = once(s, "import { chromium } from 'playwright';", "import { chromium, type BrowserContext } from 'playwright';", 'b128 import')
+          s = once(s, "const syncKey = `${storageKey}:sync`;\n", "const syncKey = `${storageKey}:sync`;\nconst H5_AUTH_GENERATION = 'b128-h5-auth-generation';\n", 'b128 generation const')
+          s = once(s, "test(\n  'B1.2.8 el backdrop móvil cubre el viewport y bloquea pulsaciones del fondo',", authority_template + "\ntest(\n  'B1.2.8 el backdrop móvil cubre el viewport y bloquea pulsaciones del fondo',", 'b128 authority insert')
+          s = once(s, "      await context.addInitScript(({ data, keys, user }) => {", "      const data = crmFixture();\n      await h5InstallSyntheticAuthority(context, url, data.organization.id, data.teamMembers[0]!);\n      await context.addInitScript(({ data, generation, keys, user }) => {", 'b128 authority call')
+          s = once(s, "          email: 'franco.solis@example.test',\n        }));\n        localStorage.setItem(keys.storage, JSON.stringify(data));", "          email: 'franco.solis@example.test',\n          __propcontrolAuthGeneration: generation,\n        }));\n        localStorage.setItem('propcontrol-cloud-auth-generation-v1', generation);\n        localStorage.setItem(keys.storage, JSON.stringify(data));", 'b128 generation seed')
+          s = once(s, "        data: crmFixture(),\n        keys:", "        data,\n        generation: H5_AUTH_GENERATION,\n        keys:", 'b128 generation arg')
+          p.write_text(s)
+
+          # Pilot 3 — Group 5. Preserve intentionally missing human identity.
+          p = Path('src/tests/b1-3-3-mobile-postproduction-hotfix.test.ts')
+          s = p.read_text()
+          s = once(s, "const syncKey = `${storageKey}:sync`;\n", "const syncKey = `${storageKey}:sync`;\nconst H5_AUTH_GENERATION = 'b133-hotfix-h5-auth-generation';\n", 'b133 generation const')
+          s = once(s, "async function contextFor(\n  browser: Browser,\n  viewport: { width: number; height: number },\n  marker: string,\n): Promise<BrowserContext> {", authority_template + "\nasync function contextFor(\n  browser: Browser,\n  viewport: { width: number; height: number },\n  marker: string,\n  origin: string,\n): Promise<BrowserContext> {", 'b133 authority insert')
+          old_cloud = """  await context.route('**/api/cloud-config', async (route) => {\n    await route.fulfill({\n      status: 503,\n      contentType: 'application/json',\n      body: JSON.stringify({ message: 'Nube de prueba no disponible.' }),\n    });\n  });\n  await context.addInitScript(({ data, keys, currentUserId, currentEmail, currentMemberId, initMarker }) => {"""
+          new_cloud = """  const data = fixture();\n  await h5InstallSyntheticAuthority(context, origin, data.organization.id, data.teamMembers[0]!);\n  await context.addInitScript(({ data, generation, keys, currentUserId, currentEmail, currentMemberId, initMarker }) => {"""
+          s = once(s, old_cloud, new_cloud, 'b133 authority call')
+          s = once(s, "      email: currentEmail,\n    }));\n    localStorage.setItem(keys.storage, JSON.stringify(data));", "      email: currentEmail,\n      __propcontrolAuthGeneration: generation,\n    }));\n    localStorage.setItem('propcontrol-cloud-auth-generation-v1', generation);\n    localStorage.setItem(keys.storage, JSON.stringify(data));", 'b133 generation seed')
+          s = once(s, "    data: fixture(),\n    keys:", "    data,\n    generation: H5_AUTH_GENERATION,\n    keys:", 'b133 generation arg')
+          s = s.replace("await contextFor(browser, { width: 1366, height: 768 }, 'propcontrol-b133-hotfix-desktop')", "await contextFor(browser, { width: 1366, height: 768 }, 'propcontrol-b133-hotfix-desktop', started.url)")
+          s = s.replace("await contextFor(browser, { width: 1280, height: 720 }, 'propcontrol-b133-hotfix-laptop')", "await contextFor(browser, { width: 1280, height: 720 }, 'propcontrol-b133-hotfix-laptop', started.url)")
+          s = s.replace("await contextFor(browser, { width: 390, height: 844 }, 'propcontrol-b133-hotfix-mobile')", "await contextFor(browser, { width: 390, height: 844 }, 'propcontrol-b133-hotfix-mobile', started.url)")
+          if s.count('started.url)') < 3:
+            raise SystemExit('b133 callsites not all updated')
+          p.write_text(s)
+          PY
+
+          git diff --check
+          CHANGED=$(git diff --name-only)
+          printf '%s\n' "$CHANGED"
+          EXPECTED=$(printf '%s\n' \
+            src/tests/b1-2-2-mobile-leads-real-app.test.ts \
+            src/tests/b1-2-8-account-menu-backdrop-real-app.test.ts \
+            src/tests/b1-3-3-mobile-postproduction-hotfix.test.ts | sort)
+          ACTUAL=$(printf '%s\n' "$CHANGED" | sort)
+          test "$ACTUAL" = "$EXPECTED"
+
+      - name: Commit pilot-only test harness changes
+        shell: bash
+        run: |
+          git config user.name 'francoagustin324'
+          git config user.email 'francoagustinsolis@gmail.com'
+          git add \
+            src/tests/b1-2-2-mobile-leads-real-app.test.ts \
+            src/tests/b1-2-8-account-menu-backdrop-real-app.test.ts \
+            src/tests/b1-3-3-mobile-postproduction-hotfix.test.ts
+          git commit -m 'test: align H5 three-pilot tenant bootstrap'
+          git push origin HEAD:validation/a35-h5-legacy-bootstrap-pilot

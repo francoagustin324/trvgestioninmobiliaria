@@ -4,6 +4,7 @@ import { existsSync } from 'node:fs';
 import test, { type TestContext } from 'node:test';
 import { chromium, type Browser, type BrowserContext, type Page } from 'playwright';
 import { initialData, type Client, type CrmData } from '../models.js';
+import { installA35H5R1ModernTenantHarness } from './a35-h5-r1-modern-tenant-harness.js';
 
 const repositoryRoot = process.cwd();
 const userId = 'p1-4-a1-browser-user';
@@ -208,6 +209,7 @@ async function stopServer(server: ChildProcess): Promise<void> {
 async function createContext(browser: Browser, viewport: { width: number; height: number }): Promise<BrowserContext> {
   const context = await browser.newContext({ viewport, locale: 'es-AR' });
   const data = browserCrm();
+  await installA35H5R1ModernTenantHarness(context, data, userId);
   await context.addInitScript(({ crm, accountUserId, accountStorageKey }) => {
     localStorage.setItem('propcontrol-cloud-session-v1', JSON.stringify({
       accessToken: 'p1-4-a1-browser-token',
@@ -370,10 +372,14 @@ test('P1.4-A1 browser mobile 390: sin overflow y controles táctiles', { timeout
   try {
     await openOpportunities(page, 'http://127.0.0.1:4332');
     await selectTestProperty(page);
+    await page.locator('#propiedades [data-opportunity-select="1"]').check();
+    await page.locator('#propiedades [data-prepare-diffusion]').click();
+    await page.waitForSelector('#propiedades [data-diffusion-review]', { state: 'visible', timeout: 10_000 });
 
     const metrics = await page.locator('#propiedades [data-property-opportunities]').evaluate((node) => {
       const rect = node.getBoundingClientRect();
-      const controls = [...node.querySelectorAll<HTMLElement>('button, select, input[type="search"]')]
+      const review = node.querySelector<HTMLElement>('[data-diffusion-review]')?.getBoundingClientRect();
+      const controls = [...node.querySelectorAll<HTMLElement>('button, select, input[type="search"], .diffusion-open-channel')]
         .filter((control) => control.offsetParent !== null)
         .map((control) => control.getBoundingClientRect().height);
       const selectors = [...node.querySelectorAll<HTMLElement>('.opportunity-selector')]
@@ -384,6 +390,8 @@ test('P1.4-A1 browser mobile 390: sin overflow y controles táctiles', { timeout
         right: rect.right,
         viewport: window.innerWidth,
         documentWidth: document.documentElement.scrollWidth,
+        reviewLeft: review?.left ?? 0,
+        reviewRight: review?.right ?? 0,
         minControlHeight: Math.min(...controls),
         minSelectorWidth: Math.min(...selectors),
       };
@@ -391,6 +399,8 @@ test('P1.4-A1 browser mobile 390: sin overflow y controles táctiles', { timeout
     assert.ok(metrics.left >= -1, JSON.stringify(metrics));
     assert.ok(metrics.right <= metrics.viewport + 1, JSON.stringify(metrics));
     assert.ok(metrics.documentWidth <= metrics.viewport + 1, JSON.stringify(metrics));
+    assert.ok(metrics.reviewLeft >= -1, JSON.stringify(metrics));
+    assert.ok(metrics.reviewRight <= metrics.viewport + 1, JSON.stringify(metrics));
     assert.ok(metrics.minControlHeight >= 43.5, JSON.stringify(metrics));
     assert.ok(metrics.minSelectorWidth >= 43.5, JSON.stringify(metrics));
     assert.deepEqual(pageErrors, []);

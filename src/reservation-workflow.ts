@@ -72,9 +72,13 @@ function replaceClient(crm: CrmData, client: Client): void {
 }
 function moneyLabel(value: Pick<Reservation, 'amount' | 'currency'>): string { return `${value.currency} ${value.amount.toLocaleString('es-AR', { maximumFractionDigits: 2 })}`; }
 function addActivity(crm: CrmData, actor: ReservationActor, action: string, client: Client, property: Property, reservation: Reservation, now: Date): void {
+  const syncedReservation = reservation as SyncedReservation;
   const entry: ActivityEntry = { ...newSyncRecordMetadata(), id: nextId(crm.activityLog), actorId: actor.id, action, entityType: 'Cliente', entityId: client.id,
     detail: `${compact(client.name, 48)} · ${propertyLabel(property)} · ${moneyLabel(reservation)} · ${reservation.status}${reservation.expiresAt ? ` · vence ${reservation.expiresAt}` : ''}`,
-    createdAt: now.toISOString() };
+    createdAt: now.toISOString(),
+    commercialEntityType: 'reservation',
+    commercialEntityId: reservation.id,
+    ...(syncedReservation.uid ? { commercialEntityUid: syncedReservation.uid } : {}) };
   crm.activityLog.unshift(entry); crm.activityLog = crm.activityLog.slice(0, 250);
 }
 export function reservationsForClient(reservations: Reservation[], clientId: number): Reservation[] {

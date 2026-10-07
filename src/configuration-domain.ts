@@ -1,5 +1,7 @@
+import { PRODUCT_BRAND } from './branding.js';
 import type {
   OrganizationSettings,
+  PublicTenantIdentity,
   Settings,
   TeamMemberStatus,
   TeamRole,
@@ -260,7 +262,7 @@ export function resolvePersonalIdentity(input: ResolvePersonalIdentityInput): Re
     { value: input.membership?.legacyName, source: 'membership_legacy' },
     { value: input.legacySettings?.profileName, source: 'settings_legacy' },
     { value: emailLocalPart(input.authIdentity?.email), source: 'auth_identity' },
-  ], input.fallbackDisplayName || 'Usuario PropControl');
+  ], input.fallbackDisplayName || `Usuario ${PRODUCT_BRAND.name}`);
 
   const email = selectText([
     { value: input.authIdentity?.email, source: 'auth_identity' },
@@ -355,4 +357,48 @@ export function resolveOrganizationConfiguration(
       input.defaults?.shareText,
     ),
   };
+}
+
+export type TenantCommercialIdentity = PublicTenantIdentity;
+
+export function normalizePublicTenantIdentity(
+  value?: Partial<PublicTenantIdentity> | null,
+): PublicTenantIdentity {
+  return {
+    organizationId: cleanText(value?.organizationId),
+    name: cleanText(value?.name) || 'Inmobiliaria',
+    commercialPhone: cleanText(value?.commercialPhone),
+    logoPath: cleanText(value?.logoPath),
+    legalText: cleanText(value?.legalText),
+  };
+}
+
+export function resolveTenantCommercialIdentity(input: {
+  organization: OrganizationSettings;
+}): TenantCommercialIdentity {
+  const name = resolveOrganizationName({
+    organization: input.organization,
+    fallbackName: 'Inmobiliaria',
+  });
+  const configuration = resolveOrganizationConfiguration({
+    organizationId: input.organization.id,
+    configuration: {
+      organizationId: input.organization.id,
+      commercialPhone: input.organization.commercialPhone,
+      commercialEmail: input.organization.commercialEmail,
+      address: input.organization.address,
+      logoPath: input.organization.logoPath,
+      legalText: input.organization.legalText,
+      defaultCurrency: input.organization.defaultCurrency,
+      defaultZone: input.organization.defaultZone,
+      shareText: input.organization.shareText,
+    },
+  });
+  return normalizePublicTenantIdentity({
+    organizationId: configuration.organizationId,
+    name: name.name,
+    commercialPhone: configuration.commercialPhone,
+    logoPath: configuration.logoPath,
+    legalText: configuration.legalText,
+  });
 }

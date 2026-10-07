@@ -1,11 +1,16 @@
-import { renderSupervisedAttentionQueue } from './lead-attention-queue.js';
+import { renderOperationalAttentionForTenant } from './lead-attention-runtime.js';
+import { confirmScheduledVisit } from './visit-confirmation.js';
 import { instrumentVisibleSupervisedRecommendations } from './lead-recommendation-instrumentation.js';
-import { visibleClients } from './team-access.js';
+import type { Property } from './models.js';
+import { state } from './store.js';
+import { visibleProperties } from './team-access.js';
+import { currentTenantScope } from './tenant-runtime.js';
 
 const desktopQuery = '(min-width: 901px)';
 
 interface LeadListEnhancementOptions {
   centerSelectedStage?: boolean;
+  properties?: Property[];
 }
 
 let activeLeadContainer: HTMLElement | null = null;
@@ -132,11 +137,17 @@ function schedulePipelineGeometryRefresh(container: HTMLElement): void {
   });
 }
 
-function renderAttentionQueue(container: HTMLElement): void {
+function renderAttentionQueue(container: HTMLElement, properties: Property[] = visibleProperties()): void {
   const results = container.querySelector<HTMLElement>('#mvp-lead-results');
   if (!results) return;
   container.querySelector<HTMLElement>('[data-supervised-attention-queue]')?.remove();
-  results.insertAdjacentHTML('beforebegin', renderSupervisedAttentionQueue(visibleClients()));
+  const markup = renderOperationalAttentionForTenant(
+    state.crm,
+    currentTenantScope(),
+    3,
+    properties,
+  );
+  results.insertAdjacentHTML('beforebegin', markup);
 }
 
 function attentionNavigationStatus(container: HTMLElement): HTMLElement | null {
@@ -150,7 +161,7 @@ function announceAttentionNavigation(container: HTMLElement, message = ''): void
   status.hidden = !message;
 }
 
-export function openAttentionLead(container: HTMLElement, clientId: number): 'opened' | 'filtered-out' {
+export function openAttentionLead(container: HTMLElement, clientId: number, target: string = 'lead'): 'opened' | 'filtered-out' {
   const card = container.querySelector<HTMLElement>(`#mvp-lead-results .mvp-lead-card[data-client-id="${clientId}"]`);
   if (!card) {
     announceAttentionNavigation(
@@ -167,7 +178,20 @@ export function openAttentionLead(container: HTMLElement, clientId: number): 'op
 
   const details = card.querySelector<HTMLDetailsElement>(`[data-lead-full-sheet="${clientId}"]`);
   if (details) details.open = true;
-  const focusTarget = details?.querySelector<HTMLElement>('summary') || card;
+  const targetSelector = target === 'matches'
+    ? '.mvp-lead-matches'
+    : target === 'visits'
+      ? '[data-lead-visits]'
+      : target === 'offers'
+        ? '[data-lead-offers]'
+        : target === 'reservations'
+          ? '[data-lead-reservations]'
+          : '';
+  const nestedTarget = targetSelector ? card.querySelector<HTMLElement>(targetSelector) : null;
+  if (nestedTarget instanceof HTMLDetailsElement) nestedTarget.open = true;
+  const focusTarget = nestedTarget?.querySelector<HTMLElement>('summary, button, input, select, textarea')
+    || details?.querySelector<HTMLElement>('summary')
+    || card;
   if (focusTarget === card && !card.hasAttribute('tabindex')) card.tabIndex = -1;
 
   window.requestAnimationFrame(() => {
@@ -183,11 +207,31 @@ function bindAttentionQueue(container: HTMLElement): void {
   attentionQueueBindings.add(container);
   container.addEventListener('click', (event) => {
     const target = event.target as HTMLElement;
-    const button = target.closest<HTMLButtonElement>('button[data-attention-client-id]');
+    const button = target.closest<HTMLButtonElement>('button[data-attention-client-id], button[data-operational-action]');
     if (!button || !container.contains(button)) return;
     const clientId = Number(button.dataset.attentionClientId);
-    if (!clientId) return;
-    openAttentionLead(container, clientId);
+    const attentionTarget = button.dataset.attentionTarget || 'lead';
+    const operationalAction = button.dataset.operationalAction;
+    const sourceId = Number(button.dataset.attentionSourceId);
+    if (operationalAction === 'visit-confirm' && sourceId) {
+      button.disabled = true;
+      void confirmScheduledVisit(sourceId).catch((error) => {
+        if (button.isConnected) button.disabled = false;
+        announceAttentionNavigation(
+          container,
+          error instanceof Error ? error.message : 'No se pudo confirmar la visita.',
+        );
+      });
+      return;
+    }
+    if (clientId) {
+      if (attentionTarget === 'lead') openAttentionLead(container, clientId);
+      else openAttentionLead(container, clientId, attentionTarget);
+      return;
+    }
+    const module = button.dataset.attentionModule;
+    if (!module) return;
+    document.querySelector<HTMLButtonElement>(`[data-module="${module}"]`)?.click();
   });
 }
 
@@ -197,7 +241,7 @@ export function enhanceLeadList(container: HTMLElement, options: LeadListEnhance
   placeNewLeadButton(container, breakpoint.matches);
   syncFilterDetails(container);
   enhancePipelines(container, options.centerSelectedStage === true);
-  renderAttentionQueue(container);
+  renderAttentionQueue(container, options.properties);
   bindAttentionQueue(container);
   instrumentVisibleSupervisedRecommendations(container);
   schedulePipelineGeometryRefresh(container);

@@ -1,7 +1,10 @@
 import { isTerminalClient, localIsoDate } from './lead-pipeline.js';
 import type { Client, Offer, OfferCurrency, OfferOrigin, OfferStatus, Property } from './models.js';
-import { saveData, state } from './store.js';
-import { activeMember, visibleProperties } from './team-access.js';
+import { authenticatedTenantMember, saveData, state } from './store.js';
+import { assertTenantCrmScope, writeTenantSnapshot } from './tenant-storage.js';
+import { assertTenantRuntimeLeaseCurrent, captureTenantRuntimeLease, requireCurrentTenantScope, tenantRuntimeLeaseIsCurrent, type TenantRuntimeLease } from './tenant-runtime.js';
+import type { TenantScope } from './active-organization.js';
+import { visibleProperties } from './team-access.js';
 import { assignmentVisible } from './team-policy.js';
 import { escapeHtml } from './utils.js';
 import {
@@ -14,6 +17,7 @@ import {
 const SECTION_SELECTOR = '[data-lead-offers]';
 let observerInstalled = false;
 let enhancementQueued = false;
+const offerWriteContexts = new WeakMap<HTMLFormElement, { scope: TenantScope; runtimeLease: TenantRuntimeLease }>();
 
 const dateFormatter = new Intl.DateTimeFormat('es-AR', { dateStyle: 'medium' });
 const moneyFormatter = new Intl.NumberFormat('es-AR', { maximumFractionDigits: 2 });
@@ -24,7 +28,8 @@ function propertyLabel(property: Property | undefined, propertyId: number): stri
 }
 
 function visibleOffers(clientId: number): Offer[] {
-  const actor = activeMember();
+  const actor = authenticatedTenantMember();
+  if (!actor) return [];
   return offersForClient(
     state.crm.offers.filter((offer) => assignmentVisible(actor.role, actor.id, offer.assignedToId)),
     clientId,
@@ -133,7 +138,7 @@ function formattedDate(value: string): string {
 }
 
 function offerRow(client: Client, offer: Offer): string {
-  const property = state.crm.properties.find((item) => item.id === offer.propertyId);
+  const property = visibleProperties().find((item) => item.id === offer.propertyId);
   const parent = offer.parentOfferId ? state.crm.offers.find((item) => item.id === offer.parentOfferId) : undefined;
   const pending = offer.status === 'Pendiente';
   const details = [
@@ -172,6 +177,15 @@ function renderSection(client: Client): string {
   </section>`;
 }
 
+function captureOfferWriteContext(form: HTMLFormElement): void {
+  if (offerWriteContexts.has(form)) return;
+  const scope = requireCurrentTenantScope();
+  const runtimeLease = captureTenantRuntimeLease(scope);
+  assertTenantRuntimeLeaseCurrent(runtimeLease);
+  assertTenantCrmScope(scope, state.crm);
+  offerWriteContexts.set(form, { scope, runtimeLease });
+}
+
 function bindDeferredForms(section: HTMLElement, client: Client): void {
   const register = section.querySelector<HTMLDetailsElement>('[data-offer-register-disclosure]');
   if (register) {
@@ -180,6 +194,8 @@ function bindDeferredForms(section: HTMLElement, client: Client): void {
       if (!body) return;
       if (!register.open) { body.replaceChildren(); return; }
       if (!body.querySelector('[data-register-offer]')) body.innerHTML = registerForm(client);
+      const form = body.querySelector<HTMLFormElement>('[data-register-offer]');
+      if (form) captureOfferWriteContext(form);
     };
     register.addEventListener('toggle', sync);
     sync();
@@ -193,6 +209,8 @@ function bindDeferredForms(section: HTMLElement, client: Client): void {
       const offer = state.crm.offers.find((item) => item.id === id && item.clientId === client.id);
       if (!offer || offer.status !== 'Pendiente') { body.replaceChildren(); return; }
       if (!body.querySelector('[data-register-counteroffer]')) body.innerHTML = counterForm(offer);
+      const form = body.querySelector<HTMLFormElement>('[data-register-counteroffer]');
+      if (form) captureOfferWriteContext(form);
     };
     details.addEventListener('toggle', sync);
     sync();
@@ -206,6 +224,8 @@ function bindDeferredForms(section: HTMLElement, client: Client): void {
       const offer = state.crm.offers.find((item) => item.id === id && item.clientId === client.id);
       if (!offer || offer.status !== 'Pendiente') { body.replaceChildren(); return; }
       if (!body.querySelector('[data-resolve-offer]')) body.innerHTML = resolveForm(client, offer);
+      const form = body.querySelector<HTMLFormElement>('[data-resolve-offer]');
+      if (form) captureOfferWriteContext(form);
     };
     details.addEventListener('toggle', sync);
     sync();
@@ -220,8 +240,12 @@ function insertOfferSection(card: HTMLElement, client: Client): void {
   wrapper.innerHTML = renderSection(client);
   const section = wrapper.firstElementChild;
   if (!(section instanceof HTMLElement)) return;
-  const visits = host.querySelector('[data-lead-visits]');
-  const anchor = visits?.nextSibling ?? host.querySelector('.mvp-lead-history, .mvp-lead-matches, .mvp-lead-full-actions');
+  const visits = host.querySelector<HTMLElement>(':scope > [data-lead-visits]');
+  const fallbackAnchor = host.querySelector<HTMLElement>(
+    ':scope > .mvp-lead-history, :scope > .mvp-lead-matches-slot, :scope > .mvp-lead-matches, :scope > .mvp-lead-full-actions',
+  );
+  const anchor = visits?.nextSibling ?? fallbackAnchor;
+  if (anchor && anchor.parentNode !== host) return;
   host.insertBefore(section, anchor);
   bindDeferredForms(section, client);
 }
@@ -252,14 +276,56 @@ function formError(form: HTMLFormElement, error: unknown): void {
   output.hidden = false;
 }
 
-function actor() {
-  const member = activeMember();
-  return { id: member.id, role: member.role };
+function writeContext(form: HTMLFormElement) {
+  const context = offerWriteContexts.get(form);
+  if (!context) throw new Error('TENANT_FORM_CONTEXT_REQUIRED');
+  assertTenantRuntimeLeaseCurrent(context.runtimeLease);
+  assertTenantCrmScope(context.scope, state.crm);
+  const member = authenticatedTenantMember(context.scope);
+  if (!member) throw new Error('AUTHENTICATED_TENANT_MEMBER_REQUIRED');
+  return { ...context, member };
 }
 
-function applyResult(result: { crm: typeof state.crm }): void {
-  state.crm = result.crm;
-  saveData('Flujo comercial de ofertas');
+function rollbackOfferMutation(
+  context: ReturnType<typeof writeContext>,
+  previousCrm: typeof state.crm,
+): void {
+  if (!tenantRuntimeLeaseIsCurrent(context.runtimeLease)) return;
+  try {
+    assertTenantRuntimeLeaseCurrent(context.runtimeLease);
+    assertTenantCrmScope(context.scope, previousCrm);
+    state.crm = previousCrm;
+    writeTenantSnapshot(context.scope, previousCrm, {
+      markDirty: true,
+      reason: 'Reversión de oferta no persistida',
+      backup: false,
+    });
+  } catch {
+    // Fail closed: nunca se restaura sobre otro tenant/runtime.
+  }
+}
+
+function applyResult(
+  result: { crm: typeof state.crm },
+  context: ReturnType<typeof writeContext>,
+  originForm: HTMLFormElement,
+): void {
+  assertTenantRuntimeLeaseCurrent(context.runtimeLease);
+  assertTenantCrmScope(context.scope, result.crm);
+  const previousCrm = structuredClone(state.crm);
+  try {
+    state.crm = result.crm;
+    assertTenantRuntimeLeaseCurrent(context.runtimeLease);
+    assertTenantCrmScope(context.scope, state.crm);
+    saveData('Flujo comercial de ofertas');
+    assertTenantRuntimeLeaseCurrent(context.runtimeLease);
+    assertTenantCrmScope(context.scope, state.crm);
+  } catch (error) {
+    rollbackOfferMutation(context, previousCrm);
+    throw error;
+  }
+  const details = originForm.closest<HTMLDetailsElement>('details[open]');
+  if (details) details.open = false;
   document.dispatchEvent(new CustomEvent('trv-render'));
 }
 
@@ -280,14 +346,15 @@ function submitRegister(form: HTMLFormElement): void {
   if (form.dataset.submitting === 'true') return;
   formBusy(form, true);
   try {
+    const context = writeContext(form);
     const data = new FormData(form);
     const clientId = Number(form.dataset.registerOffer);
-    const result = registerOffer(state.crm, actor(), {
+    const result = registerOffer(state.crm, { id: context.member.id, role: context.member.role }, {
       clientId,
       propertyId: Number(data.get('propertyId')),
       ...readOfferFields(data),
     });
-    applyResult(result);
+    applyResult(result, context, form);
   } catch (error) { formBusy(form, false); formError(form, error); }
 }
 
@@ -295,12 +362,13 @@ function submitCounter(form: HTMLFormElement): void {
   if (form.dataset.submitting === 'true') return;
   formBusy(form, true);
   try {
+    const context = writeContext(form);
     const data = new FormData(form);
-    const result = registerCounterOffer(state.crm, actor(), {
+    const result = registerCounterOffer(state.crm, { id: context.member.id, role: context.member.role }, {
       parentOfferId: Number(form.dataset.registerCounteroffer),
       ...readOfferFields(data),
     });
-    applyResult(result);
+    applyResult(result, context, form);
   } catch (error) { formBusy(form, false); formError(form, error); }
 }
 
@@ -308,14 +376,15 @@ function submitResolution(form: HTMLFormElement): void {
   if (form.dataset.submitting === 'true') return;
   formBusy(form, true);
   try {
+    const context = writeContext(form);
     const data = new FormData(form);
-    const result = resolveOffer(state.crm, actor(), {
+    const result = resolveOffer(state.crm, { id: context.member.id, role: context.member.role }, {
       offerId: Number(form.dataset.resolveOffer),
       status: String(data.get('status') || ''),
       nextAction: String(data.get('nextAction') || ''),
       nextFollowUp: String(data.get('nextFollowUp') || ''),
     });
-    applyResult(result);
+    applyResult(result, context, form);
   } catch (error) { formBusy(form, false); formError(form, error); }
 }
 

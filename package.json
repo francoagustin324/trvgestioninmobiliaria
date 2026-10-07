@@ -2,7 +2,7 @@
   "name": "trv-gestion-inmobiliaria",
   "version": "1.3.0",
   "private": true,
-  "description": "PropControl MVP para gestión de leads, conversaciones y seguimientos inmobiliarios.",
+  "description": "OrdenBroker: sistema comercial para corredores e inmobiliarias.",
   "type": "module",
   "scripts": {
     "build": "tsc && node scripts/build-extension-zip.mjs",

@@ -1,7 +1,7 @@
 import {
   commercialStage,
   COMMERCIAL_STAGES,
-  completeClientFollowUp,
+  completeClientFollowUpWithDecision,
   filterLeads,
   isTerminalClient,
   localIsoDate,
@@ -14,6 +14,7 @@ import {
   renderLeadQualificationPanel,
   requestLeadQualification,
 } from './lead-qualification-ui.js';
+import { requestFollowUpCompletion } from './followup-completion-ui.js';
 import {
   renderEssentialQualificationFields,
   renderSecondaryQualificationFields,
@@ -28,10 +29,19 @@ import { enhanceLeadList } from './lead-list-polish-ui.js';
 import { enhanceLeadsProfessionalRedesign } from './leads-professional-redesign.js';
 import { prepareLeadsProfessionalRedesign } from './leads-professional-redesign-blocking-fix.js';
 import { enhanceLeadForm, submitLeadForm } from './lead-create-reliability.js';
-import type { ActivityEntry, Client, CommercialStage, Temperature } from './models.js';
-import { matchPropertiesForClient, type PropertyMatch } from './property-matching.js';
+import type { ActivityEntry, Client, CommercialStage, Property, Temperature } from './models.js';
+import {
+  clearReadEntityNavigation,
+  currentReadEntityReturnTarget,
+  currentReadEntityTarget,
+  openEntityReadOnly,
+  returnToEntityReadOnly,
+} from './entity-read-navigation.js';
+import { matchPropertiesForClient, matchRelevantPropertiesForClient, type PropertyMatch } from './property-matching.js';
+import { MATCH_DISMISSED_ACTION, matchDismissalActive } from './property-matching.js';
 import { saveData, state } from './store.js';
-import { addActivity, memberName, visibleClients, visibleProperties } from './team-access.js';
+import { addActivityForAuthenticatedTenant, memberName, visibleClients, visibleProperties } from './team-access.js';
+import { requireCurrentTenantScope } from './tenant-runtime.js';
 import { escapeHtml } from './utils.js';
 
 interface LeadListFilters extends LeadFilters {
@@ -99,21 +109,48 @@ function matchRow(match: PropertyMatch): string {
     <div class="mvp-match-actions">
       <b class="mvp-match-score ${match.level.toLowerCase()}">${match.score}%</b>
       <button type="button" class="secondary" data-open-match-property="${match.property.id}">Abrir propiedad</button>
+      <button type="button" class="quiet-button" data-dismiss-match-client="${match.client.id}" data-dismiss-match-property="${match.property.id}">Descartar match</button>
     </div>
   </article>`;
 }
 
-function matchesForLead(client: Client): string {
+function matchesContentForLead(client: Client, properties: Property[], exhaustive: boolean): string {
   if (isTerminalClient(client)) return '';
-  const properties = visibleProperties();
   if (!properties.length) return '<p class="mvp-match-empty">Todavía no hay propiedades cargadas para comparar.</p>';
-  const matches = matchPropertiesForClient(client, properties).slice(0, 3);
+  const matches = (
+    exhaustive
+      ? matchPropertiesForClient(client, properties)
+      : matchRelevantPropertiesForClient(client, properties)
+  ).slice(0, 3)
+    .filter((match) => !matchDismissalActive(client, match.property, state.crm.activityLog));
   if (!matches.length) return '<p class="mvp-match-empty">No hay coincidencias claras con las propiedades disponibles.</p>';
   const best = matches[0]!;
   return `<details class="mvp-lead-matches">
     <summary><span>${matches.length} ${matches.length === 1 ? 'propiedad compatible' : 'propiedades compatibles'}</span><strong>${best.score}% mejor coincidencia</strong></summary>
     <div class="mvp-match-list">${matches.map(matchRow).join('')}</div>
   </details>`;
+}
+
+function matchesForLead(client: Client, properties: Property[], exhaustive: boolean): string {
+  return `<div class="mvp-lead-matches-slot" data-lead-matches-slot="${client.id}" data-match-mode="${exhaustive ? 'exhaustive' : 'bounded'}">${matchesContentForLead(client, properties, exhaustive)}</div>`;
+}
+
+function refreshLeadMatches(
+  container: HTMLElement,
+  clientId: number,
+  exhaustive: boolean,
+): void {
+  if (!container.isConnected) return;
+  const details = container.querySelector<HTMLDetailsElement>(`[data-lead-full-sheet="${clientId}"]`);
+  const slot = details?.querySelector<HTMLElement>(`[data-lead-matches-slot="${clientId}"]`);
+  const client = visibleClients().find((item) => item.id === clientId);
+  if (!details?.isConnected || !slot?.isConnected || !client) return;
+
+  const template = document.createElement('template');
+  template.innerHTML = matchesContentForLead(client, visibleProperties(), exhaustive);
+  slot.dataset.matchMode = exhaustive ? 'exhaustive' : 'bounded';
+  slot.replaceChildren(template.content.cloneNode(true));
+  bindLeadMatchActions(slot);
 }
 
 function clientHistory(clientId: number): ActivityEntry[] {
@@ -136,19 +173,27 @@ function historyBlock(client: Client): string {
   </details>`;
 }
 
-function card(client: Client): string {
+function card(client: Client, properties: Property[]): string {
   const responsible = readableLeadAssignee(
     client,
     state.crm.teamMembers,
     state.crm.settings.profileName,
     state.crm.settings.profileEmail,
   );
+  const readTarget = currentReadEntityTarget();
+  const returnTarget = currentReadEntityReturnTarget();
+  const openedReadOnly = readTarget?.entityType === 'lead' && readTarget.entityId === client.id;
+  const expanded = expandedClientId === client.id || openedReadOnly;
+  const navigation = openedReadOnly && returnTarget?.entityType === 'property'
+    ? '<div class="mvp-read-return"><button type="button" class="secondary" data-return-read-entity>← Volver a propiedad</button></div>'
+    : '';
   return renderCompactLeadCard(client, {
-    expanded: expandedClientId === client.id,
+    expanded,
     responsible,
     qualificationPanel: renderLeadQualificationPanel(client),
     history: historyBlock(client),
-    matches: matchesForLead(client),
+    matches: matchesForLead(client, properties, expanded),
+    navigation,
   });
 }
 
@@ -170,16 +215,25 @@ function saveLeadFollowUp(reason: string, container: HTMLElement): void {
 function bindFullSheets(container: HTMLElement): void {
   container.querySelectorAll<HTMLDetailsElement>('[data-lead-full-sheet]').forEach((details) => {
     details.addEventListener('toggle', () => {
+      if (!details.isConnected || !container.contains(details)) return;
       const clientId = Number(details.dataset.leadFullSheet);
       if (!clientId) return;
+
       if (details.open) {
         container.querySelectorAll<HTMLDetailsElement>('[data-lead-full-sheet]').forEach((other) => {
-          if (other !== details && other.open) other.open = false;
+          if (other === details || !other.open) return;
+          other.open = false;
+          const otherClientId = Number(other.dataset.leadFullSheet);
+          if (otherClientId) refreshLeadMatches(container, otherClientId, false);
         });
         expandedClientId = clientId;
-      } else if (expandedClientId === clientId) {
-        expandedClientId = null;
+        refreshLeadMatches(container, clientId, true);
+      } else {
+        if (expandedClientId === clientId) expandedClientId = null;
+        refreshLeadMatches(container, clientId, false);
       }
+
+      if (!details.isConnected || !container.contains(details)) return;
       const label = details.querySelector<HTMLElement>('summary > span');
       if (label) label.textContent = details.open ? 'Ocultar ficha' : 'Ver ficha completa';
       details.querySelector('summary')?.setAttribute('aria-expanded', String(details.open));
@@ -208,10 +262,12 @@ function bindDelegatedFollowUpActions(container: HTMLElement): void {
     event.stopPropagation();
     const client = visibleClients().find((item) => item.id === Number(button.dataset.completeClientFollowUp));
     if (!client || isTerminalClient(client)) return;
-    const result = completeClientFollowUp(client);
-    Object.assign(client, result.client);
-    addActivity(result.activity);
-    saveLeadFollowUp(`Seguimiento de lead completado: ${client.name}`, container);
+    requestFollowUpCompletion(client, (decision) => {
+      const result = completeClientFollowUpWithDecision(client, decision);
+      Object.assign(client, result.client);
+      addActivityForAuthenticatedTenant(requireCurrentTenantScope(), result.activity);
+      saveLeadFollowUp(`Seguimiento de lead completado: ${client.name}`, container);
+    });
   });
   container.addEventListener('submit', (event) => {
     const form = (event.target as HTMLElement).closest<HTMLFormElement>('[data-reprogram-client-follow-up]');
@@ -222,20 +278,61 @@ function bindDelegatedFollowUpActions(container: HTMLElement): void {
     if (!client || !date || isTerminalClient(client)) return;
     const result = reprogramClientFollowUp(client, date);
     Object.assign(client, result.client);
-    addActivity(result.activity);
+    addActivityForAuthenticatedTenant(requireCurrentTenantScope(), result.activity);
     saveLeadFollowUp(`Seguimiento reprogramado: ${client.name}`, container);
   });
 }
 
+function bindLeadMatchActions(container: HTMLElement): void {
+  container.querySelectorAll<HTMLButtonElement>('[data-open-match-property]').forEach((button) => {
+    button.addEventListener('click', (event) => {
+      event.stopPropagation();
+      const propertyId = Number(button.dataset.openMatchProperty);
+      if (!propertyId || !visibleProperties().some((property) => property.id === propertyId)) return;
+      openEntityReadOnly(
+        { entityType: 'property', entityId: propertyId },
+        { returnTarget: { entityType: 'lead', entityId: Number(button.closest('.mvp-lead-card')?.getAttribute('data-client-id')) } },
+      );
+    });
+  });
+  container.querySelectorAll<HTMLButtonElement>('[data-dismiss-match-property]').forEach((button) => {
+    button.addEventListener('click', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      const clientId = Number(button.dataset.dismissMatchClient);
+      const propertyId = Number(button.dataset.dismissMatchProperty);
+      const client = visibleClients().find((item) => item.id === clientId);
+      const property = visibleProperties().find((item) => item.id === propertyId);
+      if (!client || !property || matchDismissalActive(client, property, state.crm.activityLog)) return;
+      addActivityForAuthenticatedTenant(requireCurrentTenantScope(), {
+        action: MATCH_DISMISSED_ACTION,
+        entityType: 'Cliente',
+        entityId: client.id,
+        entityUid: client.uid,
+        diffusionClientId: client.id,
+        diffusionClientUid: client.uid,
+        diffusionPropertyId: property.id,
+        diffusionPropertyUid: property.uid,
+        detail: `Propiedad descartada del matching: ${property.title || property.address || `#${property.id}`}\npropertyRevision=${Number(property.revision ?? 0)}`,
+      });
+      saveData(`Match descartado: ${client.name}`);
+      renderMvpLeads(container);
+      queueMicrotask(() => document.dispatchEvent(new CustomEvent('trv-render')));
+    });
+  });
+}
+
 function bindLeadCardActions(container: HTMLElement): void {
+  bindLeadMatchActions(container);
   container.querySelectorAll<HTMLButtonElement>('[data-edit-client]').forEach((button) => {
     button.addEventListener('click', (event) => {
       event.stopPropagation();
       const clientId = Number(button.dataset.editClient);
       if (!clientId || !visibleClients().some((client) => client.id === clientId)) return;
+      clearReadEntityNavigation();
       state.editingClientId = clientId;
       state.openForms.client = true;
-      renderMvpLeads(container);
+      renderMvpLeads(container, false, true);
       focusLeadForm(container);
     });
   });
@@ -247,16 +344,11 @@ function bindLeadCardActions(container: HTMLElement): void {
       requestLeadQualification(clientId);
     });
   });
-  container.querySelectorAll<HTMLButtonElement>('[data-open-match-property]').forEach((button) => {
+  container.querySelectorAll<HTMLButtonElement>('[data-return-read-entity]').forEach((button) => {
     button.addEventListener('click', (event) => {
+      event.preventDefault();
       event.stopPropagation();
-      const propertyId = Number(button.dataset.openMatchProperty);
-      if (!propertyId || !visibleProperties().some((property) => property.id === propertyId)) return;
-      state.activeModule = 'propiedades';
-      state.editingPropertyId = propertyId;
-      state.openForms.property = true;
-      document.dispatchEvent(new CustomEvent('trv-render'));
-      window.requestAnimationFrame(() => document.querySelector('#mvp-property-form')?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
+      returnToEntityReadOnly();
     });
   });
   bindDelegatedFollowUpActions(container);
@@ -266,10 +358,11 @@ function bindLeadCardActions(container: HTMLElement): void {
 
 function updateLeadResults(container: HTMLElement): void {
   const leads = leadRows();
+  const properties = visibleProperties();
   if (expandedClientId !== null && !leads.some((client) => client.id === expandedClientId)) expandedClientId = null;
   const results = container.querySelector<HTMLElement>('#mvp-lead-results');
   const count = container.querySelector<HTMLElement>('#mvp-lead-count');
-  if (results) results.innerHTML = leads.map(card).join('') || '<p class="empty-state">No hay leads para mostrar con estos filtros.</p>';
+  if (results) results.innerHTML = leads.map((client) => card(client, properties)).join('') || '<p class="empty-state">No hay leads para mostrar con estos filtros.</p>';
   if (count) count.textContent = `${leads.length} de ${visibleClients().length} leads`;
   bindLeadCardActions(container);
 }
@@ -280,18 +373,25 @@ function stageOptions(current: CommercialStage): string {
 
 function leadForm(editing: Client | null): string {
   const stage = editing ? commercialStage(editing) : 'Nuevo';
+  const temperature = editing?.temperature ?? 'Sin definir';
   return `<form id="mvp-lead-form" class="mvp-lead-form ${state.openForms.client ? '' : 'collapsed'}">
     <div class="mvp-form-heading"><h2>${editing ? `Editar ${escapeHtml(editing.name)}` : 'Nuevo lead'}</h2><button type="button" class="quiet-button" data-cancel-client-edit>Cerrar</button></div>
-    <label>Nombre<input name="name" value="${value(editing, 'name')}" required></label>
-    <label>Número de WhatsApp<input name="phone" value="${value(editing, 'phone')}" inputmode="tel" required></label>
-    <label>Email<input name="email" type="email" value="${value(editing, 'email')}" placeholder="cliente@correo.com"></label>
-    <label>Temperatura<select name="temperature">${(['Caliente', 'Tibio', 'Frío'] as Temperature[]).map((temperature) => `<option value="${temperature}"${selected(editing?.temperature ?? 'Tibio', temperature)}>${temperature}</option>`).join('')}</select></label>
-    <label class="lead-form-wide">Lugar o propiedad de interés<input name="interest" value="${value(editing, 'interest')}" placeholder="Ej. Dúplex en Manantiales" required></label>
-    <label>Etapa comercial<select name="pipeline" data-commercial-stage>${stageOptions(stage)}</select></label>
-    <label>Próxima acción<input name="nextAction" value="${value(editing, 'nextAction')}" placeholder="Ej. Confirmar entrega y financiación"></label>
-    <label>Fecha del próximo seguimiento<input name="nextFollowUp" type="date" value="${value(editing, 'nextFollowUp')}"></label>
-    ${renderEssentialQualificationFields(editing)}
-    ${renderSecondaryQualificationFields(editing)}
+    <label>Nombre<input name="name" value="${value(editing, 'name')}" required autocomplete="name"></label>
+    <label>Número de WhatsApp o teléfono<input name="phone" value="${value(editing, 'phone')}" inputmode="tel" autocomplete="tel" placeholder="Ej. 351 511 0069"></label>
+    <label>Email<input name="email" type="email" value="${value(editing, 'email')}" autocomplete="email" placeholder="cliente@correo.com"></label>
+    <small class="lead-contact-hint">Ingresá al menos WhatsApp/teléfono o email.</small>
+    <details class="lead-form-commercial"${editing ? ' open' : ''}>
+      <summary>Completar datos comerciales</summary>
+      <div class="lead-form-more-grid">
+        <label class="lead-form-wide">Lugar o propiedad de interés<input name="interest" value="${value(editing, 'interest')}" placeholder="Ej. Dúplex en Docta"></label>
+        <label>Temperatura<select name="temperature">${(['Sin definir', 'Caliente', 'Tibio', 'Frío'] as Temperature[]).map((item) => `<option value="${item}"${selected(temperature, item)}>${item}</option>`).join('')}</select></label>
+        <label>Etapa comercial<select name="pipeline" data-commercial-stage>${stageOptions(stage)}</select></label>
+        <label>Próxima acción<input name="nextAction" value="${value(editing, 'nextAction')}" placeholder="Ej. Confirmar visita"></label>
+        <label>Fecha del próximo seguimiento<input name="nextFollowUp" type="date" value="${value(editing, 'nextFollowUp')}"></label>
+      </div>
+      ${renderEssentialQualificationFields(editing)}
+      ${renderSecondaryQualificationFields(editing)}
+    </details>
     <div data-lead-error class="form-error" hidden></div>
     <button type="submit">${editing ? 'Guardar cambios' : 'Guardar lead'}</button>
   </form>`;
@@ -331,7 +431,7 @@ function filterPanel(): string {
       <summary><span>Más filtros</span><small>${escapeHtml(active.length ? active.join(' · ') : 'Etapa, temperatura, responsable y orden')}</small></summary>
       <div class="mvp-lead-filter-grid">
         <label><span>Etapa</span><select id="mvp-lead-stage-filter"><option value="Todas">Todas</option>${COMMERCIAL_STAGES.map((stage) => `<option value="${stage}"${selected(filters.stage, stage)}>${stage}</option>`).join('')}</select></label>
-        <label><span>Temperatura</span><select id="mvp-lead-temperature-filter"><option value="Todas">Todas</option>${(['Caliente', 'Tibio', 'Frío'] as Temperature[]).map((temperature) => `<option value="${temperature}"${selected(filters.temperature, temperature)}>${temperature}</option>`).join('')}</select></label>
+        <label><span>Temperatura</span><select id="mvp-lead-temperature-filter"><option value="Todas">Todas</option>${(['Sin definir', 'Caliente', 'Tibio', 'Frío'] as Temperature[]).map((temperature) => `<option value="${temperature}"${selected(filters.temperature, temperature)}>${temperature}</option>`).join('')}</select></label>
         ${assignees.length > 1 ? `<label><span>Responsable</span><select id="mvp-lead-assignee-filter"><option value="Todos">Todos</option>${assignees.map((member) => `<option value="${member.id}"${selected(filters.assignee, member.id)}>${escapeHtml(member.name)}</option>`).join('')}</select></label>` : ''}
         <label><span>Ordenar por</span><select id="mvp-lead-order"><option value="priority"${selected(filters.order, 'priority')}>Prioridad</option><option value="follow-up"${selected(filters.order, 'follow-up')}>Seguimiento</option><option value="recent"${selected(filters.order, 'recent')}>Más recientes</option><option value="name"${selected(filters.order, 'name')}>Nombre</option></select></label>
       </div>
@@ -415,11 +515,27 @@ function bindFilters(container: HTMLElement): void {
   });
 }
 
-export function renderMvpLeads(container: HTMLElement, centerSelectedStage = false): void {
+function shouldPreserveCommercialEditor(container: HTMLElement): boolean {
+  return Boolean(container.querySelector([
+    '[data-offer-register-disclosure][open] form[data-register-offer]',
+    '[data-counteroffer-disclosure][open] form[data-register-counteroffer]',
+    '[data-resolve-offer-disclosure][open] form[data-resolve-offer]',
+    '[data-reservation-disclosure][open] form[data-register-reservation]',
+    '[data-commercial-close-dialog][open]',
+    'form[data-update-reservation][data-submitting="true"]',
+  ].join(',')));
+}
+
+export function renderMvpLeads(container: HTMLElement, centerSelectedStage = false, force = false): void {
+  // Los renders globales de fondo no deben desmontar editores/modales activos.
+  // Una acción explícita del usuario (Editar/Ganado/Perdido) puede forzar el
+  // cambio de contexto para abrir el formulario de cierre.
+  if (!force && shouldPreserveCommercialEditor(container)) return;
   const editing = visibleClients().find((client) => client.id === state.editingClientId) ?? null;
   const leads = leadRows();
+  const properties = visibleProperties();
   if (expandedClientId !== null && !leads.some((client) => client.id === expandedClientId)) expandedClientId = null;
-  container.innerHTML = `<div class="mvp-page-heading"><div><h1>Leads</h1><p>Priorizá a quién contactar, resolvé la próxima acción y abrí la ficha completa solo cuando haga falta.</p></div><button type="button" data-toggle="client-form">Nuevo lead</button></div>${leadForm(editing)}${filterPanel()}<div id="mvp-lead-results" class="mvp-lead-list">${leads.map(card).join('') || '<p class="empty-state">No hay leads para mostrar con estos filtros.</p>'}</div>`;
+  container.innerHTML = `<div class="mvp-page-heading"><div><h1>Leads</h1><p>Priorizá a quién contactar, resolvé la próxima acción y abrí la ficha completa solo cuando haga falta.</p></div><button type="button" data-toggle="client-form">Nuevo lead</button></div>${leadForm(editing)}${filterPanel()}<div id="mvp-lead-results" class="mvp-lead-list">${leads.map((client) => card(client, properties)).join('') || '<p class="empty-state">No hay leads para mostrar con estos filtros.</p>'}</div>`;
 
   bindFilters(container);
   bindLeadCardActions(container);
@@ -445,7 +561,7 @@ export function renderMvpLeads(container: HTMLElement, centerSelectedStage = fal
     renderMvpLeads(container);
   });
 
-  enhanceLeadList(container, { centerSelectedStage });
+  enhanceLeadList(container, { centerSelectedStage, properties });
   enhanceLeadForm();
   prepareLeadsProfessionalRedesign(container);
   enhanceLeadsProfessionalRedesign(container);

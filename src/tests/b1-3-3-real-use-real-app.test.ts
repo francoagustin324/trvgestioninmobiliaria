@@ -10,6 +10,7 @@ import {
   type Page,
 } from 'playwright';
 import { initialData, type Client, type CrmData, type TeamMember, type TeamRole, type WhatsAppConversation } from '../models.js';
+import { activateA35H5R1RecordsOutage, armA35H5R1RecordsOutage, installA35H5R1ModernTenantHarness } from './a35-h5-r1-modern-tenant-harness.js';
 
 const sessionKey = 'propcontrol-cloud-session-v1';
 const activeMemberKey = 'propcontrol-active-team-member-v1';
@@ -36,8 +37,8 @@ function identity(role: TeamRole): Identity {
     memberId,
     userId,
     email: `${slug}-b133@propcontrol.test`,
-    storageKey: `trv-crm-basico:user:${userId}`,
-    syncKey: `trv-crm-basico:user:${userId}:sync`,
+    storageKey: `trv-crm-basico:user:${userId}:org:${organizationId}`,
+    syncKey: `trv-crm-basico:user:${userId}:org:${organizationId}:sync`,
   };
 }
 
@@ -227,9 +228,8 @@ async function contextFor(
 ): Promise<BrowserContext> {
   const current = identity(role);
   const context = await browser.newContext(contextOptions(viewport));
-  await context.route('**/api/cloud-config', async (route) => {
-    await route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ message: 'Nube de prueba no disponible.' }) });
-  });
+  await installA35H5R1ModernTenantHarness(context, crm, current.userId);
+  armA35H5R1RecordsOutage(context);
   await context.addInitScript(({ data, session, memberId, keys, marker, whatsappKey, whatsappIdentity }) => {
     if (!localStorage.getItem(marker)) {
       localStorage.setItem(marker, '1');
@@ -262,6 +262,7 @@ async function load(page: Page, url: string): Promise<void> {
   await page.waitForSelector('#crm.active', { state: 'visible', timeout: 25_000 });
   await page.locator('#mvp-lead-order').waitFor({ state: 'attached' });
   await page.waitForFunction(() => document.querySelector<HTMLSelectElement>('#mvp-lead-order')?.value === 'recent');
+  activateA35H5R1RecordsOutage(page.context());
 }
 
 async function snapshot(page: Page, role: TeamRole): Promise<CrmData> {
@@ -320,6 +321,9 @@ test('B1.3.3 mantiene selectores legibles y lead nuevo visible en Android', { ti
     const page = await context.newPage();
     await load(page, url);
     const form = await openLeadForm(page);
+    const commercial = form.locator('details.lead-form-commercial');
+    assert.equal(await commercial.getAttribute('open'), null, 'El alta rápida inicia con datos comerciales cerrados.');
+    await commercial.locator(':scope > summary').click();
     const temperature = form.locator('select[name="temperature"]');
     const pipeline = form.locator('select[name="pipeline"]');
     await assertReadableSelect(temperature);

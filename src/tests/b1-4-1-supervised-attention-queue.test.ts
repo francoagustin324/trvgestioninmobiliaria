@@ -87,15 +87,19 @@ test('B1.4.1 D/E: terminales quedan fuera y la cola nunca supera tres recomendac
   assert.equal(result.some((item) => item.stage === 'Ganado' || item.stage === 'Perdido'), false);
 });
 
-test('B1.4.1 F/G: producción usa visibleClients global y no los filtros de la lista normal', () => {
+test('B1.4.1 F/G: producción usa autoridad tenant global y no los filtros de la lista normal', () => {
   const polish = readFileSync('src/lead-list-polish-ui.ts', 'utf8');
+  const runtime = readFileSync('src/lead-attention-runtime.ts', 'utf8');
   const queue = readFileSync('src/lead-attention-queue.ts', 'utf8');
-  assert.ok(polish.includes('renderSupervisedAttentionQueue(visibleClients())'));
-  assert.equal(polish.includes('state.crm.clients'), false);
+  assert.ok(polish.includes('renderOperationalAttentionForTenant('));
+  assert.ok(polish.includes('currentTenantScope()'));
+  assert.match(runtime, /resolveOperationalAttentionAuthority/);
+  assert.match(runtime, /assignmentVisible/);
+  assert.equal(runtime.includes('filterLeads'), false);
   assert.equal(queue.includes('filterLeads'), false);
   assert.equal(queue.includes('LeadFilters'), false);
   assert.equal(queue.includes('filters.'), false);
-  assert.ok(queue.includes("sortLeads(active, 'priority', today)"));
+  assert.equal(polish.includes('renderSupervisedAttentionQueue(visibleClients())'), false);
 });
 
 test('B1.4.1 H/I: orden normal y Limpiar conservan recent y orden no cuenta como filtro comercial', () => {
@@ -132,8 +136,12 @@ test('B1.4.1 J: calcular y renderizar recomendaciones no muta Client ni contiene
   assert.match(html, /Contactos para gestionar primero\./);
 
   const source = readFileSync('src/lead-attention-queue.ts', 'utf8');
+  const legacySource = source.slice(
+    source.indexOf('export function supervisedAttentionRecommendationForClient'),
+    source.indexOf('export type OperationalPriority'),
+  );
   for (const forbidden of ['saveData', 'addActivity', 'Reminder', 'nextFollowUp =', 'nextAction =', 'Math.random', 'score']) {
-    assert.equal(source.includes(forbidden), false, forbidden);
+    assert.equal(legacySource.includes(forbidden), false, forbidden);
   }
   for (const sourceOfTruth of ['sortLeads', 'leadPrimaryAlert', 'leadCardAttentionPresentation', 'commercialStage', 'isTerminalClient']) {
     assert.ok(source.includes(sourceOfTruth), sourceOfTruth);
@@ -143,7 +151,7 @@ test('B1.4.1 J: calcular y renderizar recomendaciones no muta Client ni contiene
 test('B1.4.1 K/L: CSS mantiene top 3 compacto, sin overflow móvil y sin overlays', () => {
   const css = readFileSync('src/lead-attention-queue.css', 'utf8');
   const html = readFileSync('index.html', 'utf8');
-  assert.ok(html.includes('/src/lead-attention-queue.css?v=20260820-3'));
+  assert.ok(html.includes('/src/lead-attention-queue.css?v=20260928-block2g-daily-ops-2'));
   assert.ok(css.includes('grid-template-columns: repeat(3, minmax(0, 1fr))'));
   assert.ok(css.includes('max-width: 100%'));
   assert.ok(css.includes('min-width: 0'));

@@ -73,7 +73,7 @@
     overflow: hidden;
     border-color: rgba(255, 255, 255, 0.14);
     border-radius: 18px;
-    background: rgba(10, 31, 22, 0.9);
+    background: rgba(15, 27, 53, 0.9);
     box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.1);
   }
 
@@ -143,14 +143,14 @@
   }
 
   #whatsapp .mvp-conversation-item.active {
-    background: rgba(198, 171, 120, 0.11) !important;
+    background: rgba(9, 88, 237, 0.11) !important;
     box-shadow: inset 3px 0 0 var(--brand);
   }
 
   #whatsapp .mvp-conversation-avatar {
     width: 40px;
     height: 40px;
-    color: var(--brand-ink);
+    color: var(--ob-white);
     background: linear-gradient(150deg, var(--brand-bright), var(--brand));
   }
 
@@ -199,7 +199,7 @@
     display: grid;
     grid-template-rows: auto auto auto auto;
     overflow: hidden;
-    background: rgba(4, 15, 10, 0.22);
+    background: rgba(15, 27, 53, 0.22);
   }
 
   #whatsapp .mvp-chat-header {
@@ -289,8 +289,8 @@
     overscroll-behavior: contain;
     padding: 13px;
     background:
-      radial-gradient(60% 46% at 8% 6%, rgba(10, 39, 27, 0.48), transparent 70%),
-      rgba(4, 15, 10, 0.3);
+      radial-gradient(60% 46% at 8% 6%, rgba(16, 54, 118, 0.48), transparent 70%),
+      rgba(15, 27, 53, 0.3);
   }
 
   #whatsapp .mvp-message {

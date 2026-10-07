@@ -6,15 +6,16 @@ const html = readFileSync('index.html', 'utf8');
 const whatsappScope = readFileSync('src/whatsapp-action-scope.ts', 'utf8');
 
 const shellVersion = '20260802-1';
-const mainVersion = '20260906-p1-4-a2-2-1';
+const block2hPromotionVersion = '20261006-block2h-promo-1';
+const mainVersion = '20260928-block2f-force-explicit-edit-1';
 const leadRealUseVersion = '20260816-1';
 
 test('carga una versión nueva y coordinada del shell móvil', () => {
-  assert.ok(html.includes(`/dist/cloud-compat-bootstrap.js?v=${shellVersion}`));
+  assert.ok(html.includes(`/dist/cloud-compat-bootstrap.js?v=${block2hPromotionVersion}`));
   assert.ok(html.includes(`/dist/mvp-main.js?v=${mainVersion}`));
   assert.ok(html.includes(`/dist/lead-real-use-ui.js?v=${leadRealUseVersion}`));
   assert.ok(html.includes(`/dist/invitation-link-ux.js?v=${shellVersion}`));
-  assert.ok(html.includes(`/dist/sync-recovery-bootstrap.js?v=${shellVersion}`));
+  assert.ok(html.includes(`/dist/sync-recovery-bootstrap.js?v=${block2hPromotionVersion}`));
   assert.ok(html.includes(`/dist/whatsapp-action-scope.js?v=${shellVersion}`));
   assert.equal(html.includes('/dist/whatsapp-contact-ui.js'), false);
   assert.ok(whatsappScope.includes("from './whatsapp-contact-ui.js'"));
@@ -22,7 +23,7 @@ test('carga una versión nueva y coordinada del shell móvil', () => {
 });
 
 test('mantiene cargado el CSS de navegación inferior y agrega estabilización de uso real', () => {
-  assert.ok(html.includes('/src/mobile-bottom-nav.css?v=20260728-1'));
-  assert.ok(html.includes('/src/mobile-leads-polish.css?v=20260728-1'));
+  assert.ok(html.includes(`/src/mobile-bottom-nav.css?v=${block2hPromotionVersion}`));
+  assert.ok(html.includes(`/src/mobile-leads-polish.css?v=${block2hPromotionVersion}`));
   assert.ok(html.includes(`/src/real-use-stabilization.css?v=${shellVersion}`));
 });

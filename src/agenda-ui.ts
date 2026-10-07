@@ -1,6 +1,6 @@
 import {
   agendaRelatedOptions,
-  buildAgendaItems,
+  buildCommercialAgendaItems,
   completedReminders,
   daysBetweenIsoDates,
   filterAgendaRelatedOptions,
@@ -10,10 +10,16 @@ import {
   type AgendaUrgency,
   type ReminderWithStatus,
 } from './agenda.js';
-import { completeClientFollowUp, reprogramClientFollowUp } from './lead-pipeline.js';
-import { saveData, state } from './store.js';
+import { openEntityReadOnly } from './entity-read-navigation.js';
+import { completeClientFollowUpWithDecision, reprogramClientFollowUp } from './lead-pipeline.js';
+import { requestFollowUpCompletion } from './followup-completion-ui.js';
+import { authenticatedTenantMember, saveData, state } from './store.js';
+import { assertTenantCrmScope } from './tenant-storage.js';
+import { assertTenantRuntimeLeaseCurrent, captureTenantRuntimeLease, requireCurrentTenantScope, type TenantRuntimeLease } from './tenant-runtime.js';
+import type { TenantScope } from './active-organization.js';
 import { newSyncRecordMetadata } from './sync-identity.js';
-import { addActivity, visibleClients, visibleReminders } from './team-access.js';
+import { addActivityForAuthenticatedTenant, visibleClients, visibleReminders } from './team-access.js';
+import { visibleProperties } from './team-access.js';
 import { escapeHtml, field, formValues, nextId } from './utils.js';
 
 const dateFormatter = new Intl.DateTimeFormat('es-AR', { day: '2-digit', month: 'short', year: 'numeric', timeZone: 'UTC' });
@@ -49,7 +55,14 @@ function relativeDateLabel(item: AgendaItem, today: string): string {
 }
 
 function sourceBadge(item: AgendaItem): string {
-  return item.source === 'client' ? 'Lead' : 'Recordatorio';
+  const labels: Record<AgendaItem['source'], string> = {
+    client: 'Seguimiento',
+    reminder: 'Recordatorio',
+    visit: 'Visita',
+    offer: 'Oferta',
+    reservation: 'Reserva',
+  };
+  return labels[item.source];
 }
 
 function reprogramControl(item: AgendaItem): string {
@@ -62,16 +75,39 @@ function reprogramControl(item: AgendaItem): string {
   </div>`;
 }
 
+function agendaContextClientId(item: AgendaItem): number | null {
+  if (item.source === 'client') return item.sourceId;
+  return item.clientId ?? null;
+}
+
+function contextAction(item: AgendaItem): string {
+  const clientId = agendaContextClientId(item);
+  if (!clientId) return '';
+  return `<button type="button" class="secondary agenda-open-context" data-open-agenda-context="${clientId}">Abrir contexto</button>`;
+}
+
 function itemActions(item: AgendaItem): string {
-  const secondaryAction = item.source === 'client'
-    ? `<button type="button" class="secondary agenda-open-client" data-edit-client="${item.sourceId}">Abrir lead</button>`
-    : `<button type="button" class="secondary" data-edit-reminder="${item.sourceId}">Editar</button>
-       <button type="button" class="delete agenda-delete" data-delete="reminders" data-id="${item.sourceId}" aria-label="Eliminar ${escapeHtml(item.title)}">Eliminar</button>`;
-  return `<button type="button" class="agenda-complete" data-complete-agenda="${item.source}" data-id="${item.sourceId}">Completar</button>
+  if (item.source === 'visit' || item.source === 'offer' || item.source === 'reservation') {
+    return contextAction(item);
+  }
+
+  if (item.source === 'client') {
+    return `<button type="button" class="agenda-complete" data-complete-agenda="client" data-id="${item.sourceId}">Completar</button>
+      <details class="agenda-more-actions">
+        <summary>Más acciones</summary>
+        <div class="agenda-more-actions-panel">
+          ${contextAction(item)}
+          ${reprogramControl(item)}
+        </div>
+      </details>`;
+  }
+
+  return `<button type="button" class="agenda-complete" data-complete-agenda="reminder" data-id="${item.sourceId}">Completar</button>
     <details class="agenda-more-actions">
       <summary>Más acciones</summary>
       <div class="agenda-more-actions-panel">
-        ${secondaryAction}
+        <button type="button" class="secondary" data-edit-reminder="${item.sourceId}">Editar</button>
+        <button type="button" class="delete agenda-delete" data-delete="reminders" data-id="${item.sourceId}" aria-label="Eliminar ${escapeHtml(item.title)}">Eliminar</button>
         ${reprogramControl(item)}
       </div>
     </details>`;
@@ -81,7 +117,7 @@ function renderAgendaItem(item: AgendaItem, today: string, position: number): st
   return `<article class="agenda-card ${item.urgency}">
     <span class="agenda-position" aria-label="Posición ${position}">${position}</span>
     <div class="agenda-card-content">
-      <div class="agenda-card-header"><span class="agenda-source">${sourceBadge(item)}</span><time datetime="${item.date}">${escapeHtml(formattedDate(item.date))}</time></div>
+      <div class="agenda-card-header"><span class="agenda-source" data-agenda-source="${item.source}">${sourceBadge(item)}</span><time datetime="${item.date}${item.time ? `T${item.time}` : ''}">${escapeHtml(formattedDate(item.date))}${item.time ? ` · ${escapeHtml(item.time)} hs` : ''}</time></div>
       <span class="agenda-relative-date">${escapeHtml(relativeDateLabel(item, today))}</span>
       <h3>${escapeHtml(item.title)}</h3>
       <p>${escapeHtml(item.detail)}</p>
@@ -132,7 +168,16 @@ function reminderForm(editing: ReminderWithStatus | null, today: string): string
   </form>`;
 }
 
-function saveAndRender(reason: string): void {
+function agendaWriteMember(scope: TenantScope, runtimeLease: TenantRuntimeLease) {
+  assertTenantRuntimeLeaseCurrent(runtimeLease);
+  assertTenantCrmScope(scope, state.crm);
+  const member = authenticatedTenantMember(scope);
+  if (!member) throw new Error('AUTHENTICATED_TENANT_MEMBER_REQUIRED');
+  return member;
+}
+
+function saveAndRender(reason: string, scope: TenantScope, runtimeLease: TenantRuntimeLease): void {
+  agendaWriteMember(scope, runtimeLease);
   saveData(reason);
   document.dispatchEvent(new CustomEvent('trv-render'));
 }
@@ -189,10 +234,23 @@ function bindRelatedPicker(container: HTMLElement): void {
 }
 
 export function renderAgenda(container: HTMLElement): void {
+  const renderScope = requireCurrentTenantScope();
+  const renderLease = captureTenantRuntimeLease(renderScope);
+  assertTenantRuntimeLeaseCurrent(renderLease);
+  assertTenantCrmScope(renderScope, state.crm);
   const today = todayIsoDate();
   const clients = visibleClients();
   const reminders = visibleReminders();
-  const groups = groupAgendaItems(buildAgendaItems(clients, reminders, today));
+  const actor = agendaWriteMember(renderScope, renderLease);
+  const groups = groupAgendaItems(buildCommercialAgendaItems({
+    clients,
+    reminders,
+    visits: state.crm.visits,
+    offers: state.crm.offers,
+    reservations: state.crm.reservations,
+    properties: visibleProperties(),
+    actor,
+  }, today));
   const completed = completedReminders(reminders);
   const total = groups.overdue.length + groups.today.length + groups.upcoming.length;
   const editing = editingReminderId === null ? null : reminderRecords().find((reminder) => reminder.id === editingReminderId) ?? null;
@@ -218,6 +276,15 @@ export function renderAgenda(container: HTMLElement): void {
 
   bindRelatedPicker(container);
 
+  container.querySelectorAll<HTMLButtonElement>('[data-open-agenda-context]').forEach((button) => {
+    button.addEventListener('click', () => {
+      assertTenantRuntimeLeaseCurrent(renderLease);
+      const clientId = Number(button.dataset.openAgendaContext);
+      if (!clientId || !clients.some((client) => client.id === clientId)) return;
+      openEntityReadOnly({ entityType: 'lead', entityId: clientId });
+    });
+  });
+
   container.querySelector<HTMLFormElement>('#reminder-form')?.addEventListener('submit', (event) => {
     event.preventDefault();
     const values = formValues(event.currentTarget as HTMLFormElement);
@@ -229,8 +296,8 @@ export function renderAgenda(container: HTMLElement): void {
       title: field(values, 'title').trim(),
       related: field(values, 'related').trim(),
       priority: field(values, 'priority'),
-      assignedToId: existing?.assignedToId ?? state.activeMemberId,
-      createdById: existing?.createdById ?? state.activeMemberId,
+      assignedToId: existing?.assignedToId ?? agendaWriteMember(renderScope, renderLease).id,
+      createdById: existing?.createdById ?? agendaWriteMember(renderScope, renderLease).id,
       completedAt: undefined,
     };
     if (existing) {
@@ -241,7 +308,7 @@ export function renderAgenda(container: HTMLElement): void {
     }
     editingReminderId = null;
     state.openForms.reminder = false;
-    saveAndRender(existing ? 'Seguimiento editado' : 'Seguimiento creado');
+    saveAndRender(existing ? 'Seguimiento editado' : 'Seguimiento creado', renderScope, renderLease);
   });
 
   container.querySelectorAll<HTMLButtonElement>('[data-edit-reminder]').forEach((button) => {
@@ -267,16 +334,19 @@ export function renderAgenda(container: HTMLElement): void {
       if (button.dataset.completeAgenda === 'client') {
         const client = visibleClients().find((item) => item.id === id);
         if (!client) return;
-        const result = completeClientFollowUp(client);
-        Object.assign(client, result.client);
-        addActivity(result.activity);
-        saveAndRender(`Seguimiento de lead completado: ${client.name}`);
+        requestFollowUpCompletion(client, (decision) => {
+          assertTenantRuntimeLeaseCurrent(renderLease);
+          const result = completeClientFollowUpWithDecision(client, decision);
+          Object.assign(client, result.client);
+          addActivityForAuthenticatedTenant(renderScope, result.activity);
+          saveAndRender(`Seguimiento de lead completado: ${client.name}`, renderScope, renderLease);
+        });
         return;
       }
       const reminder = reminderRecords().find((item) => item.id === id);
       if (!reminder) return;
       reminder.completedAt = new Date().toISOString();
-      saveAndRender('Seguimiento completado');
+      saveAndRender('Seguimiento completado', renderScope, renderLease);
     });
   });
 
@@ -291,14 +361,14 @@ export function renderAgenda(container: HTMLElement): void {
         if (!client) return;
         const result = reprogramClientFollowUp(client, date);
         Object.assign(client, result.client);
-        addActivity(result.activity);
+        addActivityForAuthenticatedTenant(renderScope, result.activity);
       } else {
         const reminder = reminderRecords().find((item) => item.id === id);
         if (!reminder) return;
         reminder.date = date;
         reminder.completedAt = undefined;
       }
-      saveAndRender('Seguimiento reprogramado');
+      saveAndRender('Seguimiento reprogramado', renderScope, renderLease);
     });
   });
 
@@ -307,7 +377,7 @@ export function renderAgenda(container: HTMLElement): void {
       const reminder = reminderRecords().find((item) => item.id === Number(button.dataset.reopenReminder));
       if (!reminder) return;
       reminder.completedAt = undefined;
-      saveAndRender('Seguimiento reabierto');
+      saveAndRender('Seguimiento reabierto', renderScope, renderLease);
     });
   });
 }

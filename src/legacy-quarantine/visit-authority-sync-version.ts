@@ -1,6 +1,6 @@
-import { isSupervisedRecommendationTelemetryPayload, type CloudRecordRow } from './cloud-records.js';
-import { getCloudMembershipContext, getCloudSession } from './cloud-api.js';
-import { latestRemoteVersion } from './sync-safety.js';
+import { isSupervisedRecommendationTelemetryPayload, type CloudRecordRow } from '../cloud-records.js';
+import { getCloudMembershipContext, getCloudSession } from '../cloud-api.js';
+import { latestRemoteVersion } from '../sync-safety.js';
 
 interface PublicCloudConfig {
   configured?: boolean;
