@@ -700,6 +700,7 @@ function_catalog as (
   join pg_catalog.pg_language as language
     on language.oid = function_info.prolang
   where namespace.nspname in ('public', 'private', 'auth', 'storage', 'cron', 'net')
+    and function_info.prokind in ('f', 'p')
 ),
 function_acl as (
   select
