@@ -156,6 +156,23 @@ test('ambas etapas son estrictamente de solo lectura y sin SQL dinámico', () =>
   assertReadOnly(p0aInventorySql);
 });
 
+test('P0A.1a falla cerrado fuera del major PostgreSQL validado', () => {
+  assert.match(
+    p0aPreflightSql,
+    /current_setting\('server_version_num'\)::integer\s*>=\s*170000[\s\S]*?<\s*180000/i,
+  );
+  assert.match(p0aPreflightSql, /'PostgreSQL 17\.x'/i);
+});
+
+test('P0A.1a no emite DEFAULT literals de argumentos de funciones', () => {
+  assert.doesNotMatch(p0aSql, /pg_get_function_arguments\s*\(/i);
+  assert.match(p0aInventorySql, /pg_get_function_identity_arguments\s*\(/i);
+  assert.match(
+    p0aInventorySql,
+    /'arguments',\s*function_info\.identity_arguments/i,
+  );
+});
+
 test('no califica construcciones especiales como funciones de pg_catalog', () => {
   for (const specialForm of ['coalesce', 'greatest', 'least', 'nullif'] as const) {
     assert.doesNotMatch(
