@@ -4,13 +4,19 @@ import test from 'node:test';
 
 const auditPath = 'supabase/audits/b0_2_production_inventory_readonly.sql';
 const documentationPath = 'docs/SUPABASE_PRODUCTION_BASELINE.md';
+const p0aAuditPath = 'supabase/audits/p0a_1a_production_inventory_extended_readonly.sql';
 const sql = readFileSync(auditPath, 'utf8');
+const p0aSql = readFileSync(p0aAuditPath, 'utf8');
 const documentation = readFileSync(documentationPath, 'utf8');
 
 const preflightBegin = '-- B0.2-A STAGE 1: PREFLIGHT BEGIN';
 const preflightEnd = '-- B0.2-A STAGE 1: PREFLIGHT END';
 const inventoryBegin = '-- B0.2-A STAGE 2: INVENTORY BEGIN';
 const inventoryEnd = '-- B0.2-A STAGE 2: INVENTORY END';
+const p0aPreflightBegin = '-- P0A.1a STAGE 1: PREFLIGHT BEGIN';
+const p0aPreflightEnd = '-- P0A.1a STAGE 1: PREFLIGHT END';
+const p0aInventoryBegin = '-- P0A.1a STAGE 2: INVENTORY BEGIN';
+const p0aInventoryEnd = '-- P0A.1a STAGE 2: INVENTORY END';
 
 function between(source: string, start: string, end: string): string {
   const startIndex = source.indexOf(start);
@@ -51,6 +57,10 @@ function assertReadOnly(source: string): void {
     'truncate',
     'copy',
     'lock',
+    'vacuum',
+    'analyze',
+    'refresh',
+    'comment',
   ] as const;
 
   for (const keyword of forbidden) {
@@ -63,6 +73,8 @@ function assertReadOnly(source: string): void {
   assert.doesNotMatch(executable, /\bprepare\b/i);
   assert.doesNotMatch(executable, /\bdeallocate\b/i);
   assert.doesNotMatch(executable, /\bdblink\b/i);
+  assert.doesNotMatch(executable, /\bset\s+role\b/i);
+  assert.doesNotMatch(executable, /\b(?:enable|disable)\s+row\s+level\s+security\b/i);
 }
 
 const preflightSql = between(sql, preflightBegin, preflightEnd);
@@ -70,6 +82,11 @@ const inventorySql = between(sql, inventoryBegin, inventoryEnd);
 const executableSql = stripSqlCommentsAndStrings(sql);
 const executablePreflight = stripSqlCommentsAndStrings(preflightSql);
 const executableInventory = stripSqlCommentsAndStrings(inventorySql);
+const p0aPreflightSql = between(p0aSql, p0aPreflightBegin, p0aPreflightEnd);
+const p0aInventorySql = between(p0aSql, p0aInventoryBegin, p0aInventoryEnd);
+const executableP0aSql = stripSqlCommentsAndStrings(p0aSql);
+const executableP0aPreflight = stripSqlCommentsAndStrings(p0aPreflightSql);
+const executableP0aInventory = stripSqlCommentsAndStrings(p0aInventorySql);
 
 const requiredTables = [
   'public.organizations',
@@ -112,8 +129,10 @@ const requiredInventoryKeys = [
 ] as const;
 
 test('el artefacto permanece fuera de supabase/migrations', () => {
-  assert.match(auditPath, /^supabase\/audits\//);
-  assert.doesNotMatch(auditPath, /^supabase\/migrations\//);
+  for (const path of [auditPath, p0aAuditPath]) {
+    assert.match(path, /^supabase\/audits\//);
+    assert.doesNotMatch(path, /^supabase\/migrations\//);
+  }
 });
 
 test('contiene exactamente dos etapas y dos sentencias SELECT', () => {
@@ -122,11 +141,19 @@ test('contiene exactamente dos etapas y dos sentencias SELECT', () => {
   assert.equal((executableInventory.match(/;/g) ?? []).length, 1);
   assert.match(executablePreflight.trim(), /^with\b/i);
   assert.match(executableInventory.trim(), /^with\b/i);
+
+  assert.equal((executableP0aSql.match(/;/g) ?? []).length, 2);
+  assert.equal((executableP0aPreflight.match(/;/g) ?? []).length, 1);
+  assert.equal((executableP0aInventory.match(/;/g) ?? []).length, 1);
+  assert.match(executableP0aPreflight.trim(), /^with\b/i);
+  assert.match(executableP0aInventory.trim(), /^with\b/i);
 });
 
 test('ambas etapas son estrictamente de solo lectura y sin SQL dinámico', () => {
   assertReadOnly(preflightSql);
   assertReadOnly(inventorySql);
+  assertReadOnly(p0aPreflightSql);
+  assertReadOnly(p0aInventorySql);
 });
 
 test('no califica construcciones especiales como funciones de pg_catalog', () => {
@@ -149,6 +176,15 @@ test('el preflight usa únicamente pg_catalog como fuente física', () => {
     assert.ok(relation?.toLowerCase().startsWith('pg_catalog.'));
   }
   assert.doesNotMatch(executablePreflight, /\b(?:from|join)\s+(?:storage|auth|public|private|supabase_migrations)\./i);
+
+  const p0aQualifiedRelations = [
+    ...executableP0aPreflight.matchAll(/\b(?:from|join)\s+([a-z_][a-z0-9_]*\.[a-z_][a-z0-9_]*)/gi),
+  ].map((match) => match[1]);
+  assert.ok(p0aQualifiedRelations.length > 0);
+  for (const relation of p0aQualifiedRelations) {
+    assert.ok(relation?.toLowerCase().startsWith('pg_catalog.'));
+  }
+  assert.doesNotMatch(executableP0aPreflight, /\b(?:from|join)\s+(?:storage|auth|public|private|supabase_migrations)\./i);
 });
 
 test('migration history es opcional y no bloquea safe_to_run_inventory', () => {
@@ -193,6 +229,11 @@ test('no consulta filas sensibles, comerciales ni archivos', () => {
     const escaped = tableName.replace('.', '\\.');
     assert.doesNotMatch(executableSql, new RegExp(`\\b(?:from|join)\\s+${escaped}\\b`, 'i'));
   }
+
+  assert.doesNotMatch(executableP0aSql, /\b(?:from|join)\s+auth\.users\b/i);
+  assert.doesNotMatch(executableP0aSql, /\b(?:from|join)\s+storage\.objects\b/i);
+  assert.doesNotMatch(executableP0aSql, /\b(?:from|join)\s+private\.commercial_operations\b/i);
+  assert.match(executableP0aInventory, /\bfrom\s+storage\.buckets\b/i);
 });
 
 test('cubre el inventario estructural completo', () => {
@@ -216,6 +257,32 @@ test('cubre el inventario estructural completo', () => {
   ]);
   assertContainsEvery(inventorySql, requiredInventoryKeys.map((key) => `'${key}'`));
   assert.match(inventorySql, /as\s+b0_2_production_inventory\b/i);
+
+  assertContainsEvery(p0aInventorySql, [
+    'pg_extension',
+    'pg_available_extensions',
+    'pg_type',
+    'pg_enum',
+    'pg_sequence',
+    'commercial_operations',
+    'idempotency_surface',
+    'operation_id',
+    'request_hash',
+    'cas_revision',
+    'auth_metadata',
+    'storage_buckets',
+    'external_integrations',
+    'pg_cron',
+    'pg_net',
+    'triggers',
+    'rls',
+    'policies',
+    'grants',
+    'migration_surface',
+    'classification_hint',
+  ]);
+  assert.match(p0aPreflightSql, /'safe_to_run_inventory'/i);
+  assert.match(p0aPreflightSql, /required inspection capability is absent/i);
 });
 
 test('no ejecuta las funciones inspeccionadas', () => {
