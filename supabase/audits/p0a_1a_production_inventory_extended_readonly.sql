@@ -137,11 +137,11 @@ permission_status as (
   select
     case
       when pg_catalog.to_regclass('storage.buckets') is null then false
-      else pg_catalog.has_table_privilege(pg_catalog.current_user, 'storage.buckets', 'SELECT')
+      else pg_catalog.has_table_privilege(current_user, 'storage.buckets', 'SELECT')
     end as can_read_bucket_config,
     case
       when not exists (select 1 from pg_catalog.pg_namespace where nspname = 'storage') then false
-      else pg_catalog.has_schema_privilege(pg_catalog.current_user, 'storage', 'USAGE')
+      else pg_catalog.has_schema_privilege(current_user, 'storage', 'USAGE')
     end as can_use_storage_schema
 ),
 extension_candidates(extension_name) as (
@@ -949,14 +949,14 @@ policy_rows as (
       'roles', (
         select coalesce(
           pg_catalog.jsonb_agg(
-            case when role_oid = 0 then 'PUBLIC' else role_info.rolname end
-            order by case when role_oid = 0 then 'PUBLIC' else role_info.rolname end
+            case when role_entry.role_oid = 0 then 'PUBLIC' else role_info.rolname end
+            order by case when role_entry.role_oid = 0 then 'PUBLIC' else role_info.rolname end
           ),
           '[]'::jsonb
         )
-        from pg_catalog.unnest(policy.polroles) as role_oid
+        from pg_catalog.unnest(policy.polroles) as role_entry(role_oid)
         left join pg_catalog.pg_roles as role_info
-          on role_info.oid = role_oid
+          on role_info.oid = role_entry.role_oid
       ),
       'command', policy.polcmd,
       'permissive', policy.polpermissive,
