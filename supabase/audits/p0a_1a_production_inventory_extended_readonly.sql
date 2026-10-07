@@ -109,7 +109,6 @@ required_catalog_functions(function_name, minimum_arguments) as (
     ('pg_get_constraintdef'::text, 1),
     ('pg_get_indexdef'::text, 1),
     ('pg_get_functiondef'::text, 1),
-    ('pg_get_function_arguments'::text, 1),
     ('pg_get_function_identity_arguments'::text, 1),
     ('pg_get_function_result'::text, 1),
     ('pg_get_triggerdef'::text, 1),
@@ -168,6 +167,19 @@ extension_status as (
     on available.name = candidate.extension_name
 ),
 requirements as (
+  select
+    'server_version'::text as category,
+    'PostgreSQL 17.x'::text as object_name,
+    true as required_for_inventory,
+    pg_catalog.current_setting('server_version_num')::integer >= 170000
+      and pg_catalog.current_setting('server_version_num')::integer < 180000 as exists,
+    pg_catalog.jsonb_build_object(
+      'server_version', pg_catalog.current_setting('server_version'),
+      'server_version_num', pg_catalog.current_setting('server_version_num')
+    ) as details
+
+  union all
+
   select
     'schema'::text as category,
     schema_name as object_name,
@@ -679,13 +691,15 @@ idempotency_surface_rows as (
     on definition.schema_name = 'private'
    and definition.relation_name = 'commercial_operations'
 ),
+-- Deliberately use identity arguments instead of pg_get_function_arguments().
+-- Identity arguments preserve signature/name/type information required for comparison
+-- without emitting DEFAULT literal values that could accidentally contain configuration secrets.
 function_catalog as (
   select
     function_info.oid as function_oid,
     namespace.nspname as schema_name,
     function_info.proname as function_name,
     pg_catalog.pg_get_function_identity_arguments(function_info.oid) as identity_arguments,
-    pg_catalog.pg_get_function_arguments(function_info.oid) as arguments,
     pg_catalog.pg_get_function_result(function_info.oid) as return_type,
     language.lanname as language_name,
     function_info.provolatile,
@@ -746,7 +760,7 @@ function_rows as (
     function_info.schema_name || '.' || function_info.function_name
       || '(' || function_info.identity_arguments || ')' as identity,
     pg_catalog.jsonb_build_object(
-      'arguments', function_info.arguments,
+      'arguments', function_info.identity_arguments,
       'return_type', function_info.return_type,
       'language', function_info.language_name,
       'security', case when function_info.prosecdef then 'definer' else 'invoker' end,
@@ -788,7 +802,7 @@ cas_revision_rows as (
         when 'v' then 'volatile'
         else function_info.provolatile::text
       end,
-      'arguments', function_info.arguments,
+      'arguments', function_info.identity_arguments,
       'return_type', function_info.return_type,
       'grants', function_acl.grants,
       'revision_related', function_info.function_definition ~* '\mrevision\M',
