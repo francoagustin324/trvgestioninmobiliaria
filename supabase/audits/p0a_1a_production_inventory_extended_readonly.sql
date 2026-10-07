@@ -400,7 +400,11 @@ domain_constraints as (
   select
     constraint_info.contypid as type_oid,
     pg_catalog.jsonb_agg(
-      pg_catalog.pg_get_constraintdef(constraint_info.oid, true)
+      pg_catalog.jsonb_build_object(
+        'name', constraint_info.conname,
+        'definition_redacted', pg_catalog.regexp_replace(pg_catalog.pg_get_constraintdef(constraint_info.oid, true), '''(?:''''|[^''])*''', '''<redacted>''', 'g'),
+        'definition_hash', pg_catalog.md5(pg_catalog.pg_get_constraintdef(constraint_info.oid, true))
+      )
       order by constraint_info.conname
     ) as constraints
   from pg_catalog.pg_constraint as constraint_info
@@ -453,7 +457,15 @@ type_rows as (
         else null
       end,
       'not_null', type_info.typnotnull,
-      'default', type_info.typdefault,
+      'default_present', type_info.typdefault is not null,
+      'default_redacted', case
+        when type_info.typdefault is null then null
+        else pg_catalog.regexp_replace(type_info.typdefault, '''(?:''''|[^''])*''', '''<redacted>''', 'g')
+      end,
+      'default_hash', case
+        when type_info.typdefault is null then null
+        else pg_catalog.md5(type_info.typdefault)
+      end,
       'enum_labels', enum_labels.labels,
       'domain_constraints', domain_constraints.constraints,
       'attributes', composite_attributes.attributes
@@ -486,7 +498,15 @@ sequence_ownership as (
     owner_relation.relname as owner_table,
     owner_attribute.attname as owner_column,
     owner_attribute.attidentity as identity_mode,
-    pg_catalog.pg_get_expr(owner_default.adbin, owner_default.adrelid) as column_default
+    owner_default.oid is not null as column_default_present,
+    case
+      when owner_default.oid is null then null
+      else pg_catalog.regexp_replace(pg_catalog.pg_get_expr(owner_default.adbin, owner_default.adrelid), '''(?:''''|[^''])*''', '''<redacted>''', 'g')
+    end as column_default_redacted,
+    case
+      when owner_default.oid is null then null
+      else pg_catalog.md5(pg_catalog.pg_get_expr(owner_default.adbin, owner_default.adrelid))
+    end as column_default_hash
   from pg_catalog.pg_class as sequence_relation
   left join pg_catalog.pg_depend as dependency
     on dependency.classid = 'pg_catalog.pg_class'::pg_catalog.regclass
@@ -526,7 +546,9 @@ sequence_rows as (
       'owned_by_table', ownership.owner_table,
       'owned_by_column', ownership.owner_column,
       'identity_mode', nullif(ownership.identity_mode, ''),
-      'column_default', ownership.column_default
+      'column_default_present', ownership.column_default_present,
+      'column_default_redacted', ownership.column_default_redacted,
+      'column_default_hash', ownership.column_default_hash
     ) as definition,
     null::text as classification_hint
   from pg_catalog.pg_class as relation
@@ -548,7 +570,15 @@ relation_columns as (
         'not_null', attribute.attnotnull,
         'identity', nullif(attribute.attidentity, ''),
         'generated', nullif(attribute.attgenerated, ''),
-        'default', pg_catalog.pg_get_expr(default_value.adbin, default_value.adrelid)
+        'default_present', default_value.oid is not null,
+        'default_redacted', case
+          when default_value.oid is null then null
+          else pg_catalog.regexp_replace(pg_catalog.pg_get_expr(default_value.adbin, default_value.adrelid), '''(?:''''|[^''])*''', '''<redacted>''', 'g')
+        end,
+        'default_hash', case
+          when default_value.oid is null then null
+          else pg_catalog.md5(pg_catalog.pg_get_expr(default_value.adbin, default_value.adrelid))
+        end
       )
       order by attribute.attnum
     ) filter (where attribute.attname is not null) as columns
@@ -569,7 +599,8 @@ relation_constraints as (
       pg_catalog.jsonb_build_object(
         'name', constraint_info.conname,
         'type', constraint_info.contype,
-        'definition', pg_catalog.pg_get_constraintdef(constraint_info.oid, true)
+        'definition_redacted', pg_catalog.regexp_replace(pg_catalog.pg_get_constraintdef(constraint_info.oid, true), '''(?:''''|[^''])*''', '''<redacted>''', 'g'),
+        'definition_hash', pg_catalog.md5(pg_catalog.pg_get_constraintdef(constraint_info.oid, true))
       )
       order by constraint_info.conname
     ) filter (where constraint_info.oid is not null) as constraints
@@ -587,7 +618,8 @@ relation_indexes as (
         'unique', index_info.indisunique,
         'primary', index_info.indisprimary,
         'valid', index_info.indisvalid,
-        'definition', pg_catalog.pg_get_indexdef(index_info.indexrelid)
+        'definition_redacted', pg_catalog.regexp_replace(pg_catalog.pg_get_indexdef(index_info.indexrelid), '''(?:''''|[^''])*''', '''<redacted>''', 'g'),
+        'definition_hash', pg_catalog.md5(pg_catalog.pg_get_indexdef(index_info.indexrelid))
       )
       order by index_relation.relname
     ) filter (where index_info.indexrelid is not null) as indexes
@@ -975,13 +1007,21 @@ policy_rows as (
       ),
       'command', policy.polcmd,
       'permissive', policy.polpermissive,
-      'using', case
+      'using_redacted', case
         when policy.polqual is null then null
-        else pg_catalog.pg_get_expr(policy.polqual, policy.polrelid)
+        else pg_catalog.regexp_replace(pg_catalog.pg_get_expr(policy.polqual, policy.polrelid), '''(?:''''|[^''])*''', '''<redacted>''', 'g')
       end,
-      'with_check', case
+      'using_hash', case
+        when policy.polqual is null then null
+        else pg_catalog.md5(pg_catalog.pg_get_expr(policy.polqual, policy.polrelid))
+      end,
+      'with_check_redacted', case
         when policy.polwithcheck is null then null
-        else pg_catalog.pg_get_expr(policy.polwithcheck, policy.polrelid)
+        else pg_catalog.regexp_replace(pg_catalog.pg_get_expr(policy.polwithcheck, policy.polrelid), '''(?:''''|[^''])*''', '''<redacted>''', 'g')
+      end,
+      'with_check_hash', case
+        when policy.polwithcheck is null then null
+        else pg_catalog.md5(pg_catalog.pg_get_expr(policy.polwithcheck, policy.polrelid))
       end
     ) as definition,
     null::text as classification_hint
