@@ -8,6 +8,7 @@ const r22bPath = 'supabase/migrations/20260831120000_p1_1_a7_r2_2_visit_transact
 const r22cPath = 'supabase/migrations/20260901223000_p1_1_a7_r2_2c_visit_authority_capability.sql';
 const r22dPath = 'supabase/migrations/20260903150000_p1_1_a7_r2_2d_client_reassignment_cas.sql';
 const migrationPath = 'supabase/migrations/20260910140000_sec_fix_a2_4_org_aware_rpc_v2_alignment.sql';
+const p001Path = 'supabase/migrations/20261008010000_p0_01_client_cas_authority_decoupling.sql';
 const tenantV2Path = 'src/tenant-visit-v2.ts';
 
 const r21 = readFileSync(r21Path, 'utf8');
@@ -15,6 +16,7 @@ const r22b = readFileSync(r22bPath, 'utf8');
 const r22c = readFileSync(r22cPath, 'utf8');
 const r22d = readFileSync(r22dPath, 'utf8');
 const migration = readFileSync(migrationPath, 'utf8');
+const p001Migration = readFileSync(p001Path, 'utf8');
 const tenantV2 = readFileSync(tenantV2Path, 'utf8');
 
 function gitBlobSha(content: string): string {
@@ -78,6 +80,26 @@ assert.match(tenantV2, /'commercial_visit_mutation_v2'[\s\S]*p_organization_id: 
 assert.doesNotMatch(migration, /public\.commercial_visit_mutation\s*\(/);
 assert.doesNotMatch(migration, /public\.client_snapshot_cas\s*\(/);
 assert.doesNotMatch(migration, /public\.visit_transaction_authority_active\s*\(\s*\)/);
+
+  // P0-01: Client CAS conserva el contrato V2 pero queda desacoplado de la capability de Visit.
+  assert.match(
+    p001Migration,
+    /create or replace function public\.client_snapshot_cas_v2\(\s*p_organization_id uuid,\s*p_request jsonb,\s*p_force_rollback boolean default false/i,
+  );
+  assert.match(p001Migration, /security invoker/i);
+  assert.match(p001Migration, /set search_path = ''/i);
+  assert.match(p001Migration, /member\.status = 'active'/);
+  assert.match(p001Migration, /for update/i);
+  assert.match(p001Migration, /current_record\.revision <> expected_revision/i);
+  assert.match(p001Migration, /target_member\.status = 'active'/);
+  assert.doesNotMatch(p001Migration, /private\.visit_authority_active\s*\(/i);
+  assert.doesNotMatch(p001Migration, /commercial_visit_mutation_v2|property_snapshot_cas_v1/i);
+  assert.doesNotMatch(p001Migration, /create\s+policy|alter\s+policy|drop\s+policy/i);
+  assert.match(
+    p001Migration,
+    /grant execute on function public\.client_snapshot_cas_v2\(uuid, jsonb, boolean\)\s+to authenticated/i,
+  );
+  assert.match(tenantV2, /const clients = await reconcileClientsWithCas\(/);
 
 });
 
@@ -290,6 +312,7 @@ test('SEC-FIX A2.4 ejecuta V2 org-aware y drift alignment en PostgreSQL 17 efím
     };
 
     psql(migration);
+    psql(p001Migration);
 
     const legacyAfter = {
       authority: psql(`select pg_catalog.md5(pg_catalog.pg_get_functiondef('public.visit_transaction_authority_active()'::pg_catalog.regprocedure));`),
@@ -332,6 +355,10 @@ test('SEC-FIX A2.4 ejecuta V2 org-aware y drift alignment en PostgreSQL 17 efím
     assert.equal(psql(`select has_function_privilege('service_role','public.visit_transaction_authority_active_v2(uuid)','execute');`), 'f');
     assert.equal(psql(`select has_function_privilege('service_role','public.client_snapshot_cas_v2(uuid,jsonb,boolean)','execute');`), 'f');
     assert.equal(psql(`select has_function_privilege('service_role','public.commercial_visit_mutation_v2(uuid,uuid,text,jsonb,boolean)','execute');`), 'f');
+    const clientCasDefinition = psql(
+      `select pg_catalog.pg_get_functiondef('public.client_snapshot_cas_v2(uuid,jsonb,boolean)'::pg_catalog.regprocedure);`,
+    );
+    assert.doesNotMatch(clientCasDefinition, /private\.visit_authority_active\s*\(/i);
 
 
     psql(`
@@ -373,7 +400,7 @@ test('SEC-FIX A2.4 ejecuta V2 org-aware y drift alignment en PostgreSQL 17 efím
       })},'${createdBy}',0);
     `);
 
-    for (const id of [1,2,3,4,10,11,12,13,14]) insertClient(orgA, id, 1, multiOwner);
+    for (const id of [1,2,3,4,10,11,12,13,14,15]) insertClient(orgA, id, 1, multiOwner);
     insertClient(orgB, 200, 1, multiOwner);
     insertProperty(orgA, 1, 1, multiOwner);
     insertProperty(orgB, 200, 1, multiOwner);
@@ -382,7 +409,13 @@ test('SEC-FIX A2.4 ejecuta V2 org-aware y drift alignment en PostgreSQL 17 efím
       'revision',revision,'assignedMemberId',assigned_member_id,'payload',payload
     ) from public.propcontrol_records where organization_id='${org}' and entity_type='client' and entity_key='${key(org,id)}';`));
 
-    // CAS V2: tenant A funciona, B bajo tenant A no se descubre, revisions y assignment quedan preservados.
+    // P0-01: Client CAS debe seguir operativo cuando Visit authority=false.
+    psql(`update private.commercial_entity_authority
+      set transaction_owned=false, activated_at=null, activated_by=null
+      where organization_id='${orgA}' and entity_type='visit';`);
+    assert.equal(asUser(multiOwner, authorityV2(orgA)), 'f');
+
+    // CAS V2 authority=false: update, tenant isolation, revision, permisos, reasignación, rollback y delete.
     const casOk = parseJson(asUser(multiOwner, casV2(orgA, {
       action: 'update', client: { legacyId: 1 }, expectedRevision: 0,
       payload: readyClient(1, 999, { notes: 'cas-v2' }), assignedMemberId: 5,
@@ -442,6 +475,18 @@ test('SEC-FIX A2.4 ejecuta V2 org-aware y drift alignment en PostgreSQL 17 efím
     assert.equal(casDeleted.organizationId, orgA);
     assert.equal(casDeleted.action, 'delete');
     assert.equal(psql(`select count(*) from public.propcontrol_records where organization_id='${orgA}' and entity_type='client' and entity_key='${key(orgA,4)}';`), '0');
+
+    // Regresión authority=true: el mismo Client CAS conserva comportamiento y revision.
+    psql(`update private.commercial_entity_authority
+      set transaction_owned=true, activated_at=now(), activated_by='${multiOwner}'
+      where organization_id='${orgA}' and entity_type='visit';`);
+    assert.equal(asUser(multiOwner, authorityV2(orgA)), 't');
+    const casAuthorityTrue = parseJson(asUser(multiOwner, casV2(orgA, {
+      action: 'update', client: { legacyId: 15 }, expectedRevision: 0,
+      payload: readyClient(15, 1, { notes: 'authority-true-regression' }),
+    })));
+    assert.equal(casAuthorityTrue.organizationId, orgA);
+    assert.equal(casAuthorityTrue.client.revision, 1);
 
     // Visit V2: create/resolve atómicos dentro del tenant explícito.
     const createOp = randomUUID();
@@ -512,6 +557,7 @@ test('SEC-FIX A2.4 ejecuta V2 org-aware y drift alignment en PostgreSQL 17 efím
       from pg_catalog.pg_proc p join pg_catalog.pg_namespace n on n.oid=p.pronamespace
       where n.nspname='public' and p.proname in ('visit_transaction_authority_active_v2','client_snapshot_cas_v2','commercial_visit_mutation_v2');`);
     psql(migration);
+    psql(p001Migration);
     const definitionsAfterRerun = psql(`select pg_catalog.jsonb_object_agg(p.proname, pg_catalog.md5(pg_catalog.pg_get_functiondef(p.oid)))
       from pg_catalog.pg_proc p join pg_catalog.pg_namespace n on n.oid=p.pronamespace
       where n.nspname='public' and p.proname in ('visit_transaction_authority_active_v2','client_snapshot_cas_v2','commercial_visit_mutation_v2');`);
@@ -525,6 +571,7 @@ test('SEC-FIX A2.4 ejecuta V2 org-aware y drift alignment en PostgreSQL 17 efím
     `);
     assert.equal(psql(`select p.prosecdef from pg_catalog.pg_proc p where p.oid='public.visit_transaction_authority_active_v2(uuid)'::pg_catalog.regprocedure;`), 't');
     psql(migration);
+    psql(p001Migration);
     assert.equal(psql(`select p.prosecdef from pg_catalog.pg_proc p where p.oid='public.visit_transaction_authority_active_v2(uuid)'::pg_catalog.regprocedure;`), 'f');
     assert.equal(psql(`select p.proconfig = ARRAY['search_path=""']::text[] from pg_catalog.pg_proc p where p.oid='public.visit_transaction_authority_active_v2(uuid)'::pg_catalog.regprocedure;`), 't');
     assert.equal(psql(`select has_function_privilege('service_role','public.visit_transaction_authority_active_v2(uuid)','execute');`), 'f');
